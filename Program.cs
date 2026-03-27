@@ -28,11 +28,9 @@ var app = builder.Build();
 
 app.Use(async (context, next) =>
 {
-    context.Response.OnStarting(() =>
-    {
-        context.Response.Headers.Remove("Content-Security-Policy");
-        return Task.CompletedTask;
-    });
+    context.Response.Headers.Append("Content-Security-Policy",
+        "default-src 'self'; " +
+        "connect-src 'self' chrome://webui-test chrome://resources chrome://theme;"); // Add the missing sources here
     await next();
 });
 
