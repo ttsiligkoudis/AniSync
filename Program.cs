@@ -26,6 +26,16 @@ builder.Services.AddScoped<IKitsuService, KitsuService>();
 
 var app = builder.Build();
 
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        context.Response.Headers.Remove("Content-Security-Policy");
+        return Task.CompletedTask;
+    });
+    await next();
+});
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Home/Error");
