@@ -118,7 +118,7 @@ namespace AnimeList.Services
             new KeyValuePair<string, string>("grant_type", "authorization_code"),
             new KeyValuePair<string, string>("client_id", "20850"),
             new KeyValuePair<string, string>("client_secret", "bAgns7Q0rGxXnhGRRoq84slYleN4NIe2SkoSDOZ1"),
-            new KeyValuePair<string, string>("redirect_uri", "https://tools.myportofolio.eu/Auth/Callback"),
+            new KeyValuePair<string, string>("redirect_uri", "https://anisync.fly.dev/Auth/Callback"),
             new KeyValuePair<string, string>("code", code)
             }));
 
