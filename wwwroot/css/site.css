@@ -18,67 +18,305 @@ html {
 }
 
 body {
-  margin-bottom: 60px;
-}
-
-body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     margin: 0;
     height: 100vh;
-    background-color: black;
-    color: white
+    background-color: #0d0d0d;
+    color: #e0e0e0;
 }
 
 main {
-    background-color: rgba(142, 142, 142, 0.189);
     margin: 0 auto;
-    padding: 0 5rem;
+    padding: 2rem 1.5rem;
     display: flex;
     height: 100%;
     align-items: center;
     flex-direction: column;
-    max-width: 600px;
+    max-width: 520px;
+    gap: 1.5rem;
 }
 
-.button {
-    background-color: #7b5bf5;
-    width: 7.5rem;
-    text-align: center;
-    padding: 0.75rem;
-    text-decoration: none;
+/* ── Logo ── */
+.app-logo {
+    font-size: 2.2rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: #fff;
+    margin: 0;
+}
+
+.app-logo .accent {
+    color: #7b5bf5;
+}
+
+.app-subtitle {
+    font-size: 0.85rem;
+    color: #999;
+    margin-top: 0.2rem;
+}
+
+/* ── Service toggle ── */
+.service-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 1rem;
+    border-radius: 2rem;
+    background: rgba(255,255,255,0.06);
+}
+
+.service-toggle .label {
+    font-size: 0.85rem;
     font-weight: 600;
-    color: white;
-    font-family: 'Franklin Gothic Medium', 'Arial Narrow', Arial, sans-serif;
+    color: #666;
+    transition: color 0.2s;
+    cursor: pointer;
+    user-select: none;
+}
+
+.service-toggle .label.active {
+    color: #fff;
+}
+
+.toggle-track {
+    position: relative;
+    width: 50px;
+    height: 26px;
+    background: #333;
+    border-radius: 13px;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.toggle-track.anilist {
+    background: #3db4f2;
+}
+
+.toggle-track.kitsu {
+    background: #f75239;
+}
+
+.toggle-thumb {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.3s;
+}
+
+.toggle-track.anilist .toggle-thumb {
+    transform: translateX(24px);
+}
+
+/* ── Cards ── */
+.card-section {
+    width: 100%;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 1.25rem;
+}
+
+.card-section h5 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #888;
+    margin-bottom: 1rem;
+}
+
+/* ── Credential form ── */
+.cred-group {
+    margin-bottom: 0.75rem;
+}
+
+.cred-group label {
+    display: block;
+    font-size: 0.8rem;
+    color: #aaa;
+    margin-bottom: 0.25rem;
+}
+
+.cred-group input {
+    width: 100%;
+    padding: 0.55rem 0.75rem;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+    box-sizing: border-box;
+}
+
+.cred-group input:focus {
+    border-color: #7b5bf5;
+}
+
+/* ── Catalog toggles ── */
+.option-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+}
+
+.option-row + .option-row {
+    border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.option-row span {
+    font-size: 0.9rem;
+}
+
+.switch {
+    position: relative;
+    width: 42px;
+    height: 24px;
+    flex-shrink: 0;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    inset: 0;
+    background: #333;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.slider::before {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    left: 3px;
+    bottom: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.3s;
+}
+
+.switch input:checked + .slider {
+    background: #7b5bf5;
+}
+
+.switch input:checked + .slider::before {
+    transform: translateX(18px);
+}
+
+/* ── Buttons ── */
+.btn-primary-action {
+    display: block;
+    width: 100%;
+    padding: 0.75rem;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+    color: #fff;
+}
+
+.btn-primary-action:hover {
+    opacity: 0.9;
+    color: #fff;
+}
+
+.btn-primary-action:active {
+    transform: scale(0.98);
+}
+
+.btn-login {
+    background: linear-gradient(135deg, #7b5bf5, #6341d4);
+}
+
+.btn-install {
+    background: linear-gradient(135deg, #7b5bf5, #6341d4);
+}
+
+.success-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: rgba(46,204,113,0.12);
+    color: #2ecc71;
+    padding: 0.35rem 0.85rem;
+    border-radius: 2rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.error-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: rgba(46,204,113,0.12);
+    color: #d1338e;
+    padding: 0.35rem 0.85rem;
+    border-radius: 2rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.hint-text {
+    font-size: 0.78rem;
+    color: #777;
+    text-align: center;
+    margin: 0;
+}
+
+.hint-text a {
+    color: #7b5bf5;
+    text-decoration: underline;
+}
+
+.hint-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    flex-wrap: nowrap;
+}
+
+.hint-copy-btn {
+    background: transparent;
+    color: #7b5bf5;
+    border: 1px solid rgba(123, 91, 245, 0.5);
+    border-radius: 999px;
+    padding: 0.15rem 0.55rem;
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
+.hint-copy-btn:hover {
+    background: rgba(123, 91, 245, 0.12);
 }
 
 .disabled {
     opacity: 0.2 !important;
+    pointer-events: none;
 }
-
-#login-button {
-    background-color: #47b8f3;
-}
-
-#success-message {
-    display: none;
-}
-
-#options {
-    display: flex;
-    flex-direction: column;
-    padding: 1rem;
-    gap: 0.25rem;
-    border: 1px solid white;
-    margin: 20px;
-    max-width: 500px;
-}
-
-    #options h5 {
-        margin: 0.5rem;
-        text-align: center;
-    }
 
 #helper {
     display: none;
 }
 
+.required:after {
+    content: " *";
+    font-weight: bold;
+    color: red;
+}

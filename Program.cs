@@ -19,6 +19,7 @@ builder.Services.AddCors(options =>
         });
 });
 
+builder.Services.AddSingleton<IAnimeMappingService, AnimeMappingService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAnilistService, AnilistService>();
 builder.Services.AddScoped<IKitsuService, KitsuService>();

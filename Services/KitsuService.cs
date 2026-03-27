@@ -8,23 +8,23 @@ namespace AnimeList.Services
     public class KitsuService : IKitsuService
     {
         private readonly IHttpClientFactory _clientFactory;
+        private readonly IAnimeMappingService _mappingService;
         private readonly string _kitsuApi = "https://kitsu.io/api/edge";
-        private HttpClient _client => _clientFactory.CreateClient();
 
-        public KitsuService(IHttpClientFactory clientFactory)
+        public KitsuService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService)
         {
             _clientFactory = clientFactory;
+            _mappingService = mappingService;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string id = null, string skip = null)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null)
         {
-            var tmpStr = string.IsNullOrEmpty(id)
-                ? (list.HasValue ? $"&filter[status]={GetListTypeString(list.Value, tokenData)}" : "")
-                : $"&filter[animeId]={id.Replace(kitsuPrefix, "")}";
+            var tmpStr = list.HasValue ? $"&filter[status]={GetListTypeString(list.Value, tokenData)}" : "";
+            var animeFilter = !string.IsNullOrWhiteSpace(animeId) ? $"&filter[animeId]={animeId.Replace(kitsuPrefix, "")}" : "";
 
             var str = list == ListType.Trending_Desc
                 ? $"{_kitsuApi}/trending/anime?filter[status]={GetListTypeString(ListType.Current, tokenData)}"
-                : $"{_kitsuApi}/users/{tokenData.user_id}/library-entries?filter[kind]=anime&include=anime{tmpStr}";
+                : $"{_kitsuApi}/users/{tokenData.user_id}/library-entries?filter[kind]=anime&include=anime{tmpStr}{animeFilter}";
 
             str = $"{str}&page[limit]=20";
 
@@ -35,40 +35,49 @@ namespace AnimeList.Services
 
             var request = new HttpRequestMessage(HttpMethod.Get, str);
 
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            if (!string.IsNullOrWhiteSpace(tokenData?.access_token))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            }
 
-            var response = await _client.SendAsync(request);
+            var client = _clientFactory.CreateClient();
+            var response = await client.SendAsync(request);
             if (!response.IsSuccessStatusCode) return [];
 
             var content = await response.Content.ReadAsStringAsync();
             var entries = DeserializeObject<dynamic>(content);
 
+            // Build O(1) lookup for included anime by id
+            var includedById = new Dictionary<string, dynamic>();
+            if (list != ListType.Trending_Desc && entries.included != null)
+            {
+                foreach (var inc in entries.included)
+                {
+                    includedById[(string)inc.id] = inc;
+                }
+            }
+
             var animeList = new List<Meta>();
             foreach (var entry in entries.data)
             {
-                dynamic included = null;
+                dynamic included = list == ListType.Trending_Desc
+                    ? entry
+                    : includedById.GetValueOrDefault((string)entry.relationships.anime.data.id);
 
-                if (list == ListType.Trending_Desc)
-                {
-                    included = entry;
-                }
-                else
-                {
-                    foreach (var inc in entries.included)
-                    {
-                        if (inc.id == entry.relationships.anime.data.id)
-                        {
-                            included = inc;
-                            break;
-                        }
-                    }
-                }
+                if (included == null) continue;
+
+                if (list == ListType.Current && (string)included.attributes.status is "tba" or "unreleased" or "upcoming") continue;
+
+                int kitsuId = (int)included.id;
+                string imdbId = await _mappingService.GetImdbIdByKitsuIdAsync(kitsuId);
 
                 animeList.Add(new Meta
                 {
-                    id = $"{kitsuPrefix}{included.id}",
+                    id = imdbId ?? $"{kitsuPrefix}{included.id}",
+                    imdbId = imdbId,
+                    type = ((string)included.attributes.subtype).Equals("movie", StringComparison.OrdinalIgnoreCase) ? MetaType.movie.ToString() : MetaType.series.ToString(),
                     name = included.attributes.titles.en,
-                    poster = included.attributes.posterImage.large,
+                    poster = included.attributes.posterImage != null ? (string)included.attributes.posterImage.large : null,
                     descriptionRich = included.attributes.description,
                     entryId = list == ListType.Trending_Desc ? null : entry.id,
                 });
@@ -77,29 +86,37 @@ namespace AnimeList.Services
             return animeList;
         }
 
-        public async Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData, HttpContext context, string config)
+        public async Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData)
         {
             if (string.IsNullOrEmpty(id) || !id.StartsWith(kitsuPrefix)) return null;
 
             var request = new HttpRequestMessage(HttpMethod.Get, $"{_kitsuApi}/anime/{id.Replace(kitsuPrefix, "")}?include=genres,episodes");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            if (!string.IsNullOrWhiteSpace(tokenData?.access_token))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            }
 
-            var response = await _client.SendAsync(request);
+            var client = _clientFactory.CreateClient();
+            var response = await client.SendAsync(request);
             if (!response.IsSuccessStatusCode) return null;
 
             var content = await response.Content.ReadAsStringAsync();
             var results = DeserializeObject<dynamic>(content);
 
             var entry = results.data;
+            int kitsuId = (int)entry.id;
+            string imdbId = await _mappingService.GetImdbIdByKitsuIdAsync(kitsuId);
 
             var anime = new Meta
             {
                 id = id,
+                imdbId = imdbId,
+                type = (string)entry.attributes.subtype == "movie" ? MetaType.movie.ToString() : MetaType.series.ToString(),
                 name = entry.attributes.titles.en,
-                poster = entry.attributes.posterImage.large,
+                poster = entry.attributes.posterImage != null ? (string)entry.attributes.posterImage.large : null,
                 descriptionRich = entry.attributes.description,
                 //genres = entry.relationships.genres.data.ToObject<List<string>>(),
-                background = entry.attributes.coverImage.large
+                background = entry.attributes.coverImage != null ? (string)entry.attributes.coverImage.large : null
             };
 
             if (!string.IsNullOrEmpty((string)entry.attributes.youtubeVideoId))
@@ -127,71 +144,66 @@ namespace AnimeList.Services
                 anime.videos.Add(video);
             }
 
-            var entryId = (await GetAnimeListAsync(tokenData, null, id) ?? []).FirstOrDefault()?.entryId;
-
-            var url = $"{context.Request.Scheme}://{context.Request.Host}/{config}/Meta/{anime.type}/{id}/{!string.IsNullOrEmpty(entryId)}/View";
-
-            if (!string.IsNullOrEmpty(entryId))
-            {
-                url = $"{url}?entryId={entryId}";
-            }
-
-            anime.links.Add(new Link
-            {
-                name = !string.IsNullOrEmpty(entryId) ? "Remove" : "Add",
-                url = url,
-                category = LinkCategory.follow.ToString()
-            });
-
             return anime;
         }
 
-        public async Task UpdateEntry(TokenData tokenData, string id, bool exists, string entryId = null)
+        public async Task UpdateEpisodeProgressAsync(TokenData tokenData, string animeId, int episode)
         {
-            if (exists)
+            if (string.IsNullOrEmpty(animeId)
+                || string.IsNullOrWhiteSpace(tokenData?.user_id)
+                || tokenData?.anonymousUser == true) return;
+
+            var entryId = (await GetAnimeListAsync(tokenData, null, null, animeId)).FirstOrDefault()?.entryId;
+
+            if (string.IsNullOrEmpty(entryId)) return;
+
+            //// Fetch total episode count to determine if this completes the series
+            int? totalEpisodes = await GetTotalEpisodesAsync(tokenData, animeId);
+            bool isCompleted = totalEpisodes.HasValue && totalEpisodes.Value > 0 && episode >= totalEpisodes.Value;
+
+            var obj = new
             {
-                var request = new HttpRequestMessage(HttpMethod.Delete, $"{_kitsuApi}/library-entries/{entryId}");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
-                var response = await _client.SendAsync(request);
-            }
-            else
-            {
-                var request = new HttpRequestMessage(HttpMethod.Post, $"{_kitsuApi}/library-entries");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
-                var obj = new
+                data = new
                 {
-                    data = new
+                    type = "libraryEntries",
+                    id = entryId,
+                    attributes = new
                     {
-                        type = "libraryEntries",
-                        attributes = new
-                        {
-                            status = GetListTypeString(ListType.Current, tokenData)
-                        },
-                        relationships = new
-                        {
-                            user = new
-                            {
-                                data = new
-                                {
-                                    type = "users",
-                                    id = tokenData.user_id
-                                }
-                            },
-                            anime = new
-                            {
-                                data = new
-                                {
-                                    type = "anime",
-                                    id = id.Replace(kitsuPrefix, "")
-                                }
-                            }
-                        }
+                        progress = episode,
+                        status = isCompleted ? "completed" : "current"
                     }
-                };
-                request.Content = new StringContent(SerializeObject(obj), Encoding.UTF8, "application/vnd.api+json");
-                var response = await _client.SendAsync(request);
-                var content = await response.Content.ReadAsStringAsync();
+                }
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Patch, $"{_kitsuApi}/library-entries/{entryId}")
+            {
+                Content = new StringContent(SerializeObject(obj), Encoding.UTF8, "application/vnd.api+json")
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+
+            var client = _clientFactory.CreateClient();
+            await client.SendAsync(request);
+        }
+
+        private async Task<int?> GetTotalEpisodesAsync(TokenData tokenData, string animeId)
+        {
+            var kitsuId = animeId.Replace(kitsuPrefix, "");
+
+            var request = new HttpRequestMessage(HttpMethod.Get, $"{_kitsuApi}/anime/{kitsuId}?fields[anime]=episodeCount");
+            if (!string.IsNullOrWhiteSpace(tokenData?.access_token))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
             }
+
+            var client = _clientFactory.CreateClient();
+            var response = await client.SendAsync(request);
+
+            if (!response.IsSuccessStatusCode) return null;
+
+            var content = await response.Content.ReadAsStringAsync();
+            var result = DeserializeObject<dynamic>(content);
+
+            return (int?)result?.data?.attributes?.episodeCount;
         }
     }
 }

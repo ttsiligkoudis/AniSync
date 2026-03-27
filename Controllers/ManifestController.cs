@@ -10,19 +10,25 @@ namespace AnimeList.Controllers
         public JsonResult Get(string config)
         {
             var configiration = DeserializeObject<Configuration>(config);
+            var isAuthenticated = !string.IsNullOrWhiteSpace(configiration?.tokenData);
             TokenData? tokenData = null;
 
             var manifest = new Manifest
             {
-                id = "community.MyAnime",
+                id = "community.AniSync",
                 version = "1.0.0",
-                name = "MyAnime",
+                name = "AniSync",
                 description = "Fetches anime list from Kitsu/AniList to track your anime progress while using stremio",
-                resources = [ "catalog", "meta" ],
-                types = [ MetaType.movie.ToString(), MetaType.series.ToString() ],
+                logo = $"{Request.Scheme}://{Request.Host}/logo.png",
+                resources = [ "catalog", "meta", "subtitles" ],
+                types = [ MetaType.movie.ToString(), MetaType.series.ToString(), MetaType.anime.ToString() ],
+                behaviorHints = new BehaviorHints
+                {
+                    configurable = true,
+                },
             };
 
-            if (!string.IsNullOrEmpty(configiration.tokenData))
+            if (isAuthenticated)
             {
                 tokenData = DeserializeObject<TokenData>(DecompressString(Uri.UnescapeDataString(configiration.tokenData)));
 
@@ -36,39 +42,48 @@ namespace AnimeList.Controllers
                 if (tokenData.anime_service == AnimeService.Kitsu)
                     manifest.idPrefixes.Add(kitsuPrefix);
                 else
+                {
                     manifest.idPrefixes.Add(anilistPrefix);
+                    manifest.idPrefixes.Add(kitsuPrefix);
+                }
+
+                manifest.idPrefixes.Add("tt");
+            }
+            else
+            {
+                manifest.idPrefixes.Add(kitsuPrefix);
             }
 
-            if (configiration.showCurrent)
+            if (isAuthenticated && configiration.showCurrent)
             {
                 manifest.catalogs.Add(new Catalog
                 {
                     type = MetaType.anime.ToString(),
                     id = GetListTypeString(ListType.Current, tokenData),
                     name = "Currently watching",
-                    extra = [new Extra("skip")]
+                    extra = [new Extra("skip")],
                 });
             }
 
-            if (configiration.showCompleted)
+            if (isAuthenticated && configiration.showCompleted)
             {
                 manifest.catalogs.Add(new Catalog
                 {
                     type = MetaType.anime.ToString(),
                     id = GetListTypeString(ListType.Completed, tokenData),
                     name = "Completed",
-                    extra = [ new Extra("skip")]
+                    extra = [new Extra("skip")],
                 });
             }
 
-            if (configiration.showTrending)
+            if (configiration.showTrending || !isAuthenticated)
             {
                 manifest.catalogs.Add(new Catalog
                 {
                     type = MetaType.anime.ToString(),
                     id = GetListTypeString(ListType.Trending_Desc, tokenData),
                     name = "Trending Now",
-                    extra = [new Extra("skip")]
+                    extra = [new Extra("skip")],
                 });
             }
 

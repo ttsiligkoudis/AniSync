@@ -5,17 +5,15 @@ namespace AnimeList.Controllers
 {
     public class AuthController : Controller
     {
-        private readonly IHttpClientFactory _clientFactory;
         private readonly ITokenService _tokenService;
 
-        public AuthController(IHttpClientFactory clientFactory, ITokenService tokenService)
+        public AuthController(ITokenService tokenService)
         {
-            _clientFactory = clientFactory;
             _tokenService = tokenService;
         }
 
         [HttpGet]
-        public async Task<IActionResult> Login(AnimeService animeService = AnimeService.Kitsu, string username = null, string password = null)
+        public async Task<IActionResult> Login(AnimeService? animeService = null, string username = null, string password = null)
         {
             if (animeService == AnimeService.Anilist)
             {
@@ -23,7 +21,8 @@ namespace AnimeList.Controllers
             }
             else
             {
-                var tokenData = await _tokenService.GetAccessTokenByCredsAsync(username, password, true);
+                await _tokenService.GetAccessTokenByCredsAsync(username, password, true);
+
                 return RedirectToAction("Index", "Home");
             }
         }
@@ -34,6 +33,13 @@ namespace AnimeList.Controllers
             HttpContext.Session.Remove("AccessToken");
 
             var tokenData = await _tokenService.GetAccessTokenByCodeAsync(code);
+
+            return RedirectToAction("Index", "Home");
+        }
+
+        public async Task<IActionResult> Logout()
+        {
+            await _tokenService.RemoveCachedUser();
 
             return RedirectToAction("Index", "Home");
         }

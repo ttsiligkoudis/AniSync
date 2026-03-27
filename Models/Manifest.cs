@@ -6,11 +6,19 @@
         public string version { get; set; }
         public string name { get; set; }
         public string description { get; set; }
+        public string logo { get; set; }
         public List<string> resources { get; set; } = [];
         public List<string> types { get; set; } = [];
         public List<Catalog> catalogs { get; set; } = [];
         public List<string> idPrefixes { get; set; } = [];
         public List<Config> config { get; set; } = [];
+        public BehaviorHints behaviorHints { get; set; }
+    }
+
+    public class BehaviorHints
+    {
+        public bool configurable { get; set; }
+        public bool configurationRequired { get; set; }
     }
 
     public class Catalog

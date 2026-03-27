@@ -18,5 +18,22 @@ namespace AnimeList.Models
         public string password { get; set; }
 
         public AnimeService anime_service { get; set; }
+
+        public bool anonymousUser => anime_service == AnimeService.Kitsu && string.IsNullOrEmpty(username);
+
+        public TokenData Clone()
+        {
+            return new TokenData
+            {
+                access_token = this.access_token,
+                refresh_token = this.refresh_token,
+                expires_in = this.expires_in,
+                expiration_date = this.expiration_date,
+                user_id = this.user_id,
+                username = this.username,
+                password = this.password,
+                anime_service = this.anime_service
+            };
+        }
     }
 }

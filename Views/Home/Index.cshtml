@@ -1,64 +1,153 @@
 ﻿@{
-    var tokenData = (string)ViewBag.TokenData;
-    var animeService = (AnimeService)ViewBag.AnimeService;
+    var tokenDataStr = (string)ViewBag.TokenData;
+    var animeService = (AnimeService?)ViewBag.AnimeService;
+    var isLoggedIn = !string.IsNullOrEmpty(tokenDataStr);
+    var isAnilist = animeService == AnimeService.Anilist;
+    var stremioStr = "https://web.stremio.com/#/addons?addon=";
+    bool anonymousUser = ViewBag.AnonymousUser == true;
+    bool showCurrent = ViewBag.ShowCurrent ?? true;
+    bool showCompleted = ViewBag.ShowCompleted ?? false;
+    bool showTrending = ViewBag.ShowTrending ?? anonymousUser;
 }
 
-<div class="text-center row justify-content-center">
-    <h1>Animeo</h1>
-    @if (!string.IsNullOrEmpty(tokenData))
-    {
-        <h3>Logged in successfully ✅</h3>
+<h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
+<p class="app-subtitle">Track your anime progress on Stremio</p>
 
-        <div id="options">
-            <h5>Options</h5>
-            <div>
-                <input type="checkbox" id="showCurrent" class="catalogCheck" checked />
-                <label for="showCurrent">Show currently watching Anime</label>
-            </div>
-            <div>
-                <input type="checkbox" id="showCompleted" class="catalogCheck" />
-                <label for="showCompleted">Show Completed Anime</label>
-            </div>
-            <div>
-                <input type="checkbox" id="showTrending" class="catalogCheck" />
-                <label for="showTrending">Show Trending Anime</label>
-            </div>
+@if (!anonymousUser)
+{
+    <!-- Service toggle (always visible) -->
+    <div class="service-toggle">
+        <span class="label @(!isAnilist ? "active" : "")" id="labelKitsu">Kitsu</span>
+        <div class="toggle-track @(isAnilist ? "anilist" : "kitsu") @(isLoggedIn ? "disabled" : "")" id="serviceToggle">
+            <div class="toggle-thumb"></div>
         </div>
-        <a id="stremioUrl" href="stremio://@Context.Request.Host">INSTALL</a>
-        <p>
-            <b>PS:</b> If it doesn't work just copy <a id="url" href="@($"https://web.stremio.com/#/addons?addon={Context.Request.Scheme}://{Context.Request.Host}")">this</a> link into your stremio search field.
-        </p>
-    } 
-    else
-    {
-        if (animeService == AnimeService.Kitsu)
+        <span class="label @(isAnilist ? "active" : "")" id="labelAnilist">AniList</span>
+    </div>
+}
+
+@if (isLoggedIn)
+{
+    <span class="success-badge">
+        @(!anonymousUser ? $"✓ Connected to {animeService}" : "Connected without User")
+        <button id="disconnectBtn" class="btn btn-sm btn-outline-danger" title="Disconnect">✗</button>
+    </span>
+
+    <!-- Catalog options -->
+    <div class="card-section">
+        <h5>Catalogs</h5>
+
+        @if (!anonymousUser)
         {
-            <div class="form-group">
-                <label>Username</label>
-                <input type="text" id="username" class="creds form-control" />
+            <div class="option-row">
+                <span>Currently watching</span>
+                <label class="switch">
+                    <input type="checkbox" id="showCurrent" class="catalogCheck" @(showCurrent ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
             </div>
-            <div class="form-group">
-                <label>Password</label>
-                <input type="password" id="password" class="creds form-control" />
+
+            <div class="option-row">
+                <span>Completed</span>
+                <label class="switch">
+                    <input type="checkbox" id="showCompleted" @(showCompleted ? "checked" : "") class="catalogCheck" />
+                    <span class="slider"></span>
+                </label>
             </div>
         }
-        <a id="loginUrl" href='@Url.Action("Login", "Auth", new { animeService })'>Login with @(animeService.ToString())</a>
-        <p>You need to login to use this addon.</p>
-    }
-</div>
+
+        <div class="option-row">
+            <span>Trending now</span>
+            <label class="switch">
+                <input type="checkbox" id="showTrending" class="catalogCheck" @(showTrending ? "checked" : "") />
+                <span class="slider"></span>
+            </label>
+        </div>
+    </div>
+
+    <!-- Install -->
+    <a id="stremioUrl" class="btn-primary-action btn-install" href="stremio://@Context.Request.Host">
+        Install on Stremio
+    </a>
+    <div class="hint-text hint-actions">
+        <span>Open or copy</span>
+        <a id="url" href="@($"{stremioStr}{Context.Request.Scheme}://{Context.Request.Host}")">this link</a>
+        <span>for Stremio.</span>
+        <button type="button" id="copyUrlBtn" class="hint-copy-btn">Copy</button>
+    </div>
+}
+else
+{
+    <!-- Login -->
+    <div class="card-section" id="loginCard">
+        <div id="kitsuCreds" style="display:@(!isAnilist ? "block" : "none")">
+            <div class="cred-group">
+                <label for="username" class="required">Username</label>
+                <input type="text" id="username" />
+            </div>
+            <div class="cred-group">
+                <label for="password" class="required">Password</label>
+                <input type="password" id="password" />
+            </div>
+        </div>
+        <a id="loginUrl" class="btn-primary-action btn-login" href='@Url.Action("Login", "Auth", new { animeService })'>
+            Login with <span id="loginServiceName">@animeService</span>
+        </a>
+    </div>
+
+    <p class="hint-text">Login to your anime list provider to get started.</p>
+
+    <a id="loginAnonymousUrl" class="btn-primary-action btn-login" href='@Url.Action("Login", "Auth")'>
+       Or Continue without Account
+    </a>
+}
 
 <script>
-    var animeService = @Html.Raw(SerializeObject(animeService));
-    var loginUrl = $('#loginUrl').attr('href');
+    var isAnilist = @Html.Raw(isAnilist.ToString().ToLower());
+    var loginBaseUrl = '@Url.Action("Login", "Auth")';
     var url = $('#url').attr('href');
     var stremioUrl = $('#stremioUrl').attr('href');
 
     var config = {
-        tokenData: @Html.Raw(SerializeObject(tokenData)),
+        tokenData: @Html.Raw(SerializeObject(tokenDataStr)),
     };
 
     changeUrl();
 
+    // Service toggle
+    $('#serviceToggle, #labelKitsu, #labelAnilist').on('click', function () {
+        isAnilist = !isAnilist;
+        var track = $('#serviceToggle');
+        track.toggleClass('anilist', isAnilist).toggleClass('kitsu', !isAnilist);
+        $('#labelAnilist').toggleClass('active', isAnilist);
+        $('#labelKitsu').toggleClass('active', !isAnilist);
+        $('#loginServiceName').text(isAnilist ? 'AniList' : 'Kitsu');
+        $('#kitsuCreds').toggle(!isAnilist);
+        updateLoginUrl();
+    });
+
+    $('#disconnectBtn').on('click', function () {
+        window.location.href = '@Url.Action("Logout", "Auth")';
+    });
+
+    $('#copyUrlBtn').on('click', async function () {
+        var copyUrl = $('#url').attr('href').replace('@stremioStr', '');
+
+        try {
+            await navigator.clipboard.writeText(copyUrl);
+            $(this).text('Copied');
+            setTimeout(() => $(this).text('Copy'), 1500);
+        } catch {
+            var tempInput = $('<input>');
+            $('body').append(tempInput);
+            tempInput.val(copyUrl).trigger('select');
+            document.execCommand('copy');
+            tempInput.remove();
+            $(this).text('Copied');
+            setTimeout(() => $(this).text('Copy'), 1500);
+        }
+    });
+
+    // Catalog checkboxes
     $('.catalogCheck').on('change', function () {
         changeUrl();
     });
@@ -69,16 +158,36 @@
         config.showTrending = $('#showTrending').is(':checked');
 
         var tempUrl = '/' + encodeURIComponent(JSON.stringify(config)) + '/manifest.json';
-
         $('#url').attr('href', url + tempUrl);
         $('#stremioUrl').attr('href', stremioUrl + tempUrl);
     }
 
-    $('.creds').on('change', function () {
-        var username = $('#username').val();
-        var password = encodeURIComponent($('#password').val());
+    // Kitsu credentials
+    $('#username, #password').on('input', function () {
+        updateLoginUrl();
+    });
 
-        var tempUrl = '?animeService=' + animeService + '&username=' + username + '&password=' + password;
-        $('#loginUrl').attr('href', loginUrl + tempUrl);
+    function updateLoginUrl() {
+        var svc = isAnilist ? 1 : 0;
+        var href = loginBaseUrl + '?animeService=' + svc;
+
+        if (!isAnilist) {
+            var username = $('#username').val();
+            var password = encodeURIComponent($('#password').val());
+            href += '&username=' + username + '&password=' + password;
+        }
+
+        $('#loginUrl').attr('href', href);
+    }
+
+    updateLoginUrl();
+
+    $('#loginUrl').on('click', function (e) {
+        e.preventDefault();
+        if (!isAnilist && ($('#username').val() == '' || $('#password').val() == '')) {
+            return;
+        }
+
+        window.location.href = $('#loginUrl').attr('href');
     });
 </script>

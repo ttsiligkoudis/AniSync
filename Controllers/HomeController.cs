@@ -21,24 +21,40 @@ public class HomeController : Controller
         return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
     }
 
-    public async Task<IActionResult> Index(AnimeService animeService = AnimeService.Kitsu)
+    public async Task<IActionResult> Index(string config = null)
     {
-        var tokenData = await _tokenService.GetAccessTokenAsync();
+        var tokenData = await _tokenService.GetAccessTokenAsync(config);
 
-        if (!string.IsNullOrEmpty(tokenData?.access_token)) 
-        { 
-            tokenData.refresh_token = null;
+        if (tokenData != null)
+        {
             tokenData.expires_in = null;
             if (tokenData.anime_service == AnimeService.Kitsu)
             {
                 tokenData.access_token = null;
+                tokenData.refresh_token = null;
             }
-            
+
+            ViewBag.AnonymousUser = tokenData.anonymousUser;
             ViewBag.TokenData = Uri.EscapeDataString(CompressString(SerializeObject(tokenData, Formatting.None, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore })));
         }
 
-        ViewBag.AnimeService = tokenData?.anime_service ?? animeService;
+        ViewBag.AnimeService = tokenData?.anime_service ?? AnimeService.Kitsu;
+
+        if (!string.IsNullOrEmpty(config))
+        {
+            var configuration = DeserializeObject<Configuration>(config);
+
+            ViewBag.ShowCurrent = configuration?.showCurrent;
+            ViewBag.ShowCompleted = configuration?.showCompleted;
+            ViewBag.ShowTrending = configuration?.showTrending;
+        }
 
         return View();
+    }
+
+    [Route("{config}/configure")]
+    public async Task<IActionResult> Configure(string config)
+    {
+        return RedirectToAction("Index", new { config });
     }
 }

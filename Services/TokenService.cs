@@ -1,5 +1,6 @@
 ﻿using AnimeList.Models;
 using AnimeList.Services.Interfaces;
+using System.Collections.Concurrent;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 
@@ -9,7 +10,8 @@ namespace AnimeList.Services
     {
         private readonly IHttpClientFactory _clientFactory;
         private readonly IHttpContextAccessor _httpContextAccessor;
-        private HttpClient _client => _clientFactory.CreateClient();
+        private static readonly ConcurrentDictionary<string, TokenData> _kitsuTokenCache = new();
+        private static readonly ConcurrentDictionary<string, TokenData> _anilistTokenCache = new();
 
         public TokenService(IHttpClientFactory clientFactory, IHttpContextAccessor httpContextAccessor)
         {
@@ -24,7 +26,8 @@ namespace AnimeList.Services
             if (!string.IsNullOrEmpty(config))
             {
                 var configuration = DeserializeObject<Configuration>(config);
-                tokenDataStr = DecompressString(Uri.UnescapeDataString(configuration?.tokenData));
+
+                tokenDataStr = DecompressString(Uri.UnescapeDataString(configuration.tokenData));
             }
             else
             {
@@ -38,23 +41,77 @@ namespace AnimeList.Services
 
             if (tokenData == null) return null;
 
+            if (tokenData.anonymousUser)
+            {
+                return tokenData;
+            }
+
             if (tokenData.anime_service == AnimeService.Anilist)
             {
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return null;
+
+                var cacheKey = tokenData.user_id;
+                if (!string.IsNullOrEmpty(cacheKey)
+                    && _anilistTokenCache.TryGetValue(cacheKey, out var cached)
+                    && !IsTokenExpired(cached.expiration_date))
+                {
+                    tokenData = cached;
+                }
+                else if (IsTokenExpired(tokenData.expiration_date) && !string.IsNullOrEmpty(tokenData.refresh_token))
+                {
+                    var refreshed = await RefreshAccessToken(tokenData.refresh_token);
+                    if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
+                    {
+                        _anilistTokenCache[cacheKey] = refreshed;
+                    }
+                    tokenData = refreshed;
+                }
             }
             else
             {
-                tokenData = await GetAccessTokenByCredsAsync(tokenData.username, tokenData.password, false, tokenData.user_id);
+                var cacheKey = tokenData.username;
+                if (!string.IsNullOrEmpty(cacheKey)
+                    && _kitsuTokenCache.TryGetValue(cacheKey, out var cached)
+                    && !IsTokenExpired(cached.expiration_date))
+                {
+                    tokenData = cached;
+                }
+                else
+                {
+                    var refreshed = await GetAccessTokenByCredsAsync(tokenData.username, tokenData.password, false, tokenData.user_id);
+                    if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
+                    {
+                        _kitsuTokenCache[cacheKey] = refreshed;
+                    }
+                    tokenData = refreshed;
+                }
             }
 
-            return tokenData;
+            return tokenData.Clone();
+        }
+
+        public async Task RemoveCachedUser()
+        {
+            var tokenData = await GetAccessTokenAsync();
+
+            if (tokenData == null) return;
+
+            if (tokenData.anime_service == AnimeService.Anilist && !string.IsNullOrEmpty(tokenData.user_id))
+            {
+                _anilistTokenCache.TryRemove(tokenData.user_id, out _);
+            }
+            else if (tokenData.anime_service == AnimeService.Kitsu && !string.IsNullOrEmpty(tokenData.username))
+            {
+                _kitsuTokenCache.TryRemove(tokenData.username, out _);
+            }
+
+            _httpContextAccessor.HttpContext.Session.Remove("AccessToken");
         }
 
         #region Anilist
         public async Task<TokenData> GetAccessTokenByCodeAsync(string code)
         {
-            var context = _httpContextAccessor.HttpContext;
             var client = _clientFactory.CreateClient();
             var response = await client.PostAsync("https://anilist.co/api/v2/oauth/token", new FormUrlEncodedContent(new[]
             {
@@ -65,27 +122,11 @@ namespace AnimeList.Services
             new KeyValuePair<string, string>("code", code)
             }));
 
-            if (!response.IsSuccessStatusCode) return null;
-
-            var content = await response.Content.ReadAsStringAsync();
-            var tokenData = DeserializeObject<TokenData>(content);
-            if (!string.IsNullOrEmpty(tokenData?.access_token))
-            {
-                tokenData.anime_service = AnimeService.Anilist;
-                tokenData.expiration_date = DateTime.UtcNow.AddSeconds(tokenData.expires_in ?? 0);
-                var handler = new JwtSecurityTokenHandler();
-                var jwtToken = handler.ReadJwtToken(tokenData.access_token);
-                var claims = jwtToken.Claims;
-                tokenData.user_id = claims.FirstOrDefault(c => c.Type == "sub")?.Value;
-                context.Session.SetString("AccessToken", SerializeObject(tokenData));
-            }
-
-            return tokenData;
+            return await ParseAnilistTokenResponseAsync(response);
         }
 
         private async Task<TokenData> RefreshAccessToken(string refreshToken)
         {
-            var context = _httpContextAccessor.HttpContext;
             var requestData = new FormUrlEncodedContent(new[]
             {
             new KeyValuePair<string, string>("grant_type", "refresh_token"),
@@ -94,7 +135,13 @@ namespace AnimeList.Services
             new KeyValuePair<string, string>("refresh_token", refreshToken)
         });
 
-            var response = await _client.PostAsync("https://anilist.co/api/v2/oauth/token", requestData);
+            var response = await _clientFactory.CreateClient().PostAsync("https://anilist.co/api/v2/oauth/token", requestData);
+
+            return await ParseAnilistTokenResponseAsync(response);
+        }
+
+        private async Task<TokenData> ParseAnilistTokenResponseAsync(HttpResponseMessage response)
+        {
             if (!response.IsSuccessStatusCode) return null;
 
             var content = await response.Content.ReadAsStringAsync();
@@ -105,9 +152,8 @@ namespace AnimeList.Services
                 tokenData.expiration_date = DateTime.UtcNow.AddSeconds(tokenData.expires_in ?? 0);
                 var handler = new JwtSecurityTokenHandler();
                 var jwtToken = handler.ReadJwtToken(tokenData.access_token);
-                var claims = jwtToken.Claims;
-                tokenData.user_id = claims.FirstOrDefault(c => c.Type == "sub")?.Value;
-                context.Session.SetString("AccessToken", SerializeObject(tokenData));
+                tokenData.user_id = jwtToken.Claims.FirstOrDefault(c => c.Type == "sub")?.Value;
+                _httpContextAccessor.HttpContext?.Session.SetString("AccessToken", SerializeObject(tokenData));
             }
 
             return tokenData;
@@ -118,36 +164,52 @@ namespace AnimeList.Services
         public async Task<TokenData> GetAccessTokenByCredsAsync(string username, string password, bool setContext = false, string userId = null)
         {
             var context = _httpContextAccessor.HttpContext;
-            var requestBody = new Dictionary<string, string>
-            {
-                { "grant_type", "password" },
-                { "username", username },
-                { "password", password }
-            };
+            TokenData tokenData;
 
-            var request = new HttpRequestMessage(HttpMethod.Post, "https://kitsu.io/api/oauth/token")
+            if (string.IsNullOrEmpty(username))
             {
-                Content = new FormUrlEncodedContent(requestBody)
-            };
+                tokenData = await CreateAnonymousKitsuToken();
 
-            var response = await _client.SendAsync(request);
-            if (!response.IsSuccessStatusCode)
-            {
-                return null;
-            }
-
-            var content = await response.Content.ReadAsStringAsync();
-            var tokenData = DeserializeObject<TokenData>(content);
-            if (!string.IsNullOrEmpty(tokenData?.access_token))
-            {
-                tokenData.anime_service = AnimeService.Kitsu;
-                tokenData.expiration_date = DateTime.UtcNow.AddSeconds(tokenData.expires_in ?? 0);
-                tokenData.username = username;
-                tokenData.password = password;
-                tokenData.user_id = await GetUserIdAsync(tokenData.access_token);
                 if (setContext)
                 {
                     context.Session.SetString("AccessToken", SerializeObject(tokenData));
+                }
+            }
+            else
+            {
+                var requestBody = new Dictionary<string, string>
+                {
+                    { "grant_type", "password" },
+                    { "username", username },
+                    { "password", password }
+                };
+
+                var request = new HttpRequestMessage(HttpMethod.Post, "https://kitsu.io/api/oauth/token")
+                {
+                    Content = new FormUrlEncodedContent(requestBody)
+                };
+
+                var response = await _clientFactory.CreateClient().SendAsync(request);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return null;
+                }
+
+                var content = await response.Content.ReadAsStringAsync();
+                tokenData = DeserializeObject<TokenData>(content);
+                if (!string.IsNullOrEmpty(tokenData?.access_token))
+                {
+                    tokenData.anime_service = AnimeService.Kitsu;
+                    tokenData.expiration_date = DateTime.UtcNow.AddSeconds(tokenData.expires_in ?? 0);
+                    tokenData.username = username;
+                    tokenData.password = password;
+                    tokenData.user_id = !string.IsNullOrEmpty(userId)
+                        ? userId
+                        : await GetUserIdAsync(tokenData.access_token);
+                    if (setContext)
+                    {
+                        context.Session.SetString("AccessToken", SerializeObject(tokenData));
+                    }
                 }
             }
 
@@ -159,13 +221,22 @@ namespace AnimeList.Services
             var request = new HttpRequestMessage(HttpMethod.Get, "https://kitsu.io/api/edge/users?filter[self]=true");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
-            var response = await _client.SendAsync(request);
+            var client = _clientFactory.CreateClient();
+            var response = await client.SendAsync(request);
             if (!response.IsSuccessStatusCode) return null;
 
             var content = await response.Content.ReadAsStringAsync();
             var user = DeserializeObject<dynamic>(content);
 
             return user.data[0].id;
+        }
+
+        public async Task<TokenData> CreateAnonymousKitsuToken()
+        {
+            return new TokenData
+            {
+                anime_service = AnimeService.Kitsu
+            };
         }
         #endregion Kitsu
     }
