@@ -26,14 +26,6 @@ builder.Services.AddScoped<IKitsuService, KitsuService>();
 
 var app = builder.Build();
 
-app.Use(async (context, next) =>
-{
-    context.Response.Headers.Append("Content-Security-Policy",
-        "default-src 'self'; " +
-        "connect-src 'self' chrome://webui-test chrome://resources chrome://theme;"); // Add the missing sources here
-    await next();
-});
-
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Home/Error");
