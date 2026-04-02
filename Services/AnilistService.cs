@@ -44,7 +44,7 @@ namespace AnimeList.Services
                                         english
                                     }}
                                     coverImage {{
-                                        medium
+                                        large
                                     }}
                                     description
                                 }}
@@ -72,7 +72,7 @@ namespace AnimeList.Services
                                                 english
                                             }}
                                             coverImage {{
-                                                medium
+                                                large
                                             }}
                                             description
                                         }}
@@ -98,7 +98,7 @@ namespace AnimeList.Services
                                     english
                                 }
                                 coverImage {
-                                    medium
+                                    large
                                 }
                                 description
                             }
@@ -177,7 +177,7 @@ namespace AnimeList.Services
                     id = externalId,
                     type = (string)tmpEntry.format == "MOVIE" ? MetaType.movie.ToString() : MetaType.series.ToString(),
                     name = (string)tmpEntry.title.english,
-                    poster = tmpEntry.coverImage.medium,
+                    poster = tmpEntry.coverImage.large,
                     descriptionRich = tmpEntry.description,
                 };
 
