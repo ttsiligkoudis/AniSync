@@ -12,12 +12,17 @@ namespace AnimeList.Controllers
             var configiration = DeserializeObject<Configuration>(config);
             var isAuthenticated = !string.IsNullOrWhiteSpace(configiration?.tokenData);
             TokenData? tokenData = null;
+            var name = "AniSync";
+
+#if DEBUG
+            name = "AniSyncDev";
+#endif
 
             var manifest = new Manifest
             {
                 id = "community.AniSync",
                 version = "1.0.0",
-                name = "AniSync",
+                name = name,
                 description = "Fetches anime list from Kitsu/AniList to track your anime progress while using stremio",
                 logo = $"{Request.Scheme}://{Request.Host}/logo.png",
                 resources = [ "catalog", "meta", "subtitles" ],
@@ -47,7 +52,7 @@ namespace AnimeList.Controllers
                     manifest.idPrefixes.Add(kitsuPrefix);
                 }
 
-                manifest.idPrefixes.Add("tt");
+                manifest.idPrefixes.Add(imdbPrefix);
             }
             else
             {

@@ -17,7 +17,7 @@ namespace AnimeList.Controllers
         {
             if (animeService == AnimeService.Anilist)
             {
-                return Redirect($"https://anilist.co/api/v2/oauth/authorize?client_id=20850&response_type=code");
+                return Redirect($"https://anilist.co/api/v2/oauth/authorize?client_id={clientId}&response_type=code");
             }
             else
             {

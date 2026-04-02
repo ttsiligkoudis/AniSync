@@ -116,9 +116,9 @@ namespace AnimeList.Services
             var response = await client.PostAsync("https://anilist.co/api/v2/oauth/token", new FormUrlEncodedContent(new[]
             {
             new KeyValuePair<string, string>("grant_type", "authorization_code"),
-            new KeyValuePair<string, string>("client_id", "20850"),
-            new KeyValuePair<string, string>("client_secret", "bAgns7Q0rGxXnhGRRoq84slYleN4NIe2SkoSDOZ1"),
-            new KeyValuePair<string, string>("redirect_uri", "https://anisync.fly.dev/Auth/Callback"),
+            new KeyValuePair<string, string>("client_id", clientId),
+            new KeyValuePair<string, string>("client_secret", clientSecret),
+            new KeyValuePair<string, string>("redirect_uri", redirectUri),
             new KeyValuePair<string, string>("code", code)
             }));
 
@@ -130,8 +130,8 @@ namespace AnimeList.Services
             var requestData = new FormUrlEncodedContent(new[]
             {
             new KeyValuePair<string, string>("grant_type", "refresh_token"),
-            new KeyValuePair<string, string>("client_id", "20850"),
-            new KeyValuePair<string, string>("client_secret", "bAgns7Q0rGxXnhGRRoq84slYleN4NIe2SkoSDOZ1"),
+            new KeyValuePair<string, string>("client_id", clientId),
+            new KeyValuePair<string, string>("client_secret", clientSecret),
             new KeyValuePair<string, string>("refresh_token", refreshToken)
         });
 

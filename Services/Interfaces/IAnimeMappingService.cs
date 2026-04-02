@@ -5,11 +5,12 @@ namespace AnimeList.Services.Interfaces
     /// </summary>
     public interface IAnimeMappingService
     {
-        Task<string> GetImdbIdByMalIdAsync(int malId);
+        Task<string> GetImdbIdByAnilistIdAsync(int anilistId);
         Task<string> GetImdbIdByKitsuIdAsync(int kitsuId);
         Task<int?> GetAnilistIdByImdbIdAsync(string imdbId);
         Task<int?> GetKitsuIdByImdbIdAsync(string imdbId);
         Task<int?> GetKitsuIdByAnilistIdAsync(int anilistId);
         Task<int?> GetAnilistIdByKitsuIdAsync(int kitsuId);
+        Task<int?> GetIdByService(string animeId, AnimeService service);
     }
 }
