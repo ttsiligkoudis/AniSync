@@ -8,8 +8,6 @@ namespace AnimeList.Models
         private static readonly Regex HtmlTagRegex = HtmlTagPattern();
 
         public string id { get; set; }
-        public int? malId { get; set; }
-        public string imdbId { get; set; }
         public string name { get; set; }
         public string poster { get; set; }
         public string descriptionRich { get; set; }

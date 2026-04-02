@@ -74,7 +74,6 @@ namespace AnimeList.Services
                 animeList.Add(new Meta
                 {
                     id = imdbId ?? $"{kitsuPrefix}{included.id}",
-                    imdbId = imdbId,
                     type = ((string)included.attributes.subtype).Equals("movie", StringComparison.OrdinalIgnoreCase) ? MetaType.movie.ToString() : MetaType.series.ToString(),
                     name = included.attributes.titles.en,
                     poster = included.attributes.posterImage != null ? (string)included.attributes.posterImage.large : null,
@@ -110,7 +109,6 @@ namespace AnimeList.Services
             var anime = new Meta
             {
                 id = id,
-                imdbId = imdbId,
                 type = (string)entry.attributes.subtype == "movie" ? MetaType.movie.ToString() : MetaType.series.ToString(),
                 name = entry.attributes.titles.en,
                 poster = entry.attributes.posterImage != null ? (string)entry.attributes.posterImage.large : null,

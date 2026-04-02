@@ -5,6 +5,7 @@ namespace AnimeList.Services.Interfaces
     /// </summary>
     public interface IAnimeMappingService
     {
+        Task EnsureLoadedAsync();
         Task<string> GetImdbIdByAnilistIdAsync(int anilistId);
         Task<string> GetImdbIdByKitsuIdAsync(int kitsuId);
         Task<int?> GetAnilistIdByImdbIdAsync(string imdbId);

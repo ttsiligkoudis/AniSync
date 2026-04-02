@@ -66,6 +66,11 @@ namespace AnimeList.Services
             return _kitsuToAnilist.TryGetValue(kitsuId, out var anilistId) ? anilistId : null;
         }
 
+        public async Task EnsureLoadedAsync()
+        {
+            await EnsureMappingsLoadedAsync();
+        }
+
         private async Task EnsureMappingsLoadedAsync()
         {
             if (_anilistToImdb is not null && DateTime.UtcNow - _lastLoaded < CacheDuration)
@@ -85,32 +90,32 @@ namespace AnimeList.Services
 
                 _anilistToImdb = withImdb
                     .Where(e => e.AnilistId.HasValue && !string.IsNullOrEmpty(e.ImdbId))
-                    .DistinctBy(e => new { e.AnilistId!.Value, e.ImdbId })
+                    .DistinctBy(e => e.AnilistId!.Value)
                     .ToFrozenDictionary(e => e.AnilistId!.Value, e => e.ImdbId);
 
                 _kitsuToImdb = withImdb
                     .Where(e => e.KitsuId.HasValue && !string.IsNullOrEmpty(e.ImdbId))
-                    .DistinctBy(e => new { e.KitsuId!.Value, e.ImdbId })
+                    .DistinctBy(e => e.KitsuId!.Value)
                     .ToFrozenDictionary(e => e.KitsuId!.Value, e => e.ImdbId);
 
                 _imdbToAnilist = withImdb
                     .Where(e => !string.IsNullOrEmpty(e.ImdbId) && e.AnilistId.HasValue)
-                    .DistinctBy(e => new { e.ImdbId, e.AnilistId })
+                    .DistinctBy(e => e.ImdbId)
                     .ToFrozenDictionary(e => e.ImdbId, e => e.AnilistId!.Value);
 
                 _imdbToKitsu = withImdb
                     .Where(e => !string.IsNullOrEmpty(e.ImdbId) && e.KitsuId.HasValue)
-                    .DistinctBy(e => new { e.ImdbId, e.KitsuId })
+                    .DistinctBy(e => e.ImdbId)
                     .ToFrozenDictionary(e => e.ImdbId, e => e.KitsuId!.Value);
 
                 _anilistToKitsu = entries
                     .Where(e => e.AnilistId.HasValue && e.KitsuId.HasValue)
-                    .DistinctBy(e => new { e.AnilistId!.Value, KitsuId = e.KitsuId!.Value })
+                    .DistinctBy(e => e.AnilistId!.Value)
                     .ToFrozenDictionary(e => e.AnilistId!.Value, e => e.KitsuId!.Value);
 
                 _kitsuToAnilist = entries
                     .Where(e => e.KitsuId.HasValue && e.AnilistId.HasValue)
-                    .DistinctBy(e => new { e.KitsuId!.Value, AnilistId = e.AnilistId!.Value })
+                    .DistinctBy(e => e.KitsuId!.Value)
                     .ToFrozenDictionary(e => e.KitsuId!.Value, e => e.AnilistId!.Value);
 
                 _lastLoaded = DateTime.UtcNow;

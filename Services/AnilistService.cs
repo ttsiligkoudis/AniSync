@@ -8,21 +8,22 @@ namespace AnimeList.Services
     {
         private readonly IHttpClientFactory _clientFactory;
         private readonly IAnimeMappingService _mappingService;
+        private readonly IKitsuService _kitsuService;
         private readonly string _anilistApi = "https://graphql.anilist.co";
         private readonly List<ListType> _userLists = [ListType.Current, ListType.Completed ];
 
-        public AnilistService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService)
+        public AnilistService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IKitsuService kitsuService)
         {
             _clientFactory = clientFactory;
             _mappingService = mappingService;
+            _kitsuService = kitsuService;
         }
+
+        private const int CatalogPageSize = 50;
 
         private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, int? resolvedAnimeId = null)
         {
             var requestBody = string.Empty;
-
-            var pageSize = 50;
-            var page = int.TryParse(skip, out var skipInt) ? (skipInt / pageSize) + 1 : 1;
 
             if (!list.HasValue || _userLists.Contains(list.Value))
             {
@@ -59,44 +60,37 @@ namespace AnimeList.Services
                     requestBody = SerializeObject(new
                     {
                         query = $@"
-                        query ($userId: Int, $page: Int, $perPage: Int) {{
-                            Page (page: $page, perPage: $perPage) {{
-                                pageInfo {{
-                                    currentPage
-                                    hasNextPage
-                                    perPage
-                                }}
-                                mediaList(userId: $userId, type: ANIME{statusArg}) {{
-                                    media {{
-                                        id
-                                        format
-                                        status
-                                        title {{
-                                            english
+                        query ($userId: Int) {{
+                            MediaListCollection(userId: $userId, type: ANIME{statusArg}) {{
+                                lists {{
+                                    entries {{
+                                        media {{
+                                            id
+                                            format
+                                            status
+                                            title {{
+                                                english
+                                            }}
+                                            coverImage {{
+                                                medium
+                                            }}
+                                            description
                                         }}
-                                        coverImage {{
-                                            medium
-                                        }}
-                                        description
                                     }}
                                 }}
                             }}
                         }}",
-                        variables = new { userId = tokenData?.user_id, page, perPage = pageSize }
+                        variables = new { userId = tokenData?.user_id }
                     });
                 }
             }
             else
             {
+                var page = int.TryParse(skip, out var skipInt) ? (skipInt / CatalogPageSize) + 1 : 1;
                 var mediaIdArg = resolvedAnimeId.HasValue ? ", id: $mediaId" : string.Empty;
                 var query = """
                     query ($sort: [MediaSort], $mediaId: Int, $page: Int, $perPage: Int) {
                         Page (page: $page, perPage: $perPage) {
-                            pageInfo {
-                                currentPage
-                                hasNextPage
-                                perPage
-                            }
                             media(sort: $sort, type: ANIME__MEDIA_ID_ARG__) {
                                 id
                                 format
@@ -115,7 +109,7 @@ namespace AnimeList.Services
                 requestBody = SerializeObject(new
                 {
                     query,
-                    variables = new { sort = new List<string> { GetListTypeString(list.Value, tokenData) }, mediaId = resolvedAnimeId, page, perPage = pageSize }
+                    variables = new { sort = new List<string> { GetListTypeString(list.Value, tokenData) }, mediaId = resolvedAnimeId, page, perPage = CatalogPageSize }
                 });
             }
 
@@ -142,11 +136,26 @@ namespace AnimeList.Services
             IEnumerable<dynamic> result;
             var data = DeserializeObject<dynamic>(content).data;
 
-            if (list == ListType.Trending_Desc) result = data.Page.media;
-            else if (resolvedAnimeId.HasValue) result = data.MediaList == null ? Array.Empty<dynamic>() : [data.MediaList];
-            else result = data.Page.mediaList;
+            bool isUserList = !list.HasValue || _userLists.Contains(list.Value);
 
-            var animeList = new List<Meta>();
+            if (list == ListType.Trending_Desc)
+                result = data.Page.media;
+            else if (resolvedAnimeId.HasValue)
+                result = data.MediaList == null ? Array.Empty<dynamic>() : [data.MediaList];
+            else
+            {
+                // MediaListCollection groups entries by status lists; flatten them
+                var entries = new List<dynamic>();
+                foreach (var lst in data.MediaListCollection.lists)
+                    foreach (var entry in lst.entries)
+                        entries.Add(entry);
+                result = entries;
+            }
+
+            // Ensure mapping cache is loaded once, so the lookups below are pure dictionary reads
+            await _mappingService.EnsureLoadedAsync();
+
+            var seenIds = new Dictionary<string, Meta>();
             foreach (var entry in result)
             {
                 var tmpEntry = entry;
@@ -163,17 +172,36 @@ namespace AnimeList.Services
                     externalId = kitsuId.HasValue ? $"{kitsuPrefix}{kitsuId}" : $"{anilistPrefix}{anilistId}";
                 }
 
-                animeList.Add(new Meta
+                var meta = new Meta
                 {
                     id = externalId,
                     type = (string)tmpEntry.format == "MOVIE" ? MetaType.movie.ToString() : MetaType.series.ToString(),
-                    name = tmpEntry.title.english,
+                    name = (string)tmpEntry.title.english,
                     poster = tmpEntry.coverImage.medium,
                     descriptionRich = tmpEntry.description,
-                });
+                };
+
+                // Multiple AniList entries (seasons/OVAs) can share the same IMDb ID;
+                // keep the shortest English title as it's typically the base series name
+                if (seenIds.TryGetValue(externalId, out var existing))
+                {
+                    if (!string.IsNullOrEmpty(meta.name) && (string.IsNullOrEmpty(existing.name) || meta.name.Length < existing.name.Length))
+                        seenIds[externalId] = meta;
+
+                    continue;
+                }
+
+                seenIds[externalId] = meta;
             }
 
-            return animeList;
+            // User lists are fetched in full via MediaListCollection; paginate after dedup
+            if (isUserList && !resolvedAnimeId.HasValue)
+            {
+                int skipCount = int.TryParse(skip, out var s) ? s : 0;
+                return seenIds.Select(s => s.Value).Skip(skipCount).Take(CatalogPageSize).ToList();
+            }
+
+            return seenIds.Select(s => s.Value).ToList();
         }
 
         public async Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData)
@@ -231,10 +259,12 @@ namespace AnimeList.Services
             int anilistId = (int)result.id;
             string externalId = anilistId > 0 ? await _mappingService.GetImdbIdByAnilistIdAsync(anilistId) : null;
 
+            int? kitsuId = null;
+
             // Fall back to Kitsu ID when IMDb is unavailable (Torrentio supports Kitsu IDs)
             if (string.IsNullOrEmpty(externalId))
             {
-                var kitsuId = await _mappingService.GetKitsuIdByAnilistIdAsync(anilistId);
+                kitsuId = await _mappingService.GetKitsuIdByAnilistIdAsync(anilistId);
                 externalId = kitsuId.HasValue ? $"{kitsuPrefix}{kitsuId}" : $"{anilistPrefix}{id}";
             }
 
@@ -260,6 +290,12 @@ namespace AnimeList.Services
                 anime.videos[i].id = $"{externalId}:{i + 1}";
                 anime.videos[i].episode = (i + 1).ToString();
                 anime.videos[i].season = "1";
+            }
+
+            if (!anime.videos.Any() && kitsuId.HasValue)
+            {
+                var kitsuAnime = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{kitsuId}", null);
+                anime.videos = kitsuAnime.videos;
             }
 
             return anime;

@@ -26,6 +26,9 @@ builder.Services.AddScoped<IKitsuService, KitsuService>();
 
 var app = builder.Build();
 
+// Pre-warm the anime ID mapping cache at startup
+await app.Services.GetRequiredService<IAnimeMappingService>().EnsureLoadedAsync();
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Home/Error");
