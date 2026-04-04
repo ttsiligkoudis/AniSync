@@ -17,14 +17,18 @@ namespace AnimeList.Controllers
             _kitsuService = kitsuService;
         }
 
-        [HttpGet("{config}/[controller]/{metaType}/{listType}/skip={skip:int}.json")]
-        public async Task<ActionResult> GetListWithSkip(string config, MetaType metaType, ListType listType, string skip, string animeId = null)
+        [HttpGet("{config}/[controller]/{metaType}/{listType}/{extras}.json")]
+        public async Task<ActionResult> GetListWithExtras(string config, MetaType metaType, ListType listType, string extras)
         {
-            return await GetList(config, metaType, listType, skip, animeId);
+            var parsed = ParseExtras(extras);
+            parsed.TryGetValue("skip", out var skip);
+            parsed.TryGetValue("genre", out var genre);
+            parsed.TryGetValue("season", out var season);
+            return await GetList(config, metaType, listType, skip, genre: genre, seasonOption: season);
         }
 
         [HttpGet("{config}/[controller]/{metaType}/{listType}.json")]
-        public async Task<ActionResult> GetList(string config, MetaType metaType, ListType listType, string skip = null, string animeId = null)
+        public async Task<ActionResult> GetList(string config, MetaType metaType, ListType listType, string skip = null, string animeId = null, string genre = null, string seasonOption = null)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync(config);
             var animeService = tokenData?.anime_service ?? AnimeService.Kitsu;
@@ -35,10 +39,32 @@ namespace AnimeList.Controllers
             }
 
             var metas = animeService == AnimeService.Anilist
-                ? await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId)
-                : await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId);
+                ? await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, seasonOption)
+                : await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, seasonOption);
 
             return new JsonResult(new { metas });
+        }
+
+        /// <summary>
+        /// Parses Stremio extras path segment (e.g. "genre=Action&amp;skip=50") into key-value pairs.
+        /// </summary>
+        private static Dictionary<string, string> ParseExtras(string extras)
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrEmpty(extras)) return result;
+
+            foreach (var part in extras.Split('&'))
+            {
+                var eqIndex = part.IndexOf('=');
+                if (eqIndex > 0)
+                {
+                    var key = Uri.UnescapeDataString(part[..eqIndex]);
+                    var value = Uri.UnescapeDataString(part[(eqIndex + 1)..]);
+                    result[key] = value;
+                }
+            }
+
+            return result;
         }
     }
 }

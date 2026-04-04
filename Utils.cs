@@ -11,6 +11,65 @@ namespace AnimeList
         public static readonly string kitsuPrefix = "kitsu:";
         public static readonly string tmdbPrefix = "tmdb:";
 
+        public static readonly List<string> AnimeGenres =
+        [
+            "Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy",
+            "Horror", "Mahou Shoujo", "Mecha", "Music", "Mystery",
+            "Psychological", "Romance", "Sci-Fi", "Slice of Life",
+            "Sports", "Supernatural", "Thriller"
+        ];
+
+        public const string SeasonCurrent = "This Season";
+        public const string SeasonNext = "Next Season";
+        public const string SeasonPrevious = "Last Season";
+
+        public static readonly List<string> SeasonOptions = [SeasonCurrent, SeasonNext, SeasonPrevious];
+
+        /// <summary>
+        /// Returns true if the given list type is the seasonal catalog.
+        /// </summary>
+        public static bool IsSeasonalListType(ListType list) => list == ListType.Seasonal;
+
+        /// <summary>
+        /// Returns the AniList MediaSeason string and year for the given season option.
+        /// </summary>
+        public static (string Season, int Year) GetSeasonAndYear(string seasonOption)
+        {
+            var now = DateTime.UtcNow;
+            int offset = seasonOption switch
+            {
+                SeasonNext => 1,
+                SeasonPrevious => -1,
+                _ => 0
+            };
+
+            int seasonIndex = (now.Month - 1) / 3; // 0=Winter, 1=Spring, 2=Summer, 3=Fall
+            int targetIndex = seasonIndex + offset;
+            int year = now.Year;
+
+            if (targetIndex > 3)
+            {
+                targetIndex -= 4;
+                year++;
+            }
+            else if (targetIndex < 0)
+            {
+                targetIndex += 4;
+                year--;
+            }
+
+            string season = targetIndex switch
+            {
+                0 => "WINTER",
+                1 => "SPRING",
+                2 => "SUMMER",
+                3 => "FALL",
+                _ => "WINTER"
+            };
+
+            return (season, year);
+        }
+
 #if DEBUG
         public static readonly string clientId = "20853";
         public static readonly string clientSecret = "za9WKI03QY3icX3S4EvsSUuE0VB1b5MZelcT2S8m";

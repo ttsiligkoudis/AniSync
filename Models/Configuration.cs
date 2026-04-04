@@ -6,5 +6,6 @@
         public bool showCurrent { get; set; }
         public bool showCompleted { get; set; }
         public bool showTrending { get; set; }
+        public bool showSeasonal { get; set; }
     }
 }

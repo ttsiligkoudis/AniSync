@@ -19,7 +19,8 @@
         {
             Current,
             Completed,
-            Trending_Desc
+            Trending_Desc,
+            Seasonal
         }
 
         public enum LinkCategory

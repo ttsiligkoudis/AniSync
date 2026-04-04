@@ -92,6 +92,22 @@ namespace AnimeList.Controllers
                 });
             }
 
+            if (configiration.showSeasonal || !isAuthenticated || true)
+            {
+                manifest.catalogs.Add(new Catalog
+                {
+                    type = MetaType.anime.ToString(),
+                    id = GetListTypeString(ListType.Seasonal, tokenData),
+                    name = "Seasonal Anime",
+                    extra =
+                    [
+                        new Extra("season") { options = SeasonOptions, isRequired = true },
+                        new Extra("genre") { options = AnimeGenres },
+                        new Extra("skip"),
+                    ],
+                });
+            }
+
             return new JsonResult(manifest);
         }
     }

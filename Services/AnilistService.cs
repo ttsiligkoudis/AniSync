@@ -22,7 +22,7 @@ namespace AnimeList.Services
 
         private const int CatalogPageSize = 50;
 
-        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null)
+        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null, string seasonOption = null)
         {
             var requestBody = string.Empty;
 
@@ -87,16 +87,48 @@ namespace AnimeList.Services
                     });
                 }
             }
+            else if (list == ListType.Seasonal)
+            {
+                var page = int.TryParse(skip, out var skipInt) ? (skipInt / CatalogPageSize) + 1 : 1;
+                var (season, year) = GetSeasonAndYear(seasonOption ?? SeasonCurrent);
+
+                var genreVarDecl = !string.IsNullOrEmpty(genre) ? ", $genre: String" : string.Empty;
+                var genreArg = !string.IsNullOrEmpty(genre) ? ", genre: $genre" : string.Empty;
+
+                requestBody = SerializeObject(new
+                {
+                    query = $@"
+                    query ($page: Int, $perPage: Int, $season: MediaSeason, $seasonYear: Int{genreVarDecl}) {{
+                        Page (page: $page, perPage: $perPage) {{
+                            media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: [POPULARITY_DESC]{genreArg}) {{
+                                id
+                                format
+                                title {{
+                                    english
+                                    romaji
+                                }}
+                                coverImage {{
+                                    large
+                                }}
+                                description
+                            }}
+                        }}
+                    }}",
+                    variables = !string.IsNullOrEmpty(genre)
+                        ? (object)new { page, perPage = CatalogPageSize, season, seasonYear = year, genre }
+                        : new { page, perPage = CatalogPageSize, season, seasonYear = year }
+                });
+            }
             else
             {
                 var page = int.TryParse(skip, out var skipInt) ? (skipInt / CatalogPageSize) + 1 : 1;
-                var mediaIdArg = !string.IsNullOrEmpty(resolvedAnimeId) ? ", id: $mediaId" : string.Empty;
-                var query = """
-                    query ($sort: [MediaSort], $mediaId: Int, $page: Int, $perPage: Int) {
+                requestBody = SerializeObject(new
+                {
+                    query = @"
+                    query ($sort: [MediaSort], $page: Int, $perPage: Int) {
                         Page (page: $page, perPage: $perPage) {
-                            media(sort: $sort, type: ANIME__MEDIA_ID_ARG__) {
+                            media(sort: $sort, type: ANIME) {
                                 id
-                                format
                                 title {
                                     english
                                     romaji
@@ -107,23 +139,18 @@ namespace AnimeList.Services
                                 description
                             }
                         }
-                    }
-                    """.Replace("__MEDIA_ID_ARG__", mediaIdArg);
-
-                requestBody = SerializeObject(new
-                {
-                    query,
-                    variables = new { sort = new List<string> { GetListTypeString(list.Value, tokenData) }, mediaId = resolvedAnimeId, page, perPage = CatalogPageSize }
+                    }",
+                    variables = new { sort = new List<string> { GetListTypeString(list.Value, tokenData) }, page, perPage = CatalogPageSize }
                 });
             }
 
             return requestBody;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string seasonOption = null)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
-            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId);
+            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, seasonOption);
 
             var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
             {
@@ -142,7 +169,7 @@ namespace AnimeList.Services
 
             bool isUserList = !list.HasValue || _userLists.Contains(list.Value);
 
-            if (list == ListType.Trending_Desc)
+            if (list == ListType.Trending_Desc || list == ListType.Seasonal)
                 result = data.Page.media;
             else if (!string.IsNullOrEmpty(resolvedAnimeId))
                 result = data.MediaList == null ? Array.Empty<dynamic>() : [data.MediaList];
@@ -163,7 +190,7 @@ namespace AnimeList.Services
             foreach (var entry in result)
             {
                 var tmpEntry = entry;
-                if (list != ListType.Trending_Desc) tmpEntry = entry.media;
+                if (list != ListType.Trending_Desc && list != ListType.Seasonal) tmpEntry = entry.media;
                 if (list == ListType.Current && (string)tmpEntry.status == "NOT_YET_RELEASED") continue;
 
                 var mapping = await _mappingService.GetAnilistMapping((string)tmpEntry.id);

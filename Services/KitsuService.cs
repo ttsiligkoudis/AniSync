@@ -19,8 +19,11 @@ namespace AnimeList.Services
             _mappingService = mappingService;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string seasonOption = null)
         {
+            // Kitsu does not support seasonal catalogs; return empty for seasonal list types
+            if (list == ListType.Seasonal) return [];
+
             var tmpStr = list.HasValue ? $"&filter[status]={GetListTypeString(list.Value, tokenData)}" : "";
             var animeFilter = !string.IsNullOrWhiteSpace(animeId) ? $"&filter[animeId]={animeId.Replace(kitsuPrefix, "")}" : "";
 
