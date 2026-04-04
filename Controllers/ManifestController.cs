@@ -101,8 +101,7 @@ namespace AnimeList.Controllers
                     name = "Seasonal Anime",
                     extra =
                     [
-                        new Extra("season") { options = SeasonOptions, isRequired = true },
-                        new Extra("genre") { options = AnimeGenres },
+                        new Extra("genre") { options = SeasonOptions, isRequired = true },
                         new Extra("skip"),
                     ],
                 });
