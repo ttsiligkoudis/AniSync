@@ -46,6 +46,12 @@ namespace AnimeList.Models
         public string episode { get; set; }
     }
 
+    public class Edge
+    {
+        public string relationType { get; set; }
+        public dynamic node { get; set; }
+    }
+
     public class Link
     {
         public string name { get; set; }

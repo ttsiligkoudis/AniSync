@@ -6,9 +6,10 @@ namespace AnimeList
 {
     public static class Utils
     {
-        public static readonly string anilistPrefix = "anilist";
+        public static readonly string anilistPrefix = "anilist:";
         public static readonly string imdbPrefix = "tt";
-        public static readonly string kitsuPrefix = "kitsu";
+        public static readonly string kitsuPrefix = "kitsu:";
+        public static readonly string tmdbPrefix = "tmdb:";
 
 #if DEBUG
         public static readonly string clientId = "20853";

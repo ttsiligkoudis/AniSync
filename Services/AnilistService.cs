@@ -1,5 +1,6 @@
 ﻿using AnimeList.Models;
 using AnimeList.Services.Interfaces;
+using System.Formats.Tar;
 using System.Net.Http.Headers;
 
 namespace AnimeList.Services
@@ -21,13 +22,13 @@ namespace AnimeList.Services
 
         private const int CatalogPageSize = 50;
 
-        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, int? resolvedAnimeId = null)
+        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null)
         {
             var requestBody = string.Empty;
 
             if (!list.HasValue || _userLists.Contains(list.Value))
             {
-                if (resolvedAnimeId.HasValue)
+                if (!string.IsNullOrEmpty(resolvedAnimeId))
                 {
                     var statusArg = list.HasValue ? $", status: {GetListTypeString(list.Value, tokenData)}" : string.Empty;
 
@@ -42,6 +43,7 @@ namespace AnimeList.Services
                                     status
                                     title {{
                                         english
+                                        romaji
                                     }}
                                     coverImage {{
                                         large
@@ -70,6 +72,7 @@ namespace AnimeList.Services
                                             status
                                             title {{
                                                 english
+                                                romaji
                                             }}
                                             coverImage {{
                                                 large
@@ -87,7 +90,7 @@ namespace AnimeList.Services
             else
             {
                 var page = int.TryParse(skip, out var skipInt) ? (skipInt / CatalogPageSize) + 1 : 1;
-                var mediaIdArg = resolvedAnimeId.HasValue ? ", id: $mediaId" : string.Empty;
+                var mediaIdArg = !string.IsNullOrEmpty(resolvedAnimeId) ? ", id: $mediaId" : string.Empty;
                 var query = """
                     query ($sort: [MediaSort], $mediaId: Int, $page: Int, $perPage: Int) {
                         Page (page: $page, perPage: $perPage) {
@@ -96,6 +99,7 @@ namespace AnimeList.Services
                                 format
                                 title {
                                     english
+                                    romaji
                                 }
                                 coverImage {
                                     large
@@ -140,7 +144,7 @@ namespace AnimeList.Services
 
             if (list == ListType.Trending_Desc)
                 result = data.Page.media;
-            else if (resolvedAnimeId.HasValue)
+            else if (!string.IsNullOrEmpty(resolvedAnimeId))
                 result = data.MediaList == null ? Array.Empty<dynamic>() : [data.MediaList];
             else
             {
@@ -162,21 +166,18 @@ namespace AnimeList.Services
                 if (list != ListType.Trending_Desc) tmpEntry = entry.media;
                 if (list == ListType.Current && (string)tmpEntry.status == "NOT_YET_RELEASED") continue;
 
-                int anilistId = (int)tmpEntry.id;
-                string externalId = anilistId > 0 ? await _mappingService.GetImdbIdByAnilistIdAsync(anilistId) : null;
+                var mapping = await _mappingService.GetAnilistMapping((string)tmpEntry.id);
 
-                // Fall back to Kitsu ID when IMDb is unavailable (Torrentio supports Kitsu IDs)
-                if (string.IsNullOrEmpty(externalId))
-                {
-                    int? kitsuId = await _mappingService.GetKitsuIdByAnilistIdAsync(anilistId);
-                    externalId = kitsuId.HasValue ? $"{kitsuPrefix}{kitsuId}" : $"{anilistPrefix}{anilistId}";
-                }
+                var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                                 !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
+                                 mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
+                                 $"{anilistPrefix}{tmpEntry.id}";
 
                 var meta = new Meta
                 {
                     id = externalId,
                     type = (string)tmpEntry.format == "MOVIE" ? MetaType.movie.ToString() : MetaType.series.ToString(),
-                    name = (string)tmpEntry.title.english,
+                    name = string.IsNullOrEmpty((string)tmpEntry.title.english) ? tmpEntry.title.romaji : tmpEntry.title.english,
                     poster = tmpEntry.coverImage.large,
                     descriptionRich = tmpEntry.description,
                 };
@@ -195,7 +196,7 @@ namespace AnimeList.Services
             }
 
             // User lists are fetched in full via MediaListCollection; paginate after dedup
-            if (isUserList && !resolvedAnimeId.HasValue)
+            if (isUserList && string.IsNullOrEmpty(resolvedAnimeId))
             {
                 int skipCount = int.TryParse(skip, out var s) ? s : 0;
                 return seenIds.Select(s => s.Value).Skip(skipCount).Take(CatalogPageSize).ToList();
@@ -208,7 +209,7 @@ namespace AnimeList.Services
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(id, AnimeService.Anilist);
 
-            if (!resolvedAnimeId.HasValue) return null;
+            if (string.IsNullOrEmpty(resolvedAnimeId)) return null;
 
             var query = @"
                 query ($id: Int) {
@@ -217,9 +218,11 @@ namespace AnimeList.Services
                         format
                         title {
                             english
+                            romaji
                         }
+                        bannerImage
                         coverImage {
-                            extraLarge
+                            large
                         }
                         description,
                         genres,
@@ -227,6 +230,14 @@ namespace AnimeList.Services
                             id,
                             site
                         },
+                        relations {
+                          edges {
+                            relationType
+                            node {
+                              id
+                            }
+                          }
+                        }
                         streamingEpisodes {
                             title,
                             thumbnail
@@ -235,7 +246,7 @@ namespace AnimeList.Services
                 }
             ";
 
-            var variables = new { id = resolvedAnimeId.Value.ToString() };
+            var variables = new { id = resolvedAnimeId };
 
             var ser = SerializeObject(new { query, variables });
 
@@ -256,27 +267,22 @@ namespace AnimeList.Services
             var content = await response.Content.ReadAsStringAsync();
             var result = DeserializeObject<dynamic>(content).data.Media;
 
-            int anilistId = (int)result.id;
-            string externalId = anilistId > 0 ? await _mappingService.GetImdbIdByAnilistIdAsync(anilistId) : null;
+            var mapping = await _mappingService.GetAnilistMapping((string)result.id);
 
-            int? kitsuId = null;
-
-            // Fall back to Kitsu ID when IMDb is unavailable (Torrentio supports Kitsu IDs)
-            if (string.IsNullOrEmpty(externalId))
-            {
-                kitsuId = await _mappingService.GetKitsuIdByAnilistIdAsync(anilistId);
-                externalId = kitsuId.HasValue ? $"{kitsuPrefix}{kitsuId}" : $"{anilistPrefix}{id}";
-            }
+            var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                             !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
+                             mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
+                             $"{anilistPrefix}{result.id}";
 
             var anime = new Meta
             {
                 id = externalId,
                 type = (string)result.format == "MOVIE" ? MetaType.movie.ToString() : MetaType.series.ToString(),
-                name = result.title.english,
-                poster = result.coverImage.extraLarge,
+                name = string.IsNullOrEmpty((string)result.title.english) ? result.title.romaji : result.title.english,
+                poster = result.coverImage.large,
                 descriptionRich = result.description,
                 genres = result.genres.ToObject<List<string>>(),
-                background = result.coverImage.extraLarge,
+                background = result.bannerImage,
                 videos = result.streamingEpisodes.ToObject<List<Video>>()
             };
 
@@ -285,30 +291,65 @@ namespace AnimeList.Services
                 anime.trailers.Add(new Trailer(result.trailer.id));
                 anime.trailerStreams.Add(new TrailerStream(result.trailer.id, anime.name));
             }
+
+            var seasonNumber = GetSeasonNumber(result.relations, (int)result.id);
+
             for (int i = 0; i < anime.videos.Count; i++)
             {
                 anime.videos[i].id = $"{externalId}:{i + 1}";
                 anime.videos[i].episode = (i + 1).ToString();
-                anime.videos[i].season = "1";
+                anime.videos[i].season = (string)seasonNumber;
             }
 
-            if (!anime.videos.Any() && kitsuId.HasValue)
+            if (anime.videos.Count == 0 && mapping?.KitsuId != null)
             {
-                var kitsuAnime = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{kitsuId}", null);
+                var kitsuAnime = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", null);
                 anime.videos = kitsuAnime.videos;
             }
 
             return anime;
         }
 
-        public async Task UpdateEpisodeProgressAsync(TokenData tokenData, string animeId, int episode)
+        private int GetSeasonNumber(dynamic relations, int animeId)
+        {
+            int season = 1;
+            int currentId = animeId;
+
+            var visited = new HashSet<int>(); // prevent infinite loops
+
+            var prequels = new List<Edge>();
+
+            if (relations?.edges != null) {
+                prequels = relations.edges.ToObject<List<Edge>>();
+            }
+
+            while (true)
+            {
+                if (visited.Contains(currentId))
+                    break;
+
+                visited.Add(currentId);
+
+                var prequel = prequels?.FirstOrDefault(e => e.relationType == "PREQUEL");
+
+                if (prequel == null)
+                    break;
+
+                season++;
+                currentId = prequel.node.id;
+            }
+
+            return season;
+        }
+
+        public async Task UpdateEpisodeProgressAsync(TokenData tokenData, string animeId, int season, int episode)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
 
-            if (!resolvedAnimeId.HasValue) return;
+            if (string.IsNullOrEmpty(resolvedAnimeId)) return;
 
             //// Fetch total episode count to determine if this completes the series
-            //int? totalEpisodes = await GetTotalEpisodesAsync(tokenData, resolvedAnimeId.Value);
+            //int? totalEpisodes = await GetTotalEpisodesAsync(tokenData, resolvedAnimeId);
             //bool isCompleted = totalEpisodes.HasValue && totalEpisodes.Value > 0 && episode >= totalEpisodes.Value;
 
             var requestBody = SerializeObject(new
@@ -322,7 +363,7 @@ namespace AnimeList.Services
                     }",
                 variables = new
                 {
-                    mediaId = resolvedAnimeId.Value,
+                    mediaId = resolvedAnimeId,
                     progress = episode,
                     //status = isCompleted ? "COMPLETED" : "CURRENT"
                 }
@@ -338,7 +379,7 @@ namespace AnimeList.Services
             await client.SendAsync(request);
         }
 
-        private async Task<int?> GetTotalEpisodesAsync(TokenData tokenData, int resolvedAnimeId)
+        private async Task<int?> GetTotalEpisodesAsync(TokenData tokenData, string resolvedAnimeId)
         {
             var requestBody = SerializeObject(new
             {

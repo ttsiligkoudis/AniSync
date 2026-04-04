@@ -29,37 +29,35 @@ namespace AnimeList.Controllers
                 var parts = id.Split(':');
                 if (parts.Length >= 3
                     && parts[0].StartsWith("tt")
+                    && int.TryParse(parts[^2], out var season)
                     && int.TryParse(parts[^1], out var episode))
                 {
-                    var imdbId = parts[0];
+                    var animeId = parts[0];
 
                     if (tokenData.anime_service == AnimeService.Anilist)
                     {
-                        var anilistId = await _mappingService.GetAnilistIdByImdbIdAsync(imdbId);
-                        if (anilistId.HasValue)
-                            await _anilistService.UpdateEpisodeProgressAsync(tokenData, $"{anilistPrefix}{anilistId}", episode);
+                        await _anilistService.UpdateEpisodeProgressAsync(tokenData, animeId, season, episode);
                     }
                     else
                     {
-                        var kitsuId = await _mappingService.GetKitsuIdByImdbIdAsync(imdbId);
-                        if (kitsuId.HasValue)
-                            await _kitsuService.UpdateEpisodeProgressAsync(tokenData, $"{kitsuPrefix}{kitsuId}", episode);
+                        await _kitsuService.UpdateEpisodeProgressAsync(tokenData, animeId, season, episode);
                     }
                 }
                 else if (parts.Length >= 3
-                    && id.StartsWith(kitsuPrefix)
-                    && int.TryParse(parts[^1], out var kitsuEpisode))
+                    && (id.StartsWith(kitsuPrefix) || id.StartsWith(anilistPrefix) || id.StartsWith(tmdbPrefix))
+                    && int.TryParse(parts[^2], out season)
+                    && int.TryParse(parts[^1], out episode))
                 {
                     // Kitsu-prefixed ID (e.g. kitsu:12345:1:5) — pass as-is, services handle conversion
-                    var kitsuAnimeId = $"{kitsuPrefix}{parts[1]}";
+                    var animeId = $"{parts[0]}{parts[1]}";
 
                     if (tokenData.anime_service == AnimeService.Anilist)
                     {
-                        await _anilistService.UpdateEpisodeProgressAsync(tokenData, kitsuAnimeId, kitsuEpisode);
+                        await _anilistService.UpdateEpisodeProgressAsync(tokenData, animeId, season, episode);
                     }
                     else
                     {
-                        await _kitsuService.UpdateEpisodeProgressAsync(tokenData, kitsuAnimeId, kitsuEpisode);
+                        await _kitsuService.UpdateEpisodeProgressAsync(tokenData, animeId, season, episode);
                     }
                 }
             }

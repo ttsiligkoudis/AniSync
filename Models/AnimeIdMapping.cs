@@ -15,5 +15,8 @@ namespace AnimeList.Models
 
         [JsonProperty("imdb_id")]
         public string ImdbId { get; set; }
+
+        [JsonProperty("themoviedb_id")]
+        public string TmdbId { get; set; }
     }
 }

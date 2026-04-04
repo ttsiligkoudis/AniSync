@@ -1,7 +1,9 @@
 ﻿using AnimeList.Models;
 using AnimeList.Services.Interfaces;
+using Newtonsoft.Json.Linq;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Xml.Linq;
 
 namespace AnimeList.Services
 {
@@ -68,12 +70,15 @@ namespace AnimeList.Services
 
                 if (list == ListType.Current && (string)included.attributes.status is "tba" or "unreleased" or "upcoming") continue;
 
-                int kitsuId = (int)included.id;
-                string imdbId = await _mappingService.GetImdbIdByKitsuIdAsync(kitsuId);
+                var mapping = await _mappingService.GetKitsuMapping((string)included.id);
+
+                var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                                 !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
+                                 $"{kitsuPrefix}{included.id}";
 
                 animeList.Add(new Meta
                 {
-                    id = imdbId ?? $"{kitsuPrefix}{included.id}",
+                    id = externalId,
                     type = ((string)included.attributes.subtype).Equals("movie", StringComparison.OrdinalIgnoreCase) ? MetaType.movie.ToString() : MetaType.series.ToString(),
                     name = included.attributes.titles.en,
                     poster = included.attributes.posterImage != null ? (string)included.attributes.posterImage.large : null,
@@ -103,12 +108,16 @@ namespace AnimeList.Services
             var results = DeserializeObject<dynamic>(content);
 
             var entry = results.data;
-            int kitsuId = (int)entry.id;
-            string imdbId = await _mappingService.GetImdbIdByKitsuIdAsync(kitsuId);
+
+            var mapping = await _mappingService.GetKitsuMapping((string)entry.id);
+
+            var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                             !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
+                             $"{kitsuPrefix}{entry.id}";
 
             var anime = new Meta
             {
-                id = id,
+                id = externalId,
                 type = (string)entry.attributes.subtype == "movie" ? MetaType.movie.ToString() : MetaType.series.ToString(),
                 name = entry.attributes.titles.en,
                 poster = entry.attributes.posterImage != null ? (string)entry.attributes.posterImage.large : null,
@@ -123,13 +132,33 @@ namespace AnimeList.Services
                 anime.trailerStreams.Add(new TrailerStream(entry.attributes.youtubeVideoId, anime.name));
             }
 
+            var episodeNumber = 1;
+
             foreach (var episode in results.included)
             {
+                object seasonNumber = 1;
+                object thumbnail = null;
+
+                var jObj = (JObject)episode.attributes;
+
+                var token = jObj["seasonNumber"];
+                if (token != null && token.Type != JTokenType.Null)
+                {
+                    seasonNumber = token;
+                }
+
+                token = jObj["thumbnail"];
+                if (token != null && token.Type != JTokenType.Null)
+                {
+                    thumbnail = token;
+                }
+
                 var video = new Video
                 {
-                    thumbnail = episode.attributes.thumbnail != null ? episode.attributes.thumbnail.large : null,
-                    season = episode.attributes.seasonNumber,
-                    episode = episode.attributes.number
+                    id = $"{externalId}:{episode.attributes.seasonNumber}:{episode.attributes.number}",
+                    thumbnail = thumbnail?.ToString(),
+                    season = seasonNumber?.ToString(),
+                    episode = episodeNumber.ToString()
                 };
 
                 video.id = $"{id}:{video.episode}";
@@ -140,12 +169,13 @@ namespace AnimeList.Services
                 if (string.IsNullOrEmpty(video.title)) continue;
 
                 anime.videos.Add(video);
+                episodeNumber++;
             }
 
             return anime;
         }
 
-        public async Task UpdateEpisodeProgressAsync(TokenData tokenData, string animeId, int episode)
+        public async Task UpdateEpisodeProgressAsync(TokenData tokenData, string animeId, int season, int episode)
         {
             if (string.IsNullOrEmpty(animeId)
                 || string.IsNullOrWhiteSpace(tokenData?.user_id)

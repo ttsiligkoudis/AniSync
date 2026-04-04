@@ -1,3 +1,5 @@
+using AnimeList.Models;
+
 namespace AnimeList.Services.Interfaces
 {
     /// <summary>
@@ -6,12 +8,10 @@ namespace AnimeList.Services.Interfaces
     public interface IAnimeMappingService
     {
         Task EnsureLoadedAsync();
-        Task<string> GetImdbIdByAnilistIdAsync(int anilistId);
-        Task<string> GetImdbIdByKitsuIdAsync(int kitsuId);
-        Task<int?> GetAnilistIdByImdbIdAsync(string imdbId);
-        Task<int?> GetKitsuIdByImdbIdAsync(string imdbId);
-        Task<int?> GetKitsuIdByAnilistIdAsync(int anilistId);
-        Task<int?> GetAnilistIdByKitsuIdAsync(int kitsuId);
-        Task<int?> GetIdByService(string animeId, AnimeService service);
+        Task<AnimeIdMapping> GetAnilistMapping(string anilistId);
+        Task<AnimeIdMapping> GetKitsuMapping(string kitsuId);
+        Task<AnimeIdMapping> GetImdbMapping(string imdb);
+        Task<AnimeIdMapping> GetTmdbMapping(string tmdbId);
+        Task<string> GetIdByService(string animeId, AnimeService service);
     }
 }

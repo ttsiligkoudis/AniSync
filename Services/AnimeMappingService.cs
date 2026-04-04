@@ -17,12 +17,10 @@ namespace AnimeList.Services
 
         private readonly IHttpClientFactory _clientFactory;
         private readonly SemaphoreSlim _semaphore = new(1, 1);
-        private FrozenDictionary<int, string> _anilistToImdb;
-        private FrozenDictionary<int, string> _kitsuToImdb;
-        private FrozenDictionary<string, int> _imdbToAnilist;
-        private FrozenDictionary<string, int> _imdbToKitsu;
-        private FrozenDictionary<int, int> _anilistToKitsu;
-        private FrozenDictionary<int, int> _kitsuToAnilist;
+        private FrozenDictionary<int, AnimeIdMapping> _anilistMapping;
+        private FrozenDictionary<int, AnimeIdMapping> _kitsuMapping;
+        private FrozenDictionary<string, AnimeIdMapping> _imdbMapping;
+        private FrozenDictionary<string, AnimeIdMapping> _tmdbMapping;
         private DateTime _lastLoaded = DateTime.MinValue;
 
         public AnimeMappingService(IHttpClientFactory clientFactory)
@@ -30,40 +28,28 @@ namespace AnimeList.Services
             _clientFactory = clientFactory;
         }
 
-        public async Task<string> GetImdbIdByAnilistIdAsync(int anilistId)
+        public async Task<AnimeIdMapping> GetAnilistMapping(string anilistId)
         {
             await EnsureMappingsLoadedAsync();
-            return _anilistToImdb.TryGetValue(anilistId, out var imdbId) ? imdbId : null;
+            return _anilistMapping.TryGetValue(int.Parse(anilistId.Replace(anilistPrefix, "")), out var mapping) ? mapping : null;
         }
 
-        public async Task<string> GetImdbIdByKitsuIdAsync(int kitsuId)
+        public async Task<AnimeIdMapping> GetKitsuMapping(string kitsuId)
         {
             await EnsureMappingsLoadedAsync();
-            return _kitsuToImdb.TryGetValue(kitsuId, out var imdbId) ? imdbId : null;
+            return _kitsuMapping.TryGetValue(int.Parse(kitsuId.Replace(kitsuPrefix, "")), out var mapping) ? mapping : null;
         }
 
-        public async Task<int?> GetAnilistIdByImdbIdAsync(string imdbId)
+        public async Task<AnimeIdMapping> GetImdbMapping(string imdb)
         {
             await EnsureMappingsLoadedAsync();
-            return _imdbToAnilist.TryGetValue(imdbId, out var anilistId) ? anilistId : null;
+            return _imdbMapping.TryGetValue(imdb, out var mapping) ? mapping : null;
         }
 
-        public async Task<int?> GetKitsuIdByImdbIdAsync(string imdbId)
+        public async Task<AnimeIdMapping> GetTmdbMapping(string tmdbId)
         {
             await EnsureMappingsLoadedAsync();
-            return _imdbToKitsu.TryGetValue(imdbId, out var kitsuId) ? kitsuId : null;
-        }
-
-        public async Task<int?> GetKitsuIdByAnilistIdAsync(int anilistId)
-        {
-            await EnsureMappingsLoadedAsync();
-            return _anilistToKitsu.TryGetValue(anilistId, out var kitsuId) ? kitsuId : null;
-        }
-
-        public async Task<int?> GetAnilistIdByKitsuIdAsync(int kitsuId)
-        {
-            await EnsureMappingsLoadedAsync();
-            return _kitsuToAnilist.TryGetValue(kitsuId, out var anilistId) ? anilistId : null;
+            return _tmdbMapping.TryGetValue(tmdbId.Replace(tmdbPrefix, ""), out var mapping) ? mapping : null;
         }
 
         public async Task EnsureLoadedAsync()
@@ -73,79 +59,70 @@ namespace AnimeList.Services
 
         private async Task EnsureMappingsLoadedAsync()
         {
-            if (_anilistToImdb is not null && DateTime.UtcNow - _lastLoaded < CacheDuration)
+            if (_anilistMapping is not null && DateTime.UtcNow - _lastLoaded < CacheDuration)
                 return;
 
             await _semaphore.WaitAsync();
-            try
-            {
-                if (_anilistToImdb is not null && DateTime.UtcNow - _lastLoaded < CacheDuration)
-                    return;
 
-                var client = _clientFactory.CreateClient();
-                var json = await client.GetStringAsync(MappingUrl);
-                var entries = DeserializeObject<List<AnimeIdMapping>>(json) ?? [];
+            if (_anilistMapping is not null && DateTime.UtcNow - _lastLoaded < CacheDuration)
+                return;
 
-                var withImdb = entries.Where(e => !string.IsNullOrEmpty(e.ImdbId)).ToList();
+            var client = _clientFactory.CreateClient();
+            var json = await client.GetStringAsync(MappingUrl);
+            var entries = DeserializeObject<List<AnimeIdMapping>>(json) ?? [];
 
-                _anilistToImdb = withImdb
-                    .Where(e => e.AnilistId.HasValue && !string.IsNullOrEmpty(e.ImdbId))
-                    .DistinctBy(e => e.AnilistId!.Value)
-                    .ToFrozenDictionary(e => e.AnilistId!.Value, e => e.ImdbId);
+            _anilistMapping = entries
+                .Where(e => e.AnilistId.HasValue)
+                .DistinctBy(e => e.AnilistId!.Value)
+                .ToFrozenDictionary(e => e.AnilistId!.Value, e => e);
 
-                _kitsuToImdb = withImdb
-                    .Where(e => e.KitsuId.HasValue && !string.IsNullOrEmpty(e.ImdbId))
-                    .DistinctBy(e => e.KitsuId!.Value)
-                    .ToFrozenDictionary(e => e.KitsuId!.Value, e => e.ImdbId);
+            _kitsuMapping = entries
+                .Where(e => e.KitsuId.HasValue)
+                .DistinctBy(e => e.KitsuId!.Value)
+                .ToFrozenDictionary(e => e.KitsuId!.Value, e => e);
 
-                _imdbToAnilist = withImdb
-                    .Where(e => !string.IsNullOrEmpty(e.ImdbId) && e.AnilistId.HasValue)
-                    .DistinctBy(e => e.ImdbId)
-                    .ToFrozenDictionary(e => e.ImdbId, e => e.AnilistId!.Value);
+            _imdbMapping = entries
+                .Where(e => !string.IsNullOrEmpty(e.ImdbId))
+                .DistinctBy(e => e.ImdbId)
+                .ToFrozenDictionary(e => e.ImdbId, e => e);
 
-                _imdbToKitsu = withImdb
-                    .Where(e => !string.IsNullOrEmpty(e.ImdbId) && e.KitsuId.HasValue)
-                    .DistinctBy(e => e.ImdbId)
-                    .ToFrozenDictionary(e => e.ImdbId, e => e.KitsuId!.Value);
+            _tmdbMapping = entries
+                .Where(e => !string.IsNullOrEmpty(e.TmdbId))
+                .DistinctBy(e => e.TmdbId)
+                .ToFrozenDictionary(e => e.TmdbId, e => e);
 
-                _anilistToKitsu = entries
-                    .Where(e => e.AnilistId.HasValue && e.KitsuId.HasValue)
-                    .DistinctBy(e => e.AnilistId!.Value)
-                    .ToFrozenDictionary(e => e.AnilistId!.Value, e => e.KitsuId!.Value);
-
-                _kitsuToAnilist = entries
-                    .Where(e => e.KitsuId.HasValue && e.AnilistId.HasValue)
-                    .DistinctBy(e => e.KitsuId!.Value)
-                    .ToFrozenDictionary(e => e.KitsuId!.Value, e => e.AnilistId!.Value);
-
-                _lastLoaded = DateTime.UtcNow;
-            }
-            catch
-            {
-                _anilistToImdb ??= FrozenDictionary<int, string>.Empty;
-                _kitsuToImdb ??= FrozenDictionary<int, string>.Empty;
-                _imdbToAnilist ??= FrozenDictionary<string, int>.Empty;
-                _imdbToKitsu ??= FrozenDictionary<string, int>.Empty;
-                _anilistToKitsu ??= FrozenDictionary<int, int>.Empty;
-                _kitsuToAnilist ??= FrozenDictionary<int, int>.Empty;
-            }
-            finally
-            {
-                _semaphore.Release();
-            }
+            _lastLoaded = DateTime.UtcNow;
+            _semaphore.Release();
         }
 
-        public async Task<int?> GetIdByService(string animeId, AnimeService service)
+        public async Task<string> GetIdByService(string animeId, AnimeService service)
         {
             if (string.IsNullOrEmpty(animeId))
                 return null;
 
-            if (animeId.StartsWith(imdbPrefix))
-                return service == AnimeService.Anilist ? await GetAnilistIdByImdbIdAsync(animeId) : await GetKitsuIdByImdbIdAsync(animeId);
-            else if (animeId.StartsWith(anilistPrefix))
-                return service == AnimeService.Kitsu ? await GetKitsuIdByAnilistIdAsync(int.Parse(animeId.Replace(anilistPrefix, ""))) : int.Parse(animeId.Replace(anilistPrefix, ""));
+            if (animeId.StartsWith(anilistPrefix))
+            {
+                if (service == AnimeService.Anilist)
+                    return animeId.Replace(anilistPrefix, "");
+
+                var mapping = await GetAnilistMapping(animeId);
+                return mapping?.KitsuId?.ToString();
+            }
             else if (animeId.StartsWith(kitsuPrefix))
-                return service == AnimeService.Anilist ? await GetAnilistIdByKitsuIdAsync(int.Parse(animeId.Replace(kitsuPrefix, ""))) : int.Parse(animeId.Replace(kitsuPrefix, ""));
+            {
+                var mapping = await GetKitsuMapping(animeId);
+                return service == AnimeService.Anilist ? mapping?.AnilistId?.ToString() : mapping?.KitsuId?.ToString();
+            } 
+            else if (animeId.StartsWith(imdbPrefix))
+            {
+                var mapping = await GetImdbMapping(animeId);
+                return service == AnimeService.Anilist ? mapping?.AnilistId?.ToString() : mapping?.KitsuId?.ToString();
+            }
+            else if (animeId.StartsWith(tmdbPrefix))
+            {
+                var mapping = await GetTmdbMapping(animeId);
+                return service == AnimeService.Anilist ? mapping?.AnilistId?.ToString() : mapping?.KitsuId?.ToString();
+            }
 
             return null;
         }
