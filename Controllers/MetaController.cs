@@ -9,12 +9,14 @@ namespace AnimeList.Controllers
         private readonly ITokenService _tokenService;
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
+        private readonly ITmdbService _tmdbService;
 
-        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService)
+        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, ITmdbService tmdbService)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
+            _tmdbService = tmdbService;
         }
 
         [HttpGet("{config}/[controller]/{metaType}/{id}.json")]
@@ -28,9 +30,11 @@ namespace AnimeList.Controllers
                 return new JsonResult(new { meta = ExpiredMeta() });
             }
 
-            var anime = animeService == AnimeService.Anilist
-                ? await _anilistService.GetAnimeByIdAsync(id, tokenData)
-                : await _kitsuService.GetAnimeByIdAsync(id, tokenData);
+            var anime = id.Contains(tmdbPrefix)
+                ? await _tmdbService.GetAnimeByIdAsync(id, tokenData)
+                : (animeService == AnimeService.Anilist
+                    ? await _anilistService.GetAnimeByIdAsync(id, tokenData)
+                    : await _kitsuService.GetAnimeByIdAsync(id, tokenData));
 
             return new JsonResult(new { meta = anime });
         }
