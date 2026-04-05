@@ -20,6 +20,7 @@ namespace AnimeList.Models
         public List<Video> videos { get; set; } = [];
         public List<Link> links { get; set; } = [];
         public string entryId { get; set; }
+        public string entryStatus { get; set; }
 
         [GeneratedRegex("<.*?>")]
         private static partial Regex HtmlTagPattern();

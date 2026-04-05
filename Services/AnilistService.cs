@@ -1,5 +1,6 @@
 ﻿using AnimeList.Models;
 using AnimeList.Services.Interfaces;
+using System.Collections;
 using System.Formats.Tar;
 using System.Net.Http.Headers;
 
@@ -37,6 +38,8 @@ namespace AnimeList.Services
                         query = $@"
                         query ($userId: Int, $mediaId: Int) {{
                             MediaList(userId: $userId, mediaId: $mediaId, type: ANIME{statusArg}) {{
+                                id
+                                status
                                 media {{
                                     id
                                     format
@@ -195,11 +198,20 @@ namespace AnimeList.Services
             foreach (var entry in result)
             {
                 var tmpEntry = entry;
-                if (list != ListType.Trending_Desc && list != ListType.Seasonal) tmpEntry = entry.media;
+                string entryId = null;
+                string entryStatus = null;
+
+                if (!list.HasValue || _userLists.Contains(list.Value))
+                {
+                    tmpEntry = entry.media;
+                    entryId = entry.id;
+                    entryStatus = entry.status;
+                }
+
                 if (list == ListType.Current && (string)tmpEntry.status == "NOT_YET_RELEASED") continue;
 
                 // Filter user list entries by genre when discover-only provides a genre selection
-                if (!string.IsNullOrEmpty(genre) && genre != "None" && isUserList && tmpEntry.genres != null)
+                if (!string.IsNullOrEmpty(genre) && genre != DefaultOption && isUserList && tmpEntry.genres != null)
                 {
                     var genres = tmpEntry.genres.ToObject<List<string>>();
                     if (!genres.Contains(genre)) continue;
@@ -219,6 +231,8 @@ namespace AnimeList.Services
                     name = string.IsNullOrEmpty((string)tmpEntry.title.english) ? tmpEntry.title.romaji : tmpEntry.title.english,
                     poster = tmpEntry.coverImage.large,
                     descriptionRich = tmpEntry.description,
+                    entryId = entryId,
+                    entryStatus = entryStatus
                 };
 
                 // Multiple AniList entries (seasons/OVAs) can share the same IMDb ID;
@@ -383,9 +397,15 @@ namespace AnimeList.Services
 
         public async Task UpdateEpisodeProgressAsync(TokenData tokenData, string animeId, int season, int episode)
         {
-            var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
+            var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist, season);
 
             if (string.IsNullOrEmpty(resolvedAnimeId)) return;
+
+            animeId = $"{anilistPrefix}{resolvedAnimeId}";
+
+            var meta = (await GetAnimeListAsync(tokenData, animeId: animeId)).FirstOrDefault();
+
+            if (string.IsNullOrEmpty(meta?.entryId)) return;
 
             //// Fetch total episode count to determine if this completes the series
             //int? totalEpisodes = await GetTotalEpisodesAsync(tokenData, resolvedAnimeId);
@@ -394,17 +414,19 @@ namespace AnimeList.Services
             var requestBody = SerializeObject(new
             {
                 query = @"
-                    mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus) {
-                        SaveMediaListEntry(mediaId: $mediaId, progress: $progress) {
+                    mutation ($listEntryId: Int, $mediaId: Int, $progress: Int, $status: MediaListStatus) {
+                        SaveMediaListEntry(id: $listEntryId, mediaId: $mediaId, progress: $progress, status: $status) {
                             id
                             progress
+                            status
                         }
                     }",
                 variables = new
                 {
+                    listEntryId = meta.entryId,
                     mediaId = resolvedAnimeId,
                     progress = episode,
-                    //status = isCompleted ? "COMPLETED" : "CURRENT"
+                    status = meta.entryStatus //GetListTypeString(isCompleted ? ListType.Completed : ListType.Current, tokenData)
                 }
             });
 

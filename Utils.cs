@@ -19,6 +19,8 @@ namespace AnimeList
             "Sports", "Supernatural", "Thriller"
         ];
 
+        public static readonly string DefaultOption = "None";
+
         public const string SeasonCurrent = "This Season";
         public const string SeasonNext = "Next Season";
         public const string SeasonPrevious = "Last Season";

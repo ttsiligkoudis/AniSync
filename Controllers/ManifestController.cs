@@ -69,7 +69,7 @@ namespace AnimeList.Controllers
                     type = MetaType.anime.ToString(),
                     id = GetListTypeString(ListType.Current, tokenData),
                     name = "Currently watching",
-                    extra = [new("skip"), new("genre") { options = ["None"] , isRequired = configiration.discoverOnlyCurrent }],
+                    extra = [new("skip"), new("genre") { options = configiration.discoverOnlyCurrent ? [DefaultOption] : [], isRequired = configiration.discoverOnlyCurrent }],
                 });
             }
 

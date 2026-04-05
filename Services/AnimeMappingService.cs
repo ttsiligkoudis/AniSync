@@ -10,8 +10,7 @@ namespace AnimeList.Services
     /// </summary>
     public class AnimeMappingService : IAnimeMappingService
     {
-        private const string MappingUrl =
-            "https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-mini.json";
+        private const string MappingUrl = "https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-mini.json";
 
         private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(24);
 
@@ -19,8 +18,8 @@ namespace AnimeList.Services
         private readonly SemaphoreSlim _semaphore = new(1, 1);
         private FrozenDictionary<int, AnimeIdMapping> _anilistMapping;
         private FrozenDictionary<int, AnimeIdMapping> _kitsuMapping;
-        private FrozenDictionary<string, AnimeIdMapping> _imdbMapping;
-        private FrozenDictionary<string, AnimeIdMapping> _tmdbMapping;
+        private FrozenDictionary<string, List<AnimeIdMapping>> _imdbMapping;
+        private FrozenDictionary<string, List<AnimeIdMapping>> _tmdbMapping;
         private DateTime _lastLoaded = DateTime.MinValue;
 
         public AnimeMappingService(IHttpClientFactory clientFactory)
@@ -40,16 +39,18 @@ namespace AnimeList.Services
             return _kitsuMapping.TryGetValue(int.Parse(kitsuId.Replace(kitsuPrefix, "")), out var mapping) ? mapping : null;
         }
 
-        public async Task<AnimeIdMapping> GetImdbMapping(string imdb)
+        public async Task<AnimeIdMapping> GetImdbMapping(string imdb, int? season = null)
         {
             await EnsureMappingsLoadedAsync();
-            return _imdbMapping.TryGetValue(imdb, out var mapping) ? mapping : null;
+            var entries = (_imdbMapping.TryGetValue(imdb, out var mappings) ? mappings : []) ?? [];
+            return entries.FirstOrDefault(m => !season.HasValue || m.Season == season);
         }
 
-        public async Task<AnimeIdMapping> GetTmdbMapping(string tmdbId)
+        public async Task<AnimeIdMapping> GetTmdbMapping(string tmdbId, int? season = null)
         {
             await EnsureMappingsLoadedAsync();
-            return _tmdbMapping.TryGetValue(tmdbId.Replace(tmdbPrefix, ""), out var mapping) ? mapping : null;
+            var entries = (_tmdbMapping.TryGetValue(tmdbId.Replace(tmdbPrefix, ""), out var mappings) ? mappings : []) ?? [];
+            return entries.FirstOrDefault(m => !season.HasValue || m.Season == season);
         }
 
         public async Task EnsureLoadedAsync()
@@ -83,19 +84,19 @@ namespace AnimeList.Services
 
             _imdbMapping = entries
                 .Where(e => !string.IsNullOrEmpty(e.ImdbId))
-                .DistinctBy(e => e.ImdbId)
-                .ToFrozenDictionary(e => e.ImdbId, e => e);
+                .GroupBy(e => e.ImdbId)
+                .ToFrozenDictionary(e => e.Key, e => e.ToList());
 
             _tmdbMapping = entries
                 .Where(e => !string.IsNullOrEmpty(e.TmdbId))
-                .DistinctBy(e => e.TmdbId)
-                .ToFrozenDictionary(e => e.TmdbId, e => e);
+                .GroupBy(e => e.TmdbId)
+                .ToFrozenDictionary(e => e.Key, e => e.ToList());
 
             _lastLoaded = DateTime.UtcNow;
             _semaphore.Release();
         }
 
-        public async Task<string> GetIdByService(string animeId, AnimeService service)
+        public async Task<string> GetIdByService(string animeId, AnimeService service, int? season = null)
         {
             if (string.IsNullOrEmpty(animeId))
                 return null;
@@ -115,16 +116,16 @@ namespace AnimeList.Services
             } 
             else if (animeId.StartsWith(imdbPrefix))
             {
-                var mapping = await GetImdbMapping(animeId);
+                var mapping = await GetImdbMapping(animeId, season);
                 return service == AnimeService.Anilist ? mapping?.AnilistId?.ToString() : mapping?.KitsuId?.ToString();
             }
             else if (animeId.StartsWith(tmdbPrefix))
             {
-                var mapping = await GetTmdbMapping(animeId);
+                var mapping = await GetTmdbMapping(animeId, season);
                 return service == AnimeService.Anilist ? mapping?.AnilistId?.ToString() : mapping?.KitsuId?.ToString();
             }
 
-            return null;
+            return animeId;
         }
     }
 }

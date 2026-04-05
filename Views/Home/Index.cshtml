@@ -5,6 +5,7 @@
     var isAnilist = animeService == AnimeService.Anilist;
     var stremioStr = "https://web.stremio.com/#/addons?addon=";
     bool anonymousUser = ViewBag.AnonymousUser == true;
+
     bool showCurrent = ViewBag.ShowCurrent ?? !anonymousUser;
     bool showCompleted = ViewBag.ShowCompleted ?? false;
     bool showTrending = ViewBag.ShowTrending ?? anonymousUser;
@@ -39,16 +40,15 @@
 
     <!-- Catalog options -->
     <div class="card-section">
-        <div class="catalog-header">
-            <h5>Catalogs</h5>
+        <div class="catalogs-grid">
+            <h5 class="catalogs-title">Catalogs</h5>
             <span class="catalog-col-label">Enable</span>
             <span class="catalog-col-label">Discover Only</span>
-        </div>
+            <hr class="option-sep" />
 
-        @if (!anonymousUser)
-        {
-            <div class="option-row">
-                <span>Currently watching</span>
+            @if (!anonymousUser)
+            {
+                <span class="option-name">Currently watching</span>
                 <label class="switch">
                     <input type="checkbox" id="showCurrent" class="catalogCheck" @(showCurrent ? "checked" : "") />
                     <span class="slider"></span>
@@ -57,10 +57,9 @@
                     <input type="checkbox" id="discoverOnlyCurrent" class="discoverCheck" @(discoverOnlyCurrent ? "checked" : "") @(!showCurrent ? "disabled" : "") />
                     <span class="slider"></span>
                 </label>
-            </div>
+                <hr class="option-sep" />
 
-            <div class="option-row">
-                <span>Completed</span>
+                <span class="option-name">Completed</span>
                 <label class="switch">
                     <input type="checkbox" id="showCompleted" class="catalogCheck" @(showCompleted ? "checked" : "") />
                     <span class="slider"></span>
@@ -69,11 +68,10 @@
                     <input type="checkbox" id="discoverOnlyCompleted" class="discoverCheck" @(discoverOnlyCompleted ? "checked" : "") @(!showCompleted ? "disabled" : "") />
                     <span class="slider"></span>
                 </label>
-            </div>
-        }
+                <hr class="option-sep" />
+            }
 
-        <div class="option-row">
-            <span>Trending now</span>
+            <span class="option-name">Trending now</span>
             <label class="switch">
                 <input type="checkbox" id="showTrending" class="catalogCheck" @(showTrending ? "checked" : "") />
                 <span class="slider"></span>
@@ -82,16 +80,15 @@
                 <input type="checkbox" id="discoverOnlyTrending" class="discoverCheck" @(discoverOnlyTrending ? "checked" : "") @(!showTrending ? "disabled" : "") />
                 <span class="slider"></span>
             </label>
-        </div>
+            <hr class="option-sep" />
 
-        <div class="option-row">
-            <span>Seasonal Anime</span>
+            <span class="option-name">Seasonal Anime</span>
             <label class="switch">
                 <input type="checkbox" id="showSeasonal" class="catalogCheck" @(showSeasonal ? "checked" : "") />
                 <span class="slider"></span>
             </label>
-            <label class="switch switch-disabled">
-                <input type="checkbox" id="discoverOnlySeasonal" class="discoverCheck" @(discoverOnlySeasonal ? "checked" : "") @(!showSeasonal ? "disabled" : "") checked disabled />
+            <label class="switch @(!showSeasonal ? "switch-disabled" : "")">
+                <input type="checkbox" id="discoverOnlySeasonal" class="discoverCheck" @(discoverOnlySeasonal ? "checked" : "") @(!showSeasonal ? "disabled" : "") />
                 <span class="slider"></span>
             </label>
         </div>
@@ -187,9 +184,8 @@ else
 
     // When an enable checkbox is toggled, enable/disable its discover-only sibling
     $('.catalogCheck').on('change', function () {
-        var $row = $(this).closest('.option-row');
-        var $discoverSwitch = $row.find('.discoverCheck');
-        var $discoverLabel = $discoverSwitch.closest('.switch');
+        var $discoverLabel = $(this).parent().next();
+        var $discoverSwitch = $discoverLabel.find('.discoverCheck');
         var isEnabled = $(this).is(':checked');
 
         $discoverSwitch.prop('disabled', !isEnabled);
