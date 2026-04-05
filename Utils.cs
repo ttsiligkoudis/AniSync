@@ -11,6 +11,14 @@ namespace AnimeList
         public static readonly string kitsuPrefix = "kitsu:";
         public static readonly string tmdbPrefix = "tmdb:";
 
+        public static readonly List<string> AnimeGenres =
+        [
+            "Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy",
+            "Horror", "Mahou Shoujo", "Mecha", "Music", "Mystery",
+            "Psychological", "Romance", "Sci-Fi", "Slice of Life",
+            "Sports", "Supernatural", "Thriller"
+        ];
+
         public const string SeasonCurrent = "This Season";
         public const string SeasonNext = "Next Season";
         public const string SeasonPrevious = "Last Season";

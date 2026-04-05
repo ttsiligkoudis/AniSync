@@ -53,10 +53,13 @@ namespace AnimeList.Controllers
                 }
 
                 manifest.idPrefixes.Add(imdbPrefix);
+                manifest.idPrefixes.Add(tmdbPrefix);
             }
             else
             {
                 manifest.idPrefixes.Add(kitsuPrefix);
+                manifest.idPrefixes.Add(imdbPrefix);
+                manifest.idPrefixes.Add(tmdbPrefix);
             }
 
             if (isAuthenticated && configiration.showCurrent)
@@ -66,7 +69,7 @@ namespace AnimeList.Controllers
                     type = MetaType.anime.ToString(),
                     id = GetListTypeString(ListType.Current, tokenData),
                     name = "Currently watching",
-                    extra = [new Extra("skip")],
+                    extra = [new("skip"), new("genre") { options = ["None"] , isRequired = configiration.discoverOnlyCurrent }],
                 });
             }
 
@@ -77,33 +80,29 @@ namespace AnimeList.Controllers
                     type = MetaType.anime.ToString(),
                     id = GetListTypeString(ListType.Completed, tokenData),
                     name = "Completed",
-                    extra = [new Extra("skip")],
+                    extra = [new("skip"), new("genre") { options = AnimeGenres, isRequired = configiration.discoverOnlyCompleted }],
                 });
             }
 
-            if (configiration.showTrending || !isAuthenticated)
+            if (configiration.showTrending)
             {
                 manifest.catalogs.Add(new Catalog
                 {
                     type = MetaType.anime.ToString(),
                     id = GetListTypeString(ListType.Trending_Desc, tokenData),
                     name = "Trending Now",
-                    extra = [new Extra("skip")],
+                    extra = [new("skip"), new("genre") { options = AnimeGenres, isRequired = configiration.discoverOnlyTrending }],
                 });
             }
 
-            if (configiration.showSeasonal || !isAuthenticated || true)
+            if (configiration.showSeasonal)
             {
                 manifest.catalogs.Add(new Catalog
                 {
                     type = MetaType.anime.ToString(),
                     id = GetListTypeString(ListType.Seasonal, tokenData),
                     name = "Seasonal Anime",
-                    extra =
-                    [
-                        new Extra("genre") { options = SeasonOptions, isRequired = true },
-                        new Extra("skip"),
-                    ],
+                    extra = [new("skip"), new("genre") { options = SeasonOptions, isRequired = configiration.discoverOnlySeasonal }],
                 });
             }
 

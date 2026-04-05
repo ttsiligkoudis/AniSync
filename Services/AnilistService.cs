@@ -22,7 +22,7 @@ namespace AnimeList.Services
 
         private const int CatalogPageSize = 50;
 
-        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null, string seasonOption = null)
+        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null)
         {
             var requestBody = string.Empty;
 
@@ -41,6 +41,7 @@ namespace AnimeList.Services
                                     id
                                     format
                                     status
+                                    genres
                                     title {{
                                         english
                                         romaji
@@ -70,6 +71,7 @@ namespace AnimeList.Services
                                             id
                                             format
                                             status
+                                            genres
                                             title {{
                                                 english
                                                 romaji
@@ -90,17 +92,14 @@ namespace AnimeList.Services
             else if (list == ListType.Seasonal)
             {
                 var page = int.TryParse(skip, out var skipInt) ? (skipInt / CatalogPageSize) + 1 : 1;
-                var (season, year) = GetSeasonAndYear(seasonOption ?? SeasonCurrent);
-
-                var genreVarDecl = !string.IsNullOrEmpty(genre) ? ", $genre: String" : string.Empty;
-                var genreArg = !string.IsNullOrEmpty(genre) ? ", genre: $genre" : string.Empty;
+                var (season, year) = GetSeasonAndYear(genre ?? SeasonCurrent);
 
                 requestBody = SerializeObject(new
                 {
                     query = $@"
-                    query ($page: Int, $perPage: Int, $season: MediaSeason, $seasonYear: Int{genreVarDecl}) {{
+                    query ($page: Int, $perPage: Int, $season: MediaSeason, $seasonYear: Int) {{
                         Page (page: $page, perPage: $perPage) {{
-                            media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: [POPULARITY_DESC]{genreArg}) {{
+                            media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: [POPULARITY_DESC]) {{
                                 id
                                 format
                                 title {{
@@ -122,35 +121,41 @@ namespace AnimeList.Services
             else
             {
                 var page = int.TryParse(skip, out var skipInt) ? (skipInt / CatalogPageSize) + 1 : 1;
+
+                var genreVarDecl = !string.IsNullOrEmpty(genre) ? ", $genre: String" : string.Empty;
+                var genreArg = !string.IsNullOrEmpty(genre) ? ", genre: $genre" : string.Empty;
+
                 requestBody = SerializeObject(new
                 {
-                    query = @"
-                    query ($sort: [MediaSort], $page: Int, $perPage: Int) {
-                        Page (page: $page, perPage: $perPage) {
-                            media(sort: $sort, type: ANIME) {
+                    query = $@"
+                    query ($sort: [MediaSort], $page: Int, $perPage: Int{genreVarDecl}) {{
+                        Page (page: $page, perPage: $perPage) {{
+                            media(sort: $sort, type: ANIME{genreArg}) {{
                                 id
-                                title {
+                                title {{
                                     english
                                     romaji
-                                }
-                                coverImage {
+                                }}
+                                coverImage {{
                                     large
-                                }
+                                }}
                                 description
-                            }
-                        }
-                    }",
-                    variables = new { sort = new List<string> { GetListTypeString(list.Value, tokenData) }, page, perPage = CatalogPageSize }
+                            }}
+                        }}
+                    }}",
+                    variables = !string.IsNullOrEmpty(genre)
+                        ? (object)new { sort = new List<string> { GetListTypeString(list.Value, tokenData) }, page, perPage = CatalogPageSize, genre }
+                        : new { sort = new List<string> { GetListTypeString(list.Value, tokenData) }, page, perPage = CatalogPageSize }
                 });
             }
 
             return requestBody;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string seasonOption = null)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
-            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, seasonOption);
+            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre);
 
             var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
             {
@@ -192,6 +197,13 @@ namespace AnimeList.Services
                 var tmpEntry = entry;
                 if (list != ListType.Trending_Desc && list != ListType.Seasonal) tmpEntry = entry.media;
                 if (list == ListType.Current && (string)tmpEntry.status == "NOT_YET_RELEASED") continue;
+
+                // Filter user list entries by genre when discover-only provides a genre selection
+                if (!string.IsNullOrEmpty(genre) && genre != "None" && isUserList && tmpEntry.genres != null)
+                {
+                    var genres = tmpEntry.genres.ToObject<List<string>>();
+                    if (!genres.Contains(genre)) continue;
+                }
 
                 var mapping = await _mappingService.GetAnilistMapping((string)tmpEntry.id);
 

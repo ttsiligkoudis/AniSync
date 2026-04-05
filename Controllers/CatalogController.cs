@@ -23,12 +23,11 @@ namespace AnimeList.Controllers
             var parsed = ParseExtras(extras);
             parsed.TryGetValue("skip", out var skip);
             parsed.TryGetValue("genre", out var genre);
-            parsed.TryGetValue("season", out var season);
-            return await GetList(config, metaType, listType, skip, genre: genre, seasonOption: season);
+            return await GetList(config, metaType, listType, skip, genre: genre);
         }
 
         [HttpGet("{config}/[controller]/{metaType}/{listType}.json")]
-        public async Task<ActionResult> GetList(string config, MetaType metaType, ListType listType, string skip = null, string animeId = null, string genre = null, string seasonOption = null)
+        public async Task<ActionResult> GetList(string config, MetaType metaType, ListType listType, string skip = null, string animeId = null, string genre = null)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync(config);
             var animeService = tokenData?.anime_service ?? AnimeService.Kitsu;
@@ -39,8 +38,8 @@ namespace AnimeList.Controllers
             }
 
             var metas = animeService == AnimeService.Anilist
-                ? await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, seasonOption)
-                : await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, seasonOption);
+                ? await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre)
+                : await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre);
 
             return new JsonResult(new { metas });
         }

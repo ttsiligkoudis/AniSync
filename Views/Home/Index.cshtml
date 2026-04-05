@@ -5,9 +5,14 @@
     var isAnilist = animeService == AnimeService.Anilist;
     var stremioStr = "https://web.stremio.com/#/addons?addon=";
     bool anonymousUser = ViewBag.AnonymousUser == true;
-    bool showCurrent = ViewBag.ShowCurrent ?? true;
+    bool showCurrent = ViewBag.ShowCurrent ?? !anonymousUser;
     bool showCompleted = ViewBag.ShowCompleted ?? false;
     bool showTrending = ViewBag.ShowTrending ?? anonymousUser;
+    bool showSeasonal = ViewBag.ShowSeasonal ?? true;
+    bool discoverOnlyCurrent = ViewBag.DiscoverOnlyCurrent ?? false;
+    bool discoverOnlyCompleted = ViewBag.DiscoverOnlyCompleted ?? false;
+    bool discoverOnlyTrending = ViewBag.DiscoverOnlyTrending ?? false;
+    bool discoverOnlySeasonal = ViewBag.DiscoverOnlySeasonal ?? true;
 }
 
 <h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
@@ -34,7 +39,11 @@
 
     <!-- Catalog options -->
     <div class="card-section">
-        <h5>Catalogs</h5>
+        <div class="catalog-header">
+            <h5>Catalogs</h5>
+            <span class="catalog-col-label">Enable</span>
+            <span class="catalog-col-label">Discover Only</span>
+        </div>
 
         @if (!anonymousUser)
         {
@@ -44,12 +53,20 @@
                     <input type="checkbox" id="showCurrent" class="catalogCheck" @(showCurrent ? "checked" : "") />
                     <span class="slider"></span>
                 </label>
+                <label class="switch @(!showCurrent ? "switch-disabled" : "")">
+                    <input type="checkbox" id="discoverOnlyCurrent" class="discoverCheck" @(discoverOnlyCurrent ? "checked" : "") @(!showCurrent ? "disabled" : "") />
+                    <span class="slider"></span>
+                </label>
             </div>
 
             <div class="option-row">
                 <span>Completed</span>
                 <label class="switch">
-                    <input type="checkbox" id="showCompleted" @(showCompleted ? "checked" : "") class="catalogCheck" />
+                    <input type="checkbox" id="showCompleted" class="catalogCheck" @(showCompleted ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
+                <label class="switch @(!showCompleted ? "switch-disabled" : "")">
+                    <input type="checkbox" id="discoverOnlyCompleted" class="discoverCheck" @(discoverOnlyCompleted ? "checked" : "") @(!showCompleted ? "disabled" : "") />
                     <span class="slider"></span>
                 </label>
             </div>
@@ -59,6 +76,22 @@
             <span>Trending now</span>
             <label class="switch">
                 <input type="checkbox" id="showTrending" class="catalogCheck" @(showTrending ? "checked" : "") />
+                <span class="slider"></span>
+            </label>
+            <label class="switch @(!showTrending ? "switch-disabled" : "")">
+                <input type="checkbox" id="discoverOnlyTrending" class="discoverCheck" @(discoverOnlyTrending ? "checked" : "") @(!showTrending ? "disabled" : "") />
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="option-row">
+            <span>Seasonal Anime</span>
+            <label class="switch">
+                <input type="checkbox" id="showSeasonal" class="catalogCheck" @(showSeasonal ? "checked" : "") />
+                <span class="slider"></span>
+            </label>
+            <label class="switch switch-disabled">
+                <input type="checkbox" id="discoverOnlySeasonal" class="discoverCheck" @(discoverOnlySeasonal ? "checked" : "") @(!showSeasonal ? "disabled" : "") checked disabled />
                 <span class="slider"></span>
             </label>
         </div>
@@ -108,7 +141,7 @@ else
     var stremioUrl = $('#stremioUrl').attr('href');
 
     var config = {
-        tokenData: @Html.Raw(SerializeObject(tokenDataStr)),
+        tokenData: @Html.Raw(SerializeObject(tokenDataStr, new JsonSerializerSettings { DefaultValueHandling = DefaultValueHandling.Ignore, NullValueHandling = NullValueHandling.Ignore })),
     };
 
     changeUrl();
@@ -148,14 +181,42 @@ else
     });
 
     // Catalog checkboxes
-    $('.catalogCheck').on('change', function () {
+    $('.catalogCheck, .discoverCheck').on('change', function () {
         changeUrl();
     });
 
+    // When an enable checkbox is toggled, enable/disable its discover-only sibling
+    $('.catalogCheck').on('change', function () {
+        var $row = $(this).closest('.option-row');
+        var $discoverSwitch = $row.find('.discoverCheck');
+        var $discoverLabel = $discoverSwitch.closest('.switch');
+        var isEnabled = $(this).is(':checked');
+
+        $discoverSwitch.prop('disabled', !isEnabled);
+        $discoverLabel.toggleClass('switch-disabled', !isEnabled);
+        if (!isEnabled) {
+            $discoverSwitch.prop('checked', false);
+        }
+    });
+
     function changeUrl() {
-        config.showCurrent = $('#showCurrent').is(':checked');
-        config.showCompleted = $('#showCompleted').is(':checked');
-        config.showTrending = $('#showTrending').is(':checked');
+        delete config.showCurrent;
+        delete config.showCompleted;
+        delete config.showTrending;
+        delete config.showSeasonal;
+        delete config.discoverOnlyCurrent;
+        delete config.discoverOnlyCompleted;
+        delete config.discoverOnlyTrending;
+        delete config.discoverOnlySeasonal;
+
+        if ($('#showCurrent').is(':checked')) config.showCurrent = true;
+        if ($('#showCompleted').is(':checked')) config.showCompleted = true;
+        if ($('#showTrending').is(':checked')) config.showTrending = true;
+        if ($('#showSeasonal').is(':checked')) config.showSeasonal = true;
+        if ($('#discoverOnlyCurrent').is(':checked')) config.discoverOnlyCurrent = true;
+        if ($('#discoverOnlyCompleted').is(':checked')) config.discoverOnlyCompleted = true;
+        if ($('#discoverOnlyTrending').is(':checked')) config.discoverOnlyTrending = true;
+        if ($('#discoverOnlySeasonal').is(':checked')) config.discoverOnlySeasonal = true;
 
         var tempUrl = '/' + encodeURIComponent(JSON.stringify(config)) + '/manifest.json';
         $('#url').attr('href', url + tempUrl);
