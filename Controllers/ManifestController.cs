@@ -25,7 +25,7 @@ namespace AnimeList.Controllers
                 name = name,
                 description = "Fetches anime list from Kitsu/AniList to track your anime progress while using stremio",
                 logo = $"{Request.Scheme}://{Request.Host}/logo.png",
-                resources = [ "catalog", "meta", "subtitles" ],
+                resources = [ "catalog", "meta", "stream", "subtitles" ],
                 types = [ MetaType.movie.ToString(), MetaType.series.ToString(), MetaType.anime.ToString() ],
                 behaviorHints = new BehaviorHints
                 {
