@@ -30,25 +30,29 @@ namespace AnimeList.Services
                 return null;
 
             var mapping = await _mappingService.GetTmdbMapping(id);
+            var seasons = mapping?.Where(w => w.Season.HasValue).Select(s => s.Season ?? 1).Distinct().ToList() ?? [1];
 
             // Most anime are TV series; try that first
-            var meta = await GetTvShowAsync(tmdbId, mapping?.Season);
+            var meta = await GetTvShowAsync(tmdbId, seasons);
             return meta ?? await GetMovieAsync(tmdbId);
         }
 
-        private async Task<Meta> GetTvShowAsync(string tmdbId, int? season)
+        private async Task<Meta> GetTvShowAsync(string tmdbId, List<int> seasons)
         {
             var client = CreateAuthenticatedClient();
-            var response = await client.GetAsync($"{_tmdbApi}/tv/{tmdbId}?append_to_response=videos");
+            var response = await client.GetAsync($"{_tmdbApi}/tv/{tmdbId}?append_to_response=videos,external_ids");
 
             if (!response.IsSuccessStatusCode) return null;
 
             var content = await response.Content.ReadAsStringAsync();
             var result = DeserializeObject<dynamic>(content);
 
+            var externalId = (string)result.external_ids?.imdb_id;
+            externalId = string.IsNullOrEmpty(externalId) ? $"{tmdbPrefix}{tmdbId}" : externalId;
+
             var meta = new Meta
             {
-                id = $"{tmdbPrefix}{tmdbId}",
+                id = externalId,
                 type = MetaType.series.ToString(),
                 name = result.name,
                 poster = BuildImageUrl((string)result.poster_path),
@@ -61,13 +65,16 @@ namespace AnimeList.Services
 
             AddTrailers(meta, result.videos?.results);
 
-            int seasonNumber = season ?? 1;
-            meta.videos = await GetSeasonEpisodesAsync(tmdbId, seasonNumber);
+            seasons ??= [];
+            foreach (var seasonNumber in seasons)
+            {
+                meta.videos.AddRange(await GetSeasonEpisodesAsync(tmdbId, seasonNumber, externalId));
+            }
 
             return meta;
         }
 
-        private async Task<List<Video>> GetSeasonEpisodesAsync(string tmdbId, int seasonNumber)
+        private async Task<List<Video>> GetSeasonEpisodesAsync(string tmdbId, int seasonNumber, string externalId)
         {
             var client = CreateAuthenticatedClient();
             var response = await client.GetAsync($"{_tmdbApi}/tv/{tmdbId}/season/{seasonNumber}");
@@ -84,11 +91,11 @@ namespace AnimeList.Services
             {
                 videos.Add(new Video
                 {
-                    id = $"{tmdbPrefix}{tmdbId}:{seasonNumber}:{episode.episode_number}",
+                    id = $"{externalId}:{seasonNumber}:{episode.episode_number}",
                     title = episode.name,
                     thumbnail = BuildImageUrl((string)episode.still_path),
-                    season = seasonNumber.ToString(),
-                    episode = ((int)episode.episode_number).ToString(),
+                    season = seasonNumber,
+                    episode = ((int)episode.episode_number),
                 });
             }
 

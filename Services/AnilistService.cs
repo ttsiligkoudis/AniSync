@@ -227,7 +227,7 @@ namespace AnimeList.Services
                 var meta = new Meta
                 {
                     id = externalId,
-                    type = (string)tmpEntry.format == "MOVIE" ? MetaType.movie.ToString() : MetaType.series.ToString(),
+                    type = IsMovieFormat((string)tmpEntry.format) ? MetaType.movie.ToString() : MetaType.series.ToString(),
                     name = string.IsNullOrEmpty((string)tmpEntry.title.english) ? tmpEntry.title.romaji : tmpEntry.title.english,
                     poster = tmpEntry.coverImage.large,
                     descriptionRich = tmpEntry.description,
@@ -327,16 +327,16 @@ namespace AnimeList.Services
                              mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
                              $"{anilistPrefix}{result.id}";
 
+            var isMovie = IsMovieFormat((string)result.format);
             var anime = new Meta
             {
                 id = externalId,
-                type = (string)result.format == "MOVIE" ? MetaType.movie.ToString() : MetaType.series.ToString(),
+                type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
                 name = string.IsNullOrEmpty((string)result.title.english) ? result.title.romaji : result.title.english,
                 poster = result.coverImage.large,
                 descriptionRich = result.description,
                 genres = result.genres.ToObject<List<string>>(),
                 background = result.bannerImage,
-                videos = result.streamingEpisodes.ToObject<List<Video>>()
             };
 
             if (result.trailer != null && result.trailer.site == "youtube")
@@ -345,19 +345,24 @@ namespace AnimeList.Services
                 anime.trailerStreams.Add(new TrailerStream(result.trailer.id, anime.name));
             }
 
-            var seasonNumber = GetSeasonNumber(result.relations, (int)result.id);
-
-            for (int i = 0; i < anime.videos.Count; i++)
+            if (!isMovie)
             {
-                anime.videos[i].id = $"{externalId}:{i + 1}";
-                anime.videos[i].episode = (i + 1).ToString();
-                anime.videos[i].season = (string)seasonNumber;
-            }
+                anime.videos = result.streamingEpisodes.ToObject<List<Video>>();
 
-            if (anime.videos.Count == 0 && mapping?.KitsuId != null)
-            {
-                var kitsuAnime = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", null);
-                anime.videos = kitsuAnime.videos;
+                var seasonNumber = GetSeasonNumber(result.relations, (int)result.id);
+
+                for (int i = 0; i < anime.videos.Count; i++)
+                {
+                    anime.videos[i].id = $"{externalId}:{i + 1}";
+                    anime.videos[i].episode = (i + 1);
+                    anime.videos[i].season = ((int?)seasonNumber ?? 1);
+                }
+
+                if (anime.videos.Count == 0 && mapping?.KitsuId != null)
+                {
+                    var kitsuAnime = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", null);
+                    anime.videos = kitsuAnime.videos;
+                }
             }
 
             return anime;

@@ -33,6 +33,14 @@ namespace AnimeList
         public static bool IsSeasonalListType(ListType list) => list == ListType.Seasonal;
 
         /// <summary>
+        /// Returns true when the format/subtype represents a movie (standalone, no episodes).
+        /// </summary>
+        public static bool IsMovieFormat(string format) =>
+            !string.IsNullOrEmpty(format) && (format.Equals("MOVIE", StringComparison.OrdinalIgnoreCase)
+                                              || format.Equals("SPECIAL", StringComparison.OrdinalIgnoreCase)
+                                              || format.Equals("MUSIC", StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>
         /// Returns the AniList MediaSeason string and year for the given season option.
         /// </summary>
         public static (string Season, int Year) GetSeasonAndYear(string seasonOption)

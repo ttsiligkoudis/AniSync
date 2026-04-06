@@ -43,8 +43,8 @@ namespace AnimeList.Models
         public string id { get; set; }
         public string title { get; set; }
         public string thumbnail { get; set; }
-        public string season { get; set; }
-        public string episode { get; set; }
+        public int season { get; set; }
+        public int episode { get; set; }
     }
 
     public class Edge

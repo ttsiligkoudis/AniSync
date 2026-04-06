@@ -10,8 +10,8 @@ namespace AnimeList.Services.Interfaces
         Task EnsureLoadedAsync();
         Task<AnimeIdMapping> GetAnilistMapping(string anilistId);
         Task<AnimeIdMapping> GetKitsuMapping(string kitsuId);
-        Task<AnimeIdMapping> GetImdbMapping(string imdb, int? season = null);
-        Task<AnimeIdMapping> GetTmdbMapping(string tmdbId, int? season = null);
+        Task<List<AnimeIdMapping>> GetImdbMapping(string imdb, int? season = null);
+        Task<List<AnimeIdMapping>> GetTmdbMapping(string tmdbId, int? season = null);
         Task<string> GetIdByService(string animeId, AnimeService service, int? season = null);
     }
 }

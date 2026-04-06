@@ -82,7 +82,7 @@ namespace AnimeList.Services
                 animeList.Add(new Meta
                 {
                     id = externalId,
-                    type = ((string)included.attributes.subtype).Equals("movie", StringComparison.OrdinalIgnoreCase) ? MetaType.movie.ToString() : MetaType.series.ToString(),
+                    type = IsMovieFormat((string)included.attributes.subtype) ? MetaType.movie.ToString() : MetaType.series.ToString(),
                     name = included.attributes.titles.en,
                     poster = included.attributes.posterImage != null ? (string)included.attributes.posterImage.large : null,
                     descriptionRich = included.attributes.description,
@@ -118,10 +118,12 @@ namespace AnimeList.Services
                              !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
                              $"{kitsuPrefix}{entry.id}";
 
+            var isMovie = IsMovieFormat((string)entry.attributes.subtype);
+
             var anime = new Meta
             {
                 id = externalId,
-                type = (string)entry.attributes.subtype == "movie" ? MetaType.movie.ToString() : MetaType.series.ToString(),
+                type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
                 name = entry.attributes.titles.en,
                 poster = entry.attributes.posterImage != null ? (string)entry.attributes.posterImage.large : null,
                 descriptionRich = entry.attributes.description,
@@ -135,44 +137,47 @@ namespace AnimeList.Services
                 anime.trailerStreams.Add(new TrailerStream(entry.attributes.youtubeVideoId, anime.name));
             }
 
-            var episodeNumber = 1;
-
-            foreach (var episode in results.included)
+            if (!isMovie)
             {
-                object seasonNumber = 1;
-                object thumbnail = null;
+                var episodeNumber = 1;
 
-                var jObj = (JObject)episode.attributes;
-
-                var token = jObj["seasonNumber"];
-                if (token != null && token.Type != JTokenType.Null)
+                foreach (var episode in results.included)
                 {
-                    seasonNumber = token;
+                    object seasonNumber = 1;
+                    object thumbnail = null;
+
+                    var jObj = (JObject)episode.attributes;
+
+                    var token = jObj["seasonNumber"];
+                    if (token != null && token.Type != JTokenType.Null)
+                    {
+                        seasonNumber = token;
+                    }
+
+                    token = jObj["thumbnail"];
+                    if (token != null && token.Type != JTokenType.Null)
+                    {
+                        thumbnail = token;
+                    }
+
+                    var video = new Video
+                    {
+                        id = $"{externalId}:{episode.attributes.seasonNumber}:{episode.attributes.number}",
+                        thumbnail = thumbnail?.ToString(),
+                        season = int.Parse(seasonNumber.ToString()),
+                        episode = episodeNumber
+                    };
+
+                    video.id = $"{id}:{video.episode}";
+                    video.title = string.IsNullOrEmpty((string)episode.attributes.canonicalTitle)
+                        ? $"Episode {video.episode}"
+                        : episode.attributes.canonicalTitle;
+
+                    if (string.IsNullOrEmpty(video.title)) continue;
+
+                    anime.videos.Add(video);
+                    episodeNumber++;
                 }
-
-                token = jObj["thumbnail"];
-                if (token != null && token.Type != JTokenType.Null)
-                {
-                    thumbnail = token;
-                }
-
-                var video = new Video
-                {
-                    id = $"{externalId}:{episode.attributes.seasonNumber}:{episode.attributes.number}",
-                    thumbnail = thumbnail?.ToString(),
-                    season = seasonNumber?.ToString(),
-                    episode = episodeNumber.ToString()
-                };
-
-                video.id = $"{id}:{video.episode}";
-                video.title = string.IsNullOrEmpty((string)episode.attributes.canonicalTitle)
-                    ? $"Episode {video.episode}"
-                    : episode.attributes.canonicalTitle;
-
-                if (string.IsNullOrEmpty(video.title)) continue;
-
-                anime.videos.Add(video);
-                episodeNumber++;
             }
 
             return anime;
