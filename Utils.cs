@@ -11,21 +11,24 @@ namespace AnimeList
         public static readonly string kitsuPrefix = "kitsu:";
         public static readonly string tmdbPrefix = "tmdb:";
 
-        public static readonly List<string> AnimeGenres =
-        [
-            "Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy",
-            "Horror", "Mahou Shoujo", "Mecha", "Music", "Mystery",
-            "Psychological", "Romance", "Sci-Fi", "Slice of Life",
-            "Sports", "Supernatural", "Thriller"
-        ];
-
         public static readonly string DefaultOption = "None";
-
         public const string SeasonCurrent = "This Season";
         public const string SeasonNext = "Next Season";
         public const string SeasonPrevious = "Last Season";
 
         public static readonly List<string> SeasonOptions = [SeasonCurrent, SeasonNext, SeasonPrevious];
+
+        public static List<string> GetOptions(bool includeDefault) 
+        {
+            var options = new List<string>{
+                "Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy",
+                "Horror", "Mahou Shoujo", "Mecha", "Music", "Mystery",
+                "Psychological", "Romance", "Sci-Fi", "Slice of Life",
+                "Sports", "Supernatural", "Thriller" 
+            };
+            if (includeDefault) options.Insert(0, "None");
+            return options;
+        }
 
         /// <summary>
         /// Returns true if the given list type is the seasonal catalog.

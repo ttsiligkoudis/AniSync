@@ -29,6 +29,8 @@ namespace AnimeList.Controllers
         [HttpGet("{config}/[controller]/{metaType}/{listType}.json")]
         public async Task<ActionResult> GetList(string config, MetaType metaType, ListType listType, string skip = null, string animeId = null, string genre = null)
         {
+            if (genre?.Equals(DefaultOption, StringComparison.OrdinalIgnoreCase) == true) genre = null;
+
             var tokenData = await _tokenService.GetAccessTokenAsync(config);
             var animeService = tokenData?.anime_service ?? AnimeService.Kitsu;
 

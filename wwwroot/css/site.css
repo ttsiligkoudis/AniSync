@@ -356,3 +356,149 @@ main {
     font-weight: bold;
     color: red;
 }
+
+/* ── Manage Entry ── */
+.manage-entry-page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+    width: 100%;
+}
+
+.manage-entry-card {
+    max-width: 480px;
+    width: 100%;
+}
+
+.manage-entry-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.manage-entry-poster {
+    width: 80px;
+    height: 112px;
+    object-fit: cover;
+    border-radius: 8px;
+    flex-shrink: 0;
+}
+
+.manage-entry-title-area {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+.manage-entry-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #fff;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.manage-entry-type-badge {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #999;
+    background: rgba(255,255,255,0.06);
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    width: fit-content;
+}
+
+.manage-entry-sep {
+    border: none;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    margin: 1rem 0;
+}
+
+.manage-entry-field {
+    margin-bottom: 1rem;
+}
+
+.manage-entry-label {
+    display: block;
+    font-size: 0.78rem;
+    color: #7b5bf5;
+    margin-bottom: 0.35rem;
+    font-weight: 600;
+}
+
+.manage-entry-select,
+.manage-entry-input {
+    width: 100%;
+    padding: 0.55rem 0.75rem;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+    box-sizing: border-box;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.manage-entry-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23999' d='M1.4 0L6 4.6 10.6 0 12 1.4l-6 6-6-6z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2rem;
+}
+
+.manage-entry-select:focus,
+.manage-entry-input:focus {
+    border-color: #7b5bf5;
+}
+
+.manage-entry-select option {
+    background: #1a1a1a;
+    color: #fff;
+}
+
+.manage-entry-progress-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.manage-entry-progress-row .manage-entry-input {
+    flex: 1;
+}
+
+.manage-entry-total {
+    font-size: 0.85rem;
+    color: #888;
+    white-space: nowrap;
+}
+
+.btn-save {
+    background: linear-gradient(135deg, #7b5bf5, #6341d4);
+    margin-top: 0.5rem;
+}
+
+.manage-entry-save-status {
+    display: inline-block;
+    font-size: 0.8rem;
+    margin-left: 0.75rem;
+    font-weight: 600;
+    vertical-align: middle;
+}
+
+.save-success {
+    color: #2ecc71;
+}
+
+.save-error {
+    color: #e74c3c;
+}

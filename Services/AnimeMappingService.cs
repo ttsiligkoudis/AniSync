@@ -352,6 +352,30 @@ namespace AnimeList.Services
             return animeId;
         }
 
+        /// <summary>
+        /// Returns distinct season numbers for all mapping entries that share the same base anime ID.
+        /// </summary>
+        public async Task<List<int>> GetSeasonsAsync(string animeId)
+        {
+            if (string.IsNullOrEmpty(animeId)) return [];
+
+            List<AnimeIdMapping> entries;
+
+            if (animeId.StartsWith(imdbPrefix))
+                entries = await GetImdbMapping(animeId);
+            else if (animeId.StartsWith(tmdbPrefix))
+                entries = await GetTmdbMapping(animeId);
+            else
+                return [];
+
+            return entries
+                .Where(e => e.Season.HasValue)
+                .Select(e => e.Season!.Value)
+                .Distinct()
+                .Order()
+                .ToList();
+        }
+
         private sealed class OfflineDbRoot
         {
             public List<OfflineDbEntry> Data { get; set; }

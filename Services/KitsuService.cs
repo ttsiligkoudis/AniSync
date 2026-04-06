@@ -241,6 +241,98 @@ namespace AnimeList.Services
 
             return (int?)result?.data?.attributes?.episodeCount;
         }
+
+        public async Task<AnimeEntry> GetAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)
+        {
+            var resolvedKitsuId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu, season);
+
+            if (string.IsNullOrEmpty(resolvedKitsuId)) return null;
+
+            var kitsuAnimeId = resolvedKitsuId.Replace(kitsuPrefix, "");
+
+            // Fetch library entry for this user + anime
+            var meta = (await GetAnimeListAsync(tokenData, null, null, $"{kitsuPrefix}{kitsuAnimeId}")).FirstOrDefault();
+
+            // Fetch total episodes
+            int? totalEpisodes = await GetTotalEpisodesAsync(tokenData, $"{kitsuPrefix}{kitsuAnimeId}");
+
+            return new AnimeEntry
+            {
+                EntryId = meta?.entryId,
+                MediaId = kitsuAnimeId,
+                Status = meta?.entryStatus ?? "current",
+                Progress = 0, // Kitsu library-entries include doesn't expose progress in GetAnimeListAsync; default to 0
+                TotalEpisodes = totalEpisodes
+            };
+        }
+
+        public async Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, string status, int progress)
+        {
+            var resolvedKitsuId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu, season);
+
+            if (string.IsNullOrEmpty(resolvedKitsuId)) return;
+
+            var kitsuAnimeId = resolvedKitsuId.Replace(kitsuPrefix, "");
+
+            var entryId = (await GetAnimeListAsync(tokenData, null, null, $"{kitsuPrefix}{kitsuAnimeId}")).FirstOrDefault()?.entryId;
+
+            if (!string.IsNullOrEmpty(entryId))
+            {
+                // Update existing entry
+                var obj = new
+                {
+                    data = new
+                    {
+                        type = "libraryEntries",
+                        id = entryId,
+                        attributes = new
+                        {
+                            progress,
+                            status
+                        }
+                    }
+                };
+
+                var request = new HttpRequestMessage(HttpMethod.Patch, $"{_kitsuApi}/library-entries/{entryId}")
+                {
+                    Content = new StringContent(SerializeObject(obj), Encoding.UTF8, "application/vnd.api+json")
+                };
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+
+                var client = _clientFactory.CreateClient();
+                await client.SendAsync(request);
+            }
+            else
+            {
+                // Create new entry
+                var obj = new
+                {
+                    data = new
+                    {
+                        type = "libraryEntries",
+                        attributes = new
+                        {
+                            progress,
+                            status
+                        },
+                        relationships = new
+                        {
+                            user = new { data = new { type = "users", id = tokenData.user_id } },
+                            anime = new { data = new { type = "anime", id = kitsuAnimeId } }
+                        }
+                    }
+                };
+
+                var request = new HttpRequestMessage(HttpMethod.Post, $"{_kitsuApi}/library-entries")
+                {
+                    Content = new StringContent(SerializeObject(obj), Encoding.UTF8, "application/vnd.api+json")
+                };
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+
+                var client = _clientFactory.CreateClient();
+                await client.SendAsync(request);
+            }
+        }
     }
 }
 

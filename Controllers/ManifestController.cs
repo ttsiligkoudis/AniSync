@@ -80,7 +80,7 @@ namespace AnimeList.Controllers
                     type = MetaType.anime.ToString(),
                     id = GetListTypeString(ListType.Completed, tokenData),
                     name = "Completed",
-                    extra = [new("skip"), new("genre") { options = AnimeGenres, isRequired = configiration.discoverOnlyCompleted }],
+                    extra = [new("skip"), new("genre") { options = GetOptions(configiration.discoverOnlyCompleted), isRequired = configiration.discoverOnlyCompleted }],
                 });
             }
 
@@ -91,7 +91,7 @@ namespace AnimeList.Controllers
                     type = MetaType.anime.ToString(),
                     id = GetListTypeString(ListType.Trending_Desc, tokenData),
                     name = "Trending Now",
-                    extra = [new("skip"), new("genre") { options = AnimeGenres, isRequired = configiration.discoverOnlyTrending }],
+                    extra = [new("skip"), new("genre") { options = GetOptions(configiration.discoverOnlyTrending), isRequired = configiration.discoverOnlyTrending }],
                 });
             }
 

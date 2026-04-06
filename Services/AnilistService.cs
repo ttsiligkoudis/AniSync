@@ -211,7 +211,7 @@ namespace AnimeList.Services
                 if (list == ListType.Current && (string)tmpEntry.status == "NOT_YET_RELEASED") continue;
 
                 // Filter user list entries by genre when discover-only provides a genre selection
-                if (!string.IsNullOrEmpty(genre) && genre != DefaultOption && isUserList && tmpEntry.genres != null)
+                if (!string.IsNullOrEmpty(genre) && isUserList && tmpEntry.genres != null)
                 {
                     var genres = tmpEntry.genres.ToObject<List<string>>();
                     if (!genres.Contains(genre)) continue;
@@ -473,6 +473,92 @@ namespace AnimeList.Services
             var result = DeserializeObject<dynamic>(content);
 
             return (int?)result?.data?.Media?.episodes;
+        }
+
+        public async Task<AnimeEntry> GetAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)
+        {
+            var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist, season);
+
+            if (string.IsNullOrEmpty(resolvedAnimeId)) return null;
+
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($userId: Int, $mediaId: Int) {
+                        MediaList(userId: $userId, mediaId: $mediaId, type: ANIME) {
+                            id
+                            status
+                            progress
+                        }
+                        Media(id: $mediaId, type: ANIME) {
+                            episodes
+                        }
+                    }",
+                variables = new { userId = tokenData?.user_id, mediaId = resolvedAnimeId }
+            });
+
+            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
+            {
+                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData?.access_token);
+
+            var client = _clientFactory.CreateClient();
+            var response = await client.SendAsync(request);
+
+            if (!response.IsSuccessStatusCode) return null;
+
+            var content = await response.Content.ReadAsStringAsync();
+            var data = DeserializeObject<dynamic>(content)?.data;
+
+            var entry = new AnimeEntry
+            {
+                MediaId = resolvedAnimeId,
+                TotalEpisodes = (int?)data?.Media?.episodes
+            };
+
+            if (data?.MediaList != null)
+            {
+                entry.EntryId = (string)data.MediaList.id?.ToString();
+                entry.Status = (string)data.MediaList.status;
+                entry.Progress = (int?)data.MediaList.progress ?? 0;
+            }
+
+            return entry;
+        }
+
+        public async Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, string status, int progress)
+        {
+            var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist, season);
+
+            if (string.IsNullOrEmpty(resolvedAnimeId)) return;
+
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus) {
+                        SaveMediaListEntry(mediaId: $mediaId, progress: $progress, status: $status) {
+                            id
+                            progress
+                            status
+                        }
+                    }",
+                variables = new
+                {
+                    mediaId = resolvedAnimeId,
+                    progress,
+                    status
+                }
+            });
+
+            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
+            {
+                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+
+            var client = _clientFactory.CreateClient();
+            await client.SendAsync(request);
         }
     }
 }

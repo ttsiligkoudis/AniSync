@@ -1,0 +1,141 @@
+@model AnimeList.Models.ManageEntryViewModel
+@{
+    Layout = "_Layout";
+    var isAnilist = Model.AnimeService == AnimeService.Anilist;
+    var isSeries = Model.Type == MetaType.series.ToString();
+    var hasSeasons = Model.Seasons?.Count > 0;
+}
+
+<div class="manage-entry-page">
+    <h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
+
+    <div class="card-section manage-entry-card">
+        <!-- Header: poster + title -->
+        <div class="manage-entry-header">
+            @if (!string.IsNullOrEmpty(Model.Poster))
+            {
+                <img src="@Model.Poster" alt="@Model.Name" class="manage-entry-poster" />
+            }
+            <div class="manage-entry-title-area">
+                <h2 class="manage-entry-title">@Model.Name</h2>
+                <span class="manage-entry-type-badge">@Model.Type</span>
+            </div>
+        </div>
+
+        <hr class="manage-entry-sep" />
+
+        <!-- Season selector (series only) -->
+        @if (isSeries && hasSeasons)
+        {
+            <div class="manage-entry-field">
+                <label class="manage-entry-label">Season</label>
+                <select id="seasonSelect" class="manage-entry-select">
+                    @foreach (var s in Model.Seasons)
+                    {
+                        <option value="@s" selected="@(s == Model.SelectedSeason)">Season @s</option>
+                    }
+                </select>
+            </div>
+        }
+
+        <!-- Status -->
+        <div class="manage-entry-field">
+            <label class="manage-entry-label">Status</label>
+            <select id="statusSelect" class="manage-entry-select">
+                @if (isAnilist)
+                {
+                    <option value="CURRENT" selected="@(Model.Status == "CURRENT")">Watching</option>
+                    <option value="PLANNING" selected="@(Model.Status == "PLANNING")">Planning</option>
+                    <option value="COMPLETED" selected="@(Model.Status == "COMPLETED")">Completed</option>
+                    <option value="PAUSED" selected="@(Model.Status == "PAUSED")">Paused</option>
+                    <option value="DROPPED" selected="@(Model.Status == "DROPPED")">Dropped</option>
+                    <option value="REPEATING" selected="@(Model.Status == "REPEATING")">Rewatching</option>
+                }
+                else
+                {
+                    <option value="current" selected="@(Model.Status == "current")">Watching</option>
+                    <option value="planned" selected="@(Model.Status == "planned")">Planning</option>
+                    <option value="completed" selected="@(Model.Status == "completed")">Completed</option>
+                    <option value="on_hold" selected="@(Model.Status == "on_hold")">On Hold</option>
+                    <option value="dropped" selected="@(Model.Status == "dropped")">Dropped</option>
+                }
+            </select>
+        </div>
+
+        <!-- Episode Progress -->
+        <div class="manage-entry-field">
+            <label class="manage-entry-label">Episode Progress</label>
+            <div class="manage-entry-progress-row">
+                <input type="number" id="progressInput" class="manage-entry-input" min="0"
+                       max="@(Model.TotalEpisodes ?? 9999)"
+                       value="@Model.Progress" />
+                @if (Model.TotalEpisodes.HasValue)
+                {
+                    <span class="manage-entry-total">/ @Model.TotalEpisodes</span>
+                }
+            </div>
+        </div>
+
+        <!-- Save button -->
+        <button id="saveBtn" class="btn-primary-action btn-save">Save</button>
+        <span id="saveStatus" class="manage-entry-save-status"></span>
+    </div>
+</div>
+
+<script>
+    var config = '@Html.Raw(Model.Config)';
+    var animeId = '@Html.Raw(Model.Id)';
+    var isSeries = @Html.Raw(isSeries.ToString().ToLower());
+    var hasSeasons = @Html.Raw(hasSeasons.ToString().ToLower());
+
+    // When season changes, fetch the entry for that season
+    $('#seasonSelect').on('change', function () {
+        var season = $(this).val();
+        $.ajax({
+            url: '/' + config + '/Meta/GetEntry',
+            data: { id: animeId, season: season },
+            success: function (data) {
+                if (data.success) {
+                    $('#statusSelect').val(data.status || $('#statusSelect option:first').val());
+                    $('#progressInput').val(data.progress || 0);
+                    if (data.totalEpisodes) {
+                        $('#progressInput').attr('max', data.totalEpisodes);
+                        $('.manage-entry-total').text('/ ' + data.totalEpisodes).show();
+                    } else {
+                        $('#progressInput').attr('max', 9999);
+                        $('.manage-entry-total').hide();
+                    }
+                }
+            }
+        });
+    });
+
+    // Save entry
+    $('#saveBtn').on('click', function () {
+        var season = hasSeasons ? parseInt($('#seasonSelect').val()) : null;
+        var status = $('#statusSelect').val();
+        var progress = parseInt($('#progressInput').val()) || 0;
+
+        var $btn = $(this);
+        $btn.prop('disabled', true).text('Saving...');
+
+        $.ajax({
+            url: '/' + config + '/Meta/SaveEntry',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ id: animeId, season: season, status: status, progress: progress }),
+            success: function (data) {
+                $btn.prop('disabled', false).text('Save');
+                $('#saveStatus').text(data.success ? '✓ Saved' : '✗ Failed')
+                    .removeClass('save-error save-success')
+                    .addClass(data.success ? 'save-success' : 'save-error');
+                setTimeout(function () { $('#saveStatus').text(''); }, 3000);
+            },
+            error: function () {
+                $btn.prop('disabled', false).text('Save');
+                $('#saveStatus').text('✗ Error').removeClass('save-success').addClass('save-error');
+                setTimeout(function () { $('#saveStatus').text(''); }, 3000);
+            }
+        });
+    });
+</script>
