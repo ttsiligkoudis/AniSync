@@ -50,14 +50,13 @@ namespace AnimeList.Services
             var externalId = (string)result.external_ids?.imdb_id;
             externalId = string.IsNullOrEmpty(externalId) ? $"{tmdbPrefix}{tmdbId}" : externalId;
 
-            var meta = new Meta
+            var meta = new Meta(result.overview)
             {
                 id = externalId,
                 type = MetaType.series.ToString(),
                 name = result.name,
                 poster = BuildImageUrl((string)result.poster_path),
                 background = BuildImageUrl((string)result.backdrop_path),
-                descriptionRich = result.overview,
                 genres = ((IEnumerable<dynamic>)result.genres)
                     .Select(g => (string)g.name)
                     .ToList(),
@@ -112,14 +111,13 @@ namespace AnimeList.Services
             var content = await response.Content.ReadAsStringAsync();
             var result = DeserializeObject<dynamic>(content);
 
-            var meta = new Meta
+            var meta = new Meta(result.overview)
             {
                 id = $"{tmdbPrefix}{tmdbId}",
-                type = MetaType.anime.ToString(),
+                type = MetaType.movie.ToString(),
                 name = result.title,
                 poster = BuildImageUrl((string)result.poster_path),
                 background = BuildImageUrl((string)result.backdrop_path),
-                descriptionRich = result.overview,
                 genres = ((IEnumerable<dynamic>)result.genres)
                     .Select(g => (string)g.name)
                     .ToList(),

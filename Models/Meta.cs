@@ -5,13 +5,15 @@ namespace AnimeList.Models
 {
     public partial class Meta
     {
-        private static readonly Regex HtmlTagRegex = HtmlTagPattern();
+        public Meta(dynamic descriptionRich = null)
+        {
+            description = string.IsNullOrEmpty((string)descriptionRich) ? string.Empty : HtmlTagPattern().Replace((string)descriptionRich, string.Empty);
+        }
 
         public string id { get; set; }
         public string name { get; set; }
         public string poster { get; set; }
-        public string descriptionRich { get; set; }
-        public string description => string.IsNullOrEmpty(descriptionRich) ? string.Empty : HtmlTagRegex.Replace(descriptionRich, string.Empty);
+        public string description { get; }
         public List<string> genres { get; set; }
         public string background { get; set; }
         public string type { get; set; } = MetaType.series.ToString();

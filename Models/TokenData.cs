@@ -19,7 +19,7 @@ namespace AnimeList.Models
 
         public AnimeService anime_service { get; set; }
 
-        public bool anonymousUser => anime_service == AnimeService.Kitsu && string.IsNullOrEmpty(username);
+        public bool anonymousUser => (anime_service == AnimeService.Kitsu && string.IsNullOrEmpty(username)) || (anime_service == AnimeService.Anilist && string.IsNullOrEmpty(access_token));
 
         public TokenData Clone()
         {

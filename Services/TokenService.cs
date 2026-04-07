@@ -164,18 +164,9 @@ namespace AnimeList.Services
         public async Task<TokenData> GetAccessTokenByCredsAsync(string username, string password, bool setContext = false, string userId = null)
         {
             var context = _httpContextAccessor.HttpContext;
-            TokenData tokenData;
+            TokenData tokenData = null;
 
-            if (string.IsNullOrEmpty(username))
-            {
-                tokenData = await CreateAnonymousKitsuToken();
-
-                if (setContext)
-                {
-                    context.Session.SetString("AccessToken", SerializeObject(tokenData));
-                }
-            }
-            else
+            if (!string.IsNullOrEmpty(username))
             {
                 var requestBody = new Dictionary<string, string>
                 {
@@ -229,14 +220,6 @@ namespace AnimeList.Services
             var user = DeserializeObject<dynamic>(content);
 
             return user.data[0].id;
-        }
-
-        public async Task<TokenData> CreateAnonymousKitsuToken()
-        {
-            return new TokenData
-            {
-                anime_service = AnimeService.Kitsu
-            };
         }
         #endregion Kitsu
     }

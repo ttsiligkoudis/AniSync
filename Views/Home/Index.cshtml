@@ -247,4 +247,18 @@ else
 
         window.location.href = $('#loginUrl').attr('href');
     });
+
+    $('#loginAnonymousUrl').on('click', function (e) {
+        e.preventDefault();
+
+        var href = $('#loginAnonymousUrl').attr('href');
+
+        if (isAnilist) {
+            href += '?animeService=1&anonymous=true';
+        } else {
+            href += '?animeService=0&anonymous=true';
+        }
+
+        window.location.href = href;
+    });
 </script>

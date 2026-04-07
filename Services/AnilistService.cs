@@ -163,7 +163,11 @@ namespace AnimeList.Services
             {
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json"),
             };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData?.access_token);
+
+            if (!string.IsNullOrEmpty(tokenData?.access_token))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            }
 
             var client = _clientFactory.CreateClient();
             var response = await client.SendAsync(request);
@@ -216,25 +220,19 @@ namespace AnimeList.Services
                     if (!genres.Contains(genre)) continue;
                 }
 
-                var isMovie = false;// IsMovieFormat((string)tmpEntry.format);
-
                 var mapping = await _mappingService.GetAnilistMapping((string)tmpEntry.id);
 
-                var externalId = isMovie 
-                    ? (mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
-                      $"{anilistPrefix}{tmpEntry.id}")
-                    : (!string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                      !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
-                      mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
-                      $"{anilistPrefix}{tmpEntry.id}");
+                var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                    !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
+                    mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
+                    $"{anilistPrefix}{tmpEntry.id}";
 
-                var meta = new Meta
+                var meta = new Meta(tmpEntry.description)
                 {
                     id = externalId,
                     type = MetaType.anime.ToString(),
                     name = string.IsNullOrEmpty((string)tmpEntry.title.english) ? tmpEntry.title.romaji : tmpEntry.title.english,
                     poster = tmpEntry.coverImage.large,
-                    descriptionRich = tmpEntry.description,
                     entryId = entryId,
                     entryStatus = entryStatus
                 };
@@ -311,7 +309,11 @@ namespace AnimeList.Services
             {
                 Content = new StringContent(ser, System.Text.Encoding.UTF8, "application/json")
             };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+
+            if (!string.IsNullOrEmpty(tokenData?.access_token))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            }
 
             var client = _clientFactory.CreateClient();
             var response = await client.SendAsync(request);
@@ -328,21 +330,17 @@ namespace AnimeList.Services
 
             var mapping = await _mappingService.GetAnilistMapping((string)result.id);
 
-            var externalId = isMovie
-                ? (mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
-                  $"{anilistPrefix}{result.id}")
-                : (!string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+            var externalId = (!string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
                   !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
                   mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
                   $"{anilistPrefix}{result.id}");
 
-            var anime = new Meta
+            var anime = new Meta(result.description)
             {
                 id = externalId,
                 type = isMovie ? MetaType.series.ToString() : MetaType.movie.ToString(),
                 name = string.IsNullOrEmpty((string)result.title.english) ? result.title.romaji : result.title.english,
                 poster = result.coverImage.large,
-                descriptionRich = result.description,
                 genres = result.genres.ToObject<List<string>>(),
                 background = result.bannerImage,
             };

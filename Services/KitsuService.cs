@@ -79,14 +79,12 @@ namespace AnimeList.Services
                                  !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
                                  $"{kitsuPrefix}{included.id}";
 
-                animeList.Add(new Meta
+                animeList.Add(new Meta(included.attributes.description)
                 {
                     id = externalId,
-                    //type = IsMovieFormat((string)included.attributes.subtype) ? MetaType.movie.ToString() : MetaType.series.ToString(),
                     type = MetaType.anime.ToString(),
                     name = included.attributes.titles.en,
                     poster = included.attributes.posterImage != null ? (string)included.attributes.posterImage.large : null,
-                    descriptionRich = included.attributes.description,
                     entryId = list == ListType.Trending_Desc ? null : entry.id,
                     entryStatus = entry.status,
                 });
@@ -122,14 +120,12 @@ namespace AnimeList.Services
 
             var isMovie = IsMovieFormat((string)entry.attributes.subtype);
 
-            var anime = new Meta
+            var anime = new Meta(entry.attributes.description)
             {
                 id = externalId,
-                //type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
-                type = MetaType.anime.ToString(),
+                type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
                 name = entry.attributes.titles.en,
                 poster = entry.attributes.posterImage != null ? (string)entry.attributes.posterImage.large : null,
-                descriptionRich = entry.attributes.description,
                 //genres = entry.relationships.genres.data.ToObject<List<string>>(),
                 background = entry.attributes.coverImage != null ? (string)entry.attributes.coverImage.large : null
             };
