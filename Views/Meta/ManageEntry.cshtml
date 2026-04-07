@@ -69,10 +69,7 @@
                 <input type="number" id="progressInput" class="manage-entry-input" min="0"
                        max="@(Model.TotalEpisodes ?? 9999)"
                        value="@Model.Progress" />
-                @if (Model.TotalEpisodes.HasValue)
-                {
-                    <span class="manage-entry-total">/ @Model.TotalEpisodes</span>
-                }
+                <span class="manage-entry-total" @(Model.TotalEpisodes.HasValue ? "" : "hidden")>/ @Model.TotalEpisodes</span>
             </div>
         </div>
 
@@ -87,6 +84,7 @@
     var animeId = '@Html.Raw(Model.Id)';
     var isSeries = @Html.Raw(isSeries.ToString().ToLower());
     var hasSeasons = @Html.Raw(hasSeasons.ToString().ToLower());
+    var videos = @Html.Raw(SerializeObject(Model.Videos));
 
     // When season changes, fetch the entry for that season
     $('#seasonSelect').on('change', function () {
@@ -98,9 +96,10 @@
                 if (data.success) {
                     $('#statusSelect').val(data.status || $('#statusSelect option:first').val());
                     $('#progressInput').val(data.progress || 0);
-                    if (data.totalEpisodes) {
-                        $('#progressInput').attr('max', data.totalEpisodes);
-                        $('.manage-entry-total').text('/ ' + data.totalEpisodes).show();
+                    var totalEpisodes = data.totalEpisodes || videos.filter(w => w.season == season).length;
+                    if (totalEpisodes > 0) {
+                        $('#progressInput').attr('max', totalEpisodes);
+                        $('.manage-entry-total').text('/ ' + totalEpisodes).show();
                     } else {
                         $('#progressInput').attr('max', 9999);
                         $('.manage-entry-total').hide();

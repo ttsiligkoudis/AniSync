@@ -115,7 +115,7 @@ namespace AnimeList.Services
             var meta = new Meta
             {
                 id = $"{tmdbPrefix}{tmdbId}",
-                type = MetaType.movie.ToString(),
+                type = MetaType.anime.ToString(),
                 name = result.title,
                 poster = BuildImageUrl((string)result.poster_path),
                 background = BuildImageUrl((string)result.backdrop_path),

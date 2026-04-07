@@ -25,12 +25,13 @@ namespace AnimeList.Controllers
                 name = name,
                 description = "Fetches anime list from Kitsu/AniList to track your anime progress while using stremio",
                 logo = $"{Request.Scheme}://{Request.Host}/logo.png",
-                resources = [ "catalog", "meta", "stream", "subtitles" ],
-                types = [ MetaType.movie.ToString(), MetaType.series.ToString(), MetaType.anime.ToString() ],
+                resources = [ "catalog", "meta", "subtitles", "stream" ],
+                types = [ MetaType.anime.ToString() ],
                 behaviorHints = new BehaviorHints
                 {
                     configurable = true,
                 },
+                idPrefixes = [anilistPrefix, kitsuPrefix, imdbPrefix, tmdbPrefix]
             };
 
             if (isAuthenticated)
@@ -43,23 +44,6 @@ namespace AnimeList.Controllers
                     type = "text",
                     title = "token"
                 });
-
-                if (tokenData.anime_service == AnimeService.Kitsu)
-                    manifest.idPrefixes.Add(kitsuPrefix);
-                else
-                {
-                    manifest.idPrefixes.Add(anilistPrefix);
-                    manifest.idPrefixes.Add(kitsuPrefix);
-                }
-
-                manifest.idPrefixes.Add(imdbPrefix);
-                manifest.idPrefixes.Add(tmdbPrefix);
-            }
-            else
-            {
-                manifest.idPrefixes.Add(kitsuPrefix);
-                manifest.idPrefixes.Add(imdbPrefix);
-                manifest.idPrefixes.Add(tmdbPrefix);
             }
 
             if (isAuthenticated && configiration.showCurrent)

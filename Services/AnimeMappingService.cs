@@ -164,10 +164,14 @@ namespace AnimeList.Services
 
             if (!string.IsNullOrEmpty(imdbId))
             {
+                var mappings = await GetTmdbMapping(mapping.TmdbId);
+
+                mappings.ForEach(f => f.ImdbId = imdbId);
+
                 mapping.ImdbId = imdbId;
                 _enrichedImdbIndex.AddOrUpdate(imdbId,
-                    _ => [mapping],
-                    (_, list) => { lock (list) { list.Add(mapping); } return list; });
+                    _ => mappings,
+                    (_, list) => mappings);
             }
         }
 

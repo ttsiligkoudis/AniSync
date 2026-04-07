@@ -19,5 +19,7 @@ namespace AnimeList.Models
         public int? SelectedSeason { get; set; }
 
         public AnimeService AnimeService { get; set; }
+
+        public dynamic Videos { get; set; }
     }
 }

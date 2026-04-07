@@ -36,11 +36,11 @@ namespace AnimeList.Controllers
 
                     if (tokenData.anime_service == AnimeService.Anilist)
                     {
-                        await _anilistService.UpdateEpisodeProgressAsync(tokenData, animeId, season, episode);
+                        await _anilistService.SaveAnimeEntryAsync(tokenData, animeId, season, episode);
                     }
                     else
                     {
-                        await _kitsuService.UpdateEpisodeProgressAsync(tokenData, animeId, season, episode);
+                        await _kitsuService.SaveAnimeEntryAsync(tokenData, animeId, season, episode);
                     }
                 }
                 else if (parts.Length >= 3
@@ -53,11 +53,11 @@ namespace AnimeList.Controllers
 
                     if (tokenData.anime_service == AnimeService.Anilist)
                     {
-                        await _anilistService.UpdateEpisodeProgressAsync(tokenData, animeId, season, episode);
+                        await _anilistService.SaveAnimeEntryAsync(tokenData, animeId, season, episode);
                     }
                     else
                     {
-                        await _kitsuService.UpdateEpisodeProgressAsync(tokenData, animeId, season, episode);
+                        await _kitsuService.SaveAnimeEntryAsync(tokenData, animeId, season, episode);
                     }
                 }
             }

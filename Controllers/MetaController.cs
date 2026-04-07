@@ -1,6 +1,10 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
+using Newtonsoft.Json.Linq;
+using System.Runtime.CompilerServices;
+using System.Xml.Linq;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace AnimeList.Controllers
 {
@@ -10,45 +14,62 @@ namespace AnimeList.Controllers
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
         private readonly ITmdbService _tmdbService;
+        private readonly ICinemetaService _cinemetaService;
         private readonly IAnimeMappingService _mappingService;
+        private readonly IHttpClientFactory _clientFactory;
 
-        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, ITmdbService tmdbService, IAnimeMappingService mappingService)
+        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService, IHttpClientFactory clientFactory)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _tmdbService = tmdbService;
+            _cinemetaService = cinemetaService;
             _mappingService = mappingService;
+            _clientFactory = clientFactory;
+        }
+
+        private async Task<(dynamic?, bool)> GetByIDInternal(string config, string id, bool deserialize = false)
+        {
+            var tokenData = await _tokenService.GetAccessTokenAsync(config);
+
+            dynamic result = null;
+
+            if (id.StartsWith(imdbPrefix))
+                result = await _cinemetaService.GetAnimeByIdAsync(config, id, Request);
+
+            if (result != null)
+            {
+                if (deserialize) result = DeserializeObject<dynamic>((string)result).meta;
+                return (result, !deserialize);
+            }
+
+            if (id.StartsWith(tmdbPrefix)) 
+                result = await _tmdbService.GetAnimeByIdAsync(id, tokenData);
+            else if (id.StartsWith(kitsuPrefix))
+                result = await _kitsuService.GetAnimeByIdAsync(id, tokenData);
+            else if (id.StartsWith(anilistPrefix))
+                result = await _anilistService.GetAnimeByIdAsync(id, tokenData);
+
+            if (result != null && !string.IsNullOrWhiteSpace(tokenData?.access_token) && !tokenData.anonymousUser)
+            {
+                var manageUrl = $"{Request.Scheme}://{Request.Host}/{config}/Meta/ManageEntry/{id}";
+                result.links.Add(new Link { name = "Manage Entry", category = "Manage", url = manageUrl });
+            }
+
+            return (result, false);
         }
 
         [HttpGet("{config}/[controller]/{metaType}/{id}.json")]
-        public async Task<JsonResult> GetByID(string config, MetaType metaType, string id)
+        public async Task<IActionResult> GetByID(string config, MetaType metaType, string id)
         {
-            var tokenData = await _tokenService.GetAccessTokenAsync(config);
-            var animeService = tokenData?.anime_service ?? AnimeService.Kitsu;
+            (var anime, var serialized) = await GetByIDInternal(config, id);
 
-            if (!string.IsNullOrWhiteSpace(tokenData?.access_token) && IsTokenExpired(tokenData.expiration_date))
-            {
-                return new JsonResult(new { meta = ExpiredMeta() });
-            }
-
-            var anime = id.Contains(tmdbPrefix)
-                ? await _tmdbService.GetAnimeByIdAsync(id, tokenData)
-                : (animeService == AnimeService.Anilist
-                    ? await _anilistService.GetAnimeByIdAsync(id, tokenData)
-                    : await _kitsuService.GetAnimeByIdAsync(id, tokenData));
-
-            if (anime != null && !string.IsNullOrWhiteSpace(tokenData?.access_token) && !tokenData.anonymousUser)
-            {
-                var manageUrl = $"{Request.Scheme}://{Request.Host}/{config}/Meta/ManageEntry/{id}";
-                anime.links.Add(new Link { name = "Manage Entry", category = "Manage", url = manageUrl });
-            }
-
-            return new JsonResult(new { meta = anime });
+            return serialized ? Content(anime, "application/json") : new JsonResult(new { meta = anime });
         }
 
         [HttpGet("{config}/[controller]/ManageEntry/{*id}")]
-        public async Task<IActionResult> ManageEntry(string config, string id)
+        public async Task<IActionResult> ManageEntry(string config, string id, int? season = null, int? episode = null)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync(config);
 
@@ -57,12 +78,7 @@ namespace AnimeList.Controllers
 
             var animeService = tokenData.anime_service;
 
-            // Fetch anime metadata to show image/title
-            var anime = id.Contains(tmdbPrefix)
-                ? await _tmdbService.GetAnimeByIdAsync(id, tokenData)
-                : (animeService == AnimeService.Anilist
-                    ? await _anilistService.GetAnimeByIdAsync(id, tokenData)
-                    : await _kitsuService.GetAnimeByIdAsync(id, tokenData));
+            (var anime, var serialized) = await GetByIDInternal(config, id, true);
 
             var isSeries = anime?.type == MetaType.series.ToString();
 
@@ -70,12 +86,25 @@ namespace AnimeList.Controllers
             var seasons = isSeries ? await _mappingService.GetSeasonsAsync(id) : [];
 
             // Default to first season
-            var selectedSeason = seasons.Count > 0 ? seasons[0] : (int?)null;
+            var selectedSeason = seasons.Count > 0 ? season ?? seasons[0] : (int?)null;
 
             // Fetch the user's entry for this anime + season
             var entry = animeService == AnimeService.Anilist
                 ? await _anilistService.GetAnimeEntryAsync(tokenData, id, selectedSeason)
                 : await _kitsuService.GetAnimeEntryAsync(tokenData, id, selectedSeason);
+
+            var totalEpisodes = entry?.TotalEpisodes;
+
+            if (anime?.videos is List<Video>)
+            {
+                var videos = anime.videos as List<Video> ?? [];
+                totalEpisodes ??= videos.Count(w => !selectedSeason.HasValue || w.season == selectedSeason);
+            }
+            else if (anime?.videos is JArray)
+            {
+                var videos = anime?["videos"] as JArray ?? [];
+                totalEpisodes ??= videos.Count(w => !selectedSeason.HasValue || w["season"]?.ToString() == selectedSeason.ToString());
+            }
 
             var model = new ManageEntryViewModel
             {
@@ -85,11 +114,12 @@ namespace AnimeList.Controllers
                 Poster = anime?.poster,
                 Type = anime?.type ?? MetaType.series.ToString(),
                 Status = entry?.Status,
-                Progress = entry?.Progress ?? 0,
-                TotalEpisodes = entry?.TotalEpisodes,
+                Progress = entry?.Progress ?? episode ?? 0,
+                TotalEpisodes = totalEpisodes,
                 Seasons = seasons,
                 SelectedSeason = selectedSeason,
-                AnimeService = animeService
+                AnimeService = animeService,
+                Videos = anime?.videos
             };
 
             return View("ManageEntry", model);
@@ -125,9 +155,9 @@ namespace AnimeList.Controllers
                 return new JsonResult(new { success = false });
 
             if (tokenData.anime_service == AnimeService.Anilist)
-                await _anilistService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Status, request.Progress);
+                await _anilistService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress, request.Status);
             else
-                await _kitsuService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Status, request.Progress);
+                await _kitsuService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress, request.Status);
 
             return new JsonResult(new { success = true });
         }

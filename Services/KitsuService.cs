@@ -82,11 +82,13 @@ namespace AnimeList.Services
                 animeList.Add(new Meta
                 {
                     id = externalId,
-                    type = IsMovieFormat((string)included.attributes.subtype) ? MetaType.movie.ToString() : MetaType.series.ToString(),
+                    //type = IsMovieFormat((string)included.attributes.subtype) ? MetaType.movie.ToString() : MetaType.series.ToString(),
+                    type = MetaType.anime.ToString(),
                     name = included.attributes.titles.en,
                     poster = included.attributes.posterImage != null ? (string)included.attributes.posterImage.large : null,
                     descriptionRich = included.attributes.description,
                     entryId = list == ListType.Trending_Desc ? null : entry.id,
+                    entryStatus = entry.status,
                 });
             }
 
@@ -123,7 +125,8 @@ namespace AnimeList.Services
             var anime = new Meta
             {
                 id = externalId,
-                type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
+                //type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
+                type = MetaType.anime.ToString(),
                 name = entry.attributes.titles.en,
                 poster = entry.attributes.posterImage != null ? (string)entry.attributes.posterImage.large : null,
                 descriptionRich = entry.attributes.description,
@@ -183,44 +186,6 @@ namespace AnimeList.Services
             return anime;
         }
 
-        public async Task UpdateEpisodeProgressAsync(TokenData tokenData, string animeId, int season, int episode)
-        {
-            if (string.IsNullOrEmpty(animeId)
-                || string.IsNullOrWhiteSpace(tokenData?.user_id)
-                || tokenData?.anonymousUser == true) return;
-
-            var entryId = (await GetAnimeListAsync(tokenData, null, null, animeId)).FirstOrDefault()?.entryId;
-
-            if (string.IsNullOrEmpty(entryId)) return;
-
-            //// Fetch total episode count to determine if this completes the series
-            int? totalEpisodes = await GetTotalEpisodesAsync(tokenData, animeId);
-            bool isCompleted = totalEpisodes.HasValue && totalEpisodes.Value > 0 && episode >= totalEpisodes.Value;
-
-            var obj = new
-            {
-                data = new
-                {
-                    type = "libraryEntries",
-                    id = entryId,
-                    attributes = new
-                    {
-                        progress = episode,
-                        status = isCompleted ? "completed" : "current"
-                    }
-                }
-            };
-
-            var request = new HttpRequestMessage(HttpMethod.Patch, $"{_kitsuApi}/library-entries/{entryId}")
-            {
-                Content = new StringContent(SerializeObject(obj), Encoding.UTF8, "application/vnd.api+json")
-            };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
-
-            var client = _clientFactory.CreateClient();
-            await client.SendAsync(request);
-        }
-
         private async Task<int?> GetTotalEpisodesAsync(TokenData tokenData, string animeId)
         {
             var kitsuId = animeId.Replace(kitsuPrefix, "");
@@ -266,7 +231,7 @@ namespace AnimeList.Services
             };
         }
 
-        public async Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, string status, int progress)
+        public async Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, int progress, string status = null)
         {
             var resolvedKitsuId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu, season);
 
@@ -274,9 +239,18 @@ namespace AnimeList.Services
 
             var kitsuAnimeId = resolvedKitsuId.Replace(kitsuPrefix, "");
 
-            var entryId = (await GetAnimeListAsync(tokenData, null, null, $"{kitsuPrefix}{kitsuAnimeId}")).FirstOrDefault()?.entryId;
+            var meta = (await GetAnimeListAsync(tokenData, null, null, $"{kitsuPrefix}{kitsuAnimeId}")).FirstOrDefault();
 
-            if (!string.IsNullOrEmpty(entryId))
+            if (string.IsNullOrEmpty(status))
+            {
+                status = meta?.entryStatus;
+
+                //int? totalEpisodes = await GetTotalEpisodesAsync(tokenData, resolvedKitsuId);
+                //bool isCompleted = totalEpisodes.HasValue && totalEpisodes.Value > 0 && progress >= totalEpisodes.Value;
+                //status = GetListTypeString(isCompleted ? ListType.Completed : ListType.Current, tokenData);
+            }
+
+            if (!string.IsNullOrEmpty(meta?.entryId))
             {
                 // Update existing entry
                 var obj = new
@@ -284,7 +258,7 @@ namespace AnimeList.Services
                     data = new
                     {
                         type = "libraryEntries",
-                        id = entryId,
+                        id = meta?.entryId,
                         attributes = new
                         {
                             progress,
@@ -293,7 +267,7 @@ namespace AnimeList.Services
                     }
                 };
 
-                var request = new HttpRequestMessage(HttpMethod.Patch, $"{_kitsuApi}/library-entries/{entryId}")
+                var request = new HttpRequestMessage(HttpMethod.Patch, $"{_kitsuApi}/library-entries/{meta?.entryId}")
                 {
                     Content = new StringContent(SerializeObject(obj), Encoding.UTF8, "application/vnd.api+json")
                 };

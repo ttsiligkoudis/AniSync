@@ -29,12 +29,12 @@ namespace AnimeList.Models
             get
             {
                 if (SeasonRaw == null || !SeasonRaw.HasValues)
-                    return 1; // default
+                    return null; // default
 
                 var firstValue = SeasonRaw.Properties().FirstOrDefault()?.Value;
 
                 if (firstValue == null || firstValue.Type == JTokenType.Null)
-                    return 1; // default
+                    return null; // default
 
                 return firstValue.Value<int?>();
             }

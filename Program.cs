@@ -24,6 +24,7 @@ builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAnilistService, AnilistService>();
 builder.Services.AddScoped<IKitsuService, KitsuService>();
 builder.Services.AddScoped<ITmdbService, TmdbService>();
+builder.Services.AddScoped<ICinemetaService, CinemetaService>();
 
 var app = builder.Build();
 

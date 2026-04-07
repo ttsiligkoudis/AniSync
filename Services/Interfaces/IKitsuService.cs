@@ -7,7 +7,6 @@ namespace AnimeList.Services.Interfaces
     {
         Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null);
         Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData);
-        Task UpdateEpisodeProgressAsync(TokenData tokenData, string animeId, int season, int episode);
 
         /// <summary>
         /// Fetches the user's library entry (status, progress) for a specific anime.
@@ -17,7 +16,7 @@ namespace AnimeList.Services.Interfaces
         /// <summary>
         /// Saves (creates or updates) the user's library entry with the given status and progress.
         /// </summary>
-        Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, string status, int progress);
+        Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, int progress, string status = null);
     }
 }
 

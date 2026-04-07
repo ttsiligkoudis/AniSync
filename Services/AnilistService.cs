@@ -1,6 +1,5 @@
 ﻿using AnimeList.Models;
 using AnimeList.Services.Interfaces;
-using System.Collections;
 using System.Formats.Tar;
 using System.Net.Http.Headers;
 
@@ -217,17 +216,22 @@ namespace AnimeList.Services
                     if (!genres.Contains(genre)) continue;
                 }
 
+                var isMovie = false;// IsMovieFormat((string)tmpEntry.format);
+
                 var mapping = await _mappingService.GetAnilistMapping((string)tmpEntry.id);
 
-                var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                                 !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
-                                 mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
-                                 $"{anilistPrefix}{tmpEntry.id}";
+                var externalId = isMovie 
+                    ? (mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
+                      $"{anilistPrefix}{tmpEntry.id}")
+                    : (!string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                      !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
+                      mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
+                      $"{anilistPrefix}{tmpEntry.id}");
 
                 var meta = new Meta
                 {
                     id = externalId,
-                    type = IsMovieFormat((string)tmpEntry.format) ? MetaType.movie.ToString() : MetaType.series.ToString(),
+                    type = MetaType.anime.ToString(),
                     name = string.IsNullOrEmpty((string)tmpEntry.title.english) ? tmpEntry.title.romaji : tmpEntry.title.english,
                     poster = tmpEntry.coverImage.large,
                     descriptionRich = tmpEntry.description,
@@ -320,18 +324,22 @@ namespace AnimeList.Services
             var content = await response.Content.ReadAsStringAsync();
             var result = DeserializeObject<dynamic>(content).data.Media;
 
+            var isMovie = IsMovieFormat((string)result.format);
+
             var mapping = await _mappingService.GetAnilistMapping((string)result.id);
 
-            var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                             !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
-                             mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
-                             $"{anilistPrefix}{result.id}";
+            var externalId = isMovie
+                ? (mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
+                  $"{anilistPrefix}{result.id}")
+                : (!string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                  !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
+                  mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
+                  $"{anilistPrefix}{result.id}");
 
-            var isMovie = IsMovieFormat((string)result.format);
             var anime = new Meta
             {
                 id = externalId,
-                type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
+                type = isMovie ? MetaType.series.ToString() : MetaType.movie.ToString(),
                 name = string.IsNullOrEmpty((string)result.title.english) ? result.title.romaji : result.title.english,
                 poster = result.coverImage.large,
                 descriptionRich = result.description,
@@ -398,51 +406,6 @@ namespace AnimeList.Services
             }
 
             return season;
-        }
-
-        public async Task UpdateEpisodeProgressAsync(TokenData tokenData, string animeId, int season, int episode)
-        {
-            var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist, season);
-
-            if (string.IsNullOrEmpty(resolvedAnimeId)) return;
-
-            animeId = $"{anilistPrefix}{resolvedAnimeId}";
-
-            var meta = (await GetAnimeListAsync(tokenData, animeId: animeId)).FirstOrDefault();
-
-            if (string.IsNullOrEmpty(meta?.entryId)) return;
-
-            //// Fetch total episode count to determine if this completes the series
-            //int? totalEpisodes = await GetTotalEpisodesAsync(tokenData, resolvedAnimeId);
-            //bool isCompleted = totalEpisodes.HasValue && totalEpisodes.Value > 0 && episode >= totalEpisodes.Value;
-
-            var requestBody = SerializeObject(new
-            {
-                query = @"
-                    mutation ($listEntryId: Int, $mediaId: Int, $progress: Int, $status: MediaListStatus) {
-                        SaveMediaListEntry(id: $listEntryId, mediaId: $mediaId, progress: $progress, status: $status) {
-                            id
-                            progress
-                            status
-                        }
-                    }",
-                variables = new
-                {
-                    listEntryId = meta.entryId,
-                    mediaId = resolvedAnimeId,
-                    progress = episode,
-                    status = meta.entryStatus //GetListTypeString(isCompleted ? ListType.Completed : ListType.Current, tokenData)
-                }
-            });
-
-            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
-            {
-                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
-            };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
-
-            var client = _clientFactory.CreateClient();
-            await client.SendAsync(request);
         }
 
         private async Task<int?> GetTotalEpisodesAsync(TokenData tokenData, string resolvedAnimeId)
@@ -527,11 +490,22 @@ namespace AnimeList.Services
             return entry;
         }
 
-        public async Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, string status, int progress)
+        public async Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, int progress, string status = null)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist, season);
 
             if (string.IsNullOrEmpty(resolvedAnimeId)) return;
+
+            if (string.IsNullOrEmpty(status))
+            {
+                animeId = $"{anilistPrefix}{resolvedAnimeId}";
+                var meta = (await GetAnimeListAsync(tokenData, animeId: animeId)).FirstOrDefault();
+                status = meta?.entryStatus;
+
+                //int? totalEpisodes = await GetTotalEpisodesAsync(tokenData, resolvedAnimeId);
+                //bool isCompleted = totalEpisodes.HasValue && totalEpisodes.Value > 0 && progress >= totalEpisodes.Value;
+                //status = GetListTypeString(isCompleted ? ListType.Completed : ListType.Current, tokenData)
+            }
 
             var requestBody = SerializeObject(new
             {
