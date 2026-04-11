@@ -67,11 +67,11 @@ namespace AnimeList.Services
             {
                 dynamic included = list == ListType.Trending_Desc
                     ? entry
-                    : includedById.GetValueOrDefault((string)entry.relationships.anime.data.id);
+                    : includedById.GetValueOrDefault((string)SafeGet<string>(entry, "relationships", "anime", "data", "id"));
 
                 if (included == null) continue;
 
-                if (list == ListType.Current && (string)included.attributes.status is "tba" or "unreleased" or "upcoming") continue;
+                if (list == ListType.Current && SafeGet<string>(included, "attributes", "status") is "tba" or "unreleased" or "upcoming") continue;
 
                 var mapping = await _mappingService.GetKitsuMapping((string)included.id);
 
@@ -79,14 +79,14 @@ namespace AnimeList.Services
                                  !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
                                  $"{kitsuPrefix}{included.id}";
 
-                animeList.Add(new Meta(included.attributes.description)
+                animeList.Add(new Meta(SafeGet<string>(included, "attributes", "description"))
                 {
                     id = externalId,
                     type = MetaType.anime.ToString(),
-                    name = included.attributes.titles.en,
-                    poster = included.attributes.posterImage != null ? (string)included.attributes.posterImage.large : null,
-                    entryId = list == ListType.Trending_Desc ? null : entry.id,
-                    entryStatus = entry.status,
+                    name = SafeGet<string>(included, "attributes", "titles", "en"),
+                    poster = SafeGet<string>(included, "attributes", "posterImage", "large"),
+                    entryId = list == ListType.Trending_Desc ? null : SafeGet<string>(entry, "id"),
+                    entryStatus = SafeGet<string>(entry, "status"),
                 });
             }
 
@@ -118,22 +118,23 @@ namespace AnimeList.Services
                              !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
                              $"{kitsuPrefix}{entry.id}";
 
-            var isMovie = IsMovieFormat((string)entry.attributes.subtype);
+            var isMovie = IsMovieFormat(SafeGet<string>(entry, "attributes", "subtype"));
 
-            var anime = new Meta(entry.attributes.description)
+            var anime = new Meta(SafeGet<string>(entry, "attributes", "description"))
             {
                 id = externalId,
                 type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
-                name = entry.attributes.titles.en,
-                poster = entry.attributes.posterImage != null ? (string)entry.attributes.posterImage.large : null,
-                //genres = entry.relationships.genres.data.ToObject<List<string>>(),
-                background = entry.attributes.coverImage != null ? (string)entry.attributes.coverImage.large : null
+                name = SafeGet<string>(entry, "attributes", "titles", "en"),
+                genres = SafeGet<List<string>>(entry, "relationships", "genres", "data"),
+                background = SafeGet<string>(entry, "attributes", "posterImage", "Large") ?? SafeGet<string>(entry, "attributes", "coverImage", "Large")
             };
 
-            if (!string.IsNullOrEmpty((string)entry.attributes.youtubeVideoId))
+            var youtubeId = SafeGet<string>(entry, "attributes", "youtubeVideoId");
+
+            if (!string.IsNullOrEmpty(youtubeId))
             {
-                anime.trailers.Add(new Trailer(entry.attributes.youtubeVideoId));
-                anime.trailerStreams.Add(new TrailerStream(entry.attributes.youtubeVideoId, anime.name));
+                anime.trailers.Add(new Trailer(youtubeId));
+                anime.trailerStreams.Add(new TrailerStream(youtubeId, anime.name));
             }
 
             if (!isMovie)
@@ -142,35 +143,19 @@ namespace AnimeList.Services
 
                 foreach (var episode in results.included)
                 {
-                    object seasonNumber = 1;
-                    object thumbnail = null;
-
-                    var jObj = (JObject)episode.attributes;
-
-                    var token = jObj["seasonNumber"];
-                    if (token != null && token.Type != JTokenType.Null)
-                    {
-                        seasonNumber = token;
-                    }
-
-                    token = jObj["thumbnail"];
-                    if (token != null && token.Type != JTokenType.Null)
-                    {
-                        thumbnail = token;
-                    }
-
+                    var seasonNumber = SafeGet<int>(episode, "attributes", "seasonNumber");
+                    var thumbnail = SafeGet<string>(episode, "attributes", "thumbnail");
+                    var title = SafeGet<string>(episode, "attributes", "canonicalTitle");
                     var video = new Video
                     {
-                        id = $"{externalId}:{episode.attributes.seasonNumber}:{episode.attributes.number}",
-                        thumbnail = thumbnail?.ToString(),
-                        season = int.Parse(seasonNumber.ToString()),
+                        id = $"{externalId}:{SafeGet<string>(episode, "attributes", "number")}",
+                        thumbnail = thumbnail,
+                        season = seasonNumber,
                         episode = episodeNumber
                     };
 
                     video.id = $"{id}:{video.episode}";
-                    video.title = string.IsNullOrEmpty((string)episode.attributes.canonicalTitle)
-                        ? $"Episode {video.episode}"
-                        : episode.attributes.canonicalTitle;
+                    video.title = title ? $"Episode {video.episode}" : title;
 
                     if (string.IsNullOrEmpty(video.title)) continue;
 
@@ -200,7 +185,7 @@ namespace AnimeList.Services
             var content = await response.Content.ReadAsStringAsync();
             var result = DeserializeObject<dynamic>(content);
 
-            return (int?)result?.data?.attributes?.episodeCount;
+            return SafeGet<int?>(result, "data", "attributes", "episodeCount");
         }
 
         public async Task<AnimeEntry> GetAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)

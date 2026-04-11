@@ -149,5 +149,34 @@ namespace AnimeList
                 ? list.ToString().ToLower()
                 : list.ToString().ToUpper();
         }
+
+        public static object SafeGet(dynamic obj, params string[] path)
+        {
+            object current = obj;
+
+            foreach (var part in path)
+            {
+                if (current == null) return null;
+
+                try
+                {
+                    current = ((dynamic)current).GetType()
+                        .GetProperty(part)?
+                        .GetValue(current, null);
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+
+            return current;
+        }
+
+        public static T SafeGet<T>(dynamic obj, params string[] path)
+        {
+            var result = SafeGet(obj, path);
+            return result is T value ? value : default;
+        }
     }
 }

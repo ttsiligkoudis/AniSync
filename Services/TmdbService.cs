@@ -47,19 +47,17 @@ namespace AnimeList.Services
             var content = await response.Content.ReadAsStringAsync();
             var result = DeserializeObject<dynamic>(content);
 
-            var externalId = (string)result.external_ids?.imdb_id;
+            var externalId = (string)SafeGet<string>(result, "idexternal_ids", "imdb_id");
             externalId = string.IsNullOrEmpty(externalId) ? $"{tmdbPrefix}{tmdbId}" : externalId;
 
-            var meta = new Meta(result.overview)
+            var meta = new Meta(SafeGet<string>(result, "overview"))
             {
                 id = externalId,
                 type = MetaType.series.ToString(),
                 name = result.name,
-                poster = BuildImageUrl((string)result.poster_path),
-                background = BuildImageUrl((string)result.backdrop_path),
-                genres = ((IEnumerable<dynamic>)result.genres)
-                    .Select(g => (string)g.name)
-                    .ToList(),
+                poster = BuildImageUrl(SafeGet<string>(result, "poster_path")),
+                background = BuildImageUrl(SafeGet<string>(result, "backdrop_path")),
+                genres = ((IEnumerable<dynamic>)result.genres).Select(g => (string)g.name).ToList(),
             };
 
             AddTrailers(meta, result.videos?.results);

@@ -8,7 +8,7 @@ namespace AnimeList.Services
         private readonly IHttpClientFactory _clientFactory;
         private readonly ITokenService _tokenService;
         private readonly IAnimeMappingService _animeMapping;
-        private readonly string _cinemetaApi = "https://cinemeta-live.strem.io/meta";
+        private readonly string _cinemetaApi = "https://v3-cinemeta.strem.io/meta"; //"https://cinemeta-live.strem.io/meta";
 
         public CinemetaService(IHttpClientFactory clientFactory, ITokenService tokenService, IAnimeMappingService animeMapping)
         {
