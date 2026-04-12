@@ -1,3 +1,4 @@
+using AnimeList.Models;
 using AnimeList.Services;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
@@ -8,12 +9,12 @@ namespace AnimeList.Controllers
     public class StreamController : ControllerBase
     {
         private readonly ITokenService _tokenService;
-        private readonly IAnimeMappingService _animeMapping;
+        private readonly IAnimeMappingService _mappingService;
 
-        public StreamController(ITokenService tokenService, IAnimeMappingService animeMapping)
+        public StreamController(ITokenService tokenService, IAnimeMappingService mappingService)
         {
             _tokenService = tokenService;
-            _animeMapping = animeMapping;
+            _mappingService = mappingService;
         }
 
         [HttpGet("{config}/stream/{type}/{id}.json")]
@@ -53,6 +54,13 @@ namespace AnimeList.Controllers
             }
 
             if (string.IsNullOrEmpty(animeId))
+            {
+                return new JsonResult(new { streams = Array.Empty<object>() });
+            }
+
+            var resolvedAnimeId = await _mappingService.GetIdByService(animeId, tokenData.anime_service);
+
+            if (string.IsNullOrEmpty(resolvedAnimeId))
             {
                 return new JsonResult(new { streams = Array.Empty<object>() });
             }

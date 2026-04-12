@@ -227,10 +227,12 @@ namespace AnimeList.Services
                     mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
                     $"{anilistPrefix}{tmpEntry.id}";
 
+                var isMovie = IsMovieFormat((string)tmpEntry.format);
+
                 var meta = new Meta(tmpEntry.description)
                 {
                     id = externalId,
-                    type = MetaType.anime.ToString(),
+                    type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
                     name = string.IsNullOrEmpty((string)tmpEntry.title.english) ? tmpEntry.title.romaji : tmpEntry.title.english,
                     poster = tmpEntry.coverImage.large,
                     entryId = entryId,

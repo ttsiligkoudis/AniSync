@@ -35,14 +35,14 @@ public class HomeController : Controller
             }
 
             ViewBag.AnonymousUser = tokenData.anonymousUser;
-            ViewBag.TokenData = Uri.EscapeDataString(CompressString(SerializeObject(tokenData, Formatting.None, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore })));
+            ViewBag.TokenData = CompressToUrlSafe(SerializeObject(tokenData, Formatting.None, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore }));
         }
 
         ViewBag.AnimeService = tokenData?.anime_service ?? AnimeService.Kitsu;
 
         if (!string.IsNullOrEmpty(config))
         {
-            var configuration = DeserializeObject<Configuration>(config);
+            var configuration = DecodeConfig(config);
 
             ViewBag.ShowCurrent = configuration?.showCurrent;
             ViewBag.ShowCompleted = configuration?.showCompleted;

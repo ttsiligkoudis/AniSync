@@ -79,10 +79,12 @@ namespace AnimeList.Services
                                  !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
                                  $"{kitsuPrefix}{included.id}";
 
+                var isMovie = IsMovieFormat(SafeGet<string>(included, "attributes", "subtype"));
+
                 animeList.Add(new Meta(SafeGet<string>(included, "attributes", "description"))
                 {
                     id = externalId,
-                    type = MetaType.anime.ToString(),
+                    type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
                     name = SafeGet<string>(included, "attributes", "titles", "en"),
                     poster = SafeGet<string>(included, "attributes", "posterImage", "large"),
                     entryId = list == ListType.Trending_Desc ? null : SafeGet<string>(entry, "id"),

@@ -9,7 +9,7 @@ namespace AnimeList.Controllers
         [HttpGet("{config}/manifest.json")]
         public JsonResult Get(string config)
         {
-            var configiration = DeserializeObject<Configuration>(config);
+            var configiration = DecodeConfig(config);
             var isAuthenticated = !string.IsNullOrWhiteSpace(configiration?.tokenData);
             TokenData? tokenData = null;
             var name = "AniSync";
@@ -26,7 +26,7 @@ namespace AnimeList.Controllers
                 description = "Fetches anime list from Kitsu/AniList to track your anime progress while using stremio",
                 logo = $"{Request.Scheme}://{Request.Host}/logo.png",
                 resources = [ "catalog", "meta", "subtitles", "stream" ],
-                types = [ MetaType.anime.ToString() ],
+                types = [ MetaType.movie.ToString(), MetaType.series.ToString() ],
                 behaviorHints = new BehaviorHints
                 {
                     configurable = true,
@@ -36,7 +36,7 @@ namespace AnimeList.Controllers
 
             if (isAuthenticated)
             {
-                tokenData = DeserializeObject<TokenData>(DecompressString(Uri.UnescapeDataString(configiration.tokenData)));
+                tokenData = DeserializeObject<TokenData>(configiration.tokenData);
 
                 manifest.config.Add(new Config
                 {

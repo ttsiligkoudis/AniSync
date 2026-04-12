@@ -137,9 +137,26 @@ else
     var url = $('#url').attr('href');
     var stremioUrl = $('#stremioUrl').attr('href');
 
-    var config = {
-        tokenData: @Html.Raw(SerializeObject(tokenDataStr, new JsonSerializerSettings { DefaultValueHandling = DefaultValueHandling.Ignore, NullValueHandling = NullValueHandling.Ignore })),
-    };
+    // Pre-compressed token bytes from the server (Base64Url of GZip data)
+    var tokenDataStr = '@(tokenDataStr ?? "")';
+
+    function base64UrlToBytes(str) {
+        if (!str) return new Uint8Array(0);
+        var base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+        while (base64.length % 4) base64 += '=';
+        var binary = atob(base64);
+        var bytes = new Uint8Array(binary.length);
+        for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return bytes;
+    }
+
+    function bytesToBase64Url(bytes) {
+        var binary = '';
+        for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    }
+
+    var tokenBytes = base64UrlToBytes(tokenDataStr);
 
     changeUrl();
 
@@ -196,25 +213,23 @@ else
     });
 
     function changeUrl() {
-        delete config.showCurrent;
-        delete config.showCompleted;
-        delete config.showTrending;
-        delete config.showSeasonal;
-        delete config.discoverOnlyCurrent;
-        delete config.discoverOnlyCompleted;
-        delete config.discoverOnlyTrending;
-        delete config.discoverOnlySeasonal;
+        var flags = 0;
+        if ($('#showCurrent').is(':checked'))          flags |= 0x01;
+        if ($('#showCompleted').is(':checked'))         flags |= 0x02;
+        if ($('#showTrending').is(':checked'))          flags |= 0x04;
+        if ($('#showSeasonal').is(':checked'))           flags |= 0x08;
+        if ($('#discoverOnlyCurrent').is(':checked'))   flags |= 0x10;
+        if ($('#discoverOnlyCompleted').is(':checked')) flags |= 0x20;
+        if ($('#discoverOnlyTrending').is(':checked'))  flags |= 0x40;
+        if ($('#discoverOnlySeasonal').is(':checked'))  flags |= 0x80;
 
-        if ($('#showCurrent').is(':checked')) config.showCurrent = true;
-        if ($('#showCompleted').is(':checked')) config.showCompleted = true;
-        if ($('#showTrending').is(':checked')) config.showTrending = true;
-        if ($('#showSeasonal').is(':checked')) config.showSeasonal = true;
-        if ($('#discoverOnlyCurrent').is(':checked')) config.discoverOnlyCurrent = true;
-        if ($('#discoverOnlyCompleted').is(':checked')) config.discoverOnlyCompleted = true;
-        if ($('#discoverOnlyTrending').is(':checked')) config.discoverOnlyTrending = true;
-        if ($('#discoverOnlySeasonal').is(':checked')) config.discoverOnlySeasonal = true;
+        // Binary v1: [0x01 version][flags byte][pre-compressed token bytes]
+        var payload = new Uint8Array(2 + tokenBytes.length);
+        payload[0] = 0x01;
+        payload[1] = flags;
+        payload.set(tokenBytes, 2);
 
-        var tempUrl = '/' + encodeURIComponent(JSON.stringify(config)) + '/manifest.json';
+        var tempUrl = '/' + bytesToBase64Url(payload) + '/manifest.json';
         $('#url').attr('href', url + tempUrl);
         $('#stremioUrl').attr('href', stremioUrl + tempUrl);
     }

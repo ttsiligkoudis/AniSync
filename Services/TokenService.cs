@@ -25,9 +25,9 @@ namespace AnimeList.Services
 
             if (!string.IsNullOrEmpty(config))
             {
-                var configuration = DeserializeObject<Configuration>(config);
+                var configuration = DecodeConfig(config);
 
-                tokenDataStr = DecompressString(Uri.UnescapeDataString(configuration.tokenData));
+                tokenDataStr = configuration.tokenData;
             }
             else
             {

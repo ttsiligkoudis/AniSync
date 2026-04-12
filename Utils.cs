@@ -143,6 +143,124 @@ namespace AnimeList
             return Encoding.UTF8.GetString(buffer);
         }
 
+        /// <summary>
+        /// Compresses text using GZip and returns a URL-safe Base64 string (no padding, +→-, /→_).
+        /// </summary>
+        public static string CompressToUrlSafe(string text)
+        {
+            byte[] data = Encoding.UTF8.GetBytes(text);
+            using var output = new MemoryStream();
+            using (var gzip = new GZipStream(output, CompressionMode.Compress))
+            {
+                gzip.Write(data, 0, data.Length);
+            }
+            return Base64UrlEncode(output.ToArray());
+        }
+
+        /// <summary>
+        /// Decompresses a URL-safe Base64 GZip string back to the original text.
+        /// </summary>
+        public static string DecompressFromUrlSafe(string compressedText)
+        {
+            byte[] data = Base64UrlDecode(compressedText);
+            return DecompressBytes(data);
+        }
+
+        /// <summary>
+        /// Encodes raw bytes as a URL-safe Base64 string (no padding, +→-, /→_).
+        /// </summary>
+        public static string Base64UrlEncode(byte[] data)
+        {
+            return Convert.ToBase64String(data)
+                .Replace('+', '-')
+                .Replace('/', '_')
+                .TrimEnd('=');
+        }
+
+        /// <summary>
+        /// Decodes a URL-safe Base64 string back to raw bytes.
+        /// </summary>
+        public static byte[] Base64UrlDecode(string text)
+        {
+            string base64 = text.Replace('-', '+').Replace('_', '/');
+            switch (base64.Length % 4)
+            {
+                case 2: base64 += "=="; break;
+                case 3: base64 += "="; break;
+            }
+            return Convert.FromBase64String(base64);
+        }
+
+        private static string DecompressBytes(byte[] data)
+        {
+            using var input = new MemoryStream(data);
+            using var gzip = new GZipStream(input, CompressionMode.Decompress);
+            using var output = new MemoryStream();
+            gzip.CopyTo(output);
+            return Encoding.UTF8.GetString(output.ToArray());
+        }
+
+        /// <summary>
+        /// Decodes a config route parameter into a <see cref="Configuration"/>.
+        /// Supports three formats for backward compatibility:
+        /// <list type="bullet">
+        ///   <item>Legacy raw JSON (starts with '{')</item>
+        ///   <item>GZip-compressed JSON via Base64Url (GZip magic bytes 0x1F 0x8B)</item>
+        ///   <item>Binary v1: [0x01][flags bitmask][GZip-compressed tokenData bytes]</item>
+        /// </list>
+        /// The returned <see cref="Configuration.tokenData"/> is always raw token JSON.
+        /// </summary>
+        public static Configuration DecodeConfig(string config)
+        {
+            if (string.IsNullOrEmpty(config))
+                return null;
+
+            // Legacy format: raw JSON starts with '{'
+            if (config.StartsWith('{'))
+            {
+                var result = DeserializeObject<Configuration>(config);
+                if (!string.IsNullOrEmpty(result?.tokenData))
+                    result.tokenData = DecompressString(Uri.UnescapeDataString(result.tokenData));
+                return result;
+            }
+
+            byte[] data = Base64UrlDecode(config);
+
+            // Previous format: GZip-compressed JSON (magic bytes 0x1F 0x8B)
+            if (data.Length >= 2 && data[0] == 0x1F && data[1] == 0x8B)
+            {
+                string json = DecompressBytes(data);
+                var result = DeserializeObject<Configuration>(json);
+                if (!string.IsNullOrEmpty(result?.tokenData))
+                    result.tokenData = DecompressString(Uri.UnescapeDataString(result.tokenData));
+                return result;
+            }
+
+            // Binary v1 format: [0x01][flags][GZip tokenData bytes...]
+            if (data.Length >= 2 && data[0] == 0x01)
+            {
+                byte flags = data[1];
+                string tokenJson = data.Length > 2
+                    ? DecompressBytes(data[2..])
+                    : null;
+
+                return new Configuration
+                {
+                    tokenData = tokenJson,
+                    showCurrent = (flags & 0x01) != 0,
+                    showCompleted = (flags & 0x02) != 0,
+                    showTrending = (flags & 0x04) != 0,
+                    showSeasonal = (flags & 0x08) != 0,
+                    discoverOnlyCurrent = (flags & 0x10) != 0,
+                    discoverOnlyCompleted = (flags & 0x20) != 0,
+                    discoverOnlyTrending = (flags & 0x40) != 0,
+                    discoverOnlySeasonal = (flags & 0x80) != 0,
+                };
+            }
+
+            throw new ArgumentException("Unknown config format");
+        }
+
         public static string GetListTypeString(ListType list, TokenData tokenData)
         {
             return (tokenData?.anime_service ?? AnimeService.Kitsu) == AnimeService.Kitsu
