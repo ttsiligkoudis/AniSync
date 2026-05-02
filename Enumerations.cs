@@ -26,6 +26,7 @@
             Dropped,
             Repeating,
             Search,
+            Airing,
         }
 
         public enum LinkCategory

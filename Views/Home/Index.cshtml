@@ -14,6 +14,7 @@
     bool showPaused = ViewBag.ShowPaused ?? false;
     bool showDropped = ViewBag.ShowDropped ?? false;
     bool showRepeating = ViewBag.ShowRepeating ?? false;
+    bool showAiring = ViewBag.ShowAiring ?? false;
     bool discoverOnlyCurrent = ViewBag.DiscoverOnlyCurrent ?? false;
     bool discoverOnlyCompleted = ViewBag.DiscoverOnlyCompleted ?? false;
     bool discoverOnlyTrending = ViewBag.DiscoverOnlyTrending ?? false;
@@ -22,6 +23,7 @@
     bool discoverOnlyPaused = ViewBag.DiscoverOnlyPaused ?? false;
     bool discoverOnlyDropped = ViewBag.DiscoverOnlyDropped ?? false;
     bool discoverOnlyRepeating = ViewBag.DiscoverOnlyRepeating ?? false;
+    bool discoverOnlyAiring = ViewBag.DiscoverOnlyAiring ?? false;
 }
 
 <h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
@@ -144,6 +146,17 @@
             </label>
             <label class="switch @(!showSeasonal ? "switch-disabled" : "")">
                 <input type="checkbox" id="discoverOnlySeasonal" class="discoverCheck" @(discoverOnlySeasonal ? "checked" : "") @(!showSeasonal ? "disabled" : "") />
+                <span class="slider"></span>
+            </label>
+            <hr class="option-sep" />
+
+            <span class="option-name">Airing This Week</span>
+            <label class="switch">
+                <input type="checkbox" id="showAiring" class="catalogCheck" @(showAiring ? "checked" : "") />
+                <span class="slider"></span>
+            </label>
+            <label class="switch @(!showAiring ? "switch-disabled" : "")">
+                <input type="checkbox" id="discoverOnlyAiring" class="discoverCheck" @(discoverOnlyAiring ? "checked" : "") @(!showAiring ? "disabled" : "") />
                 <span class="slider"></span>
             </label>
         </div>
@@ -288,12 +301,17 @@ else
         if ($('#discoverOnlyDropped').is(':checked'))    flags2 |= 0x40;
         if ($('#discoverOnlyRepeating').is(':checked'))  flags2 |= 0x80;
 
-        // Binary v2: [0x02 version][flags1][flags2][pre-compressed token bytes]
-        var payload = new Uint8Array(3 + tokenBytes.length);
-        payload[0] = 0x02;
+        var flags3 = 0;
+        if ($('#showAiring').is(':checked'))             flags3 |= 0x01;
+        if ($('#discoverOnlyAiring').is(':checked'))     flags3 |= 0x10;
+
+        // Binary v3: [0x03 version][flags1][flags2][flags3][pre-compressed token bytes]
+        var payload = new Uint8Array(4 + tokenBytes.length);
+        payload[0] = 0x03;
         payload[1] = flags1;
         payload[2] = flags2;
-        payload.set(tokenBytes, 3);
+        payload[3] = flags3;
+        payload.set(tokenBytes, 4);
 
         var tempUrl = '/' + bytesToBase64Url(payload) + '/manifest.json';
         $('#url').attr('href', url + tempUrl);

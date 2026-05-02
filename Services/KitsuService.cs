@@ -31,6 +31,11 @@ namespace AnimeList.Services
 
         public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null)
         {
+            // Kitsu has no native airing-schedule endpoint; delegate to the AniList fallback
+            // and translate ids back to Kitsu for downstream meta/manage flows.
+            if (list == ListType.Airing)
+                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.Kitsu, skip);
+
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu);
             var isUserList = !list.HasValue || _userLists.Contains(list.Value);
 

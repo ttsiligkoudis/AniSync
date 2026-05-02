@@ -259,12 +259,13 @@ namespace AnimeList
 
         /// <summary>
         /// Decodes a config route parameter into a <see cref="Configuration"/>.
-        /// Supports four formats for backward compatibility:
+        /// Supports five formats for backward compatibility:
         /// <list type="bullet">
         ///   <item>Legacy raw JSON (starts with '{')</item>
         ///   <item>GZip-compressed JSON via Base64Url (GZip magic bytes 0x1F 0x8B)</item>
         ///   <item>Binary v1: [0x01][flags byte][GZip tokenData] — 8 catalog flags</item>
         ///   <item>Binary v2: [0x02][flags1][flags2][GZip tokenData] — 16 catalog flags</item>
+        ///   <item>Binary v3: [0x03][flags1][flags2][flags3][GZip tokenData] — 24 catalog flags</item>
         /// </list>
         /// The returned <see cref="Configuration.tokenData"/> is always raw token JSON.
         /// </summary>
@@ -296,16 +297,20 @@ namespace AnimeList
 
             // Binary v1: [0x01][flags][GZip tokenData]
             if (data.Length >= 2 && data[0] == 0x01)
-                return DecodeBinaryConfig(data, headerLen: 2, flags1: data[1], flags2: 0);
+                return DecodeBinaryConfig(data, headerLen: 2, flags1: data[1], flags2: 0, flags3: 0);
 
             // Binary v2: [0x02][flags1][flags2][GZip tokenData]
             if (data.Length >= 3 && data[0] == 0x02)
-                return DecodeBinaryConfig(data, headerLen: 3, flags1: data[1], flags2: data[2]);
+                return DecodeBinaryConfig(data, headerLen: 3, flags1: data[1], flags2: data[2], flags3: 0);
+
+            // Binary v3: [0x03][flags1][flags2][flags3][GZip tokenData]
+            if (data.Length >= 4 && data[0] == 0x03)
+                return DecodeBinaryConfig(data, headerLen: 4, flags1: data[1], flags2: data[2], flags3: data[3]);
 
             throw new ArgumentException("Unknown config format");
         }
 
-        private static Configuration DecodeBinaryConfig(byte[] data, int headerLen, byte flags1, byte flags2)
+        private static Configuration DecodeBinaryConfig(byte[] data, int headerLen, byte flags1, byte flags2, byte flags3)
         {
             var tokenJson = data.Length > headerLen ? DecompressBytes(data[headerLen..]) : null;
             return new Configuration
@@ -327,6 +332,8 @@ namespace AnimeList
                 discoverOnlyPaused = (flags2 & 0x20) != 0,
                 discoverOnlyDropped = (flags2 & 0x40) != 0,
                 discoverOnlyRepeating = (flags2 & 0x80) != 0,
+                showAiring = (flags3 & 0x01) != 0,
+                discoverOnlyAiring = (flags3 & 0x10) != 0,
             };
         }
 

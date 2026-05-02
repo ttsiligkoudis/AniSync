@@ -50,6 +50,7 @@ public class HomeController : Controller
             ViewBag.ShowPaused = configuration?.showPaused;
             ViewBag.ShowDropped = configuration?.showDropped;
             ViewBag.ShowRepeating = configuration?.showRepeating;
+            ViewBag.ShowAiring = configuration?.showAiring;
             ViewBag.DiscoverOnlyCurrent = configuration?.discoverOnlyCurrent;
             ViewBag.DiscoverOnlyCompleted = configuration?.discoverOnlyCompleted;
             ViewBag.DiscoverOnlyTrending = configuration?.discoverOnlyTrending;
@@ -58,6 +59,7 @@ public class HomeController : Controller
             ViewBag.DiscoverOnlyPaused = configuration?.discoverOnlyPaused;
             ViewBag.DiscoverOnlyDropped = configuration?.discoverOnlyDropped;
             ViewBag.DiscoverOnlyRepeating = configuration?.discoverOnlyRepeating;
+            ViewBag.DiscoverOnlyAiring = configuration?.discoverOnlyAiring;
         }
 
         return View();

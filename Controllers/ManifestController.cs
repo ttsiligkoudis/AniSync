@@ -106,6 +106,17 @@ namespace AnimeList.Controllers
                 });
             }
 
+            if (configuration.showAiring)
+            {
+                manifest.catalogs.Add(new Catalog
+                {
+                    type = MetaType.anime.ToString(),
+                    id = ListType.Airing.ToString(),
+                    name = "Airing This Week",
+                    extra = [new("skip")],
+                });
+            }
+
             // Search catalog: search extra is required, so this catalog only fires when the user
             // types a query in Stremio's search bar. No discover-page presence.
             manifest.catalogs.Add(new Catalog

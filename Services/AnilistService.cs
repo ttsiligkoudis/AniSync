@@ -9,6 +9,7 @@ namespace AnimeList.Services
         private readonly IHttpClientFactory _clientFactory;
         private readonly IAnimeMappingService _mappingService;
         private readonly IKitsuService _kitsuService;
+        private readonly IAnilistFallback _anilistFallback;
         private readonly string _anilistApi = "https://graphql.anilist.co";
         private static readonly HashSet<ListType> _userLists =
         [
@@ -16,11 +17,12 @@ namespace AnimeList.Services
             ListType.Planning, ListType.Paused, ListType.Dropped, ListType.Repeating,
         ];
 
-        public AnilistService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IKitsuService kitsuService)
+        public AnilistService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IKitsuService kitsuService, IAnilistFallback anilistFallback)
         {
             _clientFactory = clientFactory;
             _mappingService = mappingService;
             _kitsuService = kitsuService;
+            _anilistFallback = anilistFallback;
         }
 
         private const int CatalogPageSize = 50;
@@ -188,6 +190,10 @@ namespace AnimeList.Services
 
         public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null)
         {
+            // Airing schedule is shared between services and lives in the cross-service helper
+            if (list == ListType.Airing)
+                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.Anilist, skip);
+
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
             var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, search, sort);
 
