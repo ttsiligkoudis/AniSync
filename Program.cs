@@ -25,6 +25,7 @@ builder.Services.AddScoped<IAnilistService, AnilistService>();
 builder.Services.AddScoped<IKitsuService, KitsuService>();
 builder.Services.AddScoped<ITmdbService, TmdbService>();
 builder.Services.AddScoped<ICinemetaService, CinemetaService>();
+builder.Services.AddScoped<IAnilistFallback, AnilistFallback>();
 
 var app = builder.Build();
 
