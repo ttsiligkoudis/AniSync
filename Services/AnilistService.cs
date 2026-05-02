@@ -318,6 +318,11 @@ namespace AnimeList.Services
                         }
                         description,
                         genres,
+                        tags {
+                            name
+                            rank
+                            isAdult
+                        },
                         trailer {
                             id,
                             site
@@ -386,6 +391,26 @@ namespace AnimeList.Services
             {
                 anime.trailers.Add(new Trailer(result.trailer.id));
                 anime.trailerStreams.Add(new TrailerStream(result.trailer.id, anime.name));
+            }
+
+            // Surface AniList tags as Meta links. Filter to non-adult, well-ranked tags so the
+            // detail page doesn't get spammed with low-confidence themes.
+            if (result.tags != null)
+            {
+                foreach (var tag in result.tags)
+                {
+                    if ((bool?)tag.isAdult == true) continue;
+                    var rank = (int?)tag.rank ?? 0;
+                    if (rank < 50) continue;
+                    var name = (string)tag.name;
+                    if (string.IsNullOrEmpty(name)) continue;
+                    anime.links.Add(new Link
+                    {
+                        name = name,
+                        category = "Tag",
+                        url = $"https://anilist.co/search/anime?genres={Uri.EscapeDataString(name)}"
+                    });
+                }
             }
 
             if (!isMovie)
