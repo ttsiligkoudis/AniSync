@@ -39,7 +39,16 @@ namespace AnimeList.Controllers
                 return (result, !deserialize);
             }
 
-            if (id.StartsWith(tmdbPrefix)) 
+            // Translate mal: ids into the user's chosen service id before dispatching
+            if (id.StartsWith(malPrefix))
+            {
+                var service = tokenData?.anime_service ?? AnimeService.Kitsu;
+                var resolved = await _mappingService.GetIdByService(id, service);
+                if (string.IsNullOrEmpty(resolved)) return (null, false);
+                id = (service == AnimeService.Anilist ? anilistPrefix : kitsuPrefix) + resolved;
+            }
+
+            if (id.StartsWith(tmdbPrefix))
                 result = await _tmdbService.GetAnimeByIdAsync(id, tokenData);
             else if (id.StartsWith(kitsuPrefix))
                 result = await _kitsuService.GetAnimeByIdAsync(id, tokenData);

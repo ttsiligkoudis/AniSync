@@ -31,7 +31,7 @@ namespace AnimeList.Controllers
                 {
                     configurable = true,
                 },
-                idPrefixes = [anilistPrefix, kitsuPrefix, imdbPrefix, tmdbPrefix]
+                idPrefixes = [anilistPrefix, kitsuPrefix, imdbPrefix, tmdbPrefix, malPrefix]
             };
 
             if (isAuthenticated)

@@ -11,6 +11,7 @@ namespace AnimeList
         public static readonly string imdbPrefix = "tt";
         public static readonly string kitsuPrefix = "kitsu:";
         public static readonly string tmdbPrefix = "tmdb:";
+        public static readonly string malPrefix = "mal:";
 
         public static readonly string DefaultOption = "None";
         public const string SeasonCurrent = "This Season";
@@ -116,7 +117,8 @@ namespace AnimeList
             {
                 animeId = parts[0];
             }
-            else if ((id.StartsWith(kitsuPrefix) || id.StartsWith(anilistPrefix) || id.StartsWith(tmdbPrefix))
+            else if ((id.StartsWith(kitsuPrefix) || id.StartsWith(anilistPrefix)
+                      || id.StartsWith(tmdbPrefix) || id.StartsWith(malPrefix))
                 && parts.Length >= 2)
             {
                 animeId = $"{parts[0]}:{parts[1]}";
