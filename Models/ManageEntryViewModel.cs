@@ -15,6 +15,12 @@ namespace AnimeList.Models
         public int Progress { get; set; }
         public int? TotalEpisodes { get; set; }
 
+        public double? Score { get; set; }
+        public string Notes { get; set; }
+        public int RewatchCount { get; set; }
+        public DateTime? StartedAt { get; set; }
+        public DateTime? FinishedAt { get; set; }
+
         public List<int> Seasons { get; set; } = [];
         public int? SelectedSeason { get; set; }
 

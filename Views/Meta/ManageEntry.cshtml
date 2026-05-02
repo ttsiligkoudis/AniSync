@@ -73,6 +73,50 @@
             </div>
         </div>
 
+        @{
+            // AniList score range depends on the user's profile setting (POINT_100 vs POINT_10_DECIMAL etc.).
+            // We can't know it server-side without an extra query, so allow the full 0-100 range and let the
+            // user enter what their account expects. Kitsu always uses 0-10 (we translate ratingTwenty/2).
+            var scoreMax = isAnilist ? "100" : "10";
+            var scoreStep = isAnilist ? "0.1" : "0.5";
+        }
+
+        <!-- Score -->
+        <div class="manage-entry-field">
+            <label class="manage-entry-label">Score</label>
+            <div class="manage-entry-progress-row">
+                <input type="number" id="scoreInput" class="manage-entry-input" min="0"
+                       max="@scoreMax" step="@scoreStep"
+                       value="@(Model.Score?.ToString("0.##") ?? "")" />
+                <span class="manage-entry-total">/ @scoreMax</span>
+            </div>
+        </div>
+
+        <!-- Rewatch count -->
+        <div class="manage-entry-field">
+            <label class="manage-entry-label">Rewatches</label>
+            <input type="number" id="rewatchInput" class="manage-entry-input" min="0"
+                   value="@Model.RewatchCount" />
+        </div>
+
+        <!-- Started / finished dates -->
+        <div class="manage-entry-field">
+            <label class="manage-entry-label">Started</label>
+            <input type="date" id="startedAtInput" class="manage-entry-input"
+                   value="@(Model.StartedAt?.ToString("yyyy-MM-dd"))" />
+        </div>
+        <div class="manage-entry-field">
+            <label class="manage-entry-label">Finished</label>
+            <input type="date" id="finishedAtInput" class="manage-entry-input"
+                   value="@(Model.FinishedAt?.ToString("yyyy-MM-dd"))" />
+        </div>
+
+        <!-- Notes -->
+        <div class="manage-entry-field">
+            <label class="manage-entry-label">Notes</label>
+            <textarea id="notesInput" class="manage-entry-input" rows="3">@Model.Notes</textarea>
+        </div>
+
         <!-- Save button -->
         <button id="saveBtn" class="btn-primary-action btn-save">Save</button>
         <span id="saveStatus" class="manage-entry-save-status"></span>
@@ -93,17 +137,23 @@
             url: '/' + config + '/Meta/GetEntry',
             data: { id: animeId, season: season },
             success: function (data) {
-                if (data.success) {
-                    $('#statusSelect').val(data.status || $('#statusSelect option:first').val());
-                    $('#progressInput').val(data.progress || 0);
-                    var totalEpisodes = data.totalEpisodes || videos.filter(w => w.season == season).length;
-                    if (totalEpisodes > 0) {
-                        $('#progressInput').attr('max', totalEpisodes);
-                        $('.manage-entry-total').text('/ ' + totalEpisodes).show();
-                    } else {
-                        $('#progressInput').attr('max', 9999);
-                        $('.manage-entry-total').hide();
-                    }
+                if (!data.success) return;
+
+                $('#statusSelect').val(data.status || $('#statusSelect option:first').val());
+                $('#progressInput').val(data.progress || 0);
+                $('#scoreInput').val(data.score != null ? data.score : '');
+                $('#rewatchInput').val(data.rewatchCount || 0);
+                $('#startedAtInput').val(data.startedAt || '');
+                $('#finishedAtInput').val(data.finishedAt || '');
+                $('#notesInput').val(data.notes || '');
+
+                var totalEpisodes = data.totalEpisodes || videos.filter(w => w.season == season).length;
+                if (totalEpisodes > 0) {
+                    $('#progressInput').attr('max', totalEpisodes);
+                    $('.manage-entry-progress-row .manage-entry-total').first().text('/ ' + totalEpisodes).show();
+                } else {
+                    $('#progressInput').attr('max', 9999);
+                    $('.manage-entry-progress-row .manage-entry-total').first().hide();
                 }
             }
         });
@@ -111,9 +161,17 @@
 
     // Save entry
     $('#saveBtn').on('click', function () {
-        var season = hasSeasons ? parseInt($('#seasonSelect').val()) : null;
-        var status = $('#statusSelect').val();
-        var progress = parseInt($('#progressInput').val()) || 0;
+        var payload = {
+            id: animeId,
+            season: hasSeasons ? parseInt($('#seasonSelect').val()) : null,
+            status: $('#statusSelect').val(),
+            progress: parseInt($('#progressInput').val()) || 0,
+            score: $('#scoreInput').val() ? parseFloat($('#scoreInput').val()) : null,
+            rewatchCount: parseInt($('#rewatchInput').val()) || 0,
+            startedAt: $('#startedAtInput').val() || null,
+            finishedAt: $('#finishedAtInput').val() || null,
+            notes: $('#notesInput').val() || null,
+        };
 
         var $btn = $(this);
         $btn.prop('disabled', true).text('Saving...');
@@ -122,7 +180,7 @@
             url: '/' + config + '/Meta/SaveEntry',
             method: 'POST',
             contentType: 'application/json',
-            data: JSON.stringify({ id: animeId, season: season, status: status, progress: progress }),
+            data: JSON.stringify(payload),
             success: function (data) {
                 $btn.prop('disabled', false).text('Save');
                 $('#saveStatus').text(data.success ? '✓ Saved' : '✗ Failed')

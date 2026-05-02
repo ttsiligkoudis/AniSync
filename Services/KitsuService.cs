@@ -275,9 +275,17 @@ namespace AnimeList.Services
 
             if ((json["data"] as JArray)?.OfType<JObject>().FirstOrDefault() is JObject libEntry)
             {
+                var attrs = libEntry["attributes"];
                 entry.EntryId = (string)libEntry["id"];
-                entry.Status = (string)libEntry["attributes"]?["status"];
-                entry.Progress = (int?)libEntry["attributes"]?["progress"] ?? 0;
+                entry.Status = (string)attrs?["status"];
+                entry.Progress = (int?)attrs?["progress"] ?? 0;
+                // Kitsu's ratingTwenty is 2-20 (where 20 == 10/10); convert to a 0-10 scale.
+                var ratingTwenty = (int?)attrs?["ratingTwenty"];
+                entry.Score = ratingTwenty.HasValue ? ratingTwenty.Value / 2.0 : null;
+                entry.Notes = (string)attrs?["notes"];
+                entry.RewatchCount = (int?)attrs?["reconsumeCount"] ?? 0;
+                entry.StartedAt = ParseKitsuDate((string)attrs?["startedAt"]);
+                entry.FinishedAt = ParseKitsuDate((string)attrs?["finishedAt"]);
             }
 
             entry.TotalEpisodes = (int?)(json["included"] as JArray)?
@@ -288,7 +296,9 @@ namespace AnimeList.Services
             return entry;
         }
 
-        public async Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, int progress, string status = null)
+        public async Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, int progress,
+            string status = null, double? score = null, string notes = null, int? rewatchCount = null,
+            DateTime? startedAt = null, DateTime? finishedAt = null)
         {
             var resolvedKitsuId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu, season);
             if (string.IsNullOrEmpty(resolvedKitsuId)) return;
@@ -300,7 +310,18 @@ namespace AnimeList.Services
             // Kitsu requires a status when creating; default new entries to current
             if (string.IsNullOrEmpty(status)) status = GetListTypeString(ListType.Current, tokenData);
 
-            var attributes = new { progress, status };
+            // Build a sparse attributes dict so unset fields aren't overwritten with null
+            var attributes = new Dictionary<string, object>
+            {
+                ["progress"] = progress,
+                ["status"] = status,
+            };
+            if (score.HasValue)
+                attributes["ratingTwenty"] = (int)Math.Round(Math.Clamp(score.Value, 0, 10) * 2);
+            if (notes != null) attributes["notes"] = notes;
+            if (rewatchCount.HasValue) attributes["reconsumeCount"] = rewatchCount.Value;
+            if (startedAt.HasValue) attributes["startedAt"] = startedAt.Value.ToString("yyyy-MM-dd");
+            if (finishedAt.HasValue) attributes["finishedAt"] = finishedAt.Value.ToString("yyyy-MM-dd");
 
             HttpRequestMessage request;
             if (!string.IsNullOrEmpty(existing?.EntryId))
@@ -344,6 +365,11 @@ namespace AnimeList.Services
 
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
             await _clientFactory.CreateClient().SendAsync(request);
+        }
+
+        private static DateTime? ParseKitsuDate(string raw)
+        {
+            return DateTime.TryParse(raw, out var dt) ? dt : null;
         }
 
         private async Task<int?> GetTotalEpisodesAsync(TokenData tokenData, string resolvedKitsuId)

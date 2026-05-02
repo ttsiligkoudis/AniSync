@@ -111,6 +111,11 @@ namespace AnimeList.Controllers
                 Status = entry?.Status,
                 Progress = entry?.Progress ?? episode ?? 0,
                 TotalEpisodes = totalEpisodes,
+                Score = entry?.Score,
+                Notes = entry?.Notes,
+                RewatchCount = entry?.RewatchCount ?? 0,
+                StartedAt = entry?.StartedAt,
+                FinishedAt = entry?.FinishedAt,
                 Seasons = seasons,
                 SelectedSeason = selectedSeason,
                 AnimeService = animeService,
@@ -137,7 +142,12 @@ namespace AnimeList.Controllers
                 success = true,
                 status = entry?.Status,
                 progress = entry?.Progress ?? 0,
-                totalEpisodes = entry?.TotalEpisodes
+                totalEpisodes = entry?.TotalEpisodes,
+                score = entry?.Score,
+                notes = entry?.Notes,
+                rewatchCount = entry?.RewatchCount ?? 0,
+                startedAt = entry?.StartedAt?.ToString("yyyy-MM-dd"),
+                finishedAt = entry?.FinishedAt?.ToString("yyyy-MM-dd"),
             });
         }
 
@@ -149,13 +159,21 @@ namespace AnimeList.Controllers
             if (tokenData == null || string.IsNullOrWhiteSpace(tokenData.access_token))
                 return new JsonResult(new { success = false });
 
+            DateTime? startedAt = ParseDate(request.StartedAt);
+            DateTime? finishedAt = ParseDate(request.FinishedAt);
+
             if (tokenData.anime_service == AnimeService.Anilist)
-                await _anilistService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress, request.Status);
+                await _anilistService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                    request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
             else
-                await _kitsuService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress, request.Status);
+                await _kitsuService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                    request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
 
             return new JsonResult(new { success = true });
         }
+
+        private static DateTime? ParseDate(string s) =>
+            DateTime.TryParse(s, out var dt) ? dt : null;
     }
 
     public class SaveEntryRequest
@@ -164,6 +182,11 @@ namespace AnimeList.Controllers
         public int? Season { get; set; }
         public string Status { get; set; }
         public int Progress { get; set; }
+        public double? Score { get; set; }
+        public string Notes { get; set; }
+        public int? RewatchCount { get; set; }
+        public string StartedAt { get; set; }
+        public string FinishedAt { get; set; }
     }
 }
 

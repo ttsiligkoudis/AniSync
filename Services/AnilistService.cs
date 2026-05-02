@@ -428,6 +428,11 @@ namespace AnimeList.Services
                             id
                             status
                             progress
+                            score
+                            notes
+                            repeat
+                            startedAt { year month day }
+                            completedAt { year month day }
                         }
                         Media(id: $mediaId, type: ANIME) {
                             episodes
@@ -458,15 +463,23 @@ namespace AnimeList.Services
 
             if (data?.MediaList != null)
             {
-                entry.EntryId = (string)data.MediaList.id?.ToString();
-                entry.Status = (string)data.MediaList.status;
-                entry.Progress = (int?)data.MediaList.progress ?? 0;
+                var ml = data.MediaList;
+                entry.EntryId = (string)ml.id?.ToString();
+                entry.Status = (string)ml.status;
+                entry.Progress = (int?)ml.progress ?? 0;
+                entry.Score = (double?)ml.score;
+                entry.Notes = (string)ml.notes;
+                entry.RewatchCount = (int?)ml.repeat ?? 0;
+                entry.StartedAt = FuzzyDateToDateTime(ml.startedAt);
+                entry.FinishedAt = FuzzyDateToDateTime(ml.completedAt);
             }
 
             return entry;
         }
 
-        public async Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, int progress, string status = null)
+        public async Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, int progress,
+            string status = null, double? score = null, string notes = null, int? rewatchCount = null,
+            DateTime? startedAt = null, DateTime? finishedAt = null)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist, season);
 
@@ -478,23 +491,45 @@ namespace AnimeList.Services
                 status = meta?.entryStatus;
             }
 
-            var requestBody = SerializeObject(new
+            // Build the variables dict so we can omit fields the caller didn't set.
+            // Anything in variables ends up in the mutation payload; anything NOT in variables
+            // is left server-side at its previous value (AniList only updates fields it sees).
+            var variables = new Dictionary<string, object>
             {
-                query = @"
-                    mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus) {
-                        SaveMediaListEntry(mediaId: $mediaId, progress: $progress, status: $status) {
-                            id
-                            progress
-                            status
-                        }
-                    }",
-                variables = new
-                {
-                    mediaId = resolvedAnimeId,
-                    progress,
-                    status
-                }
-            });
+                ["mediaId"] = resolvedAnimeId,
+                ["progress"] = progress,
+            };
+            if (!string.IsNullOrEmpty(status)) variables["status"] = status;
+            if (score.HasValue) variables["score"] = score.Value;
+            if (notes != null) variables["notes"] = notes;
+            if (rewatchCount.HasValue) variables["repeat"] = rewatchCount.Value;
+            if (startedAt.HasValue) variables["startedAt"] = ToFuzzyDate(startedAt.Value);
+            if (finishedAt.HasValue) variables["completedAt"] = ToFuzzyDate(finishedAt.Value);
+
+            // The mutation declares only the variables we're actually sending so AniList knows the
+            // schema. Optional fields are omitted from the variable declaration when null.
+            var declParts = new List<string> { "$mediaId: Int", "$progress: Int" };
+            if (variables.ContainsKey("status")) declParts.Add("$status: MediaListStatus");
+            if (variables.ContainsKey("score")) declParts.Add("$score: Float");
+            if (variables.ContainsKey("notes")) declParts.Add("$notes: String");
+            if (variables.ContainsKey("repeat")) declParts.Add("$repeat: Int");
+            if (variables.ContainsKey("startedAt")) declParts.Add("$startedAt: FuzzyDateInput");
+            if (variables.ContainsKey("completedAt")) declParts.Add("$completedAt: FuzzyDateInput");
+
+            var argParts = new List<string> { "mediaId: $mediaId", "progress: $progress" };
+            if (variables.ContainsKey("status")) argParts.Add("status: $status");
+            if (variables.ContainsKey("score")) argParts.Add("score: $score");
+            if (variables.ContainsKey("notes")) argParts.Add("notes: $notes");
+            if (variables.ContainsKey("repeat")) argParts.Add("repeat: $repeat");
+            if (variables.ContainsKey("startedAt")) argParts.Add("startedAt: $startedAt");
+            if (variables.ContainsKey("completedAt")) argParts.Add("completedAt: $completedAt");
+
+            var query = $@"
+                mutation ({string.Join(", ", declParts)}) {{
+                    SaveMediaListEntry({string.Join(", ", argParts)}) {{ id }}
+                }}";
+
+            var requestBody = SerializeObject(new { query, variables });
 
             var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
             {
@@ -505,6 +540,17 @@ namespace AnimeList.Services
             var client = _clientFactory.CreateClient();
             await client.SendAsync(request);
         }
+
+        private static DateTime? FuzzyDateToDateTime(dynamic fuzzy)
+        {
+            if (fuzzy == null) return null;
+            int? y = (int?)fuzzy.year, m = (int?)fuzzy.month, d = (int?)fuzzy.day;
+            if (!y.HasValue || !m.HasValue || !d.HasValue) return null;
+            try { return new DateTime(y.Value, m.Value, d.Value); }
+            catch { return null; }
+        }
+
+        private static object ToFuzzyDate(DateTime dt) => new { year = dt.Year, month = dt.Month, day = dt.Day };
     }
 }
 
