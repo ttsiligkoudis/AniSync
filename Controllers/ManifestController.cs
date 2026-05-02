@@ -1,4 +1,5 @@
 using AnimeList.Models;
+using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AnimeList.Controllers
@@ -6,12 +7,31 @@ namespace AnimeList.Controllers
     [ApiController]
     public class ManifestController : ControllerBase
     {
-        [HttpGet("{config}/manifest.json")]
-        public JsonResult Get(string config)
+        private readonly ITokenService _tokenService;
+        private readonly IConfigStore _configStore;
+
+        public ManifestController(ITokenService tokenService, IConfigStore configStore)
         {
-            var configuration = DecodeConfig(config);
-            var isAuthenticated = !string.IsNullOrWhiteSpace(configuration?.tokenData);
-            TokenData? tokenData = null;
+            _tokenService = tokenService;
+            _configStore = configStore;
+        }
+
+        [HttpGet("{config}/manifest.json")]
+        public async Task<JsonResult> Get(string config)
+        {
+            // Hydrates flags from the config store for v5 URLs; v3/v4 URLs carry them inline.
+            var configuration = await ResolveConfigAsync(config, _configStore);
+
+            // For v3 (inline tokenData) the in-URL JSON is enough to tell us "logged in"; for
+            // v4/v5 we go through TokenService, which knows how to fetch from the config store.
+            TokenData tokenData = null;
+            if (configuration != null)
+            {
+                tokenData = !string.IsNullOrEmpty(configuration.tokenData)
+                    ? DeserializeObject<TokenData>(configuration.tokenData)
+                    : await _tokenService.GetAccessTokenAsync(config);
+            }
+            var isAuthenticated = tokenData != null && !tokenData.anonymousUser;
             var name = "AniSync";
 
 #if DEBUG
@@ -36,8 +56,6 @@ namespace AnimeList.Controllers
 
             if (isAuthenticated)
             {
-                tokenData = DeserializeObject<TokenData>(configuration.tokenData);
-
                 manifest.config.Add(new Config
                 {
                     key = "token",
@@ -74,7 +92,7 @@ namespace AnimeList.Controllers
                 manifest.catalogs.Add(BuildUserListCatalog(ListType.Repeating, "Rewatching", tokenData,
                     configuration.discoverOnlyRepeating));
 
-            if (configuration.showTrending)
+            if (configuration?.showTrending == true)
             {
                 manifest.catalogs.Add(new Catalog
                 {
@@ -90,7 +108,7 @@ namespace AnimeList.Controllers
                 });
             }
 
-            if (configuration.showSeasonal)
+            if (configuration?.showSeasonal == true)
             {
                 manifest.catalogs.Add(new Catalog
                 {
@@ -106,7 +124,7 @@ namespace AnimeList.Controllers
                 });
             }
 
-            if (configuration.showAiring)
+            if (configuration?.showAiring == true)
             {
                 // Airing has no meaningful filter axis, so we use the same trick as the
                 // "Currently watching" catalog: when discover-only is on, declare a required

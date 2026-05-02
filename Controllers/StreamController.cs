@@ -10,21 +10,24 @@ namespace AnimeList.Controllers
         private readonly IAnimeMappingService _mappingService;
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
+        private readonly IConfigStore _configStore;
 
         public StreamController(ITokenService tokenService, IAnimeMappingService mappingService,
-            IAnilistService anilistService, IKitsuService kitsuService)
+            IAnilistService anilistService, IKitsuService kitsuService, IConfigStore configStore)
         {
             _tokenService = tokenService;
             _mappingService = mappingService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
+            _configStore = configStore;
         }
 
         [HttpGet("{config}/stream/{type}/{id}.json")]
         public async Task<JsonResult> GetStreams(string config, string type, string id)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync(config);
-            var configuration = DecodeConfig(config);
+            // Hydrates flags from the config store for v5 URLs; v3/v4 carry them inline.
+            var configuration = await ResolveConfigAsync(config, _configStore);
             var empty = new JsonResult(new { streams = Array.Empty<object>() });
 
             if (!TryParseAnimeId(id, out var animeId, out var season, out var episode))

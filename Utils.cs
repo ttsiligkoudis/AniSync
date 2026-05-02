@@ -1,4 +1,5 @@
 ﻿using AnimeList.Models;
+using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
 using System.IO.Compression;
 using System.Text;
@@ -259,19 +260,22 @@ namespace AnimeList
 
         /// <summary>
         /// Decodes a config route parameter into a <see cref="Configuration"/>.
-        /// Supports six formats for backward compatibility:
+        /// Supports seven formats for backward compatibility:
         /// <list type="bullet">
         ///   <item>Legacy raw JSON (starts with '{')</item>
         ///   <item>GZip-compressed JSON via Base64Url (GZip magic bytes 0x1F 0x8B)</item>
         ///   <item>Binary v1: [0x01][flags byte][GZip tokenData] — 8 catalog flags</item>
         ///   <item>Binary v2: [0x02][flags1][flags2][GZip tokenData] — 16 catalog flags</item>
         ///   <item>Binary v3: [0x03][flags1][flags2][flags3][GZip tokenData] — 24 catalog flags</item>
-        ///   <item>Binary v4: [0x04][flags1][flags2][flags3][16-byte UID] — UID points at a
-        ///     row in <see cref="Services.Interfaces.IConfigStore"/>; tokenData is hydrated
-        ///     by <see cref="Services.Interfaces.ITokenService"/> at request time.</item>
+        ///   <item>Binary v4: [0x04][flags1][flags2][flags3][16-byte UID] — flags in the URL,
+        ///     token JSON in the config store. Decoded for back-compat; new installs use v5.</item>
+        ///   <item>Binary v5: [0x05][16-byte UID] — UID only; both flags and token JSON live
+        ///     in the config store. Lets the configure-page "Save" button persist toggle
+        ///     changes server-side without forcing a reinstall in Stremio.</item>
         /// </list>
-        /// The returned <see cref="Configuration.tokenData"/> is set inline for the legacy
-        /// formats (v1/v2/v3); v4 sets <see cref="Configuration.tokenUid"/> instead.
+        /// For v5, the flag fields on the returned <see cref="Configuration"/> stay at their
+        /// default (false) — call <see cref="ResolveConfigAsync"/> to hydrate them from the
+        /// config store, or check <see cref="Configuration.flagsInDb"/> and do it yourself.
         /// </summary>
         public static Configuration DecodeConfig(string config)
         {
@@ -319,7 +323,61 @@ namespace AnimeList
                 return cfg;
             }
 
+            // Binary v5: [0x05][16-byte UID] — flags persisted in the config store
+            if (data.Length >= 1 + 16 && data[0] == 0x05)
+            {
+                return new Configuration
+                {
+                    tokenUid = Base64UrlEncode(data[1..(1 + 16)]),
+                    flagsInDb = true,
+                };
+            }
+
             throw new ArgumentException("Unknown config format");
+        }
+
+        /// <summary>
+        /// Calls <see cref="DecodeConfig"/> and, for v5 URLs, hydrates the toggle flags from
+        /// the config store. Use this from controllers that need the flag bits (Manifest,
+        /// Stream, Home). v3/v4 paths never touch the store.
+        /// </summary>
+        public static async Task<Configuration> ResolveConfigAsync(string config, IConfigStore store)
+        {
+            var cfg = DecodeConfig(config);
+            if (cfg?.flagsInDb == true && !string.IsNullOrEmpty(cfg.tokenUid))
+            {
+                var (f1, f2, f3) = await store.GetFlagsAsync(cfg.tokenUid);
+                ApplyBinaryFlags(cfg, f1, f2, f3);
+            }
+            return cfg;
+        }
+
+        /// <summary>
+        /// Writes flag bits into the existing <see cref="Configuration"/> instance. Used by
+        /// both <see cref="DecodeBinaryFlags"/> (URL bytes path) and <see cref="ResolveConfigAsync"/>
+        /// (DB-backed path) so the bit layout stays in one place.
+        /// </summary>
+        public static void ApplyBinaryFlags(Configuration cfg, byte flags1, byte flags2, byte flags3)
+        {
+            cfg.showCurrent = (flags1 & 0x01) != 0;
+            cfg.showCompleted = (flags1 & 0x02) != 0;
+            cfg.showTrending = (flags1 & 0x04) != 0;
+            cfg.showSeasonal = (flags1 & 0x08) != 0;
+            cfg.discoverOnlyCurrent = (flags1 & 0x10) != 0;
+            cfg.discoverOnlyCompleted = (flags1 & 0x20) != 0;
+            cfg.discoverOnlyTrending = (flags1 & 0x40) != 0;
+            cfg.discoverOnlySeasonal = (flags1 & 0x80) != 0;
+            cfg.showPlanning = (flags2 & 0x01) != 0;
+            cfg.showPaused = (flags2 & 0x02) != 0;
+            cfg.showDropped = (flags2 & 0x04) != 0;
+            cfg.showRepeating = (flags2 & 0x08) != 0;
+            cfg.discoverOnlyPlanning = (flags2 & 0x10) != 0;
+            cfg.discoverOnlyPaused = (flags2 & 0x20) != 0;
+            cfg.discoverOnlyDropped = (flags2 & 0x40) != 0;
+            cfg.discoverOnlyRepeating = (flags2 & 0x80) != 0;
+            cfg.showAiring = (flags3 & 0x01) != 0;
+            cfg.showExternalStreams = (flags3 & 0x02) != 0;
+            cfg.discoverOnlyAiring = (flags3 & 0x10) != 0;
         }
 
         private static Configuration DecodeBinaryConfig(byte[] data, int headerLen, byte flags1, byte flags2, byte flags3)
@@ -331,28 +389,9 @@ namespace AnimeList
 
         private static Configuration DecodeBinaryFlags(byte flags1, byte flags2, byte flags3)
         {
-            return new Configuration
-            {
-                showCurrent = (flags1 & 0x01) != 0,
-                showCompleted = (flags1 & 0x02) != 0,
-                showTrending = (flags1 & 0x04) != 0,
-                showSeasonal = (flags1 & 0x08) != 0,
-                discoverOnlyCurrent = (flags1 & 0x10) != 0,
-                discoverOnlyCompleted = (flags1 & 0x20) != 0,
-                discoverOnlyTrending = (flags1 & 0x40) != 0,
-                discoverOnlySeasonal = (flags1 & 0x80) != 0,
-                showPlanning = (flags2 & 0x01) != 0,
-                showPaused = (flags2 & 0x02) != 0,
-                showDropped = (flags2 & 0x04) != 0,
-                showRepeating = (flags2 & 0x08) != 0,
-                discoverOnlyPlanning = (flags2 & 0x10) != 0,
-                discoverOnlyPaused = (flags2 & 0x20) != 0,
-                discoverOnlyDropped = (flags2 & 0x40) != 0,
-                discoverOnlyRepeating = (flags2 & 0x80) != 0,
-                showAiring = (flags3 & 0x01) != 0,
-                showExternalStreams = (flags3 & 0x02) != 0,
-                discoverOnlyAiring = (flags3 & 0x10) != 0,
-            };
+            var cfg = new Configuration();
+            ApplyBinaryFlags(cfg, flags1, flags2, flags3);
+            return cfg;
         }
 
         /// <summary>

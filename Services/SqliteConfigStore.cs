@@ -38,8 +38,9 @@ namespace AnimeList.Services
         {
             using var conn = new SqliteConnection(_connectionString);
             conn.Open();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
+
+            using var create = conn.CreateCommand();
+            create.CommandText = """
                 CREATE TABLE IF NOT EXISTS configs (
                     uid         TEXT PRIMARY KEY,
                     service     INTEGER NOT NULL,
@@ -52,7 +53,30 @@ namespace AnimeList.Services
                     ON configs(service, user_key)
                     WHERE user_key IS NOT NULL;
                 """;
-            cmd.ExecuteNonQuery();
+            create.ExecuteNonQuery();
+
+            // Idempotent migration: add `flags` column on existing DBs that pre-date the
+            // "configuration in DB" change. Stores the three flag bytes packed into a single
+            // INTEGER (bits 16-23 = flags1, 8-15 = flags2, 0-7 = flags3).
+            if (!ColumnExists(conn, "configs", "flags"))
+            {
+                using var alter = conn.CreateCommand();
+                alter.CommandText = "ALTER TABLE configs ADD COLUMN flags INTEGER NOT NULL DEFAULT 0";
+                alter.ExecuteNonQuery();
+            }
+        }
+
+        private static bool ColumnExists(SqliteConnection conn, string table, string column)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"PRAGMA table_info({table})";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                if (reader.GetString(1).Equals(column, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
         }
 
         public async Task<string> UpsertAsync(TokenData tokenData)
@@ -134,6 +158,43 @@ namespace AnimeList.Services
             cmd.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             cmd.Parameters.AddWithValue("$s", (int)tokenData.anime_service);
             cmd.Parameters.AddWithValue("$k", userKey);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<(byte flags1, byte flags2, byte flags3)> GetFlagsAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return (0, 0, 0);
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT flags FROM configs WHERE uid = $uid LIMIT 1";
+            cmd.Parameters.AddWithValue("$uid", uid);
+            var raw = await cmd.ExecuteScalarAsync();
+            var packed = raw is long l ? l : 0L;
+
+            return (
+                (byte)((packed >> 16) & 0xff),
+                (byte)((packed >> 8) & 0xff),
+                (byte)(packed & 0xff));
+        }
+
+        public async Task SetFlagsAsync(string uid, byte flags1, byte flags2, byte flags3)
+        {
+            if (string.IsNullOrEmpty(uid)) return;
+            var packed = ((long)flags1 << 16) | ((long)flags2 << 8) | flags3;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE configs
+                   SET flags = $f, updated_at = $u
+                 WHERE uid = $uid
+                """;
+            cmd.Parameters.AddWithValue("$f", packed);
+            cmd.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$uid", uid);
             await cmd.ExecuteNonQueryAsync();
         }
 
