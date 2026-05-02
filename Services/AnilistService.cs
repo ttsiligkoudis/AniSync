@@ -570,6 +570,49 @@ namespace AnimeList.Services
             await client.SendAsync(request);
         }
 
+        public async Task<List<StreamingLink>> GetExternalLinksAsync(string animeId, TokenData tokenData)
+        {
+            var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
+            if (string.IsNullOrEmpty(resolvedAnimeId)) return [];
+
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($id: Int) {
+                        Media(id: $id, type: ANIME) {
+                            externalLinks { site url type }
+                        }
+                    }",
+                variables = new { id = resolvedAnimeId }
+            });
+
+            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
+            {
+                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
+            };
+            if (!string.IsNullOrEmpty(tokenData?.access_token))
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+
+            var client = _clientFactory.CreateClient();
+            var response = await client.SendAsync(request);
+            if (!response.IsSuccessStatusCode) return [];
+
+            var content = await response.Content.ReadAsStringAsync();
+            var media = DeserializeObject<dynamic>(content)?.data?.Media;
+            if (media?.externalLinks == null) return [];
+
+            var result = new List<StreamingLink>();
+            foreach (var link in media.externalLinks)
+            {
+                if ((string)link.type != "STREAMING") continue;
+                var site = (string)link.site;
+                var url = (string)link.url;
+                if (string.IsNullOrEmpty(url)) continue;
+                result.Add(new StreamingLink { Site = site, Url = url });
+            }
+            return result;
+        }
+
         private static DateTime? FuzzyDateToDateTime(dynamic fuzzy)
         {
             if (fuzzy == null) return null;

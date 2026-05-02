@@ -9,6 +9,11 @@ namespace AnimeList.Services.Interfaces
         Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData);
 
         /// <summary>
+        /// Fetches the legal-streaming destinations for an anime (Crunchyroll, Netflix, …).
+        /// </summary>
+        Task<List<StreamingLink>> GetExternalLinksAsync(string animeId, TokenData tokenData);
+
+        /// <summary>
         /// Fetches the user's list entry (status, progress) for a specific anime by its service-resolved ID and season.
         /// </summary>
         Task<AnimeEntry> GetAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null);

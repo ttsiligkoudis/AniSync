@@ -367,6 +367,51 @@ namespace AnimeList.Services
             await _clientFactory.CreateClient().SendAsync(request);
         }
 
+        public async Task<List<StreamingLink>> GetExternalLinksAsync(string animeId, TokenData tokenData)
+        {
+            var resolvedKitsuId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu);
+            if (string.IsNullOrEmpty(resolvedKitsuId)) return [];
+
+            var url = $"{_kitsuApi}/anime/{resolvedKitsuId}?include=streamingLinks.streamer&fields[anime]=id&fields[streamingLinks]=url,streamer&fields[streamers]=siteName";
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            if (!string.IsNullOrEmpty(tokenData?.access_token))
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+
+            var response = await _clientFactory.CreateClient().SendAsync(request);
+            if (!response.IsSuccessStatusCode) return [];
+
+            var json = JObject.Parse(await response.Content.ReadAsStringAsync());
+
+            // Build streamer-id -> siteName map first
+            var streamers = new Dictionary<string, string>();
+            if (json["included"] is JArray includedArr)
+            {
+                foreach (var inc in includedArr.OfType<JObject>())
+                {
+                    if ((string)inc["type"] != "streamers") continue;
+                    var sid = (string)inc["id"];
+                    var name = (string)inc["attributes"]?["siteName"];
+                    if (!string.IsNullOrEmpty(sid) && !string.IsNullOrEmpty(name)) streamers[sid] = name;
+                }
+            }
+
+            var result = new List<StreamingLink>();
+            if (json["included"] is JArray included2)
+            {
+                foreach (var inc in included2.OfType<JObject>())
+                {
+                    if ((string)inc["type"] != "streamingLinks") continue;
+                    var linkUrl = (string)inc["attributes"]?["url"];
+                    if (string.IsNullOrEmpty(linkUrl)) continue;
+
+                    var streamerId = (string)inc["relationships"]?["streamer"]?["data"]?["id"];
+                    var siteName = streamerId != null && streamers.TryGetValue(streamerId, out var n) ? n : "Stream";
+                    result.Add(new StreamingLink { Site = siteName, Url = linkUrl });
+                }
+            }
+            return result;
+        }
+
         private static DateTime? ParseKitsuDate(string raw)
         {
             return DateTime.TryParse(raw, out var dt) ? dt : null;
