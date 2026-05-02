@@ -10,10 +10,20 @@
     bool showCompleted = ViewBag.ShowCompleted ?? false;
     bool showTrending = ViewBag.ShowTrending ?? anonymousUser;
     bool showSeasonal = ViewBag.ShowSeasonal ?? true;
+    bool showPlanning = ViewBag.ShowPlanning ?? false;
+    bool showPaused = ViewBag.ShowPaused ?? false;
+    bool showDropped = ViewBag.ShowDropped ?? false;
+    bool showRepeating = ViewBag.ShowRepeating ?? false;
+    bool showAiring = ViewBag.ShowAiring ?? false;
     bool discoverOnlyCurrent = ViewBag.DiscoverOnlyCurrent ?? false;
     bool discoverOnlyCompleted = ViewBag.DiscoverOnlyCompleted ?? false;
     bool discoverOnlyTrending = ViewBag.DiscoverOnlyTrending ?? false;
     bool discoverOnlySeasonal = ViewBag.DiscoverOnlySeasonal ?? true;
+    bool discoverOnlyPlanning = ViewBag.DiscoverOnlyPlanning ?? false;
+    bool discoverOnlyPaused = ViewBag.DiscoverOnlyPaused ?? false;
+    bool discoverOnlyDropped = ViewBag.DiscoverOnlyDropped ?? false;
+    bool discoverOnlyRepeating = ViewBag.DiscoverOnlyRepeating ?? false;
+    bool discoverOnlyAiring = ViewBag.DiscoverOnlyAiring ?? false;
 }
 
 <h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
@@ -69,6 +79,53 @@
                     <span class="slider"></span>
                 </label>
                 <hr class="option-sep" />
+
+                <span class="option-name">Plan to Watch</span>
+                <label class="switch">
+                    <input type="checkbox" id="showPlanning" class="catalogCheck" @(showPlanning ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
+                <label class="switch @(!showPlanning ? "switch-disabled" : "")">
+                    <input type="checkbox" id="discoverOnlyPlanning" class="discoverCheck" @(discoverOnlyPlanning ? "checked" : "") @(!showPlanning ? "disabled" : "") />
+                    <span class="slider"></span>
+                </label>
+                <hr class="option-sep" />
+
+                <span class="option-name">On Hold</span>
+                <label class="switch">
+                    <input type="checkbox" id="showPaused" class="catalogCheck" @(showPaused ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
+                <label class="switch @(!showPaused ? "switch-disabled" : "")">
+                    <input type="checkbox" id="discoverOnlyPaused" class="discoverCheck" @(discoverOnlyPaused ? "checked" : "") @(!showPaused ? "disabled" : "") />
+                    <span class="slider"></span>
+                </label>
+                <hr class="option-sep" />
+
+                <span class="option-name">Dropped</span>
+                <label class="switch">
+                    <input type="checkbox" id="showDropped" class="catalogCheck" @(showDropped ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
+                <label class="switch @(!showDropped ? "switch-disabled" : "")">
+                    <input type="checkbox" id="discoverOnlyDropped" class="discoverCheck" @(discoverOnlyDropped ? "checked" : "") @(!showDropped ? "disabled" : "") />
+                    <span class="slider"></span>
+                </label>
+                <hr class="option-sep" />
+
+                @if (isAnilist)
+                {
+                    <span class="option-name">Rewatching</span>
+                    <label class="switch">
+                        <input type="checkbox" id="showRepeating" class="catalogCheck" @(showRepeating ? "checked" : "") />
+                        <span class="slider"></span>
+                    </label>
+                    <label class="switch @(!showRepeating ? "switch-disabled" : "")">
+                        <input type="checkbox" id="discoverOnlyRepeating" class="discoverCheck" @(discoverOnlyRepeating ? "checked" : "") @(!showRepeating ? "disabled" : "") />
+                        <span class="slider"></span>
+                    </label>
+                    <hr class="option-sep" />
+                }
             }
 
             <span class="option-name">Trending now</span>
@@ -89,6 +146,17 @@
             </label>
             <label class="switch @(!showSeasonal ? "switch-disabled" : "")">
                 <input type="checkbox" id="discoverOnlySeasonal" class="discoverCheck" @(discoverOnlySeasonal ? "checked" : "") @(!showSeasonal ? "disabled" : "") />
+                <span class="slider"></span>
+            </label>
+            <hr class="option-sep" />
+
+            <span class="option-name">Airing This Week</span>
+            <label class="switch">
+                <input type="checkbox" id="showAiring" class="catalogCheck" @(showAiring ? "checked" : "") />
+                <span class="slider"></span>
+            </label>
+            <label class="switch @(!showAiring ? "switch-disabled" : "")">
+                <input type="checkbox" id="discoverOnlyAiring" class="discoverCheck" @(discoverOnlyAiring ? "checked" : "") @(!showAiring ? "disabled" : "") />
                 <span class="slider"></span>
             </label>
         </div>
@@ -213,21 +281,37 @@ else
     });
 
     function changeUrl() {
-        var flags = 0;
-        if ($('#showCurrent').is(':checked'))          flags |= 0x01;
-        if ($('#showCompleted').is(':checked'))         flags |= 0x02;
-        if ($('#showTrending').is(':checked'))          flags |= 0x04;
-        if ($('#showSeasonal').is(':checked'))           flags |= 0x08;
-        if ($('#discoverOnlyCurrent').is(':checked'))   flags |= 0x10;
-        if ($('#discoverOnlyCompleted').is(':checked')) flags |= 0x20;
-        if ($('#discoverOnlyTrending').is(':checked'))  flags |= 0x40;
-        if ($('#discoverOnlySeasonal').is(':checked'))  flags |= 0x80;
+        var flags1 = 0;
+        if ($('#showCurrent').is(':checked'))          flags1 |= 0x01;
+        if ($('#showCompleted').is(':checked'))         flags1 |= 0x02;
+        if ($('#showTrending').is(':checked'))          flags1 |= 0x04;
+        if ($('#showSeasonal').is(':checked'))           flags1 |= 0x08;
+        if ($('#discoverOnlyCurrent').is(':checked'))   flags1 |= 0x10;
+        if ($('#discoverOnlyCompleted').is(':checked')) flags1 |= 0x20;
+        if ($('#discoverOnlyTrending').is(':checked'))  flags1 |= 0x40;
+        if ($('#discoverOnlySeasonal').is(':checked'))  flags1 |= 0x80;
 
-        // Binary v1: [0x01 version][flags byte][pre-compressed token bytes]
-        var payload = new Uint8Array(2 + tokenBytes.length);
-        payload[0] = 0x01;
-        payload[1] = flags;
-        payload.set(tokenBytes, 2);
+        var flags2 = 0;
+        if ($('#showPlanning').is(':checked'))           flags2 |= 0x01;
+        if ($('#showPaused').is(':checked'))             flags2 |= 0x02;
+        if ($('#showDropped').is(':checked'))            flags2 |= 0x04;
+        if ($('#showRepeating').is(':checked'))          flags2 |= 0x08;
+        if ($('#discoverOnlyPlanning').is(':checked'))   flags2 |= 0x10;
+        if ($('#discoverOnlyPaused').is(':checked'))     flags2 |= 0x20;
+        if ($('#discoverOnlyDropped').is(':checked'))    flags2 |= 0x40;
+        if ($('#discoverOnlyRepeating').is(':checked'))  flags2 |= 0x80;
+
+        var flags3 = 0;
+        if ($('#showAiring').is(':checked'))             flags3 |= 0x01;
+        if ($('#discoverOnlyAiring').is(':checked'))     flags3 |= 0x10;
+
+        // Binary v3: [0x03 version][flags1][flags2][flags3][pre-compressed token bytes]
+        var payload = new Uint8Array(4 + tokenBytes.length);
+        payload[0] = 0x03;
+        payload[1] = flags1;
+        payload[2] = flags2;
+        payload[3] = flags3;
+        payload.set(tokenBytes, 4);
 
         var tempUrl = '/' + bytesToBase64Url(payload) + '/manifest.json';
         $('#url').attr('href', url + tempUrl);

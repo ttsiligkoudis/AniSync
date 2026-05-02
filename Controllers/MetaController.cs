@@ -2,9 +2,6 @@ using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json.Linq;
-using System.Runtime.CompilerServices;
-using System.Xml.Linq;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace AnimeList.Controllers
 {
@@ -16,9 +13,8 @@ namespace AnimeList.Controllers
         private readonly ITmdbService _tmdbService;
         private readonly ICinemetaService _cinemetaService;
         private readonly IAnimeMappingService _mappingService;
-        private readonly IHttpClientFactory _clientFactory;
 
-        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService, IHttpClientFactory clientFactory)
+        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
@@ -26,7 +22,6 @@ namespace AnimeList.Controllers
             _tmdbService = tmdbService;
             _cinemetaService = cinemetaService;
             _mappingService = mappingService;
-            _clientFactory = clientFactory;
         }
 
         private async Task<(dynamic?, bool)> GetByIDInternal(string config, string id, bool deserialize = false)
@@ -44,7 +39,16 @@ namespace AnimeList.Controllers
                 return (result, !deserialize);
             }
 
-            if (id.StartsWith(tmdbPrefix)) 
+            // Translate mal: ids into the user's chosen service id before dispatching
+            if (id.StartsWith(malPrefix))
+            {
+                var service = tokenData?.anime_service ?? AnimeService.Kitsu;
+                var resolved = await _mappingService.GetIdByService(id, service);
+                if (string.IsNullOrEmpty(resolved)) return (null, false);
+                id = (service == AnimeService.Anilist ? anilistPrefix : kitsuPrefix) + resolved;
+            }
+
+            if (id.StartsWith(tmdbPrefix))
                 result = await _tmdbService.GetAnimeByIdAsync(id, tokenData);
             else if (id.StartsWith(kitsuPrefix))
                 result = await _kitsuService.GetAnimeByIdAsync(id, tokenData);
@@ -116,6 +120,11 @@ namespace AnimeList.Controllers
                 Status = entry?.Status,
                 Progress = entry?.Progress ?? episode ?? 0,
                 TotalEpisodes = totalEpisodes,
+                Score = entry?.Score,
+                Notes = entry?.Notes,
+                RewatchCount = entry?.RewatchCount ?? 0,
+                StartedAt = entry?.StartedAt,
+                FinishedAt = entry?.FinishedAt,
                 Seasons = seasons,
                 SelectedSeason = selectedSeason,
                 AnimeService = animeService,
@@ -142,7 +151,12 @@ namespace AnimeList.Controllers
                 success = true,
                 status = entry?.Status,
                 progress = entry?.Progress ?? 0,
-                totalEpisodes = entry?.TotalEpisodes
+                totalEpisodes = entry?.TotalEpisodes,
+                score = entry?.Score,
+                notes = entry?.Notes,
+                rewatchCount = entry?.RewatchCount ?? 0,
+                startedAt = entry?.StartedAt?.ToString("yyyy-MM-dd"),
+                finishedAt = entry?.FinishedAt?.ToString("yyyy-MM-dd"),
             });
         }
 
@@ -154,13 +168,21 @@ namespace AnimeList.Controllers
             if (tokenData == null || string.IsNullOrWhiteSpace(tokenData.access_token))
                 return new JsonResult(new { success = false });
 
+            DateTime? startedAt = ParseDate(request.StartedAt);
+            DateTime? finishedAt = ParseDate(request.FinishedAt);
+
             if (tokenData.anime_service == AnimeService.Anilist)
-                await _anilistService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress, request.Status);
+                await _anilistService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                    request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
             else
-                await _kitsuService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress, request.Status);
+                await _kitsuService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                    request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
 
             return new JsonResult(new { success = true });
         }
+
+        private static DateTime? ParseDate(string s) =>
+            DateTime.TryParse(s, out var dt) ? dt : null;
     }
 
     public class SaveEntryRequest
@@ -169,6 +191,11 @@ namespace AnimeList.Controllers
         public int? Season { get; set; }
         public string Status { get; set; }
         public int Progress { get; set; }
+        public double? Score { get; set; }
+        public string Notes { get; set; }
+        public int? RewatchCount { get; set; }
+        public string StartedAt { get; set; }
+        public string FinishedAt { get; set; }
     }
 }
 

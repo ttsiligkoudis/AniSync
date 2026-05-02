@@ -1,5 +1,3 @@
-using AnimeList.Models;
-using AnimeList.Services;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,86 +8,69 @@ namespace AnimeList.Controllers
     {
         private readonly ITokenService _tokenService;
         private readonly IAnimeMappingService _mappingService;
+        private readonly IAnilistService _anilistService;
+        private readonly IKitsuService _kitsuService;
 
-        public StreamController(ITokenService tokenService, IAnimeMappingService mappingService)
+        public StreamController(ITokenService tokenService, IAnimeMappingService mappingService,
+            IAnilistService anilistService, IKitsuService kitsuService)
         {
             _tokenService = tokenService;
             _mappingService = mappingService;
+            _anilistService = anilistService;
+            _kitsuService = kitsuService;
         }
 
         [HttpGet("{config}/stream/{type}/{id}.json")]
         public async Task<JsonResult> GetStreams(string config, string type, string id)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync(config);
+            var empty = new JsonResult(new { streams = Array.Empty<object>() });
 
-            if (tokenData == null || string.IsNullOrWhiteSpace(tokenData.access_token) || tokenData.anonymousUser)
-                return new JsonResult(new { streams = Array.Empty<object>() });
+            if (!TryParseAnimeId(id, out var animeId, out var season, out var episode))
+                return empty;
 
-            int? season = null;
-            int? episode = null;
-            string? animeId = null;
-            var parts = id.Split(':');
+            var animeService = tokenData?.anime_service ?? AnimeService.Kitsu;
+            var resolvedAnimeId = await _mappingService.GetIdByService(animeId, animeService);
+            if (string.IsNullOrEmpty(resolvedAnimeId)) return empty;
 
-            if (parts.Length >= 1 && id.StartsWith("tt"))
+            var streams = new List<object>();
+
+            // Manage Entry stream — only when authenticated as a real user
+            if (tokenData != null && !string.IsNullOrWhiteSpace(tokenData.access_token) && !tokenData.anonymousUser)
             {
-                animeId = parts[0];
+                var query = string.Concat(
+                    season.HasValue ? $"?season={season}" : "",
+                    episode.HasValue ? (season.HasValue ? $"&episode={episode}" : $"?episode={episode}") : ""
+                );
+                var manageUrl = $"{Request.Scheme}://{Request.Host}/{config}/Meta/ManageEntry/{animeId}{query}";
 
-                if (parts.Length >= 2 && int.TryParse(parts[^2], out var seasonTmp) && int.TryParse(parts[^1], out var episodeTmp))
+                streams.Add(new
                 {
-                    season = seasonTmp;
-                    episode = episodeTmp;
-                }
+                    title = "📝 Manage Entry",
+                    externalUrl = manageUrl,
+                });
             }
-            else if (parts.Length >= 2
-                && (id.StartsWith(kitsuPrefix) || id.StartsWith(anilistPrefix) || id.StartsWith(tmdbPrefix)))
-            {
-                // Kitsu-prefixed ID (e.g. kitsu:12345:1:5) — pass as-is, services handle conversion
-                animeId = $"{parts[0]}:{parts[1]}";
 
-                if (parts.Length >= 3 && int.TryParse(parts[^2], out var seasonTmp) && int.TryParse(parts[^1], out var episodeTmp))
+            // Official streaming destinations from the user's chosen service
+            var externalLinks = animeService == AnimeService.Anilist
+                ? await _anilistService.GetExternalLinksAsync(animeId, tokenData)
+                : await _kitsuService.GetExternalLinksAsync(animeId, tokenData);
+
+            // Group all episodes of the same anime so Stremio can advance through them as a binge
+            var bingeGroup = $"anisync:{animeService}:{resolvedAnimeId}";
+
+            foreach (var link in externalLinks)
+            {
+                streams.Add(new
                 {
-                    season = seasonTmp;
-                    episode = episodeTmp;
-                }
+                    name = link.Site,
+                    title = $"Watch on {link.Site}",
+                    externalUrl = link.Url,
+                    behaviorHints = new { bingeGroup },
+                });
             }
 
-            if (string.IsNullOrEmpty(animeId))
-            {
-                return new JsonResult(new { streams = Array.Empty<object>() });
-            }
-
-            var resolvedAnimeId = await _mappingService.GetIdByService(animeId, tokenData.anime_service);
-
-            if (string.IsNullOrEmpty(resolvedAnimeId))
-            {
-                return new JsonResult(new { streams = Array.Empty<object>() });
-            }
-
-            var tempUrl = "";
-
-            if (season.HasValue)
-            {
-                tempUrl += string.IsNullOrEmpty(tempUrl) ? $"?season={season}" : $"&season={season}";
-            }
-
-            if (episode.HasValue)
-            {
-                tempUrl += string.IsNullOrEmpty(tempUrl) ? $"?episode={episode}" : $"&episode={episode}";
-            }
-
-            var manageUrl = $"{Request.Scheme}://{Request.Host}/{config}/Meta/ManageEntry/{animeId}{tempUrl}";
-
-            return new JsonResult(new
-            {
-                streams = new[]
-                {
-                    new
-                    {
-                        title = "\ud83d\udcdd Manage Entry",
-                        externalUrl = manageUrl
-                    }
-                }
-            });
+            return new JsonResult(new { streams });
         }
     }
 }

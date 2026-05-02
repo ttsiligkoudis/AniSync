@@ -10,20 +10,32 @@ namespace AnimeList.Services
     {
         private readonly IHttpClientFactory _clientFactory;
         private readonly IAnimeMappingService _mappingService;
+        private readonly IAnilistFallback _anilistFallback;
         private readonly string _kitsuApi = "https://kitsu.io/api/edge";
-        private readonly List<ListType> _userLists = [ListType.Current, ListType.Completed];
+        private static readonly HashSet<ListType> _userLists =
+        [
+            ListType.Current, ListType.Completed,
+            ListType.Planning, ListType.Paused, ListType.Dropped,
+            // Kitsu has no "Repeating" status; it's intentionally excluded.
+        ];
 
         // Kitsu enforces a maximum of 20 items per page
         private const int CatalogPageSize = 20;
 
-        public KitsuService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService)
+        public KitsuService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IAnilistFallback anilistFallback)
         {
             _clientFactory = clientFactory;
             _mappingService = mappingService;
+            _anilistFallback = anilistFallback;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null)
         {
+            // Kitsu has no native airing-schedule endpoint; delegate to the AniList fallback
+            // and translate ids back to Kitsu for downstream meta/manage flows.
+            if (list == ListType.Airing)
+                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.Kitsu, skip);
+
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu);
             var isUserList = !list.HasValue || _userLists.Contains(list.Value);
 
@@ -31,7 +43,7 @@ namespace AnimeList.Services
             if (isUserList && string.IsNullOrEmpty(tokenData?.user_id))
                 return [];
 
-            string url = BuildListUrl(tokenData, list, skip, resolvedAnimeId, genre, isUserList);
+            string url = BuildListUrl(tokenData, list, skip, resolvedAnimeId, genre, search, sort, isUserList);
 
             var request = new HttpRequestMessage(HttpMethod.Get, url);
             if (!string.IsNullOrWhiteSpace(tokenData?.access_token))
@@ -135,7 +147,7 @@ namespace AnimeList.Services
                 seenIds[externalId] = meta;
             }
 
-            return seenIds.Select(s => s.Value).ToList();
+            return seenIds.Values.ToList();
         }
 
         public async Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData)
@@ -234,6 +246,15 @@ namespace AnimeList.Services
                 }
             }
 
+            // Kitsu's mediaRelationships exposes prequels/sequels but not "audience also liked"
+            // recommendations. Fall back to AniList anonymously when the anime has an AniList id
+            // in the mapping; the fallback rewrites ids back to Kitsu where possible.
+            if (mapping?.AnilistId != null)
+            {
+                var similar = await _anilistFallback.GetRecommendationsAsync(mapping.AnilistId.Value, AnimeService.Kitsu);
+                anime.links.AddRange(similar);
+            }
+
             return anime;
         }
 
@@ -242,38 +263,58 @@ namespace AnimeList.Services
             var resolvedKitsuId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu, season);
             if (string.IsNullOrEmpty(resolvedKitsuId)) return null;
 
-            var entry = new AnimeEntry
-            {
-                MediaId = resolvedKitsuId,
-                TotalEpisodes = await GetTotalEpisodesAsync(tokenData, resolvedKitsuId)
-            };
+            var entry = new AnimeEntry { MediaId = resolvedKitsuId };
 
-            // Library entry lookup requires authentication
+            // Without auth we still want totalEpisodes so the UI can show a progress max
             if (string.IsNullOrEmpty(tokenData?.access_token) || string.IsNullOrEmpty(tokenData?.user_id))
+            {
+                entry.TotalEpisodes = await GetTotalEpisodesAsync(tokenData, resolvedKitsuId);
                 return entry;
+            }
 
-            var url = $"{_kitsuApi}/users/{tokenData.user_id}/library-entries?filter[kind]=anime&filter[animeId]={resolvedKitsuId}&page[limit]=1";
+            // One round-trip: library entry + the anime's episodeCount via sparse fields on the include
+            var url = $"{_kitsuApi}/users/{tokenData.user_id}/library-entries"
+                + $"?filter[kind]=anime&filter[animeId]={resolvedKitsuId}&page[limit]=1"
+                + "&include=anime&fields[anime]=episodeCount";
+
             var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
 
-            var client = _clientFactory.CreateClient();
-            var response = await client.SendAsync(request);
-            if (!response.IsSuccessStatusCode) return entry;
-
-            var content = await response.Content.ReadAsStringAsync();
-            var json = JObject.Parse(content);
-
-            if (json["data"] is JArray dataArr && dataArr.OfType<JObject>().FirstOrDefault() is JObject libEntry)
+            var response = await _clientFactory.CreateClient().SendAsync(request);
+            if (!response.IsSuccessStatusCode)
             {
-                entry.EntryId = (string)libEntry["id"];
-                entry.Status = (string)libEntry["attributes"]?["status"];
-                entry.Progress = (int?)libEntry["attributes"]?["progress"] ?? 0;
+                entry.TotalEpisodes = await GetTotalEpisodesAsync(tokenData, resolvedKitsuId);
+                return entry;
             }
+
+            var json = JObject.Parse(await response.Content.ReadAsStringAsync());
+
+            if ((json["data"] as JArray)?.OfType<JObject>().FirstOrDefault() is JObject libEntry)
+            {
+                var attrs = libEntry["attributes"];
+                entry.EntryId = (string)libEntry["id"];
+                entry.Status = (string)attrs?["status"];
+                entry.Progress = (int?)attrs?["progress"] ?? 0;
+                // Kitsu's ratingTwenty is 2-20 (where 20 == 10/10); convert to a 0-10 scale.
+                var ratingTwenty = (int?)attrs?["ratingTwenty"];
+                entry.Score = ratingTwenty.HasValue ? ratingTwenty.Value / 2.0 : null;
+                entry.Notes = (string)attrs?["notes"];
+                entry.RewatchCount = (int?)attrs?["reconsumeCount"] ?? 0;
+                entry.StartedAt = ParseKitsuDate((string)attrs?["startedAt"]);
+                entry.FinishedAt = ParseKitsuDate((string)attrs?["finishedAt"]);
+            }
+
+            entry.TotalEpisodes = (int?)(json["included"] as JArray)?
+                .OfType<JObject>()
+                .FirstOrDefault(i => (string)i["type"] == "anime")?["attributes"]?["episodeCount"]
+                ?? await GetTotalEpisodesAsync(tokenData, resolvedKitsuId);
 
             return entry;
         }
 
-        public async Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, int progress, string status = null)
+        public async Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, int progress,
+            string status = null, double? score = null, string notes = null, int? rewatchCount = null,
+            DateTime? startedAt = null, DateTime? finishedAt = null)
         {
             var resolvedKitsuId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu, season);
             if (string.IsNullOrEmpty(resolvedKitsuId)) return;
@@ -285,7 +326,18 @@ namespace AnimeList.Services
             // Kitsu requires a status when creating; default new entries to current
             if (string.IsNullOrEmpty(status)) status = GetListTypeString(ListType.Current, tokenData);
 
-            var attributes = new { progress, status };
+            // Build a sparse attributes dict so unset fields aren't overwritten with null
+            var attributes = new Dictionary<string, object>
+            {
+                ["progress"] = progress,
+                ["status"] = status,
+            };
+            if (score.HasValue)
+                attributes["ratingTwenty"] = (int)Math.Round(Math.Clamp(score.Value, 0, 10) * 2);
+            if (notes != null) attributes["notes"] = notes;
+            if (rewatchCount.HasValue) attributes["reconsumeCount"] = rewatchCount.Value;
+            if (startedAt.HasValue) attributes["startedAt"] = startedAt.Value.ToString("yyyy-MM-dd");
+            if (finishedAt.HasValue) attributes["finishedAt"] = finishedAt.Value.ToString("yyyy-MM-dd");
 
             HttpRequestMessage request;
             if (!string.IsNullOrEmpty(existing?.EntryId))
@@ -331,6 +383,56 @@ namespace AnimeList.Services
             await _clientFactory.CreateClient().SendAsync(request);
         }
 
+        public async Task<List<StreamingLink>> GetExternalLinksAsync(string animeId, TokenData tokenData)
+        {
+            var resolvedKitsuId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu);
+            if (string.IsNullOrEmpty(resolvedKitsuId)) return [];
+
+            var url = $"{_kitsuApi}/anime/{resolvedKitsuId}?include=streamingLinks.streamer&fields[anime]=id&fields[streamingLinks]=url,streamer&fields[streamers]=siteName";
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            if (!string.IsNullOrEmpty(tokenData?.access_token))
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+
+            var response = await _clientFactory.CreateClient().SendAsync(request);
+            if (!response.IsSuccessStatusCode) return [];
+
+            var json = JObject.Parse(await response.Content.ReadAsStringAsync());
+
+            // Build streamer-id -> siteName map first
+            var streamers = new Dictionary<string, string>();
+            if (json["included"] is JArray includedArr)
+            {
+                foreach (var inc in includedArr.OfType<JObject>())
+                {
+                    if ((string)inc["type"] != "streamers") continue;
+                    var sid = (string)inc["id"];
+                    var name = (string)inc["attributes"]?["siteName"];
+                    if (!string.IsNullOrEmpty(sid) && !string.IsNullOrEmpty(name)) streamers[sid] = name;
+                }
+            }
+
+            var result = new List<StreamingLink>();
+            if (json["included"] is JArray included2)
+            {
+                foreach (var inc in included2.OfType<JObject>())
+                {
+                    if ((string)inc["type"] != "streamingLinks") continue;
+                    var linkUrl = (string)inc["attributes"]?["url"];
+                    if (string.IsNullOrEmpty(linkUrl)) continue;
+
+                    var streamerId = (string)inc["relationships"]?["streamer"]?["data"]?["id"];
+                    var siteName = streamerId != null && streamers.TryGetValue(streamerId, out var n) ? n : "Stream";
+                    result.Add(new StreamingLink { Site = siteName, Url = linkUrl });
+                }
+            }
+            return result;
+        }
+
+        private static DateTime? ParseKitsuDate(string raw)
+        {
+            return DateTime.TryParse(raw, out var dt) ? dt : null;
+        }
+
         private async Task<int?> GetTotalEpisodesAsync(TokenData tokenData, string resolvedKitsuId)
         {
             var url = $"{_kitsuApi}/anime/{resolvedKitsuId}?fields[anime]=episodeCount";
@@ -350,7 +452,7 @@ namespace AnimeList.Services
             return (int?)json["data"]?["attributes"]?["episodeCount"];
         }
 
-        private string BuildListUrl(TokenData tokenData, ListType? list, string skip, string resolvedAnimeId, string genre, bool isUserList)
+        private string BuildListUrl(TokenData tokenData, ListType? list, string skip, string resolvedAnimeId, string genre, string search, string sort, bool isUserList)
         {
             string url;
 
@@ -363,12 +465,19 @@ namespace AnimeList.Services
             else if (list == ListType.Seasonal)
             {
                 var (season, year) = GetSeasonAndYear(genre ?? SeasonCurrent);
-                url = $"{_kitsuApi}/anime?sort=-userCount&filter[season]={season.ToLowerInvariant()}&filter[seasonYear]={year}&include=categories";
+                var sortValue = string.IsNullOrEmpty(sort) ? "-userCount" : SortToKitsu(sort);
+                url = $"{_kitsuApi}/anime?sort={sortValue}&filter[season]={season.ToLowerInvariant()}&filter[seasonYear]={year}&include=categories";
+            }
+            else if (list == ListType.Search)
+            {
+                url = $"{_kitsuApi}/anime?include=categories&filter[text]={Uri.EscapeDataString(search ?? string.Empty)}";
             }
             else
             {
-                // Trending and other discovery lists: sort by popularity rank ascending (rank 1 = most popular)
-                url = $"{_kitsuApi}/anime?sort=popularityRank&include=categories";
+                // Trending and other discovery lists default to popularity rank ascending
+                // (rank 1 = most popular). Honour an explicit sort override if the user picked one.
+                var sortValue = string.IsNullOrEmpty(sort) ? "popularityRank" : SortToKitsu(sort);
+                url = $"{_kitsuApi}/anime?sort={sortValue}&include=categories";
                 if (!string.IsNullOrEmpty(genre))
                 {
                     url += $"&filter[categories]={Uri.EscapeDataString(genre.ToLowerInvariant().Replace(" ", "-"))}";

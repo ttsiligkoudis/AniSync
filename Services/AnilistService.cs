@@ -1,6 +1,5 @@
 ﻿using AnimeList.Models;
 using AnimeList.Services.Interfaces;
-using System.Formats.Tar;
 using System.Net.Http.Headers;
 
 namespace AnimeList.Services
@@ -10,23 +9,55 @@ namespace AnimeList.Services
         private readonly IHttpClientFactory _clientFactory;
         private readonly IAnimeMappingService _mappingService;
         private readonly IKitsuService _kitsuService;
+        private readonly IAnilistFallback _anilistFallback;
         private readonly string _anilistApi = "https://graphql.anilist.co";
-        private readonly List<ListType> _userLists = [ListType.Current, ListType.Completed ];
+        private static readonly HashSet<ListType> _userLists =
+        [
+            ListType.Current, ListType.Completed,
+            ListType.Planning, ListType.Paused, ListType.Dropped, ListType.Repeating,
+        ];
 
-        public AnilistService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IKitsuService kitsuService)
+        public AnilistService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IKitsuService kitsuService, IAnilistFallback anilistFallback)
         {
             _clientFactory = clientFactory;
             _mappingService = mappingService;
             _kitsuService = kitsuService;
+            _anilistFallback = anilistFallback;
         }
 
         private const int CatalogPageSize = 50;
 
-        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null)
+        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null, string search = null, string sort = null)
         {
             var requestBody = string.Empty;
 
-            if (!list.HasValue || _userLists.Contains(list.Value))
+            if (list == ListType.Search)
+            {
+                var page = int.TryParse(skip, out var skipInt) ? (skipInt / CatalogPageSize) + 1 : 1;
+
+                requestBody = SerializeObject(new
+                {
+                    query = @"
+                    query ($search: String, $page: Int, $perPage: Int) {
+                        Page (page: $page, perPage: $perPage) {
+                            media(search: $search, type: ANIME) {
+                                id
+                                format
+                                title {
+                                    english
+                                    romaji
+                                }
+                                coverImage {
+                                    large
+                                }
+                                description
+                            }
+                        }
+                    }",
+                    variables = new { search = search ?? string.Empty, page, perPage = CatalogPageSize }
+                });
+            }
+            else if (!list.HasValue || _userLists.Contains(list.Value))
             {
                 if (!string.IsNullOrEmpty(resolvedAnimeId))
                 {
@@ -95,13 +126,14 @@ namespace AnimeList.Services
             {
                 var page = int.TryParse(skip, out var skipInt) ? (skipInt / CatalogPageSize) + 1 : 1;
                 var (season, year) = GetSeasonAndYear(genre ?? SeasonCurrent);
+                var sortValue = string.IsNullOrEmpty(sort) ? "POPULARITY_DESC" : SortToAnilist(sort);
 
                 requestBody = SerializeObject(new
                 {
                     query = $@"
-                    query ($page: Int, $perPage: Int, $season: MediaSeason, $seasonYear: Int) {{
+                    query ($page: Int, $perPage: Int, $season: MediaSeason, $seasonYear: Int, $sort: [MediaSort]) {{
                         Page (page: $page, perPage: $perPage) {{
-                            media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: [POPULARITY_DESC]) {{
+                            media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: $sort) {{
                                 id
                                 format
                                 title {{
@@ -115,9 +147,7 @@ namespace AnimeList.Services
                             }}
                         }}
                     }}",
-                    variables = !string.IsNullOrEmpty(genre)
-                        ? (object)new { page, perPage = CatalogPageSize, season, seasonYear = year, genre }
-                        : new { page, perPage = CatalogPageSize, season, seasonYear = year }
+                    variables = new { page, perPage = CatalogPageSize, season, seasonYear = year, sort = new[] { sortValue } }
                 });
             }
             else
@@ -126,6 +156,10 @@ namespace AnimeList.Services
 
                 var genreVarDecl = !string.IsNullOrEmpty(genre) ? ", $genre: String" : string.Empty;
                 var genreArg = !string.IsNullOrEmpty(genre) ? ", genre: $genre" : string.Empty;
+
+                // If the user picked a sort, honour it; otherwise fall back to the catalog's
+                // default sort encoded in the ListType (e.g. TRENDING_DESC).
+                var sortValue = string.IsNullOrEmpty(sort) ? GetListTypeString(list.Value, tokenData) : SortToAnilist(sort);
 
                 requestBody = SerializeObject(new
                 {
@@ -146,18 +180,22 @@ namespace AnimeList.Services
                         }}
                     }}",
                     variables = !string.IsNullOrEmpty(genre)
-                        ? (object)new { sort = new List<string> { GetListTypeString(list.Value, tokenData) }, page, perPage = CatalogPageSize, genre }
-                        : new { sort = new List<string> { GetListTypeString(list.Value, tokenData) }, page, perPage = CatalogPageSize }
+                        ? (object)new { sort = new[] { sortValue }, page, perPage = CatalogPageSize, genre }
+                        : new { sort = new[] { sortValue }, page, perPage = CatalogPageSize }
                 });
             }
 
             return requestBody;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null)
         {
+            // Airing schedule is shared between services and lives in the cross-service helper
+            if (list == ListType.Airing)
+                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.Anilist, skip);
+
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
-            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre);
+            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, search, sort);
 
             var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
             {
@@ -180,7 +218,7 @@ namespace AnimeList.Services
 
             bool isUserList = !list.HasValue || _userLists.Contains(list.Value);
 
-            if (list == ListType.Trending_Desc || list == ListType.Seasonal)
+            if (list == ListType.Trending_Desc || list == ListType.Seasonal || list == ListType.Search)
                 result = data.Page.media;
             else if (!string.IsNullOrEmpty(resolvedAnimeId))
                 result = data.MediaList == null ? Array.Empty<dynamic>() : [data.MediaList];
@@ -200,41 +238,45 @@ namespace AnimeList.Services
             var seenIds = new Dictionary<string, Meta>();
             foreach (var entry in result)
             {
-                var tmpEntry = entry;
+                dynamic media;
                 string entryId = null;
                 string entryStatus = null;
 
-                if (!list.HasValue || _userLists.Contains(list.Value))
+                if (isUserList)
                 {
-                    tmpEntry = entry.media;
+                    media = entry.media;
                     entryId = entry.id;
                     entryStatus = entry.status;
                 }
+                else
+                {
+                    media = entry;
+                }
 
-                if (list == ListType.Current && (string)tmpEntry.status == "NOT_YET_RELEASED") continue;
+                if (list == ListType.Current && (string)media.status == "NOT_YET_RELEASED") continue;
 
                 // Filter user list entries by genre when discover-only provides a genre selection
-                if (!string.IsNullOrEmpty(genre) && isUserList && tmpEntry.genres != null)
+                if (!string.IsNullOrEmpty(genre) && isUserList && media.genres != null)
                 {
-                    var genres = tmpEntry.genres.ToObject<List<string>>();
+                    var genres = media.genres.ToObject<List<string>>();
                     if (!genres.Contains(genre)) continue;
                 }
 
-                var mapping = await _mappingService.GetAnilistMapping((string)tmpEntry.id);
+                var mapping = await _mappingService.GetAnilistMapping((string)media.id);
 
                 var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
                     !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
                     mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
-                    $"{anilistPrefix}{tmpEntry.id}";
+                    $"{anilistPrefix}{media.id}";
 
-                var isMovie = IsMovieFormat((string)tmpEntry.format);
+                var isMovie = IsMovieFormat((string)media.format);
 
-                var meta = new Meta(tmpEntry.description)
+                var meta = new Meta(media.description)
                 {
                     id = externalId,
                     type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
-                    name = string.IsNullOrEmpty((string)tmpEntry.title.english) ? tmpEntry.title.romaji : tmpEntry.title.english,
-                    poster = tmpEntry.coverImage.large,
+                    name = string.IsNullOrEmpty((string)media.title.english) ? media.title.romaji : media.title.english,
+                    poster = media.coverImage.large,
                     entryId = entryId,
                     entryStatus = entryStatus
                 };
@@ -245,7 +287,6 @@ namespace AnimeList.Services
                 {
                     if (!string.IsNullOrEmpty(meta.name) && (string.IsNullOrEmpty(existing.name) || meta.name.Length < existing.name.Length))
                         seenIds[externalId] = meta;
-
                     continue;
                 }
 
@@ -255,11 +296,11 @@ namespace AnimeList.Services
             // User lists are fetched in full via MediaListCollection; paginate after dedup
             if (isUserList && string.IsNullOrEmpty(resolvedAnimeId))
             {
-                int skipCount = int.TryParse(skip, out var s) ? s : 0;
-                return seenIds.Select(s => s.Value).Skip(skipCount).Take(CatalogPageSize).ToList();
+                var skipCount = int.TryParse(skip, out var s) ? s : 0;
+                return seenIds.Values.Skip(skipCount).Take(CatalogPageSize).ToList();
             }
 
-            return seenIds.Select(s => s.Value).ToList();
+            return seenIds.Values.ToList();
         }
 
         public async Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData)
@@ -283,6 +324,36 @@ namespace AnimeList.Services
                         }
                         description,
                         genres,
+                        tags {
+                            name
+                            rank
+                            isAdult
+                        },
+                        studios {
+                            edges {
+                                isMain
+                                node { name siteUrl }
+                            }
+                        },
+                        staff(sort: RELEVANCE, perPage: 10) {
+                            edges {
+                                role
+                                node {
+                                    name { full }
+                                    siteUrl
+                                }
+                            }
+                        },
+                        recommendations(sort: RATING_DESC, perPage: 15) {
+                            edges {
+                                node {
+                                    mediaRecommendation {
+                                        id
+                                        title { english romaji }
+                                    }
+                                }
+                            }
+                        },
                         trailer {
                             id,
                             site
@@ -340,7 +411,7 @@ namespace AnimeList.Services
             var anime = new Meta(result.description)
             {
                 id = externalId,
-                type = isMovie ? MetaType.series.ToString() : MetaType.movie.ToString(),
+                type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
                 name = string.IsNullOrEmpty((string)result.title.english) ? result.title.romaji : result.title.english,
                 poster = result.coverImage.large,
                 genres = result.genres.ToObject<List<string>>(),
@@ -351,6 +422,75 @@ namespace AnimeList.Services
             {
                 anime.trailers.Add(new Trailer(result.trailer.id));
                 anime.trailerStreams.Add(new TrailerStream(result.trailer.id, anime.name));
+            }
+
+            // Surface AniList tags as Meta links. Filter to non-adult, well-ranked tags so the
+            // detail page doesn't get spammed with low-confidence themes.
+            if (result.tags != null)
+            {
+                foreach (var tag in result.tags)
+                {
+                    if ((bool?)tag.isAdult == true) continue;
+                    var rank = (int?)tag.rank ?? 0;
+                    if (rank < 50) continue;
+                    var name = (string)tag.name;
+                    if (string.IsNullOrEmpty(name)) continue;
+                    anime.links.Add(new Link
+                    {
+                        name = name,
+                        category = "Tag",
+                        url = $"https://anilist.co/search/anime?genres={Uri.EscapeDataString(name)}"
+                    });
+                }
+            }
+
+            if (result.studios?.edges != null)
+            {
+                foreach (var edge in result.studios.edges)
+                {
+                    if ((bool?)edge.isMain != true) continue; // skip licensors / sub-studios
+                    var name = (string)edge.node?.name;
+                    var siteUrl = (string)edge.node?.siteUrl;
+                    if (string.IsNullOrEmpty(name)) continue;
+                    anime.links.Add(new Link { name = name, category = "Studio", url = siteUrl });
+                }
+            }
+
+            if (result.staff?.edges != null)
+            {
+                foreach (var edge in result.staff.edges)
+                {
+                    var role = (string)edge.role;
+                    var name = (string)edge.node?.name?.full;
+                    var siteUrl = (string)edge.node?.siteUrl;
+                    if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(role)) continue;
+
+                    // Map to Stremio's standard link categories where the role is recognisable
+                    var category = StaffRoleToCategory(role);
+                    anime.links.Add(new Link { name = name, category = category, url = siteUrl });
+                }
+            }
+
+            if (result.recommendations?.edges != null)
+            {
+                foreach (var edge in result.recommendations.edges)
+                {
+                    var rec = edge.node?.mediaRecommendation;
+                    if (rec == null) continue;
+                    var recId = (int?)rec.id;
+                    if (!recId.HasValue) continue;
+                    var name = string.IsNullOrEmpty((string)rec.title?.english)
+                        ? (string)rec.title?.romaji
+                        : (string)rec.title?.english;
+                    if (string.IsNullOrEmpty(name)) continue;
+
+                    anime.links.Add(new Link
+                    {
+                        name = name,
+                        category = "Similar",
+                        url = $"https://anilist.co/anime/{recId.Value}",
+                    });
+                }
             }
 
             if (!isMovie)
@@ -408,36 +548,6 @@ namespace AnimeList.Services
             return season;
         }
 
-        private async Task<int?> GetTotalEpisodesAsync(TokenData tokenData, string resolvedAnimeId)
-        {
-            var requestBody = SerializeObject(new
-            {
-                query = @"
-                    query ($id: Int) {
-                        Media(id: $id, type: ANIME) {
-                            episodes
-                        }
-                    }",
-                variables = new { id = resolvedAnimeId }
-            });
-
-            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
-            {
-                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
-            };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
-
-            var client = _clientFactory.CreateClient();
-            var response = await client.SendAsync(request);
-
-            if (!response.IsSuccessStatusCode) return null;
-
-            var content = await response.Content.ReadAsStringAsync();
-            var result = DeserializeObject<dynamic>(content);
-
-            return (int?)result?.data?.Media?.episodes;
-        }
-
         public async Task<AnimeEntry> GetAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist, season);
@@ -452,6 +562,11 @@ namespace AnimeList.Services
                             id
                             status
                             progress
+                            score
+                            notes
+                            repeat
+                            startedAt { year month day }
+                            completedAt { year month day }
                         }
                         Media(id: $mediaId, type: ANIME) {
                             episodes
@@ -482,15 +597,23 @@ namespace AnimeList.Services
 
             if (data?.MediaList != null)
             {
-                entry.EntryId = (string)data.MediaList.id?.ToString();
-                entry.Status = (string)data.MediaList.status;
-                entry.Progress = (int?)data.MediaList.progress ?? 0;
+                var ml = data.MediaList;
+                entry.EntryId = (string)ml.id?.ToString();
+                entry.Status = (string)ml.status;
+                entry.Progress = (int?)ml.progress ?? 0;
+                entry.Score = (double?)ml.score;
+                entry.Notes = (string)ml.notes;
+                entry.RewatchCount = (int?)ml.repeat ?? 0;
+                entry.StartedAt = FuzzyDateToDateTime(ml.startedAt);
+                entry.FinishedAt = FuzzyDateToDateTime(ml.completedAt);
             }
 
             return entry;
         }
 
-        public async Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, int progress, string status = null)
+        public async Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, int progress,
+            string status = null, double? score = null, string notes = null, int? rewatchCount = null,
+            DateTime? startedAt = null, DateTime? finishedAt = null)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist, season);
 
@@ -498,32 +621,49 @@ namespace AnimeList.Services
 
             if (string.IsNullOrEmpty(status))
             {
-                animeId = $"{anilistPrefix}{resolvedAnimeId}";
-                var meta = (await GetAnimeListAsync(tokenData, animeId: animeId)).FirstOrDefault();
+                var meta = (await GetAnimeListAsync(tokenData, animeId: $"{anilistPrefix}{resolvedAnimeId}")).FirstOrDefault();
                 status = meta?.entryStatus;
-
-                //int? totalEpisodes = await GetTotalEpisodesAsync(tokenData, resolvedAnimeId);
-                //bool isCompleted = totalEpisodes.HasValue && totalEpisodes.Value > 0 && progress >= totalEpisodes.Value;
-                //status = GetListTypeString(isCompleted ? ListType.Completed : ListType.Current, tokenData)
             }
 
-            var requestBody = SerializeObject(new
+            // Build the variables dict so we can omit fields the caller didn't set.
+            // Anything in variables ends up in the mutation payload; anything NOT in variables
+            // is left server-side at its previous value (AniList only updates fields it sees).
+            var variables = new Dictionary<string, object>
             {
-                query = @"
-                    mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus) {
-                        SaveMediaListEntry(mediaId: $mediaId, progress: $progress, status: $status) {
-                            id
-                            progress
-                            status
-                        }
-                    }",
-                variables = new
-                {
-                    mediaId = resolvedAnimeId,
-                    progress,
-                    status
-                }
-            });
+                ["mediaId"] = resolvedAnimeId,
+                ["progress"] = progress,
+            };
+            if (!string.IsNullOrEmpty(status)) variables["status"] = status;
+            if (score.HasValue) variables["score"] = score.Value;
+            if (notes != null) variables["notes"] = notes;
+            if (rewatchCount.HasValue) variables["repeat"] = rewatchCount.Value;
+            if (startedAt.HasValue) variables["startedAt"] = ToFuzzyDate(startedAt.Value);
+            if (finishedAt.HasValue) variables["completedAt"] = ToFuzzyDate(finishedAt.Value);
+
+            // The mutation declares only the variables we're actually sending so AniList knows the
+            // schema. Optional fields are omitted from the variable declaration when null.
+            var declParts = new List<string> { "$mediaId: Int", "$progress: Int" };
+            if (variables.ContainsKey("status")) declParts.Add("$status: MediaListStatus");
+            if (variables.ContainsKey("score")) declParts.Add("$score: Float");
+            if (variables.ContainsKey("notes")) declParts.Add("$notes: String");
+            if (variables.ContainsKey("repeat")) declParts.Add("$repeat: Int");
+            if (variables.ContainsKey("startedAt")) declParts.Add("$startedAt: FuzzyDateInput");
+            if (variables.ContainsKey("completedAt")) declParts.Add("$completedAt: FuzzyDateInput");
+
+            var argParts = new List<string> { "mediaId: $mediaId", "progress: $progress" };
+            if (variables.ContainsKey("status")) argParts.Add("status: $status");
+            if (variables.ContainsKey("score")) argParts.Add("score: $score");
+            if (variables.ContainsKey("notes")) argParts.Add("notes: $notes");
+            if (variables.ContainsKey("repeat")) argParts.Add("repeat: $repeat");
+            if (variables.ContainsKey("startedAt")) argParts.Add("startedAt: $startedAt");
+            if (variables.ContainsKey("completedAt")) argParts.Add("completedAt: $completedAt");
+
+            var query = $@"
+                mutation ({string.Join(", ", declParts)}) {{
+                    SaveMediaListEntry({string.Join(", ", argParts)}) {{ id }}
+                }}";
+
+            var requestBody = SerializeObject(new { query, variables });
 
             var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
             {
@@ -533,6 +673,75 @@ namespace AnimeList.Services
 
             var client = _clientFactory.CreateClient();
             await client.SendAsync(request);
+        }
+
+        public async Task<List<StreamingLink>> GetExternalLinksAsync(string animeId, TokenData tokenData)
+        {
+            var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
+            if (string.IsNullOrEmpty(resolvedAnimeId)) return [];
+
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($id: Int) {
+                        Media(id: $id, type: ANIME) {
+                            externalLinks { site url type }
+                        }
+                    }",
+                variables = new { id = resolvedAnimeId }
+            });
+
+            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
+            {
+                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
+            };
+            if (!string.IsNullOrEmpty(tokenData?.access_token))
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+
+            var client = _clientFactory.CreateClient();
+            var response = await client.SendAsync(request);
+            if (!response.IsSuccessStatusCode) return [];
+
+            var content = await response.Content.ReadAsStringAsync();
+            var media = DeserializeObject<dynamic>(content)?.data?.Media;
+            if (media?.externalLinks == null) return [];
+
+            var result = new List<StreamingLink>();
+            foreach (var link in media.externalLinks)
+            {
+                if ((string)link.type != "STREAMING") continue;
+                var site = (string)link.site;
+                var url = (string)link.url;
+                if (string.IsNullOrEmpty(url)) continue;
+                result.Add(new StreamingLink { Site = site, Url = url });
+            }
+            return result;
+        }
+
+        private static DateTime? FuzzyDateToDateTime(dynamic fuzzy)
+        {
+            if (fuzzy == null) return null;
+            int? y = (int?)fuzzy.year, m = (int?)fuzzy.month, d = (int?)fuzzy.day;
+            if (!y.HasValue || !m.HasValue || !d.HasValue) return null;
+            try { return new DateTime(y.Value, m.Value, d.Value); }
+            catch { return null; }
+        }
+
+        private static object ToFuzzyDate(DateTime dt) => new { year = dt.Year, month = dt.Month, day = dt.Day };
+
+        /// <summary>
+        /// Maps an AniList staff role string to a Stremio link category. Stremio recognises
+        /// "director", "writer", "actor"; other roles fall back to a free-form label.
+        /// </summary>
+        private static string StaffRoleToCategory(string role)
+        {
+            var r = role.ToLowerInvariant();
+            if (r.Contains("director")) return "director";
+            if (r.Contains("writ") || r.Contains("script") || r.Contains("creator")) return "writer";
+            if (r.Contains("composer") || r.Contains("music")) return "Composer";
+            if (r.Contains("character design") || r.Contains("art")) return "Artist";
+            if (r.Contains("producer")) return "Producer";
+            return "Staff";
         }
     }
 }

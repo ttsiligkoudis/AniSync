@@ -27,6 +27,7 @@ namespace AnimeList.Services
         private ConcurrentDictionary<string, List<AnimeIdMapping>> _enrichedImdbIndex = new();
         private FrozenDictionary<int, AnimeIdMapping> _anilistMapping;
         private FrozenDictionary<int, AnimeIdMapping> _kitsuMapping;
+        private FrozenDictionary<int, AnimeIdMapping> _malMapping;
         private FrozenDictionary<string, List<AnimeIdMapping>> _imdbMapping;
         private FrozenDictionary<string, List<AnimeIdMapping>> _tmdbMapping;
         private DateTime _lastLoaded = DateTime.MinValue;
@@ -52,6 +53,16 @@ namespace AnimeList.Services
             await EnsureMappingsLoadedAsync();
             if (!_kitsuMapping.TryGetValue(int.Parse(kitsuId.Replace(kitsuPrefix, "")), out var mapping))
                 return null;
+
+            await TryEnrichImdbAsync(mapping);
+            return mapping;
+        }
+
+        public async Task<AnimeIdMapping> GetMalMapping(string malId)
+        {
+            await EnsureMappingsLoadedAsync();
+            if (!int.TryParse(malId.Replace(malPrefix, ""), out var parsed)) return null;
+            if (!_malMapping.TryGetValue(parsed, out var mapping)) return null;
 
             await TryEnrichImdbAsync(mapping);
             return mapping;
@@ -121,6 +132,11 @@ namespace AnimeList.Services
                     .Where(e => e.KitsuId.HasValue)
                     .DistinctBy(e => e.KitsuId!.Value)
                     .ToFrozenDictionary(e => e.KitsuId!.Value, e => e);
+
+                _malMapping = entries
+                    .Where(e => e.MalId.HasValue)
+                    .DistinctBy(e => e.MalId!.Value)
+                    .ToFrozenDictionary(e => e.MalId!.Value, e => e);
 
                 _imdbMapping = entries
                     .Where(e => !string.IsNullOrEmpty(e.ImdbId))
@@ -351,6 +367,11 @@ namespace AnimeList.Services
             {
                 var mapping = await GetTmdbMapping(animeId, season);
                 return service == AnimeService.Anilist ? mapping?.FirstOrDefault()?.AnilistId?.ToString() : mapping?.FirstOrDefault()?.KitsuId?.ToString();
+            }
+            else if (animeId.StartsWith(malPrefix))
+            {
+                var mapping = await GetMalMapping(animeId);
+                return service == AnimeService.Anilist ? mapping?.AnilistId?.ToString() : mapping?.KitsuId?.ToString();
             }
 
             return animeId;

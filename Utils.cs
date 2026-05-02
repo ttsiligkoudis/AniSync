@@ -1,4 +1,5 @@
 ﻿using AnimeList.Models;
+using Newtonsoft.Json.Linq;
 using System.IO.Compression;
 using System.Text;
 
@@ -10,6 +11,7 @@ namespace AnimeList
         public static readonly string imdbPrefix = "tt";
         public static readonly string kitsuPrefix = "kitsu:";
         public static readonly string tmdbPrefix = "tmdb:";
+        public static readonly string malPrefix = "mal:";
 
         public static readonly string DefaultOption = "None";
         public const string SeasonCurrent = "This Season";
@@ -17,6 +19,32 @@ namespace AnimeList
         public const string SeasonPrevious = "Last Season";
 
         public static readonly List<string> SeasonOptions = [SeasonCurrent, SeasonNext, SeasonPrevious];
+
+        public const string SortPopularity = "Popularity";
+        public const string SortScore = "Score";
+        public const string SortRecent = "Recent";
+
+        public static readonly List<string> SortOptions = [SortPopularity, SortScore, SortRecent];
+
+        /// <summary>
+        /// Maps a UI sort label to the AniList <c>MediaSort</c> enum value.
+        /// </summary>
+        public static string SortToAnilist(string sort) => sort switch
+        {
+            SortScore => "SCORE_DESC",
+            SortRecent => "START_DATE_DESC",
+            _ => "POPULARITY_DESC",
+        };
+
+        /// <summary>
+        /// Maps a UI sort label to the Kitsu <c>sort</c> query parameter value.
+        /// </summary>
+        public static string SortToKitsu(string sort) => sort switch
+        {
+            SortScore => "-averageRating",
+            SortRecent => "-startDate",
+            _ => "-userCount",
+        };
 
         public static List<string> GetOptions(bool includeDefault) 
         {
@@ -29,11 +57,6 @@ namespace AnimeList
             if (includeDefault) options.Insert(0, "None");
             return options;
         }
-
-        /// <summary>
-        /// Returns true if the given list type is the seasonal catalog.
-        /// </summary>
-        public static bool IsSeasonalListType(ListType list) => list == ListType.Seasonal;
 
         /// <summary>
         /// Returns true when the format/subtype represents a movie (standalone, no episodes).
@@ -98,14 +121,48 @@ namespace AnimeList
             return DateTime.UtcNow >= (expirationDate ?? DateTime.UtcNow).AddMinutes(-5);
         }
 
-        public static Meta ExpiredMeta() 
-        {
-            return new Meta { id = $"{anilistPrefix}:token-expired", name = "Token expired, re-install addon" };
-        }
-
         public static List<Meta> ExpiredMetas()
         {
-            return [ExpiredMeta()];
+            return [new Meta { id = $"{anilistPrefix}token-expired", name = "Token expired, re-install addon" }];
+        }
+
+        /// <summary>
+        /// Parses a Stremio video ID into its anime base ID + optional season + optional episode.
+        /// Supports IMDb (tt12345 or tt12345:1:5) and prefixed (kitsu:12345, anilist:..., tmdb:..., optionally ":S:E") forms.
+        /// </summary>
+        public static bool TryParseAnimeId(string id, out string animeId, out int? season, out int? episode)
+        {
+            animeId = null;
+            season = null;
+            episode = null;
+            if (string.IsNullOrEmpty(id)) return false;
+
+            var parts = id.Split(':');
+
+            if (id.StartsWith(imdbPrefix))
+            {
+                animeId = parts[0];
+            }
+            else if ((id.StartsWith(kitsuPrefix) || id.StartsWith(anilistPrefix)
+                      || id.StartsWith(tmdbPrefix) || id.StartsWith(malPrefix))
+                && parts.Length >= 2)
+            {
+                animeId = $"{parts[0]}:{parts[1]}";
+            }
+            else
+            {
+                return false;
+            }
+
+            if (parts.Length >= 3
+                && int.TryParse(parts[^2], out var s)
+                && int.TryParse(parts[^1], out var e))
+            {
+                season = s;
+                episode = e;
+            }
+
+            return true;
         }
 
         public static string CompressString(string text)
@@ -202,11 +259,13 @@ namespace AnimeList
 
         /// <summary>
         /// Decodes a config route parameter into a <see cref="Configuration"/>.
-        /// Supports three formats for backward compatibility:
+        /// Supports five formats for backward compatibility:
         /// <list type="bullet">
         ///   <item>Legacy raw JSON (starts with '{')</item>
         ///   <item>GZip-compressed JSON via Base64Url (GZip magic bytes 0x1F 0x8B)</item>
-        ///   <item>Binary v1: [0x01][flags bitmask][GZip-compressed tokenData bytes]</item>
+        ///   <item>Binary v1: [0x01][flags byte][GZip tokenData] — 8 catalog flags</item>
+        ///   <item>Binary v2: [0x02][flags1][flags2][GZip tokenData] — 16 catalog flags</item>
+        ///   <item>Binary v3: [0x03][flags1][flags2][flags3][GZip tokenData] — 24 catalog flags</item>
         /// </list>
         /// The returned <see cref="Configuration.tokenData"/> is always raw token JSON.
         /// </summary>
@@ -236,65 +295,91 @@ namespace AnimeList
                 return result;
             }
 
-            // Binary v1 format: [0x01][flags][GZip tokenData bytes...]
+            // Binary v1: [0x01][flags][GZip tokenData]
             if (data.Length >= 2 && data[0] == 0x01)
-            {
-                byte flags = data[1];
-                string tokenJson = data.Length > 2
-                    ? DecompressBytes(data[2..])
-                    : null;
+                return DecodeBinaryConfig(data, headerLen: 2, flags1: data[1], flags2: 0, flags3: 0);
 
-                return new Configuration
-                {
-                    tokenData = tokenJson,
-                    showCurrent = (flags & 0x01) != 0,
-                    showCompleted = (flags & 0x02) != 0,
-                    showTrending = (flags & 0x04) != 0,
-                    showSeasonal = (flags & 0x08) != 0,
-                    discoverOnlyCurrent = (flags & 0x10) != 0,
-                    discoverOnlyCompleted = (flags & 0x20) != 0,
-                    discoverOnlyTrending = (flags & 0x40) != 0,
-                    discoverOnlySeasonal = (flags & 0x80) != 0,
-                };
-            }
+            // Binary v2: [0x02][flags1][flags2][GZip tokenData]
+            if (data.Length >= 3 && data[0] == 0x02)
+                return DecodeBinaryConfig(data, headerLen: 3, flags1: data[1], flags2: data[2], flags3: 0);
+
+            // Binary v3: [0x03][flags1][flags2][flags3][GZip tokenData]
+            if (data.Length >= 4 && data[0] == 0x03)
+                return DecodeBinaryConfig(data, headerLen: 4, flags1: data[1], flags2: data[2], flags3: data[3]);
 
             throw new ArgumentException("Unknown config format");
         }
 
+        private static Configuration DecodeBinaryConfig(byte[] data, int headerLen, byte flags1, byte flags2, byte flags3)
+        {
+            var tokenJson = data.Length > headerLen ? DecompressBytes(data[headerLen..]) : null;
+            return new Configuration
+            {
+                tokenData = tokenJson,
+                showCurrent = (flags1 & 0x01) != 0,
+                showCompleted = (flags1 & 0x02) != 0,
+                showTrending = (flags1 & 0x04) != 0,
+                showSeasonal = (flags1 & 0x08) != 0,
+                discoverOnlyCurrent = (flags1 & 0x10) != 0,
+                discoverOnlyCompleted = (flags1 & 0x20) != 0,
+                discoverOnlyTrending = (flags1 & 0x40) != 0,
+                discoverOnlySeasonal = (flags1 & 0x80) != 0,
+                showPlanning = (flags2 & 0x01) != 0,
+                showPaused = (flags2 & 0x02) != 0,
+                showDropped = (flags2 & 0x04) != 0,
+                showRepeating = (flags2 & 0x08) != 0,
+                discoverOnlyPlanning = (flags2 & 0x10) != 0,
+                discoverOnlyPaused = (flags2 & 0x20) != 0,
+                discoverOnlyDropped = (flags2 & 0x40) != 0,
+                discoverOnlyRepeating = (flags2 & 0x80) != 0,
+                showAiring = (flags3 & 0x01) != 0,
+                discoverOnlyAiring = (flags3 & 0x10) != 0,
+            };
+        }
+
+        /// <summary>
+        /// Maps a <see cref="ListType"/> to the status/sort string the chosen service expects.
+        /// Both services share most names; Kitsu renames a couple ("planned" / "on_hold") and
+        /// has no equivalent of AniList's "REPEATING".
+        /// </summary>
         public static string GetListTypeString(ListType list, TokenData tokenData)
         {
-            return (tokenData?.anime_service ?? AnimeService.Kitsu) == AnimeService.Kitsu
-                ? list.ToString().ToLower()
-                : list.ToString().ToUpper();
+            var isKitsu = (tokenData?.anime_service ?? AnimeService.Kitsu) == AnimeService.Kitsu;
+            if (!isKitsu) return list.ToString().ToUpper();
+
+            return list switch
+            {
+                ListType.Planning => "planned",
+                ListType.Paused => "on_hold",
+                _ => list.ToString().ToLower(),
+            };
         }
 
-        public static object SafeGet(dynamic obj, params string[] path)
+        /// <summary>
+        /// Walks a JSON object along the given path, returning null at the first missing or null segment.
+        /// Works on Newtonsoft <see cref="JToken"/> trees (the runtime type of <c>DeserializeObject&lt;dynamic&gt;</c>).
+        /// </summary>
+        public static JToken SafeGet(JToken token, params string[] path)
         {
-            object current = obj;
-
+            var current = token;
             foreach (var part in path)
             {
-                if (current == null) return null;
-
-                try
-                {
-                    current = ((dynamic)current).GetType()
-                        .GetProperty(part)?
-                        .GetValue(current, null);
-                }
-                catch
-                {
-                    return null;
-                }
+                if (current == null || current.Type == JTokenType.Null) return null;
+                current = current[part];
             }
-
-            return current;
+            return current is { Type: JTokenType.Null } ? null : current;
         }
 
-        public static T SafeGet<T>(dynamic obj, params string[] path)
+        /// <summary>
+        /// Like <see cref="SafeGet(JToken, string[])"/>, but converts the leaf to <typeparamref name="T"/>
+        /// (returns <c>default</c> if the path is missing or the conversion fails).
+        /// </summary>
+        public static T SafeGet<T>(JToken token, params string[] path)
         {
-            var result = SafeGet(obj, path);
-            return result is T value ? value : default;
+            var result = SafeGet(token, path);
+            if (result == null) return default;
+            try { return result.ToObject<T>(); }
+            catch { return default; }
         }
     }
 }

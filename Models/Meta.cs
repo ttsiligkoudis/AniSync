@@ -61,4 +61,14 @@ namespace AnimeList.Models
         public string category { get; set; }
         public string url { get; set; }
     }
+
+    /// <summary>
+    /// A "watch on platform X" link, surfaced from AniList <c>externalLinks</c> or Kitsu
+    /// <c>streamingLinks</c>. Currently used by <see cref="Controllers.StreamController"/>.
+    /// </summary>
+    public class StreamingLink
+    {
+        public string Site { get; set; }
+        public string Url { get; set; }
+    }
 }
