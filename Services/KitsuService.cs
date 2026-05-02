@@ -10,6 +10,7 @@ namespace AnimeList.Services
     {
         private readonly IHttpClientFactory _clientFactory;
         private readonly IAnimeMappingService _mappingService;
+        private readonly IAnilistFallback _anilistFallback;
         private readonly string _kitsuApi = "https://kitsu.io/api/edge";
         private static readonly HashSet<ListType> _userLists =
         [
@@ -21,10 +22,11 @@ namespace AnimeList.Services
         // Kitsu enforces a maximum of 20 items per page
         private const int CatalogPageSize = 20;
 
-        public KitsuService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService)
+        public KitsuService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IAnilistFallback anilistFallback)
         {
             _clientFactory = clientFactory;
             _mappingService = mappingService;
+            _anilistFallback = anilistFallback;
         }
 
         public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null)
@@ -237,6 +239,15 @@ namespace AnimeList.Services
                     });
                     episodeNumber++;
                 }
+            }
+
+            // Kitsu's mediaRelationships exposes prequels/sequels but not "audience also liked"
+            // recommendations. Fall back to AniList anonymously when the anime has an AniList id
+            // in the mapping; the fallback rewrites ids back to Kitsu where possible.
+            if (mapping?.AnilistId != null)
+            {
+                var similar = await _anilistFallback.GetRecommendationsAsync(mapping.AnilistId.Value, AnimeService.Kitsu);
+                anime.links.AddRange(similar);
             }
 
             return anime;

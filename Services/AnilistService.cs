@@ -338,6 +338,16 @@ namespace AnimeList.Services
                                 }
                             }
                         },
+                        recommendations(sort: RATING_DESC, perPage: 15) {
+                            edges {
+                                node {
+                                    mediaRecommendation {
+                                        id
+                                        title { english romaji }
+                                    }
+                                }
+                            }
+                        },
                         trailer {
                             id,
                             site
@@ -452,6 +462,28 @@ namespace AnimeList.Services
                     // Map to Stremio's standard link categories where the role is recognisable
                     var category = StaffRoleToCategory(role);
                     anime.links.Add(new Link { name = name, category = category, url = siteUrl });
+                }
+            }
+
+            if (result.recommendations?.edges != null)
+            {
+                foreach (var edge in result.recommendations.edges)
+                {
+                    var rec = edge.node?.mediaRecommendation;
+                    if (rec == null) continue;
+                    var recId = (int?)rec.id;
+                    if (!recId.HasValue) continue;
+                    var name = string.IsNullOrEmpty((string)rec.title?.english)
+                        ? (string)rec.title?.romaji
+                        : (string)rec.title?.english;
+                    if (string.IsNullOrEmpty(name)) continue;
+
+                    anime.links.Add(new Link
+                    {
+                        name = name,
+                        category = "Similar",
+                        url = $"https://anilist.co/anime/{recId.Value}",
+                    });
                 }
             }
 
