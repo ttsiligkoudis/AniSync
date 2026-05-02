@@ -323,6 +323,21 @@ namespace AnimeList.Services
                             rank
                             isAdult
                         },
+                        studios {
+                            edges {
+                                isMain
+                                node { name siteUrl }
+                            }
+                        },
+                        staff(sort: RELEVANCE, perPage: 10) {
+                            edges {
+                                role
+                                node {
+                                    name { full }
+                                    siteUrl
+                                }
+                            }
+                        },
                         trailer {
                             id,
                             site
@@ -410,6 +425,33 @@ namespace AnimeList.Services
                         category = "Tag",
                         url = $"https://anilist.co/search/anime?genres={Uri.EscapeDataString(name)}"
                     });
+                }
+            }
+
+            if (result.studios?.edges != null)
+            {
+                foreach (var edge in result.studios.edges)
+                {
+                    if ((bool?)edge.isMain != true) continue; // skip licensors / sub-studios
+                    var name = (string)edge.node?.name;
+                    var siteUrl = (string)edge.node?.siteUrl;
+                    if (string.IsNullOrEmpty(name)) continue;
+                    anime.links.Add(new Link { name = name, category = "Studio", url = siteUrl });
+                }
+            }
+
+            if (result.staff?.edges != null)
+            {
+                foreach (var edge in result.staff.edges)
+                {
+                    var role = (string)edge.role;
+                    var name = (string)edge.node?.name?.full;
+                    var siteUrl = (string)edge.node?.siteUrl;
+                    if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(role)) continue;
+
+                    // Map to Stremio's standard link categories where the role is recognisable
+                    var category = StaffRoleToCategory(role);
+                    anime.links.Add(new Link { name = name, category = category, url = siteUrl });
                 }
             }
 
@@ -648,6 +690,21 @@ namespace AnimeList.Services
         }
 
         private static object ToFuzzyDate(DateTime dt) => new { year = dt.Year, month = dt.Month, day = dt.Day };
+
+        /// <summary>
+        /// Maps an AniList staff role string to a Stremio link category. Stremio recognises
+        /// "director", "writer", "actor"; other roles fall back to a free-form label.
+        /// </summary>
+        private static string StaffRoleToCategory(string role)
+        {
+            var r = role.ToLowerInvariant();
+            if (r.Contains("director")) return "director";
+            if (r.Contains("writ") || r.Contains("script") || r.Contains("creator")) return "writer";
+            if (r.Contains("composer") || r.Contains("music")) return "Composer";
+            if (r.Contains("character design") || r.Contains("art")) return "Artist";
+            if (r.Contains("producer")) return "Producer";
+            return "Staff";
+        }
     }
 }
 
