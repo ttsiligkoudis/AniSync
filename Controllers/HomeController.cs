@@ -30,7 +30,7 @@ public class HomeController : Controller
             tokenData.expires_in = null;
             ViewBag.AnonymousUser = tokenData.anonymousUser;
 
-            // Authenticated users get a v4 (UID-based) install URL: store the token JSON in
+            // Authenticated users get a v5 (UID-only) install URL: store the token JSON in
             // the config store and hand the JS just the UID. Idempotent — the same user
             // re-logging in keeps their UID. Anonymous users keep the inline (v3) flow
             // because their "token data" is just a 30-byte service preference and there's
@@ -54,7 +54,10 @@ public class HomeController : Controller
 
         if (!string.IsNullOrEmpty(config))
         {
-            var configuration = DecodeConfig(config);
+            // ResolveConfigAsync hydrates the flag bits from the store for v5 URLs (where
+            // the bytes in the URL only carry the UID). For v3/v4 the flags come from the
+            // URL bytes inline.
+            var configuration = await ResolveConfigAsync(config, _configStore);
 
             ViewBag.ShowCurrent = configuration?.showCurrent;
             ViewBag.ShowCompleted = configuration?.showCompleted;
@@ -80,6 +83,29 @@ public class HomeController : Controller
         return View();
     }
 
+    /// <summary>
+    /// Persists the toggle bits to the config store for the given UID, so a re-install in
+    /// Stremio isn't needed when changing catalog flags. Only meaningful for v5 installs;
+    /// for v3 (anonymous, inline) URLs the flags live in the URL itself.
+    /// </summary>
+    [HttpPost("Home/SaveConfig")]
+    public async Task<JsonResult> SaveConfig([FromBody] SaveConfigRequest request)
+    {
+        if (string.IsNullOrEmpty(request?.uid))
+            return new JsonResult(new { success = false, error = "missing uid" });
+
+        await _configStore.SetFlagsAsync(request.uid, request.flags1, request.flags2, request.flags3);
+        return new JsonResult(new { success = true });
+    }
+
     [Route("{config}/configure")]
     public IActionResult Configure(string config) => RedirectToAction("Index", new { config });
+}
+
+public class SaveConfigRequest
+{
+    public string uid { get; set; }
+    public byte flags1 { get; set; }
+    public byte flags2 { get; set; }
+    public byte flags3 { get; set; }
 }

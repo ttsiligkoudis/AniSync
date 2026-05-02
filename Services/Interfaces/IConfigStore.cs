@@ -24,5 +24,16 @@ namespace AnimeList.Services.Interfaces
         /// even when the upstream provider rotates tokens. No-op if no matching row exists.
         /// </summary>
         Task UpdateByUserAsync(TokenData tokenData);
+
+        /// <summary>
+        /// Reads the persisted catalog / discover-only / streams toggles for a UID. Returns
+        /// (0, 0, 0) if the UID is unknown — the caller can layer view-side defaults on top.
+        /// </summary>
+        Task<(byte flags1, byte flags2, byte flags3)> GetFlagsAsync(string uid);
+
+        /// <summary>
+        /// Writes the toggle bytes for the given UID. No-op if the UID is unknown.
+        /// </summary>
+        Task SetFlagsAsync(string uid, byte flags1, byte flags2, byte flags3);
     }
 }
