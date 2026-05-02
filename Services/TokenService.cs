@@ -10,34 +10,42 @@ namespace AnimeList.Services
     {
         private readonly IHttpClientFactory _clientFactory;
         private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IConfigStore _configStore;
         private static readonly ConcurrentDictionary<string, TokenData> _kitsuTokenCache = new();
         private static readonly ConcurrentDictionary<string, TokenData> _anilistTokenCache = new();
 
-        public TokenService(IHttpClientFactory clientFactory, IHttpContextAccessor httpContextAccessor)
+        public TokenService(IHttpClientFactory clientFactory, IHttpContextAccessor httpContextAccessor, IConfigStore configStore)
         {
             _clientFactory = clientFactory;
             _httpContextAccessor = httpContextAccessor;
+            _configStore = configStore;
         }
 
         public async Task<TokenData> GetAccessTokenAsync(string config = null)
         {
-            string tokenDataStr;
+            TokenData tokenData = null;
 
             if (!string.IsNullOrEmpty(config))
             {
                 var configuration = DecodeConfig(config);
 
-                tokenDataStr = configuration.tokenData;
+                if (!string.IsNullOrEmpty(configuration?.tokenUid))
+                {
+                    // v4: token JSON lives in the config store, not the URL.
+                    tokenData = await _configStore.GetAsync(configuration.tokenUid);
+                }
+                else if (!string.IsNullOrEmpty(configuration?.tokenData))
+                {
+                    // v1/v2/v3: token JSON inline in the URL.
+                    tokenData = DeserializeObject<TokenData>(configuration.tokenData);
+                }
             }
             else
             {
-                tokenDataStr = _httpContextAccessor.HttpContext.Session.GetString("AccessToken");
+                var sessionStr = _httpContextAccessor.HttpContext.Session.GetString("AccessToken");
+                if (!string.IsNullOrEmpty(sessionStr))
+                    tokenData = DeserializeObject<TokenData>(sessionStr);
             }
-
-            if (string.IsNullOrEmpty(tokenDataStr))
-                return null;
-
-            var tokenData = DeserializeObject<TokenData>(tokenDataStr);
 
             if (tokenData == null) return null;
 
@@ -64,6 +72,8 @@ namespace AnimeList.Services
                     if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
                     {
                         _anilistTokenCache[cacheKey] = refreshed;
+                        // Write back to the config store so v4 install URLs survive token rotation.
+                        await _configStore.UpdateByUserAsync(refreshed);
                     }
                     tokenData = refreshed;
                 }
@@ -83,6 +93,7 @@ namespace AnimeList.Services
                     if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
                     {
                         _kitsuTokenCache[cacheKey] = refreshed;
+                        await _configStore.UpdateByUserAsync(refreshed);
                     }
                     tokenData = refreshed;
                 }

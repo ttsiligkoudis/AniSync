@@ -259,15 +259,19 @@ namespace AnimeList
 
         /// <summary>
         /// Decodes a config route parameter into a <see cref="Configuration"/>.
-        /// Supports five formats for backward compatibility:
+        /// Supports six formats for backward compatibility:
         /// <list type="bullet">
         ///   <item>Legacy raw JSON (starts with '{')</item>
         ///   <item>GZip-compressed JSON via Base64Url (GZip magic bytes 0x1F 0x8B)</item>
         ///   <item>Binary v1: [0x01][flags byte][GZip tokenData] — 8 catalog flags</item>
         ///   <item>Binary v2: [0x02][flags1][flags2][GZip tokenData] — 16 catalog flags</item>
         ///   <item>Binary v3: [0x03][flags1][flags2][flags3][GZip tokenData] — 24 catalog flags</item>
+        ///   <item>Binary v4: [0x04][flags1][flags2][flags3][16-byte UID] — UID points at a
+        ///     row in <see cref="Services.Interfaces.IConfigStore"/>; tokenData is hydrated
+        ///     by <see cref="Services.Interfaces.ITokenService"/> at request time.</item>
         /// </list>
-        /// The returned <see cref="Configuration.tokenData"/> is always raw token JSON.
+        /// The returned <see cref="Configuration.tokenData"/> is set inline for the legacy
+        /// formats (v1/v2/v3); v4 sets <see cref="Configuration.tokenUid"/> instead.
         /// </summary>
         public static Configuration DecodeConfig(string config)
         {
@@ -307,15 +311,28 @@ namespace AnimeList
             if (data.Length >= 4 && data[0] == 0x03)
                 return DecodeBinaryConfig(data, headerLen: 4, flags1: data[1], flags2: data[2], flags3: data[3]);
 
+            // Binary v4: [0x04][flags1][flags2][flags3][16-byte UID]
+            if (data.Length >= 4 + 16 && data[0] == 0x04)
+            {
+                var cfg = DecodeBinaryFlags(data[1], data[2], data[3]);
+                cfg.tokenUid = Base64UrlEncode(data[4..(4 + 16)]);
+                return cfg;
+            }
+
             throw new ArgumentException("Unknown config format");
         }
 
         private static Configuration DecodeBinaryConfig(byte[] data, int headerLen, byte flags1, byte flags2, byte flags3)
         {
-            var tokenJson = data.Length > headerLen ? DecompressBytes(data[headerLen..]) : null;
+            var cfg = DecodeBinaryFlags(flags1, flags2, flags3);
+            cfg.tokenData = data.Length > headerLen ? DecompressBytes(data[headerLen..]) : null;
+            return cfg;
+        }
+
+        private static Configuration DecodeBinaryFlags(byte flags1, byte flags2, byte flags3)
+        {
             return new Configuration
             {
-                tokenData = tokenJson,
                 showCurrent = (flags1 & 0x01) != 0,
                 showCompleted = (flags1 & 0x02) != 0,
                 showTrending = (flags1 & 0x04) != 0,
