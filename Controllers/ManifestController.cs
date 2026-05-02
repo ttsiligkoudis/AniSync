@@ -81,7 +81,12 @@ namespace AnimeList.Controllers
                     type = MetaType.anime.ToString(),
                     id = ListType.Trending_Desc.ToString(),
                     name = "Trending Now",
-                    extra = [new("skip"), new("genre") { options = GetOptions(configuration.discoverOnlyTrending), isRequired = configuration.discoverOnlyTrending }],
+                    extra =
+                    [
+                        new("skip"),
+                        new("genre") { options = GetOptions(configuration.discoverOnlyTrending), isRequired = configuration.discoverOnlyTrending },
+                        new("sort") { options = SortOptions },
+                    ],
                 });
             }
 
@@ -92,7 +97,12 @@ namespace AnimeList.Controllers
                     type = MetaType.anime.ToString(),
                     id = ListType.Seasonal.ToString(),
                     name = "Seasonal Anime",
-                    extra = [new("skip"), new("genre") { options = SeasonOptions, isRequired = configuration.discoverOnlySeasonal }],
+                    extra =
+                    [
+                        new("skip"),
+                        new("genre") { options = SeasonOptions, isRequired = configuration.discoverOnlySeasonal },
+                        new("sort") { options = SortOptions },
+                    ],
                 });
             }
 

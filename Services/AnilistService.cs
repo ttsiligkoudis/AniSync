@@ -25,7 +25,7 @@ namespace AnimeList.Services
 
         private const int CatalogPageSize = 50;
 
-        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null, string search = null)
+        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null, string search = null, string sort = null)
         {
             var requestBody = string.Empty;
 
@@ -124,13 +124,14 @@ namespace AnimeList.Services
             {
                 var page = int.TryParse(skip, out var skipInt) ? (skipInt / CatalogPageSize) + 1 : 1;
                 var (season, year) = GetSeasonAndYear(genre ?? SeasonCurrent);
+                var sortValue = string.IsNullOrEmpty(sort) ? "POPULARITY_DESC" : SortToAnilist(sort);
 
                 requestBody = SerializeObject(new
                 {
                     query = $@"
-                    query ($page: Int, $perPage: Int, $season: MediaSeason, $seasonYear: Int) {{
+                    query ($page: Int, $perPage: Int, $season: MediaSeason, $seasonYear: Int, $sort: [MediaSort]) {{
                         Page (page: $page, perPage: $perPage) {{
-                            media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: [POPULARITY_DESC]) {{
+                            media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: $sort) {{
                                 id
                                 format
                                 title {{
@@ -144,9 +145,7 @@ namespace AnimeList.Services
                             }}
                         }}
                     }}",
-                    variables = !string.IsNullOrEmpty(genre)
-                        ? (object)new { page, perPage = CatalogPageSize, season, seasonYear = year, genre }
-                        : new { page, perPage = CatalogPageSize, season, seasonYear = year }
+                    variables = new { page, perPage = CatalogPageSize, season, seasonYear = year, sort = new[] { sortValue } }
                 });
             }
             else
@@ -155,6 +154,10 @@ namespace AnimeList.Services
 
                 var genreVarDecl = !string.IsNullOrEmpty(genre) ? ", $genre: String" : string.Empty;
                 var genreArg = !string.IsNullOrEmpty(genre) ? ", genre: $genre" : string.Empty;
+
+                // If the user picked a sort, honour it; otherwise fall back to the catalog's
+                // default sort encoded in the ListType (e.g. TRENDING_DESC).
+                var sortValue = string.IsNullOrEmpty(sort) ? GetListTypeString(list.Value, tokenData) : SortToAnilist(sort);
 
                 requestBody = SerializeObject(new
                 {
@@ -175,18 +178,18 @@ namespace AnimeList.Services
                         }}
                     }}",
                     variables = !string.IsNullOrEmpty(genre)
-                        ? (object)new { sort = new List<string> { GetListTypeString(list.Value, tokenData) }, page, perPage = CatalogPageSize, genre }
-                        : new { sort = new List<string> { GetListTypeString(list.Value, tokenData) }, page, perPage = CatalogPageSize }
+                        ? (object)new { sort = new[] { sortValue }, page, perPage = CatalogPageSize, genre }
+                        : new { sort = new[] { sortValue }, page, perPage = CatalogPageSize }
                 });
             }
 
             return requestBody;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
-            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, search);
+            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, search, sort);
 
             var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
             {

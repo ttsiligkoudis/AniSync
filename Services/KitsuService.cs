@@ -27,7 +27,7 @@ namespace AnimeList.Services
             _mappingService = mappingService;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu);
             var isUserList = !list.HasValue || _userLists.Contains(list.Value);
@@ -36,7 +36,7 @@ namespace AnimeList.Services
             if (isUserList && string.IsNullOrEmpty(tokenData?.user_id))
                 return [];
 
-            string url = BuildListUrl(tokenData, list, skip, resolvedAnimeId, genre, search, isUserList);
+            string url = BuildListUrl(tokenData, list, skip, resolvedAnimeId, genre, search, sort, isUserList);
 
             var request = new HttpRequestMessage(HttpMethod.Get, url);
             if (!string.IsNullOrWhiteSpace(tokenData?.access_token))
@@ -391,7 +391,7 @@ namespace AnimeList.Services
             return (int?)json["data"]?["attributes"]?["episodeCount"];
         }
 
-        private string BuildListUrl(TokenData tokenData, ListType? list, string skip, string resolvedAnimeId, string genre, string search, bool isUserList)
+        private string BuildListUrl(TokenData tokenData, ListType? list, string skip, string resolvedAnimeId, string genre, string search, string sort, bool isUserList)
         {
             string url;
 
@@ -404,7 +404,8 @@ namespace AnimeList.Services
             else if (list == ListType.Seasonal)
             {
                 var (season, year) = GetSeasonAndYear(genre ?? SeasonCurrent);
-                url = $"{_kitsuApi}/anime?sort=-userCount&filter[season]={season.ToLowerInvariant()}&filter[seasonYear]={year}&include=categories";
+                var sortValue = string.IsNullOrEmpty(sort) ? "-userCount" : SortToKitsu(sort);
+                url = $"{_kitsuApi}/anime?sort={sortValue}&filter[season]={season.ToLowerInvariant()}&filter[seasonYear]={year}&include=categories";
             }
             else if (list == ListType.Search)
             {
@@ -412,8 +413,10 @@ namespace AnimeList.Services
             }
             else
             {
-                // Trending and other discovery lists: sort by popularity rank ascending (rank 1 = most popular)
-                url = $"{_kitsuApi}/anime?sort=popularityRank&include=categories";
+                // Trending and other discovery lists default to popularity rank ascending
+                // (rank 1 = most popular). Honour an explicit sort override if the user picked one.
+                var sortValue = string.IsNullOrEmpty(sort) ? "popularityRank" : SortToKitsu(sort);
+                url = $"{_kitsuApi}/anime?sort={sortValue}&include=categories";
                 if (!string.IsNullOrEmpty(genre))
                 {
                     url += $"&filter[categories]={Uri.EscapeDataString(genre.ToLowerInvariant().Replace(" ", "-"))}";

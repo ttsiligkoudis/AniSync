@@ -20,6 +20,32 @@ namespace AnimeList
 
         public static readonly List<string> SeasonOptions = [SeasonCurrent, SeasonNext, SeasonPrevious];
 
+        public const string SortPopularity = "Popularity";
+        public const string SortScore = "Score";
+        public const string SortRecent = "Recent";
+
+        public static readonly List<string> SortOptions = [SortPopularity, SortScore, SortRecent];
+
+        /// <summary>
+        /// Maps a UI sort label to the AniList <c>MediaSort</c> enum value.
+        /// </summary>
+        public static string SortToAnilist(string sort) => sort switch
+        {
+            SortScore => "SCORE_DESC",
+            SortRecent => "START_DATE_DESC",
+            _ => "POPULARITY_DESC",
+        };
+
+        /// <summary>
+        /// Maps a UI sort label to the Kitsu <c>sort</c> query parameter value.
+        /// </summary>
+        public static string SortToKitsu(string sort) => sort switch
+        {
+            SortScore => "-averageRating",
+            SortRecent => "-startDate",
+            _ => "-userCount",
+        };
+
         public static List<string> GetOptions(bool includeDefault) 
         {
             var options = new List<string>{
