@@ -1,5 +1,3 @@
-using AnimeList.Models;
-using AnimeList.Services;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -21,63 +19,23 @@ namespace AnimeList.Controllers
         public async Task<JsonResult> GetStreams(string config, string type, string id)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync(config);
+            var empty = new JsonResult(new { streams = Array.Empty<object>() });
 
             if (tokenData == null || string.IsNullOrWhiteSpace(tokenData.access_token) || tokenData.anonymousUser)
-                return new JsonResult(new { streams = Array.Empty<object>() });
+                return empty;
 
-            int? season = null;
-            int? episode = null;
-            string? animeId = null;
-            var parts = id.Split(':');
-
-            if (parts.Length >= 1 && id.StartsWith("tt"))
-            {
-                animeId = parts[0];
-
-                if (parts.Length >= 2 && int.TryParse(parts[^2], out var seasonTmp) && int.TryParse(parts[^1], out var episodeTmp))
-                {
-                    season = seasonTmp;
-                    episode = episodeTmp;
-                }
-            }
-            else if (parts.Length >= 2
-                && (id.StartsWith(kitsuPrefix) || id.StartsWith(anilistPrefix) || id.StartsWith(tmdbPrefix)))
-            {
-                // Kitsu-prefixed ID (e.g. kitsu:12345:1:5) — pass as-is, services handle conversion
-                animeId = $"{parts[0]}:{parts[1]}";
-
-                if (parts.Length >= 3 && int.TryParse(parts[^2], out var seasonTmp) && int.TryParse(parts[^1], out var episodeTmp))
-                {
-                    season = seasonTmp;
-                    episode = episodeTmp;
-                }
-            }
-
-            if (string.IsNullOrEmpty(animeId))
-            {
-                return new JsonResult(new { streams = Array.Empty<object>() });
-            }
+            if (!TryParseAnimeId(id, out var animeId, out var season, out var episode))
+                return empty;
 
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, tokenData.anime_service);
+            if (string.IsNullOrEmpty(resolvedAnimeId)) return empty;
 
-            if (string.IsNullOrEmpty(resolvedAnimeId))
-            {
-                return new JsonResult(new { streams = Array.Empty<object>() });
-            }
+            var query = string.Concat(
+                season.HasValue ? $"?season={season}" : "",
+                episode.HasValue ? (season.HasValue ? $"&episode={episode}" : $"?episode={episode}") : ""
+            );
 
-            var tempUrl = "";
-
-            if (season.HasValue)
-            {
-                tempUrl += string.IsNullOrEmpty(tempUrl) ? $"?season={season}" : $"&season={season}";
-            }
-
-            if (episode.HasValue)
-            {
-                tempUrl += string.IsNullOrEmpty(tempUrl) ? $"?episode={episode}" : $"&episode={episode}";
-            }
-
-            var manageUrl = $"{Request.Scheme}://{Request.Host}/{config}/Meta/ManageEntry/{animeId}{tempUrl}";
+            var manageUrl = $"{Request.Scheme}://{Request.Host}/{config}/Meta/ManageEntry/{animeId}{query}";
 
             return new JsonResult(new
             {
@@ -85,7 +43,7 @@ namespace AnimeList.Controllers
                 {
                     new
                     {
-                        title = "\ud83d\udcdd Manage Entry",
+                        title = "📝 Manage Entry",
                         externalUrl = manageUrl
                     }
                 }

@@ -6,12 +6,10 @@ using System.Diagnostics;
 
 public class HomeController : Controller
 {
-    private readonly IHttpClientFactory _clientFactory;
     private readonly ITokenService _tokenService;
 
-    public HomeController(IHttpClientFactory clientFactory, ITokenService tokenService)
+    public HomeController(ITokenService tokenService)
     {
-        _clientFactory = clientFactory;
         _tokenService = tokenService;
     }
 
@@ -58,8 +56,5 @@ public class HomeController : Controller
     }
 
     [Route("{config}/configure")]
-    public async Task<IActionResult> Configure(string config)
-    {
-        return RedirectToAction("Index", new { config });
-    }
+    public IActionResult Configure(string config) => RedirectToAction("Index", new { config });
 }

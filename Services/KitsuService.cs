@@ -135,7 +135,7 @@ namespace AnimeList.Services
                 seenIds[externalId] = meta;
             }
 
-            return seenIds.Select(s => s.Value).ToList();
+            return seenIds.Values.ToList();
         }
 
         public async Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData)
@@ -242,33 +242,43 @@ namespace AnimeList.Services
             var resolvedKitsuId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu, season);
             if (string.IsNullOrEmpty(resolvedKitsuId)) return null;
 
-            var entry = new AnimeEntry
-            {
-                MediaId = resolvedKitsuId,
-                TotalEpisodes = await GetTotalEpisodesAsync(tokenData, resolvedKitsuId)
-            };
+            var entry = new AnimeEntry { MediaId = resolvedKitsuId };
 
-            // Library entry lookup requires authentication
+            // Without auth we still want totalEpisodes so the UI can show a progress max
             if (string.IsNullOrEmpty(tokenData?.access_token) || string.IsNullOrEmpty(tokenData?.user_id))
+            {
+                entry.TotalEpisodes = await GetTotalEpisodesAsync(tokenData, resolvedKitsuId);
                 return entry;
+            }
 
-            var url = $"{_kitsuApi}/users/{tokenData.user_id}/library-entries?filter[kind]=anime&filter[animeId]={resolvedKitsuId}&page[limit]=1";
+            // One round-trip: library entry + the anime's episodeCount via sparse fields on the include
+            var url = $"{_kitsuApi}/users/{tokenData.user_id}/library-entries"
+                + $"?filter[kind]=anime&filter[animeId]={resolvedKitsuId}&page[limit]=1"
+                + "&include=anime&fields[anime]=episodeCount";
+
             var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
 
-            var client = _clientFactory.CreateClient();
-            var response = await client.SendAsync(request);
-            if (!response.IsSuccessStatusCode) return entry;
+            var response = await _clientFactory.CreateClient().SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                entry.TotalEpisodes = await GetTotalEpisodesAsync(tokenData, resolvedKitsuId);
+                return entry;
+            }
 
-            var content = await response.Content.ReadAsStringAsync();
-            var json = JObject.Parse(content);
+            var json = JObject.Parse(await response.Content.ReadAsStringAsync());
 
-            if (json["data"] is JArray dataArr && dataArr.OfType<JObject>().FirstOrDefault() is JObject libEntry)
+            if ((json["data"] as JArray)?.OfType<JObject>().FirstOrDefault() is JObject libEntry)
             {
                 entry.EntryId = (string)libEntry["id"];
                 entry.Status = (string)libEntry["attributes"]?["status"];
                 entry.Progress = (int?)libEntry["attributes"]?["progress"] ?? 0;
             }
+
+            entry.TotalEpisodes = (int?)(json["included"] as JArray)?
+                .OfType<JObject>()
+                .FirstOrDefault(i => (string)i["type"] == "anime")?["attributes"]?["episodeCount"]
+                ?? await GetTotalEpisodesAsync(tokenData, resolvedKitsuId);
 
             return entry;
         }

@@ -1,4 +1,5 @@
 ﻿using AnimeList.Models;
+using Newtonsoft.Json.Linq;
 using System.IO.Compression;
 using System.Text;
 
@@ -29,11 +30,6 @@ namespace AnimeList
             if (includeDefault) options.Insert(0, "None");
             return options;
         }
-
-        /// <summary>
-        /// Returns true if the given list type is the seasonal catalog.
-        /// </summary>
-        public static bool IsSeasonalListType(ListType list) => list == ListType.Seasonal;
 
         /// <summary>
         /// Returns true when the format/subtype represents a movie (standalone, no episodes).
@@ -98,14 +94,47 @@ namespace AnimeList
             return DateTime.UtcNow >= (expirationDate ?? DateTime.UtcNow).AddMinutes(-5);
         }
 
-        public static Meta ExpiredMeta() 
-        {
-            return new Meta { id = $"{anilistPrefix}:token-expired", name = "Token expired, re-install addon" };
-        }
-
         public static List<Meta> ExpiredMetas()
         {
-            return [ExpiredMeta()];
+            return [new Meta { id = $"{anilistPrefix}token-expired", name = "Token expired, re-install addon" }];
+        }
+
+        /// <summary>
+        /// Parses a Stremio video ID into its anime base ID + optional season + optional episode.
+        /// Supports IMDb (tt12345 or tt12345:1:5) and prefixed (kitsu:12345, anilist:..., tmdb:..., optionally ":S:E") forms.
+        /// </summary>
+        public static bool TryParseAnimeId(string id, out string animeId, out int? season, out int? episode)
+        {
+            animeId = null;
+            season = null;
+            episode = null;
+            if (string.IsNullOrEmpty(id)) return false;
+
+            var parts = id.Split(':');
+
+            if (id.StartsWith(imdbPrefix))
+            {
+                animeId = parts[0];
+            }
+            else if ((id.StartsWith(kitsuPrefix) || id.StartsWith(anilistPrefix) || id.StartsWith(tmdbPrefix))
+                && parts.Length >= 2)
+            {
+                animeId = $"{parts[0]}:{parts[1]}";
+            }
+            else
+            {
+                return false;
+            }
+
+            if (parts.Length >= 3
+                && int.TryParse(parts[^2], out var s)
+                && int.TryParse(parts[^1], out var e))
+            {
+                season = s;
+                episode = e;
+            }
+
+            return true;
         }
 
         public static string CompressString(string text)
@@ -268,33 +297,31 @@ namespace AnimeList
                 : list.ToString().ToUpper();
         }
 
-        public static object SafeGet(dynamic obj, params string[] path)
+        /// <summary>
+        /// Walks a JSON object along the given path, returning null at the first missing or null segment.
+        /// Works on Newtonsoft <see cref="JToken"/> trees (the runtime type of <c>DeserializeObject&lt;dynamic&gt;</c>).
+        /// </summary>
+        public static JToken SafeGet(JToken token, params string[] path)
         {
-            object current = obj;
-
+            var current = token;
             foreach (var part in path)
             {
-                if (current == null) return null;
-
-                try
-                {
-                    current = ((dynamic)current).GetType()
-                        .GetProperty(part)?
-                        .GetValue(current, null);
-                }
-                catch
-                {
-                    return null;
-                }
+                if (current == null || current.Type == JTokenType.Null) return null;
+                current = current[part];
             }
-
-            return current;
+            return current is { Type: JTokenType.Null } ? null : current;
         }
 
-        public static T SafeGet<T>(dynamic obj, params string[] path)
+        /// <summary>
+        /// Like <see cref="SafeGet(JToken, string[])"/>, but converts the leaf to <typeparamref name="T"/>
+        /// (returns <c>default</c> if the path is missing or the conversion fails).
+        /// </summary>
+        public static T SafeGet<T>(JToken token, params string[] path)
         {
-            var result = SafeGet(obj, path);
-            return result is T value ? value : default;
+            var result = SafeGet(token, path);
+            if (result == null) return default;
+            try { return result.ToObject<T>(); }
+            catch { return default; }
         }
     }
 }

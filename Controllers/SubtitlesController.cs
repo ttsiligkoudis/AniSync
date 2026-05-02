@@ -9,60 +9,34 @@ namespace AnimeList.Controllers
         private readonly ITokenService _tokenService;
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
-        private readonly IAnimeMappingService _mappingService;
 
-        public SubtitlesController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IAnimeMappingService mappingService)
+        public SubtitlesController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
-            _mappingService = mappingService;
         }
 
         [HttpGet("{config}/subtitles/{type}/{id}/{fileName}.json")]
         public async Task<JsonResult> GetSubtitles(string config, string type, string id, string fileName)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync(config);
+            var empty = new JsonResult(new { subtitles = Array.Empty<object>() });
 
-            if (!string.IsNullOrWhiteSpace(tokenData?.access_token) && !IsTokenExpired(tokenData.expiration_date))
-            {
-                var parts = id.Split(':');
-                if (parts.Length >= 3
-                    && parts[0].StartsWith("tt")
-                    && int.TryParse(parts[^2], out var season)
-                    && int.TryParse(parts[^1], out var episode))
-                {
-                    var animeId = parts[0];
+            if (string.IsNullOrWhiteSpace(tokenData?.access_token) || IsTokenExpired(tokenData.expiration_date))
+                return empty;
 
-                    if (tokenData.anime_service == AnimeService.Anilist)
-                    {
-                        await _anilistService.SaveAnimeEntryAsync(tokenData, animeId, season, episode);
-                    }
-                    else
-                    {
-                        await _kitsuService.SaveAnimeEntryAsync(tokenData, animeId, season, episode);
-                    }
-                }
-                else if (parts.Length >= 3
-                    && (id.StartsWith(kitsuPrefix) || id.StartsWith(anilistPrefix) || id.StartsWith(tmdbPrefix))
-                    && int.TryParse(parts[^2], out season)
-                    && int.TryParse(parts[^1], out episode))
-                {
-                    // Kitsu-prefixed ID (e.g. kitsu:12345:1:5) — pass as-is, services handle conversion
-                    var animeId = $"{parts[0]}{parts[1]}";
+            // We only persist progress when the request includes season + episode
+            if (!TryParseAnimeId(id, out var animeId, out var season, out var episode)
+                || season is null || episode is null)
+                return empty;
 
-                    if (tokenData.anime_service == AnimeService.Anilist)
-                    {
-                        await _anilistService.SaveAnimeEntryAsync(tokenData, animeId, season, episode);
-                    }
-                    else
-                    {
-                        await _kitsuService.SaveAnimeEntryAsync(tokenData, animeId, season, episode);
-                    }
-                }
-            }
+            if (tokenData.anime_service == AnimeService.Anilist)
+                await _anilistService.SaveAnimeEntryAsync(tokenData, animeId, season, episode.Value);
+            else
+                await _kitsuService.SaveAnimeEntryAsync(tokenData, animeId, season, episode.Value);
 
-            return new JsonResult(new { subtitles = Array.Empty<object>() });
+            return empty;
         }
     }
 }

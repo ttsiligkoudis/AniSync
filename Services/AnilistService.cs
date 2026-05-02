@@ -1,6 +1,5 @@
 ﻿using AnimeList.Models;
 using AnimeList.Services.Interfaces;
-using System.Formats.Tar;
 using System.Net.Http.Headers;
 
 namespace AnimeList.Services
@@ -11,7 +10,7 @@ namespace AnimeList.Services
         private readonly IAnimeMappingService _mappingService;
         private readonly IKitsuService _kitsuService;
         private readonly string _anilistApi = "https://graphql.anilist.co";
-        private readonly List<ListType> _userLists = [ListType.Current, ListType.Completed ];
+        private static readonly HashSet<ListType> _userLists = [ListType.Current, ListType.Completed];
 
         public AnilistService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IKitsuService kitsuService)
         {
@@ -200,41 +199,45 @@ namespace AnimeList.Services
             var seenIds = new Dictionary<string, Meta>();
             foreach (var entry in result)
             {
-                var tmpEntry = entry;
+                dynamic media;
                 string entryId = null;
                 string entryStatus = null;
 
-                if (!list.HasValue || _userLists.Contains(list.Value))
+                if (isUserList)
                 {
-                    tmpEntry = entry.media;
+                    media = entry.media;
                     entryId = entry.id;
                     entryStatus = entry.status;
                 }
+                else
+                {
+                    media = entry;
+                }
 
-                if (list == ListType.Current && (string)tmpEntry.status == "NOT_YET_RELEASED") continue;
+                if (list == ListType.Current && (string)media.status == "NOT_YET_RELEASED") continue;
 
                 // Filter user list entries by genre when discover-only provides a genre selection
-                if (!string.IsNullOrEmpty(genre) && isUserList && tmpEntry.genres != null)
+                if (!string.IsNullOrEmpty(genre) && isUserList && media.genres != null)
                 {
-                    var genres = tmpEntry.genres.ToObject<List<string>>();
+                    var genres = media.genres.ToObject<List<string>>();
                     if (!genres.Contains(genre)) continue;
                 }
 
-                var mapping = await _mappingService.GetAnilistMapping((string)tmpEntry.id);
+                var mapping = await _mappingService.GetAnilistMapping((string)media.id);
 
                 var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
                     !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
                     mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
-                    $"{anilistPrefix}{tmpEntry.id}";
+                    $"{anilistPrefix}{media.id}";
 
-                var isMovie = IsMovieFormat((string)tmpEntry.format);
+                var isMovie = IsMovieFormat((string)media.format);
 
-                var meta = new Meta(tmpEntry.description)
+                var meta = new Meta(media.description)
                 {
                     id = externalId,
                     type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
-                    name = string.IsNullOrEmpty((string)tmpEntry.title.english) ? tmpEntry.title.romaji : tmpEntry.title.english,
-                    poster = tmpEntry.coverImage.large,
+                    name = string.IsNullOrEmpty((string)media.title.english) ? media.title.romaji : media.title.english,
+                    poster = media.coverImage.large,
                     entryId = entryId,
                     entryStatus = entryStatus
                 };
@@ -245,7 +248,6 @@ namespace AnimeList.Services
                 {
                     if (!string.IsNullOrEmpty(meta.name) && (string.IsNullOrEmpty(existing.name) || meta.name.Length < existing.name.Length))
                         seenIds[externalId] = meta;
-
                     continue;
                 }
 
@@ -255,11 +257,11 @@ namespace AnimeList.Services
             // User lists are fetched in full via MediaListCollection; paginate after dedup
             if (isUserList && string.IsNullOrEmpty(resolvedAnimeId))
             {
-                int skipCount = int.TryParse(skip, out var s) ? s : 0;
-                return seenIds.Select(s => s.Value).Skip(skipCount).Take(CatalogPageSize).ToList();
+                var skipCount = int.TryParse(skip, out var s) ? s : 0;
+                return seenIds.Values.Skip(skipCount).Take(CatalogPageSize).ToList();
             }
 
-            return seenIds.Select(s => s.Value).ToList();
+            return seenIds.Values.ToList();
         }
 
         public async Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData)
@@ -340,7 +342,7 @@ namespace AnimeList.Services
             var anime = new Meta(result.description)
             {
                 id = externalId,
-                type = isMovie ? MetaType.series.ToString() : MetaType.movie.ToString(),
+                type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
                 name = string.IsNullOrEmpty((string)result.title.english) ? result.title.romaji : result.title.english,
                 poster = result.coverImage.large,
                 genres = result.genres.ToObject<List<string>>(),
@@ -408,36 +410,6 @@ namespace AnimeList.Services
             return season;
         }
 
-        private async Task<int?> GetTotalEpisodesAsync(TokenData tokenData, string resolvedAnimeId)
-        {
-            var requestBody = SerializeObject(new
-            {
-                query = @"
-                    query ($id: Int) {
-                        Media(id: $id, type: ANIME) {
-                            episodes
-                        }
-                    }",
-                variables = new { id = resolvedAnimeId }
-            });
-
-            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
-            {
-                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
-            };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
-
-            var client = _clientFactory.CreateClient();
-            var response = await client.SendAsync(request);
-
-            if (!response.IsSuccessStatusCode) return null;
-
-            var content = await response.Content.ReadAsStringAsync();
-            var result = DeserializeObject<dynamic>(content);
-
-            return (int?)result?.data?.Media?.episodes;
-        }
-
         public async Task<AnimeEntry> GetAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist, season);
@@ -498,13 +470,8 @@ namespace AnimeList.Services
 
             if (string.IsNullOrEmpty(status))
             {
-                animeId = $"{anilistPrefix}{resolvedAnimeId}";
-                var meta = (await GetAnimeListAsync(tokenData, animeId: animeId)).FirstOrDefault();
+                var meta = (await GetAnimeListAsync(tokenData, animeId: $"{anilistPrefix}{resolvedAnimeId}")).FirstOrDefault();
                 status = meta?.entryStatus;
-
-                //int? totalEpisodes = await GetTotalEpisodesAsync(tokenData, resolvedAnimeId);
-                //bool isCompleted = totalEpisodes.HasValue && totalEpisodes.Value > 0 && progress >= totalEpisodes.Value;
-                //status = GetListTypeString(isCompleted ? ListType.Completed : ListType.Current, tokenData)
             }
 
             var requestBody = SerializeObject(new

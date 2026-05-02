@@ -1,5 +1,6 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
+using Newtonsoft.Json.Linq;
 using System.Net.Http.Headers;
 
 namespace AnimeList.Services
@@ -33,122 +34,109 @@ namespace AnimeList.Services
             var seasons = mapping?.Where(w => w.Season.HasValue).Select(s => s.Season ?? 1).Distinct().ToList() ?? [1];
 
             // Most anime are TV series; try that first
-            var meta = await GetTvShowAsync(tmdbId, seasons);
-            return meta ?? await GetMovieAsync(tmdbId);
+            return await GetTvShowAsync(tmdbId, seasons) ?? await GetMovieAsync(tmdbId);
         }
 
         private async Task<Meta> GetTvShowAsync(string tmdbId, List<int> seasons)
         {
-            var client = CreateAuthenticatedClient();
-            var response = await client.GetAsync($"{_tmdbApi}/tv/{tmdbId}?append_to_response=videos,external_ids");
+            var result = await GetJsonAsync($"{_tmdbApi}/tv/{tmdbId}?append_to_response=videos,external_ids");
+            if (result == null) return null;
 
-            if (!response.IsSuccessStatusCode) return null;
-
-            var content = await response.Content.ReadAsStringAsync();
-            var result = DeserializeObject<dynamic>(content);
-
-            var externalId = (string)SafeGet<string>(result, "idexternal_ids", "imdb_id");
-            externalId = string.IsNullOrEmpty(externalId) ? $"{tmdbPrefix}{tmdbId}" : externalId;
+            var imdbId = SafeGet<string>(result, "external_ids", "imdb_id");
+            var externalId = !string.IsNullOrEmpty(imdbId) ? imdbId : $"{tmdbPrefix}{tmdbId}";
 
             var meta = new Meta(SafeGet<string>(result, "overview"))
             {
                 id = externalId,
                 type = MetaType.series.ToString(),
-                name = result.name,
+                name = SafeGet<string>(result, "name"),
                 poster = BuildImageUrl(SafeGet<string>(result, "poster_path")),
                 background = BuildImageUrl(SafeGet<string>(result, "backdrop_path")),
-                genres = ((IEnumerable<dynamic>)result.genres).Select(g => (string)g.name).ToList(),
+                genres = ExtractGenres(result),
             };
 
-            AddTrailers(meta, result.videos?.results);
+            AddTrailers(meta, SafeGet(result, "videos", "results"));
 
-            seasons ??= [];
-            foreach (var seasonNumber in seasons)
-            {
+            foreach (var seasonNumber in seasons ?? [])
                 meta.videos.AddRange(await GetSeasonEpisodesAsync(tmdbId, seasonNumber, externalId));
-            }
 
             return meta;
         }
 
         private async Task<List<Video>> GetSeasonEpisodesAsync(string tmdbId, int seasonNumber, string externalId)
         {
-            var client = CreateAuthenticatedClient();
-            var response = await client.GetAsync($"{_tmdbApi}/tv/{tmdbId}/season/{seasonNumber}");
+            var result = await GetJsonAsync($"{_tmdbApi}/tv/{tmdbId}/season/{seasonNumber}");
+            if (SafeGet(result, "episodes") is not JArray episodes) return [];
 
-            if (!response.IsSuccessStatusCode) return [];
-
-            var content = await response.Content.ReadAsStringAsync();
-            var result = DeserializeObject<dynamic>(content);
-
-            var videos = new List<Video>();
-            if (result?.episodes == null) return videos;
-
-            foreach (var episode in result.episodes)
+            return episodes.OfType<JObject>().Select(episode => new Video
             {
-                videos.Add(new Video
-                {
-                    id = $"{externalId}:{seasonNumber}:{episode.episode_number}",
-                    title = episode.name,
-                    thumbnail = BuildImageUrl((string)episode.still_path),
-                    season = seasonNumber,
-                    episode = ((int)episode.episode_number),
-                });
-            }
-
-            return videos;
+                id = $"{externalId}:{seasonNumber}:{(int?)episode["episode_number"] ?? 0}",
+                title = (string)episode["name"],
+                thumbnail = BuildImageUrl((string)episode["still_path"]),
+                season = seasonNumber,
+                episode = (int?)episode["episode_number"] ?? 0,
+            }).ToList();
         }
 
         private async Task<Meta> GetMovieAsync(string tmdbId)
         {
-            var client = CreateAuthenticatedClient();
-            var response = await client.GetAsync($"{_tmdbApi}/movie/{tmdbId}?append_to_response=videos");
+            var result = await GetJsonAsync($"{_tmdbApi}/movie/{tmdbId}?append_to_response=videos");
+            if (result == null) return null;
 
-            if (!response.IsSuccessStatusCode) return null;
-
-            var content = await response.Content.ReadAsStringAsync();
-            var result = DeserializeObject<dynamic>(content);
-
-            var meta = new Meta(result.overview)
+            var meta = new Meta(SafeGet<string>(result, "overview"))
             {
                 id = $"{tmdbPrefix}{tmdbId}",
                 type = MetaType.movie.ToString(),
-                name = result.title,
-                poster = BuildImageUrl((string)result.poster_path),
-                background = BuildImageUrl((string)result.backdrop_path),
-                genres = ((IEnumerable<dynamic>)result.genres)
-                    .Select(g => (string)g.name)
-                    .ToList(),
+                name = SafeGet<string>(result, "title"),
+                poster = BuildImageUrl(SafeGet<string>(result, "poster_path")),
+                background = BuildImageUrl(SafeGet<string>(result, "backdrop_path")),
+                genres = ExtractGenres(result),
             };
 
-            AddTrailers(meta, result.videos?.results);
+            AddTrailers(meta, SafeGet(result, "videos", "results"));
 
             return meta;
         }
 
-        private HttpClient CreateAuthenticatedClient()
+        private async Task<JObject> GetJsonAsync(string url)
         {
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _tmdbReadToken);
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            return client;
+
+            var response = await client.GetAsync(url);
+            if (!response.IsSuccessStatusCode) return null;
+
+            return JObject.Parse(await response.Content.ReadAsStringAsync());
         }
 
-        private string BuildImageUrl(string path)
-        {
-            return string.IsNullOrEmpty(path) ? null : $"{_tmdbImageBase}{path}";
-        }
+        private string BuildImageUrl(string path) => string.IsNullOrEmpty(path) ? null : $"{_tmdbImageBase}{path}";
 
-        private static void AddTrailers(Meta meta, dynamic videoResults)
+        private static List<string> ExtractGenres(JToken result)
         {
-            if (videoResults == null) return;
+            if (SafeGet(result, "genres") is not JArray arr) return [];
 
-            foreach (var video in videoResults)
+            var names = new List<string>();
+            foreach (var g in arr.OfType<JObject>())
             {
-                if ((string)video.site == "YouTube" && (string)video.type == "Trailer")
+                var name = (string)g["name"];
+                if (!string.IsNullOrEmpty(name)) names.Add(name);
+            }
+            return names;
+        }
+
+        private static void AddTrailers(Meta meta, JToken videoResults)
+        {
+            if (videoResults is not JArray videos) return;
+
+            foreach (var video in videos.OfType<JObject>())
+            {
+                if ((string)video["site"] == "YouTube" && (string)video["type"] == "Trailer")
                 {
-                    meta.trailers.Add(new Trailer((string)video.key));
-                    meta.trailerStreams.Add(new TrailerStream((string)video.key, meta.name));
+                    var key = (string)video["key"];
+                    if (string.IsNullOrEmpty(key)) continue;
+                    meta.trailers.Add(new Trailer(key));
+                    meta.trailerStreams.Add(new TrailerStream(key, meta.name));
                 }
             }
         }

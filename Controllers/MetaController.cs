@@ -2,9 +2,6 @@ using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json.Linq;
-using System.Runtime.CompilerServices;
-using System.Xml.Linq;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace AnimeList.Controllers
 {
@@ -16,9 +13,8 @@ namespace AnimeList.Controllers
         private readonly ITmdbService _tmdbService;
         private readonly ICinemetaService _cinemetaService;
         private readonly IAnimeMappingService _mappingService;
-        private readonly IHttpClientFactory _clientFactory;
 
-        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService, IHttpClientFactory clientFactory)
+        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
@@ -26,7 +22,6 @@ namespace AnimeList.Controllers
             _tmdbService = tmdbService;
             _cinemetaService = cinemetaService;
             _mappingService = mappingService;
-            _clientFactory = clientFactory;
         }
 
         private async Task<(dynamic?, bool)> GetByIDInternal(string config, string id, bool deserialize = false)
