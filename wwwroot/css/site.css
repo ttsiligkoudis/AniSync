@@ -284,6 +284,17 @@ main {
     background: linear-gradient(135deg, #7b5bf5, #6341d4);
 }
 
+/* Save button on the configure page. <button> elements default to a native OS appearance
+   that overrides the .btn-primary-action background — appearance:none lets the gradient
+   defined here actually show. Distinct green hue so users can tell it apart from Install. */
+.btn-save-config {
+    background: linear-gradient(135deg, #2ecc71, #27ae60);
+    margin-bottom: 0.5rem;
+    appearance: none;
+    -webkit-appearance: none;
+    font-family: inherit;
+}
+
 .success-badge {
     display: inline-flex;
     align-items: center;

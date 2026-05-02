@@ -64,6 +64,18 @@ namespace AnimeList.Services
                 alter.CommandText = "ALTER TABLE configs ADD COLUMN flags INTEGER NOT NULL DEFAULT 0";
                 alter.ExecuteNonQuery();
             }
+
+            // Idempotent migration: add `revision` column. The revision counter bumps on every
+            // SetFlagsAsync call and is appended to the install URL so Stremio's cache treats
+            // each save as a new addon URL — Stremio doesn't refetch the manifest for an
+            // already-installed URL even after force-restart, so we have to make the URL
+            // visibly different to force a refresh.
+            if (!ColumnExists(conn, "configs", "revision"))
+            {
+                using var alter = conn.CreateCommand();
+                alter.CommandText = "ALTER TABLE configs ADD COLUMN revision INTEGER NOT NULL DEFAULT 0";
+                alter.ExecuteNonQuery();
+            }
         }
 
         private static bool ColumnExists(SqliteConnection conn, string table, string column)
@@ -161,41 +173,61 @@ namespace AnimeList.Services
             await cmd.ExecuteNonQueryAsync();
         }
 
-        public async Task<(byte flags1, byte flags2, byte flags3)> GetFlagsAsync(string uid)
+        public async Task<(byte flags1, byte flags2, byte flags3, long revision)> GetFlagsAsync(string uid)
         {
-            if (string.IsNullOrEmpty(uid)) return (0, 0, 0);
+            if (string.IsNullOrEmpty(uid)) return (0, 0, 0, 0);
 
             using var conn = new SqliteConnection(_connectionString);
             await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT flags FROM configs WHERE uid = $uid LIMIT 1";
+            cmd.CommandText = "SELECT flags, revision FROM configs WHERE uid = $uid LIMIT 1";
             cmd.Parameters.AddWithValue("$uid", uid);
-            var raw = await cmd.ExecuteScalarAsync();
-            var packed = raw is long l ? l : 0L;
+            using var reader = await cmd.ExecuteReaderAsync();
+            if (!await reader.ReadAsync()) return (0, 0, 0, 0);
 
+            var packed = reader.GetInt64(0);
+            var revision = reader.GetInt64(1);
             return (
                 (byte)((packed >> 16) & 0xff),
                 (byte)((packed >> 8) & 0xff),
-                (byte)(packed & 0xff));
+                (byte)(packed & 0xff),
+                revision);
         }
 
-        public async Task SetFlagsAsync(string uid, byte flags1, byte flags2, byte flags3)
+        public async Task<long> GetRevisionAsync(string uid)
         {
-            if (string.IsNullOrEmpty(uid)) return;
+            if (string.IsNullOrEmpty(uid)) return 0;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT revision FROM configs WHERE uid = $uid LIMIT 1";
+            cmd.Parameters.AddWithValue("$uid", uid);
+            var raw = await cmd.ExecuteScalarAsync();
+            return raw is long l ? l : 0L;
+        }
+
+        public async Task<long> SetFlagsAsync(string uid, byte flags1, byte flags2, byte flags3)
+        {
+            if (string.IsNullOrEmpty(uid)) return 0;
             var packed = ((long)flags1 << 16) | ((long)flags2 << 8) | flags3;
 
             using var conn = new SqliteConnection(_connectionString);
             await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
+            // Bump revision atomically with the flag write so the new install URL is
+            // guaranteed to differ from the URL Stremio currently has cached.
             cmd.CommandText = """
                 UPDATE configs
-                   SET flags = $f, updated_at = $u
+                   SET flags = $f, revision = revision + 1, updated_at = $u
                  WHERE uid = $uid
+                RETURNING revision
                 """;
             cmd.Parameters.AddWithValue("$f", packed);
             cmd.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             cmd.Parameters.AddWithValue("$uid", uid);
-            await cmd.ExecuteNonQueryAsync();
+            var raw = await cmd.ExecuteScalarAsync();
+            return raw is long l ? l : 0L;
         }
 
         /// <summary>

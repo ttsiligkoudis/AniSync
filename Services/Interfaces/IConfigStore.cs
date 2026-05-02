@@ -26,14 +26,22 @@ namespace AnimeList.Services.Interfaces
         Task UpdateByUserAsync(TokenData tokenData);
 
         /// <summary>
-        /// Reads the persisted catalog / discover-only / streams toggles for a UID. Returns
-        /// (0, 0, 0) if the UID is unknown — the caller can layer view-side defaults on top.
+        /// Reads the persisted catalog / discover-only / streams toggles for a UID, plus the
+        /// row's current revision counter (used by callers building cache-busted install URLs).
+        /// Returns (0, 0, 0, 0) if the UID is unknown.
         /// </summary>
-        Task<(byte flags1, byte flags2, byte flags3)> GetFlagsAsync(string uid);
+        Task<(byte flags1, byte flags2, byte flags3, long revision)> GetFlagsAsync(string uid);
 
         /// <summary>
-        /// Writes the toggle bytes for the given UID. No-op if the UID is unknown.
+        /// Reads only the revision counter for a UID. Returns 0 if the UID is unknown.
         /// </summary>
-        Task SetFlagsAsync(string uid, byte flags1, byte flags2, byte flags3);
+        Task<long> GetRevisionAsync(string uid);
+
+        /// <summary>
+        /// Writes the toggle bytes for the given UID and bumps the revision counter. Returns
+        /// the new revision so the caller can rebuild the install URL with cache-busting bytes.
+        /// Returns 0 if the UID is unknown.
+        /// </summary>
+        Task<long> SetFlagsAsync(string uid, byte flags1, byte flags2, byte flags3);
     }
 }

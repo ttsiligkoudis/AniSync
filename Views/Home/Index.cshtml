@@ -1,8 +1,9 @@
 ﻿@{
     var tokenDataStr = (string)ViewBag.TokenData;
     var configUid = (string)ViewBag.ConfigUid;
+    var configRevision = (long?)ViewBag.ConfigRevision ?? 0L;
     var animeService = (AnimeService?)ViewBag.AnimeService;
-    // ConfigUid is set for authenticated v4 users, TokenData for anonymous v3 users —
+    // ConfigUid is set for authenticated v5 users, TokenData for anonymous v3 users —
     // either one means "you're logged in and we can render the install link".
     var isLoggedIn = !string.IsNullOrEmpty(tokenDataStr) || !string.IsNullOrEmpty(configUid);
     var isAnilist = animeService == AnimeService.Anilist;
@@ -187,7 +188,11 @@
         <button id="saveConfigBtn" class="btn-primary-action btn-save-config" type="button">
             Save Configuration
         </button>
-        <p class="hint-text hint-save">Already installed in Stremio? Save to apply changes without reinstalling.</p>
+        <p class="hint-text hint-save">
+            Save persists your toggles and bumps the install URL.
+            Click <strong>Install on Stremio</strong> below to apply the changes — Stremio
+            won't refetch a URL it already knows.
+        </p>
     }
 
     <!-- Install -->
@@ -238,6 +243,10 @@ else
     // Exactly one of the two strings is non-empty per request.
     var configUid = '@(configUid ?? "")';
     var tokenDataStr = '@(tokenDataStr ?? "")';
+    // Revision counter, appended to the install URL as 4 trailing bytes so the URL changes
+    // after every Save. Stremio caches manifests aggressively (even past force-restart) and
+    // a stable URL means it never refetches; bumping the URL forces a fresh install.
+    var configRevision = @configRevision;
 
     function base64UrlToBytes(str) {
         if (!str) return new Uint8Array(0);
@@ -301,6 +310,8 @@ else
 
     // Persists the current UI flag state to the config store. v5 only — anonymous (v3)
     // installs carry their flags in the URL and don't have a DB row to update.
+    // Server bumps the revision counter on every save and returns the new value, which
+    // we use to rebuild the install URL with cache-busting bytes.
     async function saveConfig() {
         if (!configUid) return;
         var f = readFlags();
@@ -310,6 +321,11 @@ else
             body: JSON.stringify({ uid: configUid, flags1: f.flags1, flags2: f.flags2, flags3: f.flags3 }),
         });
         if (!resp.ok) throw new Error('Save failed: ' + resp.status);
+        var data = await resp.json();
+        if (typeof data.revision === 'number') {
+            configRevision = data.revision;
+            changeUrl(); // refresh #url and #stremioUrl with the new revision bytes
+        }
     }
 
     $('#saveConfigBtn').on('click', async function () {
@@ -317,22 +333,25 @@ else
         $btn.prop('disabled', true).text('Saving…');
         try {
             await saveConfig();
-            $btn.text('✓ Saved');
+            // Stremio doesn't refetch manifests for already-installed URLs, so we tell the
+            // user to click Install — that hits the updated URL (revision bytes changed).
+            $btn.text('✓ Saved — click Install to apply');
         } catch {
             $btn.text('✗ Failed');
         } finally {
-            setTimeout(function () { $btn.prop('disabled', false).text('Save Configuration'); }, 1500);
+            setTimeout(function () { $btn.prop('disabled', false).text('Save Configuration'); }, 3000);
         }
     });
 
-    // For v5 installs, persist the latest toggle state before launching Stremio so the
-    // very first manifest fetch already reflects what the user just toggled.
+    // First-install path: user lands on the configure page after auth, hasn't pressed Save.
+    // Persist the current UI flags before launching Stremio so the addon's first manifest
+    // fetch reflects what the user toggled. Re-read href AFTER save — saveConfig bumps the
+    // revision and rebuilds the URL via changeUrl(), so the pre-save href would be stale.
     $('#stremioUrl').on('click', async function (e) {
         if (!configUid) return; // anonymous (v3): URL already encodes flags
         e.preventDefault();
-        var href = $(this).attr('href');
         try { await saveConfig(); } catch { /* still let them try to install */ }
-        window.location.href = href;
+        window.location.href = $(this).attr('href');
     });
 
     // When an enable checkbox is toggled, enable/disable its discover-only sibling
@@ -382,12 +401,19 @@ else
 
         var payload;
         if (uidBytes.length > 0) {
-            // Binary v5: [0x05][16-byte UID] — flags persisted server-side, URL is stable
-            // across toggle changes so the user can update settings via the Save button
-            // without re-installing the addon in Stremio.
-            payload = new Uint8Array(1 + uidBytes.length);
+            // Binary v5: [0x05][16-byte UID][4-byte revision big-endian]. The revision
+            // bytes are ignored by DecodeConfig (it reads bytes 1..17 only) but make the
+            // URL visibly change after every Save so Stremio re-fetches the manifest.
+            payload = new Uint8Array(1 + uidBytes.length + 4);
             payload[0] = 0x05;
             payload.set(uidBytes, 1);
+            // big-endian uint32 — JS bitwise ops work on 32-bit signed; force >>> 0 to get unsigned.
+            var rev = (configRevision >>> 0);
+            var revOffset = 1 + uidBytes.length;
+            payload[revOffset]     = (rev >>> 24) & 0xff;
+            payload[revOffset + 1] = (rev >>> 16) & 0xff;
+            payload[revOffset + 2] = (rev >>> 8)  & 0xff;
+            payload[revOffset + 3] = rev          & 0xff;
         } else {
             // Binary v3 (anonymous fallback): [0x03][flags1][flags2][flags3][gzip token bytes]
             payload = new Uint8Array(4 + tokenBytes.length);
