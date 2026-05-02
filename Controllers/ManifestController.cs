@@ -108,12 +108,21 @@ namespace AnimeList.Controllers
 
             if (configuration.showAiring)
             {
+                // Airing has no meaningful filter axis, so we use the same trick as the
+                // "Currently watching" catalog: when discover-only is on, declare a required
+                // "genre" extra with a single placeholder option. Stremio's Home/Dashboard
+                // can't auto-fill required extras, so the catalog only renders in Discover.
+                var genreOptions = configuration.discoverOnlyAiring ? [DefaultOption] : new List<string>();
                 manifest.catalogs.Add(new Catalog
                 {
                     type = MetaType.anime.ToString(),
                     id = ListType.Airing.ToString(),
                     name = "Airing This Week",
-                    extra = [new("skip")],
+                    extra =
+                    [
+                        new("skip"),
+                        new("genre") { options = genreOptions, isRequired = configuration.discoverOnlyAiring },
+                    ],
                 });
             }
 

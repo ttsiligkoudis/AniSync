@@ -24,18 +24,15 @@ namespace AnimeList.Controllers
         public async Task<JsonResult> GetStreams(string config, string type, string id)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync(config);
+            var configuration = DecodeConfig(config);
             var empty = new JsonResult(new { streams = Array.Empty<object>() });
 
             if (!TryParseAnimeId(id, out var animeId, out var season, out var episode))
                 return empty;
 
-            var animeService = tokenData?.anime_service ?? AnimeService.Kitsu;
-            var resolvedAnimeId = await _mappingService.GetIdByService(animeId, animeService);
-            if (string.IsNullOrEmpty(resolvedAnimeId)) return empty;
-
             var streams = new List<object>();
 
-            // Manage Entry stream — only when authenticated as a real user
+            // Manage Entry stream — always shown by default for authenticated, non-anonymous users
             if (tokenData != null && !string.IsNullOrWhiteSpace(tokenData.access_token) && !tokenData.anonymousUser)
             {
                 var query = string.Concat(
@@ -51,23 +48,31 @@ namespace AnimeList.Controllers
                 });
             }
 
-            // Official streaming destinations from the user's chosen service
-            var externalLinks = animeService == AnimeService.Anilist
-                ? await _anilistService.GetExternalLinksAsync(animeId, tokenData)
-                : await _kitsuService.GetExternalLinksAsync(animeId, tokenData);
-
-            // Group all episodes of the same anime so Stremio can advance through them as a binge
-            var bingeGroup = $"anisync:{animeService}:{resolvedAnimeId}";
-
-            foreach (var link in externalLinks)
+            // External streaming destinations (Crunchyroll, Netflix, …) are opt-in via config
+            if (configuration?.showExternalStreams == true)
             {
-                streams.Add(new
+                var animeService = tokenData?.anime_service ?? AnimeService.Kitsu;
+                var resolvedAnimeId = await _mappingService.GetIdByService(animeId, animeService);
+                if (!string.IsNullOrEmpty(resolvedAnimeId))
                 {
-                    name = link.Site,
-                    title = $"Watch on {link.Site}",
-                    externalUrl = link.Url,
-                    behaviorHints = new { bingeGroup },
-                });
+                    var externalLinks = animeService == AnimeService.Anilist
+                        ? await _anilistService.GetExternalLinksAsync(animeId, tokenData)
+                        : await _kitsuService.GetExternalLinksAsync(animeId, tokenData);
+
+                    // Group all episodes of the same anime so Stremio can advance through them as a binge
+                    var bingeGroup = $"anisync:{animeService}:{resolvedAnimeId}";
+
+                    foreach (var link in externalLinks)
+                    {
+                        streams.Add(new
+                        {
+                            name = link.Site,
+                            title = $"Watch on {link.Site}",
+                            externalUrl = link.Url,
+                            behaviorHints = new { bingeGroup },
+                        });
+                    }
+                }
             }
 
             return new JsonResult(new { streams });

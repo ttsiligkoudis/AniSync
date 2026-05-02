@@ -60,6 +60,7 @@ public class HomeController : Controller
             ViewBag.DiscoverOnlyDropped = configuration?.discoverOnlyDropped;
             ViewBag.DiscoverOnlyRepeating = configuration?.discoverOnlyRepeating;
             ViewBag.DiscoverOnlyAiring = configuration?.discoverOnlyAiring;
+            ViewBag.ShowExternalStreams = configuration?.showExternalStreams;
         }
 
         return View();
