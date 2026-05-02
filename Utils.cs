@@ -346,7 +346,7 @@ namespace AnimeList
             var cfg = DecodeConfig(config);
             if (cfg?.flagsInDb == true && !string.IsNullOrEmpty(cfg.tokenUid))
             {
-                var (f1, f2, f3) = await store.GetFlagsAsync(cfg.tokenUid);
+                var (f1, f2, f3, _) = await store.GetFlagsAsync(cfg.tokenUid);
                 ApplyBinaryFlags(cfg, f1, f2, f3);
             }
             return cfg;

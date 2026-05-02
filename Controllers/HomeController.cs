@@ -37,7 +37,10 @@ public class HomeController : Controller
             // no benefit to a DB row plus no stable identity to dedupe on.
             if (!tokenData.anonymousUser)
             {
-                ViewBag.ConfigUid = await _configStore.UpsertAsync(tokenData);
+                var uid = await _configStore.UpsertAsync(tokenData);
+                ViewBag.ConfigUid = uid;
+                // Used as cache-busting bytes in the install URL — see Index.cshtml's JS.
+                ViewBag.ConfigRevision = await _configStore.GetRevisionAsync(uid);
             }
             else
             {
@@ -94,8 +97,11 @@ public class HomeController : Controller
         if (string.IsNullOrEmpty(request?.uid))
             return new JsonResult(new { success = false, error = "missing uid" });
 
-        await _configStore.SetFlagsAsync(request.uid, request.flags1, request.flags2, request.flags3);
-        return new JsonResult(new { success = true });
+        // SetFlagsAsync also bumps the revision counter; we return it so the JS can update
+        // the install URL with new cache-busting bytes — Stremio refuses to refetch the
+        // manifest for an already-known URL, so we have to make the URL visibly change.
+        var revision = await _configStore.SetFlagsAsync(request.uid, request.flags1, request.flags2, request.flags3);
+        return new JsonResult(new { success = true, revision });
     }
 
     [Route("{config}/configure")]
