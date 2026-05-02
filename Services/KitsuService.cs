@@ -11,7 +11,12 @@ namespace AnimeList.Services
         private readonly IHttpClientFactory _clientFactory;
         private readonly IAnimeMappingService _mappingService;
         private readonly string _kitsuApi = "https://kitsu.io/api/edge";
-        private readonly List<ListType> _userLists = [ListType.Current, ListType.Completed];
+        private static readonly HashSet<ListType> _userLists =
+        [
+            ListType.Current, ListType.Completed,
+            ListType.Planning, ListType.Paused, ListType.Dropped,
+            // Kitsu has no "Repeating" status; it's intentionally excluded.
+        ];
 
         // Kitsu enforces a maximum of 20 items per page
         private const int CatalogPageSize = 20;

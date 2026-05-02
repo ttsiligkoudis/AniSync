@@ -9,8 +9,8 @@ namespace AnimeList.Controllers
         [HttpGet("{config}/manifest.json")]
         public JsonResult Get(string config)
         {
-            var configiration = DecodeConfig(config);
-            var isAuthenticated = !string.IsNullOrWhiteSpace(configiration?.tokenData);
+            var configuration = DecodeConfig(config);
+            var isAuthenticated = !string.IsNullOrWhiteSpace(configuration?.tokenData);
             TokenData? tokenData = null;
             var name = "AniSync";
 
@@ -36,7 +36,7 @@ namespace AnimeList.Controllers
 
             if (isAuthenticated)
             {
-                tokenData = DeserializeObject<TokenData>(configiration.tokenData);
+                tokenData = DeserializeObject<TokenData>(configuration.tokenData);
 
                 manifest.config.Add(new Config
                 {
@@ -46,53 +46,75 @@ namespace AnimeList.Controllers
                 });
             }
 
-            if (isAuthenticated && configiration.showCurrent)
-            {
-                manifest.catalogs.Add(new Catalog
-                {
-                    type = MetaType.anime.ToString(),
-                    id = GetListTypeString(ListType.Current, tokenData),
-                    name = "Currently watching",
-                    extra = [new("skip"), new("genre") { options = configiration.discoverOnlyCurrent ? [DefaultOption] : [], isRequired = configiration.discoverOnlyCurrent }],
-                });
-            }
+            // User-list catalogs require authentication. The "Currently watching" catalog
+            // intentionally has no genre options unless discover-only is set.
+            if (isAuthenticated && configuration.showCurrent)
+                manifest.catalogs.Add(BuildUserListCatalog(ListType.Current, "Currently watching", tokenData,
+                    configuration.discoverOnlyCurrent, currentListVariant: true));
 
-            if (isAuthenticated && configiration.showCompleted)
-            {
-                manifest.catalogs.Add(new Catalog
-                {
-                    type = MetaType.anime.ToString(),
-                    id = GetListTypeString(ListType.Completed, tokenData),
-                    name = "Completed",
-                    extra = [new("skip"), new("genre") { options = GetOptions(configiration.discoverOnlyCompleted), isRequired = configiration.discoverOnlyCompleted }],
-                });
-            }
+            if (isAuthenticated && configuration.showCompleted)
+                manifest.catalogs.Add(BuildUserListCatalog(ListType.Completed, "Completed", tokenData,
+                    configuration.discoverOnlyCompleted));
 
-            if (configiration.showTrending)
+            if (isAuthenticated && configuration.showPlanning)
+                manifest.catalogs.Add(BuildUserListCatalog(ListType.Planning, "Plan to Watch", tokenData,
+                    configuration.discoverOnlyPlanning));
+
+            if (isAuthenticated && configuration.showPaused)
+                manifest.catalogs.Add(BuildUserListCatalog(ListType.Paused, "On Hold", tokenData,
+                    configuration.discoverOnlyPaused));
+
+            if (isAuthenticated && configuration.showDropped)
+                manifest.catalogs.Add(BuildUserListCatalog(ListType.Dropped, "Dropped", tokenData,
+                    configuration.discoverOnlyDropped));
+
+            // AniList-only: Kitsu has no "repeating" status
+            if (isAuthenticated && configuration.showRepeating
+                && tokenData?.anime_service == AnimeService.Anilist)
+                manifest.catalogs.Add(BuildUserListCatalog(ListType.Repeating, "Rewatching", tokenData,
+                    configuration.discoverOnlyRepeating));
+
+            if (configuration.showTrending)
             {
                 manifest.catalogs.Add(new Catalog
                 {
                     type = MetaType.anime.ToString(),
-                    id = GetListTypeString(ListType.Trending_Desc, tokenData),
+                    id = ListType.Trending_Desc.ToString(),
                     name = "Trending Now",
-                    extra = [new("skip"), new("genre") { options = GetOptions(configiration.discoverOnlyTrending), isRequired = configiration.discoverOnlyTrending }],
+                    extra = [new("skip"), new("genre") { options = GetOptions(configuration.discoverOnlyTrending), isRequired = configuration.discoverOnlyTrending }],
                 });
             }
 
-            if (configiration.showSeasonal)
+            if (configuration.showSeasonal)
             {
                 manifest.catalogs.Add(new Catalog
                 {
                     type = MetaType.anime.ToString(),
-                    id = GetListTypeString(ListType.Seasonal, tokenData),
+                    id = ListType.Seasonal.ToString(),
                     name = "Seasonal Anime",
-                    extra = [new("skip"), new("genre") { options = SeasonOptions, isRequired = configiration.discoverOnlySeasonal }],
+                    extra = [new("skip"), new("genre") { options = SeasonOptions, isRequired = configuration.discoverOnlySeasonal }],
                 });
             }
 
             return new JsonResult(manifest);
         }
+
+        private static Catalog BuildUserListCatalog(ListType list, string name, TokenData tokenData,
+            bool discoverOnly, bool currentListVariant = false)
+        {
+            // Currently-watching has no genre options unless the user explicitly set discover-only;
+            // every other user list always shows the full genre list.
+            var genreOptions = currentListVariant
+                ? (discoverOnly ? [DefaultOption] : new List<string>())
+                : GetOptions(discoverOnly);
+
+            return new Catalog
+            {
+                type = MetaType.anime.ToString(),
+                id = list.ToString(),
+                name = name,
+                extra = [new("skip"), new("genre") { options = genreOptions, isRequired = discoverOnly }],
+            };
+        }
     }
 }
-
-

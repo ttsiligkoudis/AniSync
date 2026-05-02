@@ -231,11 +231,12 @@ namespace AnimeList
 
         /// <summary>
         /// Decodes a config route parameter into a <see cref="Configuration"/>.
-        /// Supports three formats for backward compatibility:
+        /// Supports four formats for backward compatibility:
         /// <list type="bullet">
         ///   <item>Legacy raw JSON (starts with '{')</item>
         ///   <item>GZip-compressed JSON via Base64Url (GZip magic bytes 0x1F 0x8B)</item>
-        ///   <item>Binary v1: [0x01][flags bitmask][GZip-compressed tokenData bytes]</item>
+        ///   <item>Binary v1: [0x01][flags byte][GZip tokenData] — 8 catalog flags</item>
+        ///   <item>Binary v2: [0x02][flags1][flags2][GZip tokenData] — 16 catalog flags</item>
         /// </list>
         /// The returned <see cref="Configuration.tokenData"/> is always raw token JSON.
         /// </summary>
@@ -265,36 +266,58 @@ namespace AnimeList
                 return result;
             }
 
-            // Binary v1 format: [0x01][flags][GZip tokenData bytes...]
+            // Binary v1: [0x01][flags][GZip tokenData]
             if (data.Length >= 2 && data[0] == 0x01)
-            {
-                byte flags = data[1];
-                string tokenJson = data.Length > 2
-                    ? DecompressBytes(data[2..])
-                    : null;
+                return DecodeBinaryConfig(data, headerLen: 2, flags1: data[1], flags2: 0);
 
-                return new Configuration
-                {
-                    tokenData = tokenJson,
-                    showCurrent = (flags & 0x01) != 0,
-                    showCompleted = (flags & 0x02) != 0,
-                    showTrending = (flags & 0x04) != 0,
-                    showSeasonal = (flags & 0x08) != 0,
-                    discoverOnlyCurrent = (flags & 0x10) != 0,
-                    discoverOnlyCompleted = (flags & 0x20) != 0,
-                    discoverOnlyTrending = (flags & 0x40) != 0,
-                    discoverOnlySeasonal = (flags & 0x80) != 0,
-                };
-            }
+            // Binary v2: [0x02][flags1][flags2][GZip tokenData]
+            if (data.Length >= 3 && data[0] == 0x02)
+                return DecodeBinaryConfig(data, headerLen: 3, flags1: data[1], flags2: data[2]);
 
             throw new ArgumentException("Unknown config format");
         }
 
+        private static Configuration DecodeBinaryConfig(byte[] data, int headerLen, byte flags1, byte flags2)
+        {
+            var tokenJson = data.Length > headerLen ? DecompressBytes(data[headerLen..]) : null;
+            return new Configuration
+            {
+                tokenData = tokenJson,
+                showCurrent = (flags1 & 0x01) != 0,
+                showCompleted = (flags1 & 0x02) != 0,
+                showTrending = (flags1 & 0x04) != 0,
+                showSeasonal = (flags1 & 0x08) != 0,
+                discoverOnlyCurrent = (flags1 & 0x10) != 0,
+                discoverOnlyCompleted = (flags1 & 0x20) != 0,
+                discoverOnlyTrending = (flags1 & 0x40) != 0,
+                discoverOnlySeasonal = (flags1 & 0x80) != 0,
+                showPlanning = (flags2 & 0x01) != 0,
+                showPaused = (flags2 & 0x02) != 0,
+                showDropped = (flags2 & 0x04) != 0,
+                showRepeating = (flags2 & 0x08) != 0,
+                discoverOnlyPlanning = (flags2 & 0x10) != 0,
+                discoverOnlyPaused = (flags2 & 0x20) != 0,
+                discoverOnlyDropped = (flags2 & 0x40) != 0,
+                discoverOnlyRepeating = (flags2 & 0x80) != 0,
+            };
+        }
+
+        /// <summary>
+        /// Maps a <see cref="ListType"/> to the status/sort string the chosen service expects.
+        /// Both services share most names; Kitsu renames a couple ("planned" / "on_hold") and
+        /// has no equivalent of AniList's "REPEATING".
+        /// </summary>
         public static string GetListTypeString(ListType list, TokenData tokenData)
         {
-            return (tokenData?.anime_service ?? AnimeService.Kitsu) == AnimeService.Kitsu
-                ? list.ToString().ToLower()
-                : list.ToString().ToUpper();
+            var isKitsu = (tokenData?.anime_service ?? AnimeService.Kitsu) == AnimeService.Kitsu;
+            if (!isKitsu) return list.ToString().ToUpper();
+
+            return list switch
+            {
+                ListType.Planning => "planned",
+                ListType.Paused => "on_hold",
+                _ => list.ToString().ToLower(),
+            };
         }
 
         /// <summary>

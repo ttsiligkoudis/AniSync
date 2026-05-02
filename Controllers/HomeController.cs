@@ -46,10 +46,18 @@ public class HomeController : Controller
             ViewBag.ShowCompleted = configuration?.showCompleted;
             ViewBag.ShowTrending = configuration?.showTrending;
             ViewBag.ShowSeasonal = configuration?.showSeasonal;
+            ViewBag.ShowPlanning = configuration?.showPlanning;
+            ViewBag.ShowPaused = configuration?.showPaused;
+            ViewBag.ShowDropped = configuration?.showDropped;
+            ViewBag.ShowRepeating = configuration?.showRepeating;
             ViewBag.DiscoverOnlyCurrent = configuration?.discoverOnlyCurrent;
             ViewBag.DiscoverOnlyCompleted = configuration?.discoverOnlyCompleted;
             ViewBag.DiscoverOnlyTrending = configuration?.discoverOnlyTrending;
             ViewBag.DiscoverOnlySeasonal = configuration?.discoverOnlySeasonal;
+            ViewBag.DiscoverOnlyPlanning = configuration?.discoverOnlyPlanning;
+            ViewBag.DiscoverOnlyPaused = configuration?.discoverOnlyPaused;
+            ViewBag.DiscoverOnlyDropped = configuration?.discoverOnlyDropped;
+            ViewBag.DiscoverOnlyRepeating = configuration?.discoverOnlyRepeating;
         }
 
         return View();

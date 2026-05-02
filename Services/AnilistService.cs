@@ -10,7 +10,11 @@ namespace AnimeList.Services
         private readonly IAnimeMappingService _mappingService;
         private readonly IKitsuService _kitsuService;
         private readonly string _anilistApi = "https://graphql.anilist.co";
-        private static readonly HashSet<ListType> _userLists = [ListType.Current, ListType.Completed];
+        private static readonly HashSet<ListType> _userLists =
+        [
+            ListType.Current, ListType.Completed,
+            ListType.Planning, ListType.Paused, ListType.Dropped, ListType.Repeating,
+        ];
 
         public AnilistService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IKitsuService kitsuService)
         {

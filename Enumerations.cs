@@ -20,7 +20,11 @@
             Current,
             Completed,
             Trending_Desc,
-            Seasonal
+            Seasonal,
+            Planning,
+            Paused,
+            Dropped,
+            Repeating,
         }
 
         public enum LinkCategory
