@@ -4,7 +4,7 @@
 #
 
 app = 'aniSync'
-primary_region = 'fra'
+primary_region = 'ams'
 
 [build]
 
