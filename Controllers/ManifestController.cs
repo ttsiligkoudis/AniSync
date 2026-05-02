@@ -96,6 +96,16 @@ namespace AnimeList.Controllers
                 });
             }
 
+            // Search catalog: search extra is required, so this catalog only fires when the user
+            // types a query in Stremio's search bar. No discover-page presence.
+            manifest.catalogs.Add(new Catalog
+            {
+                type = MetaType.anime.ToString(),
+                id = ListType.Search.ToString(),
+                name = "Search",
+                extra = [new("search") { isRequired = true }, new("skip")],
+            });
+
             return new JsonResult(manifest);
         }
 

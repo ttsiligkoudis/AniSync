@@ -25,11 +25,37 @@ namespace AnimeList.Services
 
         private const int CatalogPageSize = 50;
 
-        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null)
+        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null, string search = null)
         {
             var requestBody = string.Empty;
 
-            if (!list.HasValue || _userLists.Contains(list.Value))
+            if (list == ListType.Search)
+            {
+                var page = int.TryParse(skip, out var skipInt) ? (skipInt / CatalogPageSize) + 1 : 1;
+
+                requestBody = SerializeObject(new
+                {
+                    query = @"
+                    query ($search: String, $page: Int, $perPage: Int) {
+                        Page (page: $page, perPage: $perPage) {
+                            media(search: $search, type: ANIME) {
+                                id
+                                format
+                                title {
+                                    english
+                                    romaji
+                                }
+                                coverImage {
+                                    large
+                                }
+                                description
+                            }
+                        }
+                    }",
+                    variables = new { search = search ?? string.Empty, page, perPage = CatalogPageSize }
+                });
+            }
+            else if (!list.HasValue || _userLists.Contains(list.Value))
             {
                 if (!string.IsNullOrEmpty(resolvedAnimeId))
                 {
@@ -157,10 +183,10 @@ namespace AnimeList.Services
             return requestBody;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
-            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre);
+            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, search);
 
             var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
             {
@@ -183,7 +209,7 @@ namespace AnimeList.Services
 
             bool isUserList = !list.HasValue || _userLists.Contains(list.Value);
 
-            if (list == ListType.Trending_Desc || list == ListType.Seasonal)
+            if (list == ListType.Trending_Desc || list == ListType.Seasonal || list == ListType.Search)
                 result = data.Page.media;
             else if (!string.IsNullOrEmpty(resolvedAnimeId))
                 result = data.MediaList == null ? Array.Empty<dynamic>() : [data.MediaList];

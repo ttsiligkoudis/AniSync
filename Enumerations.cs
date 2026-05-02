@@ -25,6 +25,7 @@
             Paused,
             Dropped,
             Repeating,
+            Search,
         }
 
         public enum LinkCategory

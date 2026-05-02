@@ -27,7 +27,7 @@ namespace AnimeList.Services
             _mappingService = mappingService;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu);
             var isUserList = !list.HasValue || _userLists.Contains(list.Value);
@@ -36,7 +36,7 @@ namespace AnimeList.Services
             if (isUserList && string.IsNullOrEmpty(tokenData?.user_id))
                 return [];
 
-            string url = BuildListUrl(tokenData, list, skip, resolvedAnimeId, genre, isUserList);
+            string url = BuildListUrl(tokenData, list, skip, resolvedAnimeId, genre, search, isUserList);
 
             var request = new HttpRequestMessage(HttpMethod.Get, url);
             if (!string.IsNullOrWhiteSpace(tokenData?.access_token))
@@ -391,7 +391,7 @@ namespace AnimeList.Services
             return (int?)json["data"]?["attributes"]?["episodeCount"];
         }
 
-        private string BuildListUrl(TokenData tokenData, ListType? list, string skip, string resolvedAnimeId, string genre, bool isUserList)
+        private string BuildListUrl(TokenData tokenData, ListType? list, string skip, string resolvedAnimeId, string genre, string search, bool isUserList)
         {
             string url;
 
@@ -405,6 +405,10 @@ namespace AnimeList.Services
             {
                 var (season, year) = GetSeasonAndYear(genre ?? SeasonCurrent);
                 url = $"{_kitsuApi}/anime?sort=-userCount&filter[season]={season.ToLowerInvariant()}&filter[seasonYear]={year}&include=categories";
+            }
+            else if (list == ListType.Search)
+            {
+                url = $"{_kitsuApi}/anime?include=categories&filter[text]={Uri.EscapeDataString(search ?? string.Empty)}";
             }
             else
             {
