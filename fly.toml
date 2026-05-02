@@ -16,6 +16,16 @@ primary_region = 'fra'
   min_machines_running = 0
   processes = ['app']
 
+[env]
+  ANISYNC_DATA_DIR = '/data'
+
+# Persistent volume for the config store SQLite file. Provisioned once with
+# `fly volume create anisync_data --size 1 --region fra`. Volumes are pinned to a
+# single machine, which is fine while min_machines_running stays at 0/1.
+[[mounts]]
+  source = 'anisync_data'
+  destination = '/data'
+
 [[vm]]
   memory = '256mb'
   cpu_kind = 'shared'

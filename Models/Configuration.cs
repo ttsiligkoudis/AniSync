@@ -2,7 +2,19 @@
 {
     public class Configuration
     {
+        /// <summary>
+        /// Inline token JSON (set for legacy v1/v2/v3 install URLs that embed credentials in
+        /// the URL itself). Mutually exclusive with <see cref="tokenUid"/>: v4 URLs leave this
+        /// null and store the token JSON in <see cref="Services.Interfaces.IConfigStore"/>.
+        /// </summary>
         public string tokenData  { get; set; }
+
+        /// <summary>
+        /// 22-char base64url UID pointing at a row in <see cref="Services.Interfaces.IConfigStore"/>.
+        /// Set only for v4 install URLs.
+        /// </summary>
+        public string tokenUid { get; set; }
+
         public bool showCurrent { get; set; }
         public bool showCompleted { get; set; }
         public bool showTrending { get; set; }

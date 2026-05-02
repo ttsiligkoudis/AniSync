@@ -1,7 +1,10 @@
 ﻿@{
     var tokenDataStr = (string)ViewBag.TokenData;
+    var configUid = (string)ViewBag.ConfigUid;
     var animeService = (AnimeService?)ViewBag.AnimeService;
-    var isLoggedIn = !string.IsNullOrEmpty(tokenDataStr);
+    // ConfigUid is set for authenticated v4 users, TokenData for anonymous v3 users —
+    // either one means "you're logged in and we can render the install link".
+    var isLoggedIn = !string.IsNullOrEmpty(tokenDataStr) || !string.IsNullOrEmpty(configUid);
     var isAnilist = animeService == AnimeService.Anilist;
     var stremioStr = "https://web.stremio.com/#/addons?addon=";
     bool anonymousUser = ViewBag.AnonymousUser == true;
@@ -219,7 +222,10 @@ else
     var url = $('#url').attr('href');
     var stremioUrl = $('#stremioUrl').attr('href');
 
-    // Pre-compressed token bytes from the server (Base64Url of GZip data)
+    // Authenticated users have a 16-byte UID (base64url) pointing at a row in the
+    // server-side config store; anonymous users still embed their (tiny) token data inline.
+    // Exactly one of the two strings is non-empty per request.
+    var configUid = '@(configUid ?? "")';
     var tokenDataStr = '@(tokenDataStr ?? "")';
 
     function base64UrlToBytes(str) {
@@ -238,6 +244,7 @@ else
         return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
     }
 
+    var uidBytes = base64UrlToBytes(configUid);
     var tokenBytes = base64UrlToBytes(tokenDataStr);
 
     changeUrl();
@@ -320,13 +327,24 @@ else
         if ($('#showExternalStreams').is(':checked'))    flags3 |= 0x02;
         if ($('#discoverOnlyAiring').is(':checked'))     flags3 |= 0x10;
 
-        // Binary v3: [0x03 version][flags1][flags2][flags3][pre-compressed token bytes]
-        var payload = new Uint8Array(4 + tokenBytes.length);
-        payload[0] = 0x03;
-        payload[1] = flags1;
-        payload[2] = flags2;
-        payload[3] = flags3;
-        payload.set(tokenBytes, 4);
+        var payload;
+        if (uidBytes.length > 0) {
+            // Binary v4: [0x04][flags1][flags2][flags3][16-byte UID]
+            payload = new Uint8Array(4 + uidBytes.length);
+            payload[0] = 0x04;
+            payload[1] = flags1;
+            payload[2] = flags2;
+            payload[3] = flags3;
+            payload.set(uidBytes, 4);
+        } else {
+            // Binary v3 (anonymous fallback): [0x03][flags1][flags2][flags3][gzip token bytes]
+            payload = new Uint8Array(4 + tokenBytes.length);
+            payload[0] = 0x03;
+            payload[1] = flags1;
+            payload[2] = flags2;
+            payload[3] = flags3;
+            payload.set(tokenBytes, 4);
+        }
 
         var tempUrl = '/' + bytesToBase64Url(payload) + '/manifest.json';
         $('#url').attr('href', url + tempUrl);

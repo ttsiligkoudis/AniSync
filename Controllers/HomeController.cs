@@ -7,10 +7,12 @@ using System.Diagnostics;
 public class HomeController : Controller
 {
     private readonly ITokenService _tokenService;
+    private readonly IConfigStore _configStore;
 
-    public HomeController(ITokenService tokenService)
+    public HomeController(ITokenService tokenService, IConfigStore configStore)
     {
         _tokenService = tokenService;
+        _configStore = configStore;
     }
 
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
@@ -26,14 +28,26 @@ public class HomeController : Controller
         if (tokenData != null)
         {
             tokenData.expires_in = null;
-            if (tokenData.anime_service == AnimeService.Kitsu)
-            {
-                tokenData.access_token = null;
-                tokenData.refresh_token = null;
-            }
-
             ViewBag.AnonymousUser = tokenData.anonymousUser;
-            ViewBag.TokenData = CompressToUrlSafe(SerializeObject(tokenData, Formatting.None, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore }));
+
+            // Authenticated users get a v4 (UID-based) install URL: store the token JSON in
+            // the config store and hand the JS just the UID. Idempotent — the same user
+            // re-logging in keeps their UID. Anonymous users keep the inline (v3) flow
+            // because their "token data" is just a 30-byte service preference and there's
+            // no benefit to a DB row plus no stable identity to dedupe on.
+            if (!tokenData.anonymousUser)
+            {
+                ViewBag.ConfigUid = await _configStore.UpsertAsync(tokenData);
+            }
+            else
+            {
+                if (tokenData.anime_service == AnimeService.Kitsu)
+                {
+                    tokenData.access_token = null;
+                    tokenData.refresh_token = null;
+                }
+                ViewBag.TokenData = CompressToUrlSafe(SerializeObject(tokenData, Formatting.None, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore }));
+            }
         }
 
         ViewBag.AnimeService = tokenData?.anime_service ?? AnimeService.Kitsu;
