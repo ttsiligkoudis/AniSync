@@ -24,6 +24,7 @@
     bool discoverOnlyDropped = ViewBag.DiscoverOnlyDropped ?? false;
     bool discoverOnlyRepeating = ViewBag.DiscoverOnlyRepeating ?? false;
     bool discoverOnlyAiring = ViewBag.DiscoverOnlyAiring ?? false;
+    bool showExternalStreams = ViewBag.ShowExternalStreams ?? false;
 }
 
 <h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
@@ -159,6 +160,19 @@
                 <input type="checkbox" id="discoverOnlyAiring" class="discoverCheck" @(discoverOnlyAiring ? "checked" : "") @(!showAiring ? "disabled" : "") />
                 <span class="slider"></span>
             </label>
+            <hr class="option-sep" />
+
+            <h5 class="catalogs-title">Streams</h5>
+            <span class="catalog-col-label">Enable</span>
+            <span></span>
+            <hr class="option-sep" />
+
+            <span class="option-name">External (Crunchyroll, Netflix, ...)</span>
+            <label class="switch">
+                <input type="checkbox" id="showExternalStreams" @(showExternalStreams ? "checked" : "") />
+                <span class="slider"></span>
+            </label>
+            <span></span>
         </div>
     </div>
 
@@ -262,8 +276,8 @@ else
         }
     });
 
-    // Catalog checkboxes
-    $('.catalogCheck, .discoverCheck').on('change', function () {
+    // Catalog checkboxes (and the standalone External Streams toggle)
+    $('.catalogCheck, .discoverCheck, #showExternalStreams').on('change', function () {
         changeUrl();
     });
 
@@ -303,6 +317,7 @@ else
 
         var flags3 = 0;
         if ($('#showAiring').is(':checked'))             flags3 |= 0x01;
+        if ($('#showExternalStreams').is(':checked'))    flags3 |= 0x02;
         if ($('#discoverOnlyAiring').is(':checked'))     flags3 |= 0x10;
 
         // Binary v3: [0x03 version][flags1][flags2][flags3][pre-compressed token bytes]

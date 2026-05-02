@@ -333,6 +333,7 @@ namespace AnimeList
                 discoverOnlyDropped = (flags2 & 0x40) != 0,
                 discoverOnlyRepeating = (flags2 & 0x80) != 0,
                 showAiring = (flags3 & 0x01) != 0,
+                showExternalStreams = (flags3 & 0x02) != 0,
                 discoverOnlyAiring = (flags3 & 0x10) != 0,
             };
         }

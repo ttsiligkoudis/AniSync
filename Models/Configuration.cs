@@ -21,5 +21,6 @@
         public bool discoverOnlyDropped { get; set; }
         public bool discoverOnlyRepeating { get; set; }
         public bool discoverOnlyAiring { get; set; }
+        public bool showExternalStreams { get; set; }
     }
 }
