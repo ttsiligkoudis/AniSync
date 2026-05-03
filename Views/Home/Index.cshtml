@@ -66,6 +66,20 @@
             <span class="catalog-col-label">Discover Only</span>
             <hr class="option-sep" />
 
+            @* Select-all row — flips every row in the column it sits under. The aggregate *@
+            @* state of the master toggles is kept in sync via JS as users toggle individual *@
+            @* rows. *@
+            <span class="option-name option-name-all">Select all</span>
+            <label class="switch">
+                <input type="checkbox" id="enableAll" />
+                <span class="slider"></span>
+            </label>
+            <label class="switch">
+                <input type="checkbox" id="discoverOnlyAll" />
+                <span class="slider"></span>
+            </label>
+            <hr class="option-sep" />
+
             @if (!anonymousUser)
             {
                 <span class="option-name">Currently watching</span>
@@ -178,27 +192,32 @@
         <p class="section-description">Choose what AniSync attaches to each episode in Stremio.</p>
 
         <div class="streams-grid">
-            <div class="stream-option">
-                <div class="option-name-wrap">
-                    <span class="option-name">Manage Entry</span>
-                    <span class="option-name-sub">Quick-edit progress, score and notes from Stremio.</span>
+            @* Manage Entry and Auto-track touch the user's list, so they only make sense *@
+            @* when there's an account behind the install. *@
+            @if (!anonymousUser)
+            {
+                <div class="stream-option">
+                    <div class="option-name-wrap">
+                        <span class="option-name">Manage Entry</span>
+                        <span class="option-name-sub">Quick-edit progress, score and notes from Stremio.</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="showManageEntry" @(showManageEntry ? "checked" : "") />
+                        <span class="slider"></span>
+                    </label>
                 </div>
-                <label class="switch">
-                    <input type="checkbox" id="showManageEntry" @(showManageEntry ? "checked" : "") />
-                    <span class="slider"></span>
-                </label>
-            </div>
 
-            <div class="stream-option">
-                <div class="option-name-wrap">
-                    <span class="option-name">Auto-track progress</span>
-                    <span class="option-name-sub">Update your list when you start an episode in Stremio.</span>
+                <div class="stream-option">
+                    <div class="option-name-wrap">
+                        <span class="option-name">Auto-track progress</span>
+                        <span class="option-name-sub">Update your list when you start an episode in Stremio.</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="autoTrackProgress" @(autoTrackProgress ? "checked" : "") />
+                        <span class="slider"></span>
+                    </label>
                 </div>
-                <label class="switch">
-                    <input type="checkbox" id="autoTrackProgress" @(autoTrackProgress ? "checked" : "") />
-                    <span class="slider"></span>
-                </label>
-            </div>
+            }
 
             <div class="stream-option">
                 <div class="option-name-wrap">
@@ -379,8 +398,13 @@ else
         if ($('#showExternalStreams').is(':checked'))    flags3 |= 0x02;
         // Inverse bits: stored 1 = "off". Toggling the UI off sets the bit; default-checked
         // toggles leave the bit at 0, matching pre-feature behavior for existing rows.
-        if (!$('#showManageEntry').is(':checked'))       flags3 |= 0x04;
-        if (!$('#autoTrackProgress').is(':checked'))     flags3 |= 0x08;
+        // The toggles are hidden for anonymous users (no account → nothing to manage), so
+        // .length-guard before reading state to avoid setting the bit just because the input
+        // doesn't exist on the page.
+        var $manage = $('#showManageEntry');
+        if ($manage.length && !$manage.is(':checked'))   flags3 |= 0x04;
+        var $autoTrack = $('#autoTrackProgress');
+        if ($autoTrack.length && !$autoTrack.is(':checked')) flags3 |= 0x08;
         if ($('#discoverOnlyAiring').is(':checked'))     flags3 |= 0x10;
 
         return { flags1: flags1, flags2: flags2, flags3: flags3 };
@@ -442,6 +466,37 @@ else
         $discoverLabel.toggleClass('switch-disabled', !isEnabled);
         if (!isEnabled) $discoverSwitch.prop('checked', false);
     });
+
+    // ── Select-all switches ───────────────────────────────────────────
+    // Master "Enable" toggle: flips every catalog row to its state. trigger('change')
+    // so the per-row sibling-disable handler runs, refreshUrls fires, etc.
+    $('#enableAll').on('change', function () {
+        var checked = $(this).is(':checked');
+        $('.catalogCheck').prop('checked', checked).trigger('change');
+    });
+
+    // Master "Discover Only" toggle: only flips rows whose Enable is on (the rest are
+    // visually disabled and stay unchecked).
+    $('#discoverOnlyAll').on('change', function () {
+        var checked = $(this).is(':checked');
+        $('.catalogCheck').each(function () {
+            if (!$(this).is(':checked')) return;
+            var $disc = $(this).parent().next().find('.discoverCheck');
+            $disc.prop('checked', checked).trigger('change');
+        });
+    });
+
+    // Mirror aggregate state on the master toggles: master ON only when *every* row in
+    // its column is on. Use prop (no trigger) so we don't recurse.
+    function refreshAllToggles() {
+        var enables = $('.catalogCheck');
+        $('#enableAll').prop('checked', enables.length > 0 && enables.length === enables.filter(':checked').length);
+
+        var discovers = $('.discoverCheck:not(:disabled)');
+        $('#discoverOnlyAll').prop('checked', discovers.length > 0 && discovers.length === discovers.filter(':checked').length);
+    }
+    $('.catalogCheck, .discoverCheck').on('change', refreshAllToggles);
+    refreshAllToggles();
 
     // ── Service toggle ────────────────────────────────────────────────
     $('#serviceToggle, #labelKitsu, #labelAnilist').on('click', function () {
