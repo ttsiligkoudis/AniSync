@@ -21,8 +21,15 @@ namespace AnimeList.Models
         public DateTime? StartedAt { get; set; }
         public DateTime? FinishedAt { get; set; }
 
-        public List<int> Seasons { get; set; } = [];
-        public int? SelectedSeason { get; set; }
+        public List<EntrySeason> Seasons { get; set; } = [];
+
+        /// <summary>
+        /// The resolved entry id for the season auto-selected on page load. Matches one of
+        /// <see cref="Seasons"/>'s ids (or equals <see cref="Id"/> when there's no season
+        /// dropdown). The dropdown's &lt;option value="…"&gt; carries the same shape so the
+        /// JS can send it straight to GetEntry/SaveEntry.
+        /// </summary>
+        public string SelectedEntryId { get; set; }
 
         public AnimeService AnimeService { get; set; }
 

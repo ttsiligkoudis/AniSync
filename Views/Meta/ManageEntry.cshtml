@@ -24,7 +24,7 @@
 
         <hr class="manage-entry-sep" />
 
-        <!-- Season selector (series only) -->
+        <!-- Season selector (only for franchises split across multiple service entries) -->
         @if (isSeries && hasSeasons)
         {
             <div class="manage-entry-field">
@@ -32,7 +32,11 @@
                 <select id="seasonSelect" class="manage-entry-select">
                     @foreach (var s in Model.Seasons)
                     {
-                        <option value="@s" selected="@(s == Model.SelectedSeason)">Season @s</option>
+                        <option value="@s.Id"
+                                data-total="@(s.TotalEpisodes ?? 0)"
+                                selected="@(s.Id == Model.SelectedEntryId)">
+                            @s.Label
+                        </option>
                     }
                 </select>
             </div>
@@ -125,17 +129,27 @@
 
 <script>
     var config = '@Html.Raw(Model.Config)';
-    var animeId = '@Html.Raw(Model.Id)';
-    var isSeries = @Html.Raw(isSeries.ToString().ToLower());
+    var originalId = '@Html.Raw(Model.Id)';
+    // selectedEntryId is the auto-resolved per-mapping id (anilist:N / kitsu:N) for
+    // multi-season franchises; for single-anime ids it equals originalId.
+    var selectedEntryId = '@Html.Raw(Model.SelectedEntryId ?? Model.Id)';
     var hasSeasons = @Html.Raw(hasSeasons.ToString().ToLower());
-    var videos = @Html.Raw(SerializeObject(Model.Videos));
 
-    // When season changes, fetch the entry for that season
+    // Returns the id we should send to GetEntry/SaveEntry — the dropdown value when it
+    // exists (multi-mapping franchises), otherwise the single resolved id.
+    function currentEntryId() {
+        return hasSeasons ? $('#seasonSelect').val() : selectedEntryId;
+    }
+
+    // When the user picks a different cour from the dropdown, refresh the form fields
+    // from that mapping's saved entry.
     $('#seasonSelect').on('change', function () {
-        var season = $(this).val();
+        var $opt = $(this).find('option:selected');
+        var totalFromOption = parseInt($opt.attr('data-total'), 10) || 0;
+
         $.ajax({
             url: '/' + config + '/Meta/GetEntry',
-            data: { id: animeId, season: season },
+            data: { id: $(this).val() },
             success: function (data) {
                 if (!data.success) return;
 
@@ -147,7 +161,7 @@
                 $('#finishedAtInput').val(data.finishedAt || '');
                 $('#notesInput').val(data.notes || '');
 
-                var totalEpisodes = data.totalEpisodes || videos.filter(w => w.season == season).length;
+                var totalEpisodes = data.totalEpisodes || totalFromOption;
                 if (totalEpisodes > 0) {
                     $('#progressInput').attr('max', totalEpisodes);
                     $('.manage-entry-progress-row .manage-entry-total').first().text('/ ' + totalEpisodes).show();
@@ -162,8 +176,9 @@
     // Save entry
     $('#saveBtn').on('click', function () {
         var payload = {
-            id: animeId,
-            season: hasSeasons ? parseInt($('#seasonSelect').val()) : null,
+            // Send the resolved per-mapping id so the server doesn't have to guess which
+            // cour to update — see MetaController.BuildSeasonsAsync for the resolution.
+            id: currentEntryId(),
             status: $('#statusSelect').val(),
             progress: parseInt($('#progressInput').val()) || 0,
             score: $('#scoreInput').val() ? parseFloat($('#scoreInput').val()) : null,
