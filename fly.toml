@@ -11,7 +11,10 @@ primary_region = 'ams'
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = 'stop'
+  # `suspend` keeps the .NET process resident and wakes in ~1s vs the ~5-10s cold
+  # start of `stop`. The mapping cache (~10-50MB JSON) doesn't get re-downloaded.
+  # Falls back to a full stop if Fly's host runs out of RAM for suspended machines.
+  auto_stop_machines = 'suspend'
   auto_start_machines = true
   min_machines_running = 0
   processes = ['app']
@@ -27,7 +30,10 @@ primary_region = 'ams'
   destination = '/data'
 
 [[vm]]
-  memory = '256mb'
+  # 1 GB gives the runtime + mapping cache + any in-process API caches headroom
+  # so GC doesn't thrash on bigger AniList responses. Still well inside Fly's
+  # €5/mo free allowance with auto-suspend on top.
+  memory = '1024mb'
   cpu_kind = 'shared'
   cpus = 1
-  memory_mb = 256
+  memory_mb = 1024
