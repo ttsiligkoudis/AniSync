@@ -184,6 +184,12 @@ namespace AnimeList.Controllers
                 mappings.Select(m => BuildEntrySeasonAsync(m, animeService))
             )).Where(s => s != null).ToList();
 
+            // Every per-mapping fetch could have returned null (BuildEntrySeasonAsync swallows
+            // failures). Fall back to picking the first mapping's id directly so the page
+            // still renders without a dropdown rather than NRE'ing on entrySeasons[0].
+            if (entrySeasons.Count == 0)
+                return ([], BuildEntryId(mappings[0], animeService) ?? id, null);
+
             var imdbAbsolute = ComputeAbsoluteEpisode(videos, season, episode);
             var (autoId, autoEpisode) = AutoSelectSeason(entrySeasons, imdbAbsolute);
 
@@ -195,12 +201,21 @@ namespace AnimeList.Controllers
             var entryId = BuildEntryId(mapping, service);
             if (entryId == null) return null;
 
-            // GetAnimeByIdAsync returns Meta (statically typed), with .videos as List<Video>.
-            // Counting those is the cheapest way to label the season without a separate
-            // "episodes" call.
-            var anime = service == AnimeService.Anilist
-                ? await _anilistService.GetAnimeByIdAsync(entryId, null)
-                : await _kitsuService.GetAnimeByIdAsync(entryId, null);
+            // Best-effort label fetch: if a single mapping's anime fetch throws (AniList
+            // returning a malformed Media payload, transient 502, …) we still want the
+            // dropdown to render with the remaining seasons. Fall back to a bare entry
+            // option labelled with the raw id so the user can at least pick it.
+            Meta anime = null;
+            try
+            {
+                anime = service == AnimeService.Anilist
+                    ? await _anilistService.GetAnimeByIdAsync(entryId, null)
+                    : await _kitsuService.GetAnimeByIdAsync(entryId, null);
+            }
+            catch
+            {
+                // swallow — see comment above
+            }
 
             int? episodeCount = anime?.videos?.Count;
             if (episodeCount is 0) episodeCount = null;

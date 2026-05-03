@@ -1,5 +1,6 @@
 ﻿using AnimeList.Models;
 using AnimeList.Services.Interfaces;
+using Newtonsoft.Json.Linq;
 using System.Net.Http.Headers;
 
 namespace AnimeList.Services
@@ -495,7 +496,14 @@ namespace AnimeList.Services
 
             if (!isMovie)
             {
-                anime.videos = result.streamingEpisodes.ToObject<List<Video>>();
+                // streamingEpisodes can be null on AniList for anime that haven't aired yet
+                // or simply lack the data — ToObject on a JTokenType.Null returns null, and
+                // accessing the field at all on a JObject returns null for missing keys.
+                // Default to an empty list so the iteration / fallback below is NRE-safe.
+                JToken streamingEps = result.streamingEpisodes as JToken;
+                anime.videos = (streamingEps != null && streamingEps.Type != JTokenType.Null)
+                    ? (streamingEps.ToObject<List<Video>>() ?? new List<Video>())
+                    : new List<Video>();
 
                 var seasonNumber = GetSeasonNumber(result.relations, (int)result.id);
 
@@ -509,7 +517,7 @@ namespace AnimeList.Services
                 if (anime.videos.Count == 0 && mapping?.KitsuId != null)
                 {
                     var kitsuAnime = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", null);
-                    anime.videos = kitsuAnime.videos;
+                    anime.videos = kitsuAnime?.videos ?? new List<Video>();
                 }
             }
 
