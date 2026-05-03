@@ -310,6 +310,16 @@ namespace AnimeList.Controllers
             if (tokenData == null || string.IsNullOrWhiteSpace(tokenData.access_token))
                 return new JsonResult(new { success = false });
 
+            // Empty status = the "None" option in the UI = "remove from list".
+            if (string.IsNullOrEmpty(request.Status))
+            {
+                if (tokenData.anime_service == AnimeService.Anilist)
+                    await _anilistService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                else
+                    await _kitsuService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                return new JsonResult(new { success = true });
+            }
+
             DateTime? startedAt = ParseDate(request.StartedAt);
             DateTime? finishedAt = ParseDate(request.FinishedAt);
 

@@ -33,6 +33,13 @@ namespace AnimeList.Services.Interfaces
         Task SaveAnimeEntryAsync(TokenData tokenData, string animeId, int? season, int progress,
             string status = null, double? score = null, string notes = null, int? rewatchCount = null,
             DateTime? startedAt = null, DateTime? finishedAt = null);
+
+        /// <summary>
+        /// Removes the anime from the user's list. No-op if it isn't there. Used when the
+        /// Manage Entry page is saved with the "None" status — the user is taking the anime
+        /// off their list rather than updating it.
+        /// </summary>
+        Task DeleteAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null);
     }
 }
 

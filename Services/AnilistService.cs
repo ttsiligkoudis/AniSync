@@ -683,6 +683,34 @@ namespace AnimeList.Services
             await client.SendAsync(request);
         }
 
+        public async Task DeleteAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)
+        {
+            // DeleteMediaListEntry takes the MediaList id, not the media id, so fetch the
+            // existing entry to get it. If the user has nothing on their list there's
+            // nothing to delete and we exit silently.
+            var entry = await GetAnimeEntryAsync(tokenData, animeId, season);
+            if (string.IsNullOrEmpty(entry?.EntryId)
+                || !int.TryParse(entry.EntryId, out var listId))
+                return;
+
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    mutation ($id: Int) {
+                        DeleteMediaListEntry(id: $id) { deleted }
+                    }",
+                variables = new { id = listId },
+            });
+
+            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
+            {
+                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json"),
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+
+            await _clientFactory.CreateClient().SendAsync(request);
+        }
+
         public async Task<(string? name, int? episodeCount)> GetAnimeSummaryAsync(string id)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(id, AnimeService.Anilist);

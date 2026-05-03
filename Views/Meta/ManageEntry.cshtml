@@ -46,6 +46,9 @@
         <div class="manage-entry-field">
             <label class="manage-entry-label">Status</label>
             <select id="statusSelect" class="manage-entry-select">
+                @* "None" represents "this anime isn't on my list". Saving with this *@
+                @* selected makes the server delete the entry. *@
+                <option value="" selected="@(string.IsNullOrEmpty(Model.Status))">— None (not in list) —</option>
                 @if (isAnilist)
                 {
                     <option value="CURRENT" selected="@(Model.Status == "CURRENT")">Watching</option>
@@ -153,7 +156,8 @@
             success: function (data) {
                 if (!data.success) return;
 
-                $('#statusSelect').val(data.status || $('#statusSelect option:first').val());
+                // No status returned = entry doesn't exist on this cour → land on "None".
+                $('#statusSelect').val(data.status || '');
                 $('#progressInput').val(data.progress || 0);
                 $('#scoreInput').val(data.score != null ? data.score : '');
                 $('#rewatchInput').val(data.rewatchCount || 0);

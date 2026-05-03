@@ -450,6 +450,25 @@ namespace AnimeList.Services
             return result;
         }
 
+        public async Task DeleteAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)
+        {
+            if (string.IsNullOrWhiteSpace(tokenData?.access_token) || string.IsNullOrEmpty(tokenData?.user_id))
+                return;
+
+            var resolvedKitsuId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu, season);
+            if (string.IsNullOrEmpty(resolvedKitsuId)) return;
+
+            // Need the library-entry id, not the anime id, for the DELETE. Fetch via the
+            // user's list; if the entry doesn't exist there's nothing to remove.
+            var existing = await GetAnimeEntryAsync(tokenData, $"{kitsuPrefix}{resolvedKitsuId}", season);
+            if (string.IsNullOrEmpty(existing?.EntryId)) return;
+
+            var request = new HttpRequestMessage(HttpMethod.Delete, $"{_kitsuApi}/library-entries/{existing.EntryId}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+
+            await _clientFactory.CreateClient().SendAsync(request);
+        }
+
         private static DateTime? ParseKitsuDate(string raw)
         {
             return DateTime.TryParse(raw, out var dt) ? dt : null;
