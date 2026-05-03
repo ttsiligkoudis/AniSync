@@ -130,9 +130,20 @@
     </div>
 </div>
 
+<!-- Full-screen blocking loader shown during GetEntry / SaveEntry. -->
+<div id="loaderOverlay" class="loader-overlay" aria-hidden="true">
+    <div class="loader-spinner"></div>
+</div>
+
 <script>
     var config = '@Html.Raw(Model.Config)';
     var originalId = '@Html.Raw(Model.Id)';
+
+    // Full-screen loader: blocks input while async work is in flight. Fired around
+    // GetEntry (season change) and SaveEntry (save click) — both are HTTP round-trips
+    // to AniList / Kitsu which can take a noticeable second on cold caches.
+    function showLoader() { $('#loaderOverlay').addClass('show').attr('aria-hidden', 'false'); }
+    function hideLoader() { $('#loaderOverlay').removeClass('show').attr('aria-hidden', 'true'); }
     // selectedEntryId is the auto-resolved per-mapping id (anilist:N / kitsu:N) for
     // multi-season franchises; for single-anime ids it equals originalId.
     var selectedEntryId = '@Html.Raw(Model.SelectedEntryId ?? Model.Id)';
@@ -150,9 +161,11 @@
         var $opt = $(this).find('option:selected');
         var totalFromOption = parseInt($opt.attr('data-total'), 10) || 0;
 
+        showLoader();
         $.ajax({
             url: '/' + config + '/Meta/GetEntry',
             data: { id: $(this).val() },
+            complete: hideLoader,
             success: function (data) {
                 if (!data.success) return;
 
@@ -194,12 +207,14 @@
 
         var $btn = $(this);
         $btn.prop('disabled', true).text('Saving...');
+        showLoader();
 
         $.ajax({
             url: '/' + config + '/Meta/SaveEntry',
             method: 'POST',
             contentType: 'application/json',
             data: JSON.stringify(payload),
+            complete: hideLoader,
             success: function (data) {
                 $btn.prop('disabled', false).text('Save');
                 $('#saveStatus').text(data.success ? '✓ Saved' : '✗ Failed')
