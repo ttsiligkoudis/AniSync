@@ -287,6 +287,14 @@ main {
     width: 100%;
 }
 
+.option-name-all {
+    color: #aaa;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
 .catalogs-grid .switch {
     padding: 0.45rem 0;
 }
