@@ -35,8 +35,11 @@ namespace AnimeList.Controllers
 
             var streams = new List<object>();
 
-            // Manage Entry stream — always shown by default for authenticated, non-anonymous users
-            if (tokenData != null && !string.IsNullOrWhiteSpace(tokenData.access_token) && !tokenData.anonymousUser)
+            // Manage Entry stream — shown by default for authenticated, non-anonymous users.
+            // The configure page's "Manage Entry" toggle stores the negative bit (hideManageEntry)
+            // so existing installs keep showing it without a forced re-save.
+            if (tokenData != null && !string.IsNullOrWhiteSpace(tokenData.access_token) && !tokenData.anonymousUser
+                && configuration?.hideManageEntry != true)
             {
                 var query = string.Concat(
                     season.HasValue ? $"?season={season}" : "",

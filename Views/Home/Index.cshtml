@@ -29,6 +29,8 @@
     bool discoverOnlyRepeating = ViewBag.DiscoverOnlyRepeating ?? false;
     bool discoverOnlyAiring = ViewBag.DiscoverOnlyAiring ?? false;
     bool showExternalStreams = ViewBag.ShowExternalStreams ?? false;
+    bool showManageEntry = ViewBag.ShowManageEntry ?? true;
+    bool autoTrackProgress = ViewBag.AutoTrackProgress ?? true;
 }
 
 <h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
@@ -167,19 +169,47 @@
                 <input type="checkbox" id="discoverOnlyAiring" class="discoverCheck" @(discoverOnlyAiring ? "checked" : "") @(!showAiring ? "disabled" : "") />
                 <span class="slider"></span>
             </label>
-            <hr class="option-sep" />
+        </div>
+    </section>
 
-            <span class="catalogs-subhead">Streams</span>
-            <span></span>
-            <span></span>
-            <hr class="option-sep" />
+    <!-- ─── STREAMS ─────────────────────────────────────────────────── -->
+    <section class="section-card">
+        <span class="section-title">Streams</span>
+        <p class="section-description">Choose what AniSync attaches to each episode in Stremio.</p>
 
-            <span class="option-name">External (Crunchyroll, Netflix, …)</span>
-            <label class="switch">
-                <input type="checkbox" id="showExternalStreams" @(showExternalStreams ? "checked" : "") />
-                <span class="slider"></span>
-            </label>
-            <span></span>
+        <div class="streams-grid">
+            <div class="stream-option">
+                <div class="option-name-wrap">
+                    <span class="option-name">Manage Entry</span>
+                    <span class="option-name-sub">Quick-edit progress, score and notes from Stremio.</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="showManageEntry" @(showManageEntry ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="stream-option">
+                <div class="option-name-wrap">
+                    <span class="option-name">Auto-track progress</span>
+                    <span class="option-name-sub">Update your list when you start an episode in Stremio.</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="autoTrackProgress" @(autoTrackProgress ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="stream-option">
+                <div class="option-name-wrap">
+                    <span class="option-name">External services</span>
+                    <span class="option-name-sub">Crunchyroll, Netflix, HiDive, …</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="showExternalStreams" @(showExternalStreams ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
+            </div>
         </div>
     </section>
 
@@ -347,6 +377,10 @@ else
         var flags3 = 0;
         if ($('#showAiring').is(':checked'))             flags3 |= 0x01;
         if ($('#showExternalStreams').is(':checked'))    flags3 |= 0x02;
+        // Inverse bits: stored 1 = "off". Toggling the UI off sets the bit; default-checked
+        // toggles leave the bit at 0, matching pre-feature behavior for existing rows.
+        if (!$('#showManageEntry').is(':checked'))       flags3 |= 0x04;
+        if (!$('#autoTrackProgress').is(':checked'))     flags3 |= 0x08;
         if ($('#discoverOnlyAiring').is(':checked'))     flags3 |= 0x10;
 
         return { flags1: flags1, flags2: flags2, flags3: flags3 };
@@ -393,10 +427,11 @@ else
 
     refreshUrls();
 
-    // Catalog toggles — recompute the manifest URL whenever flags change. (For v5 the
-    // path bytes don't actually change since flags live in DB, but we still call
+    // Catalog + stream toggles — recompute the manifest URL whenever flags change. (For
+    // v5 the path bytes don't actually change since flags live in DB, but we still call
     // refreshUrls() to keep the path in sync after a SaveConfig response bumps revision.)
-    $('.catalogCheck, .discoverCheck, #showExternalStreams').on('change', refreshUrls);
+    $('.catalogCheck, .discoverCheck, #showExternalStreams, #showManageEntry, #autoTrackProgress')
+        .on('change', refreshUrls);
 
     // When an enable checkbox is toggled, enable/disable its discover-only sibling
     $('.catalogCheck').on('change', function () {

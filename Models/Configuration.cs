@@ -42,5 +42,12 @@
         public bool discoverOnlyRepeating { get; set; }
         public bool discoverOnlyAiring { get; set; }
         public bool showExternalStreams { get; set; }
+
+        // Inverse-sense bits: stored 0/false by default so existing rows keep doing what
+        // they did before this flag existed. The configure-page UI exposes them as positive
+        // toggles ("Manage Entry", "Auto-track progress") with default checked, and the
+        // JS flips the bit when the toggle is unchecked.
+        public bool hideManageEntry { get; set; }
+        public bool disableAutoTrack { get; set; }
     }
 }

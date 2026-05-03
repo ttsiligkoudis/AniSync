@@ -166,6 +166,39 @@ main {
     background: rgba(231, 76, 60, 0.04);
 }
 
+/* Streams card — single-column rows with a label + sub-description and one toggle each.
+   No "discover only" column, so we don't reuse .catalogs-grid (which is 3-col). */
+.streams-grid {
+    display: flex;
+    flex-direction: column;
+}
+
+.stream-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.65rem 0;
+}
+
+.stream-option + .stream-option {
+    border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.option-name-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    flex: 1;
+    min-width: 0;
+}
+
+.option-name-sub {
+    font-size: 0.75rem;
+    color: #777;
+    line-height: 1.35;
+}
+
 /* ── Credential form ── */
 .cred-group {
     margin-bottom: 0.75rem;
