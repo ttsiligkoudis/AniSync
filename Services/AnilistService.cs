@@ -683,6 +683,42 @@ namespace AnimeList.Services
             await client.SendAsync(request);
         }
 
+        public async Task<(string? name, int? episodeCount)> GetAnimeSummaryAsync(string id)
+        {
+            var resolvedAnimeId = await _mappingService.GetIdByService(id, AnimeService.Anilist);
+            if (string.IsNullOrEmpty(resolvedAnimeId)) return (null, null);
+
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($id: Int) {
+                        Media(id: $id, type: ANIME) {
+                            episodes
+                            title { english romaji }
+                        }
+                    }",
+                variables = new { id = resolvedAnimeId },
+            });
+
+            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
+            {
+                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json"),
+            };
+
+            var client = _clientFactory.CreateClient();
+            var response = await client.SendAsync(request);
+            if (!response.IsSuccessStatusCode) return (null, null);
+
+            var content = await response.Content.ReadAsStringAsync();
+            var media = DeserializeObject<dynamic>(content)?.data?.Media;
+            if (media == null) return (null, null);
+
+            var name = string.IsNullOrEmpty((string)media.title?.english)
+                ? (string)media.title?.romaji
+                : (string)media.title?.english;
+            return (name, (int?)media.episodes);
+        }
+
         public async Task<List<StreamingLink>> GetExternalLinksAsync(string animeId, TokenData tokenData)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);

@@ -383,6 +383,28 @@ namespace AnimeList.Services
             await _clientFactory.CreateClient().SendAsync(request);
         }
 
+        public async Task<(string? name, int? episodeCount)> GetAnimeSummaryAsync(string id)
+        {
+            var resolvedKitsuId = await _mappingService.GetIdByService(id, AnimeService.Kitsu);
+            if (string.IsNullOrEmpty(resolvedKitsuId)) return (null, null);
+
+            // Sparse fieldset — the dropdown only needs title and episodeCount, not the
+            // ~20 KB payload that the full meta query returns (categories, episodes
+            // include, etc.).
+            var url = $"{_kitsuApi}/anime/{resolvedKitsuId}?fields[anime]=titles,canonicalTitle,episodeCount";
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+
+            var response = await _clientFactory.CreateClient().SendAsync(request);
+            if (!response.IsSuccessStatusCode) return (null, null);
+
+            var json = JObject.Parse(await response.Content.ReadAsStringAsync());
+            if (json["data"] is not JObject entry) return (null, null);
+
+            var name = ExtractTitle(entry);
+            var episodeCount = (int?)entry["attributes"]?["episodeCount"];
+            return (name, episodeCount);
+        }
+
         public async Task<List<StreamingLink>> GetExternalLinksAsync(string animeId, TokenData tokenData)
         {
             var resolvedKitsuId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu);
