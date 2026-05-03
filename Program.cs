@@ -1,6 +1,8 @@
 using AnimeList.Services;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.ResponseCompression;
+using System.IO.Compression;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -8,6 +10,22 @@ builder.Services.AddHttpClient();
 builder.Services.AddSession();
 builder.Services.AddControllersWithViews();
 builder.Services.AddHttpContextAccessor();
+
+// Brotli + Gzip on outgoing responses. Catalog / meta JSON is the bulk of bandwidth
+// and compresses ~70%. EnableForHttps is required because the addon is served over
+// HTTPS through Fly's edge proxy. CompressionLevel.Fastest is the right tradeoff
+// here — payloads aren't huge and CPU time costs more than bandwidth on a shared
+// VM. Order in the pipeline below: must come before UseStaticFiles / endpoints.
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
+        new[] { "application/json", "image/svg+xml" });
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(o => o.Level = CompressionLevel.Fastest);
+builder.Services.Configure<GzipCompressionProviderOptions>(o => o.Level = CompressionLevel.Fastest);
 
 // Fly.io terminates TLS at its edge proxy and forwards to the app over plain HTTP, so
 // Request.Scheme would otherwise read "http" and we'd hand Stremio Web an http:// install
@@ -57,6 +75,7 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
+app.UseResponseCompression();
 app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
