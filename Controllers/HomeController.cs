@@ -81,6 +81,11 @@ public class HomeController : Controller
             ViewBag.DiscoverOnlyRepeating = configuration?.discoverOnlyRepeating;
             ViewBag.DiscoverOnlyAiring = configuration?.discoverOnlyAiring;
             ViewBag.ShowExternalStreams = configuration?.showExternalStreams;
+            // Inverse-sense flags: stored as "hide/disable" so default-zero rows mean
+            // "show / enabled" — the UI toggles, however, are positive ("Manage Entry",
+            // "Auto-track progress") so flip the bool here.
+            ViewBag.ShowManageEntry = configuration?.hideManageEntry != true;
+            ViewBag.AutoTrackProgress = configuration?.disableAutoTrack != true;
         }
 
         return View();

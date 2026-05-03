@@ -377,6 +377,8 @@ namespace AnimeList
             cfg.discoverOnlyRepeating = (flags2 & 0x80) != 0;
             cfg.showAiring = (flags3 & 0x01) != 0;
             cfg.showExternalStreams = (flags3 & 0x02) != 0;
+            cfg.hideManageEntry = (flags3 & 0x04) != 0;
+            cfg.disableAutoTrack = (flags3 & 0x08) != 0;
             cfg.discoverOnlyAiring = (flags3 & 0x10) != 0;
         }
 
