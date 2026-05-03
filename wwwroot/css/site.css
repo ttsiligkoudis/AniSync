@@ -27,13 +27,13 @@ body {
 
 main {
     margin: 0 auto;
-    padding: 2rem 1.5rem;
+    padding: 2rem 1.5rem 3rem;
     display: flex;
     height: 100%;
     align-items: center;
     flex-direction: column;
     max-width: 520px;
-    gap: 1.5rem;
+    gap: 1.75rem;
 }
 
 /* ── Logo ── */
@@ -128,6 +128,44 @@ main {
     margin-bottom: 1rem;
 }
 
+/* "Section card" — outer card with a label badge that hangs over the top-left edge.
+   Used for Catalogs / Installation Options / Backups / Danger Zone. */
+.section-card {
+    width: 100%;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 1.5rem 1.25rem 1.25rem;
+    position: relative;
+}
+
+.section-card .section-title {
+    position: absolute;
+    top: -0.85rem;
+    left: 1rem;
+    background: #161616;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    padding: 0.4rem 0.85rem;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 700;
+    color: #fff;
+}
+
+.section-card .section-description {
+    font-size: 0.82rem;
+    color: #888;
+    margin: 0.5rem 0 1.1rem;
+    line-height: 1.45;
+}
+
+.danger-zone-card {
+    border-color: rgba(231, 76, 60, 0.25);
+    background: rgba(231, 76, 60, 0.04);
+}
+
 /* ── Credential form ── */
 .cred-group {
     margin-bottom: 0.75rem;
@@ -166,6 +204,11 @@ main {
     justify-items: center;
 }
 
+.catalog-col-spacer {
+    /* invisible spacer so the col labels align with the toggle columns below */
+    grid-column: 1;
+}
+
 .catalogs-title {
     justify-self: start;
     font-size: 0.8rem;
@@ -174,6 +217,17 @@ main {
     color: #888;
     margin: 0;
     padding-bottom: 0.6rem;
+}
+
+.catalogs-subhead {
+    grid-column: 1 / -1;
+    justify-self: start;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #888;
+    font-weight: 700;
+    padding: 0.5rem 0 0.4rem;
 }
 
 .catalog-col-label {
@@ -284,15 +338,197 @@ main {
     background: linear-gradient(135deg, #7b5bf5, #6341d4);
 }
 
-/* Save button on the configure page. <button> elements default to a native OS appearance
-   that overrides the .btn-primary-action background — appearance:none lets the gradient
-   defined here actually show. Distinct green hue so users can tell it apart from Install. */
-.btn-save-config {
-    background: linear-gradient(135deg, #2ecc71, #27ae60);
-    margin-bottom: 0.5rem;
-    appearance: none;
-    -webkit-appearance: none;
+/* Outline / secondary button — same shape as primary but transparent so the primary CTA
+   stays the obvious one. Used by "Install to Stremio Web". */
+.btn-secondary-action {
+    display: block;
+    width: 100%;
+    padding: 0.75rem;
+    margin-top: 0.6rem;
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 10px;
+    color: #e0e0e0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
     font-family: inherit;
+}
+
+.btn-secondary-action:hover {
+    background: rgba(255,255,255,0.05);
+    border-color: rgba(255,255,255,0.28);
+    color: #fff;
+    text-decoration: none;
+}
+
+/* Inner card inside Installation Options — slightly darker so it pops against the
+   outer section card. */
+.install-inner-card {
+    background: rgba(0,0,0,0.28);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 12px;
+    padding: 1.1rem 1rem;
+}
+
+.install-header {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+}
+
+.install-icon-img {
+    width: 44px;
+    height: 44px;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.install-header-text h3 {
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 0 0 0.15rem;
+    color: #fff;
+}
+
+.install-header-text p {
+    font-size: 0.78rem;
+    color: #888;
+    margin: 0;
+    line-height: 1.4;
+}
+
+.install-divider {
+    border: none;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    margin: 1rem 0;
+}
+
+.manifest-url-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #888;
+    margin: 1.1rem 0 0.45rem;
+    font-weight: 600;
+}
+
+.manifest-url-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: stretch;
+}
+
+.manifest-url-input {
+    flex: 1;
+    min-width: 0;
+    padding: 0.55rem 0.75rem;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    color: #c4b8ff;
+    font-family: 'SFMono-Regular', Menlo, Monaco, 'Courier New', monospace;
+    font-size: 0.78rem;
+    outline: none;
+}
+
+.btn-icon-copy {
+    width: 42px;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, #7b5bf5, #6341d4);
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.2s, transform 0.1s;
+}
+
+.btn-icon-copy:hover { opacity: 0.9; }
+.btn-icon-copy:active { transform: scale(0.96); }
+.btn-icon-copy.copied { background: linear-gradient(135deg, #2ecc71, #27ae60); }
+
+/* Action button row used by Backups + Danger Zone. */
+.btn-action-row {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+
+.btn-ghost {
+    flex: 1 1 8rem;
+    padding: 0.6rem 1rem;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    color: #ddd;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    text-decoration: none;
+    font-family: inherit;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.btn-ghost:hover {
+    background: rgba(255,255,255,0.09);
+    border-color: rgba(255,255,255,0.2);
+    color: #fff;
+    text-decoration: none;
+}
+
+.btn-ghost svg { flex-shrink: 0; }
+
+.btn-danger-pill {
+    flex: 1 1 9rem;
+    padding: 0.6rem 1.25rem;
+    background: linear-gradient(135deg, #f04e40, #d83b3b);
+    border: none;
+    border-radius: 999px;
+    color: #fff;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.2s, transform 0.1s;
+    font-family: inherit;
+}
+
+.btn-danger-pill:hover { opacity: 0.92; }
+.btn-danger-pill:active { transform: scale(0.98); }
+
+/* Disconnect (✗) button next to the connected badge. Replaces the old bootstrap class. */
+.success-badge-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    background: transparent;
+    border: 1px solid rgba(46,204,113,0.4);
+    border-radius: 50%;
+    color: #2ecc71;
+    font-size: 0.7rem;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    font-family: inherit;
+}
+
+.success-badge-action:hover {
+    background: rgba(46,204,113,0.12);
 }
 
 .success-badge {

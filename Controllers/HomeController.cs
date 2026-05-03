@@ -87,9 +87,10 @@ public class HomeController : Controller
     }
 
     /// <summary>
-    /// Persists the toggle bits to the config store for the given UID, so a re-install in
-    /// Stremio isn't needed when changing catalog flags. Only meaningful for v5 installs;
-    /// for v3 (anonymous, inline) URLs the flags live in the URL itself.
+    /// Persists the toggle bits to the config store for the given UID. Auto-called by the
+    /// Install button on the configure page so the manifest the addon serves immediately
+    /// reflects the user's current toggle state. Bumps the revision so the install URL
+    /// changes (Stremio refuses to refetch a URL it already has cached).
     /// </summary>
     [HttpPost("Home/SaveConfig")]
     public async Task<JsonResult> SaveConfig([FromBody] SaveConfigRequest request)
@@ -97,11 +98,87 @@ public class HomeController : Controller
         if (string.IsNullOrEmpty(request?.uid))
             return new JsonResult(new { success = false, error = "missing uid" });
 
-        // SetFlagsAsync also bumps the revision counter; we return it so the JS can update
-        // the install URL with new cache-busting bytes — Stremio refuses to refetch the
-        // manifest for an already-known URL, so we have to make the URL visibly change.
         var revision = await _configStore.SetFlagsAsync(request.uid, request.flags1, request.flags2, request.flags3);
         return new JsonResult(new { success = true, revision });
+    }
+
+    /// <summary>
+    /// Streams the current configuration as a downloadable JSON file. Backup contains
+    /// everything needed to restore the user on another browser/device: their token data
+    /// (so they don't have to log in again) plus the toggle flags.
+    /// </summary>
+    [HttpGet("Home/ExportConfig")]
+    public async Task<IActionResult> ExportConfig()
+    {
+        var tokenData = await _tokenService.GetAccessTokenAsync();
+        if (tokenData == null || tokenData.anonymousUser)
+            return BadRequest("No configuration to export.");
+
+        var uid = await _configStore.UpsertAsync(tokenData);
+        var (f1, f2, f3, _) = await _configStore.GetFlagsAsync(uid);
+
+        var backup = new ConfigBackup
+        {
+            version = 1,
+            service = tokenData.anime_service.ToString(),
+            tokenData = tokenData,
+            flags = new BackupFlags { flags1 = f1, flags2 = f2, flags3 = f3 },
+        };
+
+        var json = SerializeObject(backup, Formatting.Indented, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
+        var fileName = $"anisync-config-{tokenData.anime_service.ToString().ToLower()}-{DateTime.UtcNow:yyyyMMdd}.json";
+        return File(System.Text.Encoding.UTF8.GetBytes(json), "application/json", fileName);
+    }
+
+    /// <summary>
+    /// Restores a configuration from an exported backup file. Replaces the current session
+    /// (if any) and writes the backup's tokens + flags into the config store, returning the
+    /// new UID + revision so the JS can rebuild the install URL.
+    /// </summary>
+    [HttpPost("Home/ImportConfig")]
+    public async Task<JsonResult> ImportConfig([FromBody] ConfigBackup backup)
+    {
+        if (backup?.tokenData == null)
+            return new JsonResult(new { success = false, error = "Backup file is missing tokenData." });
+
+        // Re-establish the session so the configure page recognises the user without
+        // forcing them through OAuth/login again.
+        HttpContext.Session.SetString("AccessToken", SerializeObject(backup.tokenData));
+
+        var uid = await _configStore.UpsertAsync(backup.tokenData);
+        if (backup.flags != null)
+            await _configStore.SetFlagsAsync(uid, backup.flags.flags1, backup.flags.flags2, backup.flags.flags3);
+
+        return new JsonResult(new { success = true });
+    }
+
+    /// <summary>
+    /// Resets the toggle bits to all-zero, keeping the user logged in. Bumps the revision
+    /// so Stremio sees a different install URL.
+    /// </summary>
+    [HttpPost("Home/ResetConfig")]
+    public async Task<JsonResult> ResetConfig([FromBody] UidRequest request)
+    {
+        if (string.IsNullOrEmpty(request?.uid))
+            return new JsonResult(new { success = false, error = "missing uid" });
+
+        var revision = await _configStore.SetFlagsAsync(request.uid, 0, 0, 0);
+        return new JsonResult(new { success = true, revision });
+    }
+
+    /// <summary>
+    /// Removes the configuration row from the store and ends the session. After this the
+    /// user is fully signed out and any old install URLs they had become dead links.
+    /// </summary>
+    [HttpPost("Home/DeleteConfig")]
+    public async Task<JsonResult> DeleteConfig([FromBody] UidRequest request)
+    {
+        if (!string.IsNullOrEmpty(request?.uid))
+            await _configStore.DeleteAsync(request.uid);
+
+        await _tokenService.RemoveCachedUser();
+        HttpContext.Session.Clear();
+        return new JsonResult(new { success = true });
     }
 
     [Route("{config}/configure")]
@@ -111,6 +188,26 @@ public class HomeController : Controller
 public class SaveConfigRequest
 {
     public string uid { get; set; }
+    public byte flags1 { get; set; }
+    public byte flags2 { get; set; }
+    public byte flags3 { get; set; }
+}
+
+public class UidRequest
+{
+    public string uid { get; set; }
+}
+
+public class ConfigBackup
+{
+    public int version { get; set; }
+    public string service { get; set; }
+    public TokenData tokenData { get; set; }
+    public BackupFlags flags { get; set; }
+}
+
+public class BackupFlags
+{
     public byte flags1 { get; set; }
     public byte flags2 { get; set; }
     public byte flags3 { get; set; }

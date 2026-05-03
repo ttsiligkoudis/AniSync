@@ -43,5 +43,11 @@ namespace AnimeList.Services.Interfaces
         /// Returns 0 if the UID is unknown.
         /// </summary>
         Task<long> SetFlagsAsync(string uid, byte flags1, byte flags2, byte flags3);
+
+        /// <summary>
+        /// Removes the row for <paramref name="uid"/> from the config store. No-op if missing.
+        /// Used by the "Delete Configuration" Danger Zone action.
+        /// </summary>
+        Task DeleteAsync(string uid);
     }
 }

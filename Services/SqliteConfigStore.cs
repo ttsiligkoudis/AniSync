@@ -230,6 +230,18 @@ namespace AnimeList.Services
             return raw is long l ? l : 0L;
         }
 
+        public async Task DeleteAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM configs WHERE uid = $uid";
+            cmd.Parameters.AddWithValue("$uid", uid);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
         /// <summary>
         /// Identity column for the unique index. user_id for AniList (extracted from the JWT),
         /// username for Kitsu (the credentials the user typed). Anonymous installs have neither.
