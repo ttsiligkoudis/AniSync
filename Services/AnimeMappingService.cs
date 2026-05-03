@@ -355,9 +355,16 @@ namespace AnimeList.Services
             }
             else if (animeId.StartsWith(kitsuPrefix))
             {
+                // Same-service short-circuit: the id already names the Kitsu anime, no
+                // mapping lookup needed. Without this, a Kitsu anime that isn't in our
+                // local mapping cache (newer entries, gaps in the upstream data) would
+                // resolve to null and the meta endpoint would return no data.
+                if (service == AnimeService.Kitsu)
+                    return animeId.Replace(kitsuPrefix, "");
+
                 var mapping = await GetKitsuMapping(animeId);
-                return service == AnimeService.Anilist ? mapping?.AnilistId?.ToString() : mapping?.KitsuId?.ToString();
-            } 
+                return mapping?.AnilistId?.ToString();
+            }
             else if (animeId.StartsWith(imdbPrefix))
             {
                 var mapping = await GetImdbMapping(animeId, season);
