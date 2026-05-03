@@ -1,10 +1,10 @@
-﻿@{
+@{
     var tokenDataStr = (string)ViewBag.TokenData;
     var configUid = (string)ViewBag.ConfigUid;
     var configRevision = (long?)ViewBag.ConfigRevision ?? 0L;
     var animeService = (AnimeService?)ViewBag.AnimeService;
     // ConfigUid is set for authenticated v5 users, TokenData for anonymous v3 users —
-    // either one means "you're logged in and we can render the install link".
+    // either one means "logged in and we can render the install link".
     var isLoggedIn = !string.IsNullOrEmpty(tokenDataStr) || !string.IsNullOrEmpty(configUid);
     var isAnilist = animeService == AnimeService.Anilist;
     var stremioStr = "https://web.stremio.com/#/addons?addon=";
@@ -49,14 +49,17 @@
 @if (isLoggedIn)
 {
     <span class="success-badge">
-        @(!anonymousUser ? $"✓ Connected to {animeService}" : "Connected without User")
-        <button id="disconnectBtn" class="btn btn-sm btn-outline-danger" title="Disconnect">✗</button>
+        @(!anonymousUser ? $"✓ Connected to {animeService}" : "Connected without Account")
+        <button id="disconnectBtn" class="success-badge-action" title="Disconnect">✗</button>
     </span>
 
-    <!-- Catalog options -->
-    <div class="card-section">
+    <!-- ─── CATALOGS ────────────────────────────────────────────────── -->
+    <section class="section-card">
+        <span class="section-title">Catalogs</span>
+        <p class="section-description">Choose which catalogs and stream sources AniSync exposes to Stremio.</p>
+
         <div class="catalogs-grid">
-            <h5 class="catalogs-title">Catalogs</h5>
+            <span class="catalog-col-spacer"></span>
             <span class="catalog-col-label">Enable</span>
             <span class="catalog-col-label">Discover Only</span>
             <hr class="option-sep" />
@@ -166,45 +169,96 @@
             </label>
             <hr class="option-sep" />
 
-            <h5 class="catalogs-title">Streams</h5>
-            <span class="catalog-col-label">Enable</span>
+            <span class="catalogs-subhead">Streams</span>
+            <span></span>
             <span></span>
             <hr class="option-sep" />
 
-            <span class="option-name">External (Crunchyroll, Netflix, ...)</span>
+            <span class="option-name">External (Crunchyroll, Netflix, …)</span>
             <label class="switch">
                 <input type="checkbox" id="showExternalStreams" @(showExternalStreams ? "checked" : "") />
                 <span class="slider"></span>
             </label>
             <span></span>
         </div>
-    </div>
+    </section>
 
-    @* "Save Configuration" only makes sense for v5 (UID) installs — there's a DB row to *@
-    @* update. Anonymous (v3) users still rely on the URL itself for their flag state, so a *@
-    @* fresh install URL is what they need. *@
-    @if (!string.IsNullOrEmpty(configUid))
-    {
-        <button id="saveConfigBtn" class="btn-primary-action btn-save-config" type="button">
-            Save Configuration
-        </button>
-        <p class="hint-text hint-save">
-            Save persists your toggles and bumps the install URL.
-            Click <strong>Install on Stremio</strong> below to apply the changes — Stremio
-            won't refetch a URL it already knows.
+    <!-- ─── INSTALLATION OPTIONS ────────────────────────────────────── -->
+    <section class="section-card">
+        <span class="section-title">Installation Options</span>
+        <p class="section-description">
+            Install AniSync using your preferred method. The install URL updates automatically
+            when you change the toggles above — Stremio caches manifests, so a fresh install
+            is needed to pick up changes.
         </p>
-    }
 
-    <!-- Install -->
-    <a id="stremioUrl" class="btn-primary-action btn-install" href="stremio://@Context.Request.Host">
-        Install on Stremio
-    </a>
-    <div class="hint-text hint-actions">
-        <span>Open or copy</span>
-        <a id="url" href="@($"{stremioStr}{Context.Request.Scheme}://{Context.Request.Host}")">this link</a>
-        <span>for Stremio.</span>
-        <button type="button" id="copyUrlBtn" class="hint-copy-btn">Copy</button>
-    </div>
+        <div class="install-inner-card">
+            <div class="install-header">
+                <img src="/logo.png" alt="AniSync" class="install-icon-img" />
+                <div class="install-header-text">
+                    <h3>Stremio</h3>
+                    <p>Install to Stremio or other Stremio-compatible clients using the Manifest URL.</p>
+                </div>
+            </div>
+
+            <hr class="install-divider" />
+
+            <a id="stremioUrl" class="btn-primary-action btn-install" href="stremio://@Context.Request.Host">
+                Install to Stremio
+            </a>
+            <a id="stremioWebUrl" class="btn-secondary-action" target="_blank" rel="noopener" href="@($"{stremioStr}{Context.Request.Scheme}://{Context.Request.Host}")">
+                Install to Stremio Web
+            </a>
+
+            <p class="manifest-url-label">Direct Manifest URL</p>
+            <div class="manifest-url-row">
+                <input id="manifestUrlInput" class="manifest-url-input" readonly type="text" value="" />
+                <button id="copyManifestBtn" class="btn-icon-copy" type="button" title="Copy URL" aria-label="Copy URL">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <!-- ─── BACKUPS ─────────────────────────────────────────────────── -->
+    <section class="section-card">
+        <span class="section-title">Backups</span>
+        <p class="section-description">Export your configuration to a file or restore from one.</p>
+
+        <div class="btn-action-row">
+            <a id="exportConfigBtn" class="btn-ghost" href="/Home/ExportConfig" download>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                Export
+            </a>
+            <button id="importConfigBtn" class="btn-ghost" type="button">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Import
+            </button>
+            <input id="importConfigFile" type="file" accept="application/json,.json" hidden />
+        </div>
+    </section>
+
+    <!-- ─── DANGER ZONE ─────────────────────────────────────────────── -->
+    <section class="section-card danger-zone-card">
+        <span class="section-title">Danger Zone</span>
+        <p class="section-description">Perform potentially destructive actions that cannot be undone.</p>
+
+        <div class="btn-action-row">
+            <button id="resetConfigBtn" class="btn-danger-pill" type="button">Reset Configuration</button>
+            <button id="deleteConfigBtn" class="btn-danger-pill" type="button">Delete Configuration</button>
+        </div>
+    </section>
 }
 else
 {
@@ -235,8 +289,10 @@ else
 <script>
     var isAnilist = @Html.Raw(isAnilist.ToString().ToLower());
     var loginBaseUrl = '@Url.Action("Login", "Auth")';
-    var url = $('#url').attr('href');
-    var stremioUrl = $('#stremioUrl').attr('href');
+    // Origin (scheme://host) of the addon — used to build the manifest URL and the
+    // stremio:// deep-link. These never include flags; flags live in the URL path bytes.
+    var addonOrigin = '@(Context.Request.Scheme)://@(Context.Request.Host)';
+    var stremioWebPrefix = '@stremioStr';
 
     // Authenticated users have a 16-byte UID (base64url) pointing at a row in the
     // server-side config store; anonymous users still embed their (tiny) token data inline.
@@ -267,112 +323,12 @@ else
     var uidBytes = base64UrlToBytes(configUid);
     var tokenBytes = base64UrlToBytes(tokenDataStr);
 
-    changeUrl();
-
-    // Service toggle
-    $('#serviceToggle, #labelKitsu, #labelAnilist').on('click', function () {
-        isAnilist = !isAnilist;
-        var track = $('#serviceToggle');
-        track.toggleClass('anilist', isAnilist).toggleClass('kitsu', !isAnilist);
-        $('#labelAnilist').toggleClass('active', isAnilist);
-        $('#labelKitsu').toggleClass('active', !isAnilist);
-        $('#loginServiceName').text(isAnilist ? 'AniList' : 'Kitsu');
-        $('#kitsuCreds').toggle(!isAnilist);
-        updateLoginUrl();
-    });
-
-    $('#disconnectBtn').on('click', function () {
-        window.location.href = '@Url.Action("Logout", "Auth")';
-    });
-
-    $('#copyUrlBtn').on('click', async function () {
-        var copyUrl = $('#url').attr('href').replace('@stremioStr', '');
-
-        try {
-            await navigator.clipboard.writeText(copyUrl);
-            $(this).text('Copied');
-            setTimeout(() => $(this).text('Copy'), 1500);
-        } catch {
-            var tempInput = $('<input>');
-            $('body').append(tempInput);
-            tempInput.val(copyUrl).trigger('select');
-            document.execCommand('copy');
-            tempInput.remove();
-            $(this).text('Copied');
-            setTimeout(() => $(this).text('Copy'), 1500);
-        }
-    });
-
-    // Catalog checkboxes (and the standalone External Streams toggle)
-    $('.catalogCheck, .discoverCheck, #showExternalStreams').on('change', function () {
-        changeUrl();
-    });
-
-    // Persists the current UI flag state to the config store. v5 only — anonymous (v3)
-    // installs carry their flags in the URL and don't have a DB row to update.
-    // Server bumps the revision counter on every save and returns the new value, which
-    // we use to rebuild the install URL with cache-busting bytes.
-    async function saveConfig() {
-        if (!configUid) return;
-        var f = readFlags();
-        var resp = await fetch('/Home/SaveConfig', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ uid: configUid, flags1: f.flags1, flags2: f.flags2, flags3: f.flags3 }),
-        });
-        if (!resp.ok) throw new Error('Save failed: ' + resp.status);
-        var data = await resp.json();
-        if (typeof data.revision === 'number') {
-            configRevision = data.revision;
-            changeUrl(); // refresh #url and #stremioUrl with the new revision bytes
-        }
-    }
-
-    $('#saveConfigBtn').on('click', async function () {
-        var $btn = $(this);
-        $btn.prop('disabled', true).text('Saving…');
-        try {
-            await saveConfig();
-            // Stremio doesn't refetch manifests for already-installed URLs, so we tell the
-            // user to click Install — that hits the updated URL (revision bytes changed).
-            $btn.text('✓ Saved — click Install to apply');
-        } catch {
-            $btn.text('✗ Failed');
-        } finally {
-            setTimeout(function () { $btn.prop('disabled', false).text('Save Configuration'); }, 3000);
-        }
-    });
-
-    // First-install path: user lands on the configure page after auth, hasn't pressed Save.
-    // Persist the current UI flags before launching Stremio so the addon's first manifest
-    // fetch reflects what the user toggled. Re-read href AFTER save — saveConfig bumps the
-    // revision and rebuilds the URL via changeUrl(), so the pre-save href would be stale.
-    $('#stremioUrl').on('click', async function (e) {
-        if (!configUid) return; // anonymous (v3): URL already encodes flags
-        e.preventDefault();
-        try { await saveConfig(); } catch { /* still let them try to install */ }
-        window.location.href = $(this).attr('href');
-    });
-
-    // When an enable checkbox is toggled, enable/disable its discover-only sibling
-    $('.catalogCheck').on('change', function () {
-        var $discoverLabel = $(this).parent().next();
-        var $discoverSwitch = $discoverLabel.find('.discoverCheck');
-        var isEnabled = $(this).is(':checked');
-
-        $discoverSwitch.prop('disabled', !isEnabled);
-        $discoverLabel.toggleClass('switch-disabled', !isEnabled);
-        if (!isEnabled) {
-            $discoverSwitch.prop('checked', false);
-        }
-    });
-
     function readFlags() {
         var flags1 = 0;
-        if ($('#showCurrent').is(':checked'))          flags1 |= 0x01;
+        if ($('#showCurrent').is(':checked'))           flags1 |= 0x01;
         if ($('#showCompleted').is(':checked'))         flags1 |= 0x02;
         if ($('#showTrending').is(':checked'))          flags1 |= 0x04;
-        if ($('#showSeasonal').is(':checked'))           flags1 |= 0x08;
+        if ($('#showSeasonal').is(':checked'))          flags1 |= 0x08;
         if ($('#discoverOnlyCurrent').is(':checked'))   flags1 |= 0x10;
         if ($('#discoverOnlyCompleted').is(':checked')) flags1 |= 0x20;
         if ($('#discoverOnlyTrending').is(':checked'))  flags1 |= 0x40;
@@ -396,18 +352,15 @@ else
         return { flags1: flags1, flags2: flags2, flags3: flags3 };
     }
 
-    function changeUrl() {
+    function buildManifestPath() {
         var f = readFlags();
-
         var payload;
         if (uidBytes.length > 0) {
-            // Binary v5: [0x05][16-byte UID][4-byte revision big-endian]. The revision
-            // bytes are ignored by DecodeConfig (it reads bytes 1..17 only) but make the
-            // URL visibly change after every Save so Stremio re-fetches the manifest.
+            // Binary v5: [0x05][16-byte UID][4-byte revision big-endian]. Revision bytes
+            // make the URL different after every save so Stremio re-fetches the manifest.
             payload = new Uint8Array(1 + uidBytes.length + 4);
             payload[0] = 0x05;
             payload.set(uidBytes, 1);
-            // big-endian uint32 — JS bitwise ops work on 32-bit signed; force >>> 0 to get unsigned.
             var rev = (configRevision >>> 0);
             var revOffset = 1 + uidBytes.length;
             payload[revOffset]     = (rev >>> 24) & 0xff;
@@ -415,7 +368,7 @@ else
             payload[revOffset + 2] = (rev >>> 8)  & 0xff;
             payload[revOffset + 3] = rev          & 0xff;
         } else {
-            // Binary v3 (anonymous fallback): [0x03][flags1][flags2][flags3][gzip token bytes]
+            // Binary v3 anonymous fallback: [0x03][flags1][flags2][flags3][gzip token bytes]
             payload = new Uint8Array(4 + tokenBytes.length);
             payload[0] = 0x03;
             payload[1] = f.flags1;
@@ -423,27 +376,166 @@ else
             payload[3] = f.flags3;
             payload.set(tokenBytes, 4);
         }
-
-        var tempUrl = '/' + bytesToBase64Url(payload) + '/manifest.json';
-        $('#url').attr('href', url + tempUrl);
-        $('#stremioUrl').attr('href', stremioUrl + tempUrl);
+        return '/' + bytesToBase64Url(payload) + '/manifest.json';
     }
 
-    // Kitsu credentials
-    $('#username, #password').on('input', function () {
+    function refreshUrls() {
+        var path = buildManifestPath();
+        var manifestHttps = addonOrigin + path;
+        // stremio:// deep link uses the host (not scheme) so apps know to open natively.
+        var stremioDeep = 'stremio://' + addonOrigin.replace(/^https?:\/\//, '') + path;
+        var stremioWeb = stremioWebPrefix + manifestHttps;
+
+        $('#stremioUrl').attr('href', stremioDeep);
+        $('#stremioWebUrl').attr('href', stremioWeb);
+        $('#manifestUrlInput').val(manifestHttps);
+    }
+
+    refreshUrls();
+
+    // Catalog toggles — recompute the manifest URL whenever flags change. (For v5 the
+    // path bytes don't actually change since flags live in DB, but we still call
+    // refreshUrls() to keep the path in sync after a SaveConfig response bumps revision.)
+    $('.catalogCheck, .discoverCheck, #showExternalStreams').on('change', refreshUrls);
+
+    // When an enable checkbox is toggled, enable/disable its discover-only sibling
+    $('.catalogCheck').on('change', function () {
+        var $discoverLabel = $(this).parent().next();
+        var $discoverSwitch = $discoverLabel.find('.discoverCheck');
+        var isEnabled = $(this).is(':checked');
+        $discoverSwitch.prop('disabled', !isEnabled);
+        $discoverLabel.toggleClass('switch-disabled', !isEnabled);
+        if (!isEnabled) $discoverSwitch.prop('checked', false);
+    });
+
+    // ── Service toggle ────────────────────────────────────────────────
+    $('#serviceToggle, #labelKitsu, #labelAnilist').on('click', function () {
+        isAnilist = !isAnilist;
+        var track = $('#serviceToggle');
+        track.toggleClass('anilist', isAnilist).toggleClass('kitsu', !isAnilist);
+        $('#labelAnilist').toggleClass('active', isAnilist);
+        $('#labelKitsu').toggleClass('active', !isAnilist);
+        $('#loginServiceName').text(isAnilist ? 'AniList' : 'Kitsu');
+        $('#kitsuCreds').toggle(!isAnilist);
         updateLoginUrl();
     });
+
+    $('#disconnectBtn').on('click', function () {
+        window.location.href = '@Url.Action("Logout", "Auth")';
+    });
+
+    // ── Copy manifest URL ─────────────────────────────────────────────
+    $('#copyManifestBtn').on('click', async function () {
+        var url = $('#manifestUrlInput').val();
+        var $btn = $(this);
+        var success = false;
+        try {
+            await navigator.clipboard.writeText(url);
+            success = true;
+        } catch {
+            // Fallback for older browsers
+            $('#manifestUrlInput').select();
+            success = document.execCommand('copy');
+        }
+        $btn.toggleClass('copied', success);
+        setTimeout(function () { $btn.removeClass('copied'); }, 1500);
+    });
+
+    // ── Save flags before launching Stremio ───────────────────────────
+    // Persists current toggle state and bumps the revision so Stremio sees a different
+    // URL — required because Stremio caches manifests for already-installed URLs and
+    // wouldn't otherwise pick up flag changes.
+    async function saveFlags() {
+        if (!configUid) return;
+        var f = readFlags();
+        var resp = await fetch('/Home/SaveConfig', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: configUid, flags1: f.flags1, flags2: f.flags2, flags3: f.flags3 }),
+        });
+        if (!resp.ok) throw new Error('Save failed: ' + resp.status);
+        var data = await resp.json();
+        if (typeof data.revision === 'number') {
+            configRevision = data.revision;
+            refreshUrls();
+        }
+    }
+
+    // Both install buttons trigger a save first so the new URL reflects the latest flags.
+    async function handleInstallClick(e) {
+        if (!configUid) return; // anonymous (v3): URL already encodes flags
+        e.preventDefault();
+        try { await saveFlags(); } catch { /* let them try anyway */ }
+        // Re-read the (possibly new) href after saveFlags bumped configRevision.
+        var href = $(this).attr('href');
+        if ($(this).attr('target') === '_blank') {
+            window.open(href, '_blank', 'noopener');
+        } else {
+            window.location.href = href;
+        }
+    }
+    $('#stremioUrl, #stremioWebUrl').on('click', handleInstallClick);
+
+    // ── Backups ───────────────────────────────────────────────────────
+    $('#importConfigBtn').on('click', function () {
+        $('#importConfigFile').trigger('click');
+    });
+
+    $('#importConfigFile').on('change', async function (e) {
+        var file = e.target.files[0];
+        if (!file) return;
+        try {
+            var text = await file.text();
+            var json = JSON.parse(text);
+            var resp = await fetch('/Home/ImportConfig', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(json),
+            });
+            if (!resp.ok) throw new Error('Import failed: ' + resp.status);
+            window.location.href = '/';
+        } catch (err) {
+            alert('Could not import configuration: ' + err.message);
+        } finally {
+            $('#importConfigFile').val(''); // allow re-selecting same file later
+        }
+    });
+
+    // ── Danger Zone ───────────────────────────────────────────────────
+    $('#resetConfigBtn').on('click', async function () {
+        if (!configUid) return;
+        if (!confirm('Reset all toggles to defaults? Your login is kept.')) return;
+        var resp = await fetch('/Home/ResetConfig', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: configUid }),
+        });
+        if (resp.ok) window.location.reload();
+        else alert('Reset failed.');
+    });
+
+    $('#deleteConfigBtn').on('click', async function () {
+        if (!confirm('Delete your AniSync configuration permanently? Existing install URLs in Stremio will stop working and you will be signed out.')) return;
+        var resp = await fetch('/Home/DeleteConfig', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: configUid }),
+        });
+        if (resp.ok) window.location.href = '/';
+        else alert('Delete failed.');
+    });
+
+    // ── Login form (anonymous / Kitsu credentials) ────────────────────
+    $('#username, #password').on('input', updateLoginUrl);
 
     function updateLoginUrl() {
         var svc = isAnilist ? 1 : 0;
         var href = loginBaseUrl + '?animeService=' + svc;
-
         if (!isAnilist) {
             var username = $('#username').val();
             var password = encodeURIComponent($('#password').val());
             href += '&username=' + username + '&password=' + password;
         }
-
         $('#loginUrl').attr('href', href);
     }
 
@@ -451,24 +543,14 @@ else
 
     $('#loginUrl').on('click', function (e) {
         e.preventDefault();
-        if (!isAnilist && ($('#username').val() == '' || $('#password').val() == '')) {
-            return;
-        }
-
+        if (!isAnilist && ($('#username').val() == '' || $('#password').val() == '')) return;
         window.location.href = $('#loginUrl').attr('href');
     });
 
     $('#loginAnonymousUrl').on('click', function (e) {
         e.preventDefault();
-
         var href = $('#loginAnonymousUrl').attr('href');
-
-        if (isAnilist) {
-            href += '?animeService=1&anonymous=true';
-        } else {
-            href += '?animeService=0&anonymous=true';
-        }
-
+        href += isAnilist ? '?animeService=1&anonymous=true' : '?animeService=0&anonymous=true';
         window.location.href = href;
     });
 </script>
