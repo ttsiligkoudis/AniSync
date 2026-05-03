@@ -9,6 +9,15 @@ namespace AnimeList.Services.Interfaces
         Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData);
 
         /// <summary>
+        /// Fetches just the title and total episode count for an anime — used by the
+        /// Manage Entry season dropdown where we list every cour of a franchise. Avoids
+        /// the heavy <see cref="GetAnimeByIdAsync"/> path (which pulls categories,
+        /// episodes, and AniList recommendations) so a multi-cour fan-out doesn't
+        /// trigger Kitsu rate limits.
+        /// </summary>
+        Task<(string? name, int? episodeCount)> GetAnimeSummaryAsync(string id);
+
+        /// <summary>
         /// Fetches the legal-streaming destinations for an anime.
         /// </summary>
         Task<List<StreamingLink>> GetExternalLinksAsync(string animeId, TokenData tokenData);

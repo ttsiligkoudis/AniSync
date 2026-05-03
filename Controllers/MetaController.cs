@@ -201,26 +201,26 @@ namespace AnimeList.Controllers
             var entryId = BuildEntryId(mapping, service);
             if (entryId == null) return null;
 
-            // Best-effort label fetch: if a single mapping's anime fetch throws (AniList
-            // returning a malformed Media payload, transient 502, …) we still want the
-            // dropdown to render with the remaining seasons. Fall back to a bare entry
-            // option labelled with the raw id so the user can at least pick it.
-            Meta anime = null;
+            // Lightweight summary — title + episode count only. Avoids the heavy
+            // GetAnimeByIdAsync path (which pulls categories, episodes include, AniList
+            // recommendations, etc.) that would otherwise trigger rate limits when we
+            // fan out across every cour of a multi-mapping franchise.
+            string name = null;
+            int? episodeCount = null;
             try
             {
-                anime = service == AnimeService.Anilist
-                    ? await _anilistService.GetAnimeByIdAsync(entryId, null)
-                    : await _kitsuService.GetAnimeByIdAsync(entryId, null);
+                (name, episodeCount) = service == AnimeService.Anilist
+                    ? await _anilistService.GetAnimeSummaryAsync(entryId)
+                    : await _kitsuService.GetAnimeSummaryAsync(entryId);
             }
             catch
             {
-                // swallow — see comment above
+                // Best-effort: a single failed summary still renders the rest of the
+                // dropdown — the failed option just shows the raw id as its label.
             }
 
-            int? episodeCount = anime?.videos?.Count;
             if (episodeCount is 0) episodeCount = null;
 
-            var name = anime?.name;
             var label = string.IsNullOrEmpty(name)
                 ? entryId
                 : (episodeCount.HasValue ? $"{name} ({episodeCount} ep)" : name);
