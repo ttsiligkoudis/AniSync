@@ -51,9 +51,32 @@ namespace AnimeList.Controllers
             if (id.StartsWith(tmdbPrefix))
                 result = await _tmdbService.GetAnimeByIdAsync(id, tokenData);
             else if (id.StartsWith(kitsuPrefix))
+            {
                 result = await _kitsuService.GetAnimeByIdAsync(id, tokenData);
+
+                // Cross-service fallback: Kitsu can return null for entries that exist in
+                // Stremio's catalogs but are missing / age-restricted / wrong-id on Kitsu's
+                // API. If we have an AniList equivalent in the mapping, render meta from
+                // there instead of bouncing the user to "No metadata was found".
+                if (result == null)
+                {
+                    var mapping = await _mappingService.GetKitsuMapping(id);
+                    if (mapping?.AnilistId != null)
+                        result = await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData);
+                }
+            }
             else if (id.StartsWith(anilistPrefix))
+            {
                 result = await _anilistService.GetAnimeByIdAsync(id, tokenData);
+
+                // Symmetric fallback for AniList primary failures.
+                if (result == null)
+                {
+                    var mapping = await _mappingService.GetAnilistMapping(id);
+                    if (mapping?.KitsuId != null)
+                        result = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData);
+                }
+            }
 
             if (result != null && !string.IsNullOrWhiteSpace(tokenData?.access_token) && !tokenData.anonymousUser)
             {

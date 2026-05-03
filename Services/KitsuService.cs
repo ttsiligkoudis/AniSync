@@ -248,11 +248,19 @@ namespace AnimeList.Services
 
             // Kitsu's mediaRelationships exposes prequels/sequels but not "audience also liked"
             // recommendations. Fall back to AniList anonymously when the anime has an AniList id
-            // in the mapping; the fallback rewrites ids back to Kitsu where possible.
+            // in the mapping; the fallback rewrites ids back to Kitsu where possible. Wrapped
+            // in try/catch so a transient AniList failure can't take the whole meta down with it.
             if (mapping?.AnilistId != null)
             {
-                var similar = await _anilistFallback.GetRecommendationsAsync(mapping.AnilistId.Value, AnimeService.Kitsu);
-                anime.links.AddRange(similar);
+                try
+                {
+                    var similar = await _anilistFallback.GetRecommendationsAsync(mapping.AnilistId.Value, AnimeService.Kitsu);
+                    anime.links.AddRange(similar);
+                }
+                catch
+                {
+                    // best-effort enrichment
+                }
             }
 
             return anime;
