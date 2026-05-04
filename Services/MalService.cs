@@ -34,8 +34,13 @@ namespace AnimeList.Services
 
         // Standard list of fields we ask MAL to include on anime nodes returned in
         // list-style endpoints. Picked to match what Kitsu/AniList already surface.
-        private const string NodeFields = "id,title,main_picture,media_type,status,num_episodes,genres,synopsis";
-        private const string ListStatusFields = "list_status{status,score,num_episodes_watched,is_rewatching,num_times_rewatched,start_date,finish_date,comments}";
+        // MAL's `fields` parameter is flat — anime fields come back inside each entry's
+        // `node` object automatically, no `node{...}` wrapper.
+        private const string NodeFields = "id,title,main_picture,media_type,status,num_episodes,genres,synopsis,alternative_titles";
+        // /users/@me/animelist returns the user's list metadata in `list_status`.
+        private const string UserListStatusFields = "list_status{status,score,num_episodes_watched,is_rewatching,num_times_rewatched,start_date,finish_date,comments}";
+        // /anime/{id} returns the same data in `my_list_status` when authenticated.
+        private const string MyListStatusFields = "my_list_status{status,score,num_episodes_watched,is_rewatching,num_times_rewatched,start_date,finish_date,comments}";
 
         public MalService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService,
             IAnilistFallback anilistFallback, IConfiguration configuration, IKitsuService kitsuService)
@@ -95,14 +100,18 @@ namespace AnimeList.Services
                 }
 
                 // MAL doesn't expose per-anime "currently airing vs not yet released" filtering on
-                // the list endpoint — drop pre-release entries from the Currently Watching catalog
-                // so the catalog matches the parity behaviour of the other services.
+                // the list endpoint — drop pre-release entries from the Currently Watching and
+                // Rewatching catalogs so they match the parity behaviour of the other services.
                 var status = (string)node["status"];
-                if (list == ListType.Current && status == "not_yet_aired") continue;
+                if ((list == ListType.Current || list == ListType.Repeating) && status == "not_yet_aired")
+                    continue;
 
-                // MAL has no native genre filter on most list/ranking endpoints, so we post-filter
-                // here. The anime payload includes a `genres` array of {id, name}.
-                if (!string.IsNullOrEmpty(genre) && !MatchesGenre(node, genre)) continue;
+                // Genre post-filter — MAL's list/ranking endpoints have no server-side genre
+                // arg, so filter the response. Skip for Seasonal because the catalog repurposes
+                // the `genre` extra as a season selector ("This Season" / "Next Season" / etc.)
+                // and matching that against an anime's genres array would zero out the catalog.
+                if (list != ListType.Seasonal && !string.IsNullOrEmpty(genre) && !MatchesGenre(node, genre))
+                    continue;
 
                 var meta = await BuildMetaAsync(node, listStatus);
                 if (meta == null) continue;
@@ -379,35 +388,37 @@ namespace AnimeList.Services
         {
             string url;
             var offset = int.TryParse(skip, out var s) ? s : 0;
-            var fields = $"node{{{NodeFields}}},{ListStatusFields}";
-            var nodeOnlyFields = NodeFields;
+            // MAL accepts the fields parameter unencoded (its docs use raw braces and commas);
+            // running it through Uri.EscapeDataString turns `{` into `%7B` and the API silently
+            // returns only default fields, which is why genres / status went missing.
+            var userListFields = $"{NodeFields},{UserListStatusFields}";
 
             if (isUserList)
             {
                 // ListType.Repeating reuses the watching list; the is_rewatching post-filter
                 // happens above in GetAnimeListAsync so the URL itself stays simple.
-                var statusFilter = list.HasValue ? $"&status={Uri.EscapeDataString(MalUserListStatus(list.Value))}" : "";
-                url = $"{MalApi}/users/@me/animelist?fields={Uri.EscapeDataString(fields)}&sort=list_updated_at{statusFilter}";
+                var statusFilter = list.HasValue ? $"&status={MalUserListStatus(list.Value)}" : "";
+                url = $"{MalApi}/users/@me/animelist?fields={userListFields}&sort=list_updated_at{statusFilter}";
             }
             else if (list == ListType.Seasonal)
             {
                 var (season, year) = GetSeasonAndYear(genre ?? SeasonCurrent);
                 var seasonLower = season.ToLowerInvariant();
-                url = $"{MalApi}/anime/season/{year}/{seasonLower}?fields={Uri.EscapeDataString(nodeOnlyFields)}";
+                url = $"{MalApi}/anime/season/{year}/{seasonLower}?fields={NodeFields}";
                 if (!string.IsNullOrEmpty(sort))
-                    url += $"&sort={Uri.EscapeDataString(SeasonalSortToMal(sort))}";
+                    url += $"&sort={SeasonalSortToMal(sort)}";
             }
             else if (list == ListType.Search)
             {
                 var q = string.IsNullOrEmpty(search) ? string.Empty : search;
-                url = $"{MalApi}/anime?q={Uri.EscapeDataString(q)}&fields={Uri.EscapeDataString(nodeOnlyFields)}";
+                url = $"{MalApi}/anime?q={Uri.EscapeDataString(q)}&fields={NodeFields}";
             }
             else
             {
                 // Trending / fallback: the ranking endpoint exposes a popularity bucket plus a
                 // few alternates (airing, all). The user's sort choice picks the bucket.
                 var rankingType = string.IsNullOrEmpty(sort) ? "bypopularity" : SortToMal(sort);
-                url = $"{MalApi}/anime/ranking?ranking_type={Uri.EscapeDataString(rankingType)}&fields={Uri.EscapeDataString(nodeOnlyFields)}";
+                url = $"{MalApi}/anime/ranking?ranking_type={rankingType}&fields={NodeFields}";
             }
 
             url += $"&limit={CatalogPageSize}";
@@ -423,8 +434,10 @@ namespace AnimeList.Services
         /// </summary>
         private async Task<List<Meta>> GetSingleUserListEntryAsync(string resolvedMalId, TokenData tokenData)
         {
+            // The detail endpoint returns the user's list metadata under `my_list_status` (not
+            // `list_status` like the user-list endpoint), so the fields spec uses MyListStatusFields.
             var json = await GetJsonAsync(
-                $"{MalApi}/anime/{resolvedMalId}?fields={Uri.EscapeDataString(NodeFields + "," + ListStatusFields)}",
+                $"{MalApi}/anime/{resolvedMalId}?fields={NodeFields},{MyListStatusFields}",
                 tokenData);
             if (json == null) return [];
 
