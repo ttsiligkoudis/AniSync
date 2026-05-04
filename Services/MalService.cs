@@ -24,6 +24,9 @@ namespace AnimeList.Services
         // MAL caps anime list responses at 100 per page; pick a moderate value for parity
         // with the other services.
         private const int CatalogPageSize = 50;
+        // The full-fetch loop for user lists uses MAL's max page size to keep the number of
+        // round-trips down — power users with hundreds of entries finish in one or two calls.
+        private const int FullFetchPageSize = 1000;
 
         // List statuses the user owns — anything else is a discovery / public catalog.
         private static readonly HashSet<ListType> _userLists =
@@ -70,61 +73,83 @@ namespace AnimeList.Services
             if (isUserList && !string.IsNullOrEmpty(resolvedAnimeId))
                 return await GetSingleUserListEntryAsync(resolvedAnimeId, tokenData);
 
-            var url = BuildListUrl(list, skip, genre, search, sort, isUserList);
-            var json = await GetJsonAsync(url, tokenData);
-            if (json == null) return [];
-
-            var dataArr = json["data"] as JArray;
-            if (dataArr == null) return [];
+            // For "browse my list" requests we walk every page server-side, dedup across all
+            // of them, and apply the user's `skip` after dedup. Server-side pagination + per-
+            // page dedup returns short pages that confuse Stremio's "fetch until empty" loop —
+            // the catalog can otherwise refetch the same skip in circles. Mirrors the
+            // AnilistService MediaListCollection approach.
+            var fetchAll = isUserList;
+            var startOffset = int.TryParse(skip, out var requestedSkip) ? requestedSkip : 0;
+            // MAL caps animelist at 1000/page, so a single round-trip covers most users; the
+            // ranking/seasonal/search endpoints stay at CatalogPageSize since there's no dedup
+            // multiplication to recover from there.
+            var pageSize = fetchAll ? FullFetchPageSize : CatalogPageSize;
 
             await _mappingService.EnsureLoadedAsync();
-
             var seenIds = new Dictionary<string, Meta>();
+            int apiOffset = 0;
 
-            foreach (var raw in dataArr.OfType<JObject>())
+            while (true)
             {
-                // Both list-style and ranking-style responses wrap the anime in a `node` field;
-                // user-list responses also include a sibling `list_status` block.
-                var node = raw["node"] as JObject;
-                if (node == null) continue;
+                var apiSkip = fetchAll ? apiOffset.ToString() : skip;
+                var url = BuildListUrl(list, apiSkip, genre, search, sort, isUserList, pageSize);
+                var json = await GetJsonAsync(url, tokenData);
+                if (json == null) break;
 
-                var listStatus = raw["list_status"] as JObject;
+                if (json["data"] is not JArray dataArr || dataArr.Count == 0) break;
 
-                // Repeating / Current overlap on MAL — both are status=watching, separated only
-                // by is_rewatching. Apply the bool-side filter here so the catalogs stay disjoint.
-                if (isUserList && list.HasValue)
+                foreach (var raw in dataArr.OfType<JObject>())
                 {
-                    var isRewatching = (bool?)listStatus?["is_rewatching"] ?? false;
-                    if (list == ListType.Repeating && !isRewatching) continue;
-                    if (list == ListType.Current && isRewatching) continue;
+                    // Both list-style and ranking-style responses wrap the anime in a `node` field;
+                    // user-list responses also include a sibling `list_status` block.
+                    var node = raw["node"] as JObject;
+                    if (node == null) continue;
+
+                    var listStatus = raw["list_status"] as JObject;
+
+                    // Repeating / Current overlap on MAL — both are status=watching, separated only
+                    // by is_rewatching. Apply the bool-side filter here so the catalogs stay disjoint.
+                    if (isUserList && list.HasValue)
+                    {
+                        var isRewatching = (bool?)listStatus?["is_rewatching"] ?? false;
+                        if (list == ListType.Repeating && !isRewatching) continue;
+                        if (list == ListType.Current && isRewatching) continue;
+                    }
+
+                    // MAL doesn't expose per-anime "currently airing vs not yet released" filtering on
+                    // the list endpoint — drop pre-release entries from the Currently Watching and
+                    // Rewatching catalogs so they match the parity behaviour of the other services.
+                    var status = (string)node["status"];
+                    if ((list == ListType.Current || list == ListType.Repeating) && status == "not_yet_aired")
+                        continue;
+
+                    // Genre post-filter — MAL's list/ranking endpoints have no server-side genre
+                    // arg, so filter the response. Skip for Seasonal because the catalog repurposes
+                    // the `genre` extra as a season selector ("This Season" / "Next Season" / etc.)
+                    // and matching that against an anime's genres array would zero out the catalog.
+                    if (list != ListType.Seasonal && !string.IsNullOrEmpty(genre) && !MatchesGenre(node, genre))
+                        continue;
+
+                    var meta = await BuildMetaAsync(node, listStatus);
+                    if (meta == null) continue;
+
+                    if (seenIds.TryGetValue(meta.id, out var existing))
+                    {
+                        if (!string.IsNullOrEmpty(meta.name)
+                            && (string.IsNullOrEmpty(existing.name) || meta.name.Length < existing.name.Length))
+                            seenIds[meta.id] = meta;
+                        continue;
+                    }
+                    seenIds[meta.id] = meta;
                 }
 
-                // MAL doesn't expose per-anime "currently airing vs not yet released" filtering on
-                // the list endpoint — drop pre-release entries from the Currently Watching and
-                // Rewatching catalogs so they match the parity behaviour of the other services.
-                var status = (string)node["status"];
-                if ((list == ListType.Current || list == ListType.Repeating) && status == "not_yet_aired")
-                    continue;
-
-                // Genre post-filter — MAL's list/ranking endpoints have no server-side genre
-                // arg, so filter the response. Skip for Seasonal because the catalog repurposes
-                // the `genre` extra as a season selector ("This Season" / "Next Season" / etc.)
-                // and matching that against an anime's genres array would zero out the catalog.
-                if (list != ListType.Seasonal && !string.IsNullOrEmpty(genre) && !MatchesGenre(node, genre))
-                    continue;
-
-                var meta = await BuildMetaAsync(node, listStatus);
-                if (meta == null) continue;
-
-                if (seenIds.TryGetValue(meta.id, out var existing))
-                {
-                    if (!string.IsNullOrEmpty(meta.name)
-                        && (string.IsNullOrEmpty(existing.name) || meta.name.Length < existing.name.Length))
-                        seenIds[meta.id] = meta;
-                    continue;
-                }
-                seenIds[meta.id] = meta;
+                if (!fetchAll) break;
+                if (dataArr.Count < pageSize) break;
+                apiOffset += pageSize;
             }
+
+            if (fetchAll)
+                return seenIds.Values.Skip(startOffset).Take(CatalogPageSize).ToList();
 
             return seenIds.Values.ToList();
         }
@@ -405,7 +430,7 @@ namespace AnimeList.Services
             };
         }
 
-        private string BuildListUrl(ListType? list, string skip, string genre, string search, string sort, bool isUserList)
+        private string BuildListUrl(ListType? list, string skip, string genre, string search, string sort, bool isUserList, int pageSize)
         {
             string url;
             var offset = int.TryParse(skip, out var s) ? s : 0;
@@ -443,7 +468,7 @@ namespace AnimeList.Services
                 url = $"{MalApi}/anime/ranking?ranking_type={rankingType}&fields={NodeFields}";
             }
 
-            url += $"&limit={CatalogPageSize}";
+            url += $"&limit={pageSize}";
             if (offset > 0) url += $"&offset={offset}";
             return url;
         }

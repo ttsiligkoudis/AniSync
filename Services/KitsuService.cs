@@ -43,109 +43,132 @@ namespace AnimeList.Services
             if (isUserList && string.IsNullOrEmpty(tokenData?.user_id))
                 return [];
 
-            string url = BuildListUrl(tokenData, list, skip, resolvedAnimeId, genre, search, sort, isUserList);
-
-            var request = new HttpRequestMessage(HttpMethod.Get, url);
-            if (!string.IsNullOrWhiteSpace(tokenData?.access_token))
-            {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
-            }
-
-            var client = _clientFactory.CreateClient();
-            var response = await client.SendAsync(request);
-            if (!response.IsSuccessStatusCode) return [];
-
-            var content = await response.Content.ReadAsStringAsync();
-            var json = JObject.Parse(content);
-
-            // Build O(1) lookups for `included` resources by id, separated by type
-            var includedAnime = new Dictionary<string, JObject>();
-            var categoryNames = new Dictionary<string, string>();
-            if (json["included"] is JArray includedArr)
-            {
-                foreach (var inc in includedArr.OfType<JObject>())
-                {
-                    var incType = (string)inc["type"];
-                    var incId = (string)inc["id"];
-                    if (incId == null) continue;
-
-                    if (incType == "anime") includedAnime[incId] = inc;
-                    else if (incType == "categories")
-                    {
-                        var title = (string)inc["attributes"]?["title"];
-                        if (!string.IsNullOrEmpty(title)) categoryNames[incId] = title;
-                    }
-                }
-            }
+            // For "browse my list" requests we walk every page server-side, dedup across all
+            // of them, and apply the user's `skip` after dedup. Server-side pagination + per-
+            // page dedup returns short pages that confuse Stremio's "fetch until empty" loop —
+            // some catalog views can end up paging in circles or refetching the same skip
+            // indefinitely. Mirrors AnilistService's MediaListCollection approach.
+            var fetchAll = isUserList && string.IsNullOrEmpty(resolvedAnimeId);
+            var startOffset = int.TryParse(skip, out var requestedSkip) ? requestedSkip : 0;
 
             await _mappingService.EnsureLoadedAsync();
-
             var seenIds = new Dictionary<string, Meta>();
-            if (json["data"] is not JArray dataArr) return [];
+            int apiOffset = 0;
 
-            foreach (var entry in dataArr.OfType<JObject>())
+            while (true)
             {
-                JObject anime;
-                string entryId = null;
-                string entryStatus = null;
+                // In fetch-all mode we walk from offset 0 ourselves and apply the user's
+                // `skip` post-dedup. In single-page mode we honour the caller's skip directly.
+                var apiSkip = fetchAll ? apiOffset.ToString() : skip;
+                var url = BuildListUrl(tokenData, list, apiSkip, resolvedAnimeId, genre, search, sort, isUserList);
 
-                if (isUserList)
+                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                if (!string.IsNullOrWhiteSpace(tokenData?.access_token))
                 {
-                    var animeRefId = (string)entry["relationships"]?["anime"]?["data"]?["id"];
-                    if (string.IsNullOrEmpty(animeRefId) || !includedAnime.TryGetValue(animeRefId, out anime)) continue;
-                    entryId = (string)entry["id"];
-                    entryStatus = (string)entry["attributes"]?["status"];
-                }
-                else
-                {
-                    anime = entry;
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
                 }
 
-                var status = (string)anime["attributes"]?["status"];
-                if (list == ListType.Current && status is "tba" or "unreleased" or "upcoming") continue;
+                var client = _clientFactory.CreateClient();
+                var response = await client.SendAsync(request);
+                if (!response.IsSuccessStatusCode) break;
 
-                var animeKitsuId = (string)anime["id"];
+                var content = await response.Content.ReadAsStringAsync();
+                var json = JObject.Parse(content);
 
-                // Resolve category names from the included array
-                var animeGenres = ExtractCategories(anime, categoryNames);
-
-                // Filter user list entries by genre when discover-only provides a genre selection
-                if (!string.IsNullOrEmpty(genre) && isUserList)
+                // Build O(1) lookups for `included` resources by id, separated by type
+                var includedAnime = new Dictionary<string, JObject>();
+                var categoryNames = new Dictionary<string, string>();
+                if (json["included"] is JArray includedArr)
                 {
-                    if (animeGenres == null || !animeGenres.Any(g => string.Equals(g, genre, StringComparison.OrdinalIgnoreCase)))
+                    foreach (var inc in includedArr.OfType<JObject>())
+                    {
+                        var incType = (string)inc["type"];
+                        var incId = (string)inc["id"];
+                        if (incId == null) continue;
+
+                        if (incType == "anime") includedAnime[incId] = inc;
+                        else if (incType == "categories")
+                        {
+                            var title = (string)inc["attributes"]?["title"];
+                            if (!string.IsNullOrEmpty(title)) categoryNames[incId] = title;
+                        }
+                    }
+                }
+
+                if (json["data"] is not JArray dataArr || dataArr.Count == 0) break;
+
+                foreach (var entry in dataArr.OfType<JObject>())
+                {
+                    JObject anime;
+                    string entryId = null;
+                    string entryStatus = null;
+
+                    if (isUserList)
+                    {
+                        var animeRefId = (string)entry["relationships"]?["anime"]?["data"]?["id"];
+                        if (string.IsNullOrEmpty(animeRefId) || !includedAnime.TryGetValue(animeRefId, out anime)) continue;
+                        entryId = (string)entry["id"];
+                        entryStatus = (string)entry["attributes"]?["status"];
+                    }
+                    else
+                    {
+                        anime = entry;
+                    }
+
+                    var status = (string)anime["attributes"]?["status"];
+                    if (list == ListType.Current && status is "tba" or "unreleased" or "upcoming") continue;
+
+                    var animeKitsuId = (string)anime["id"];
+
+                    // Resolve category names from the included array
+                    var animeGenres = ExtractCategories(anime, categoryNames);
+
+                    // Filter user list entries by genre when discover-only provides a genre selection
+                    if (!string.IsNullOrEmpty(genre) && isUserList)
+                    {
+                        if (animeGenres == null || !animeGenres.Any(g => string.Equals(g, genre, StringComparison.OrdinalIgnoreCase)))
+                            continue;
+                    }
+
+                    var mapping = await _mappingService.GetKitsuMapping(animeKitsuId);
+
+                    var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                                     !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
+                                     $"{kitsuPrefix}{animeKitsuId}";
+
+                    var subtype = (string)anime["attributes"]?["subtype"];
+                    var isMovie = IsMovieFormat(subtype);
+
+                    var meta = new Meta((string)anime["attributes"]?["description"])
+                    {
+                        id = externalId,
+                        type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
+                        name = ExtractTitle(anime),
+                        poster = (string)anime["attributes"]?["posterImage"]?["large"],
+                        entryId = entryId,
+                        entryStatus = entryStatus,
+                    };
+
+                    // Multiple Kitsu entries (seasons/OVAs) can share the same IMDb ID;
+                    // keep the shortest English title as it's typically the base series name
+                    if (seenIds.TryGetValue(externalId, out var existing))
+                    {
+                        if (!string.IsNullOrEmpty(meta.name) && (string.IsNullOrEmpty(existing.name) || meta.name.Length < existing.name.Length))
+                            seenIds[externalId] = meta;
                         continue;
+                    }
+
+                    seenIds[externalId] = meta;
                 }
 
-                var mapping = await _mappingService.GetKitsuMapping(animeKitsuId);
-
-                var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                                 !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
-                                 $"{kitsuPrefix}{animeKitsuId}";
-
-                var subtype = (string)anime["attributes"]?["subtype"];
-                var isMovie = IsMovieFormat(subtype);
-
-                var meta = new Meta((string)anime["attributes"]?["description"])
-                {
-                    id = externalId,
-                    type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
-                    name = ExtractTitle(anime),
-                    poster = (string)anime["attributes"]?["posterImage"]?["large"],
-                    entryId = entryId,
-                    entryStatus = entryStatus,
-                };
-
-                // Multiple Kitsu entries (seasons/OVAs) can share the same IMDb ID;
-                // keep the shortest English title as it's typically the base series name
-                if (seenIds.TryGetValue(externalId, out var existing))
-                {
-                    if (!string.IsNullOrEmpty(meta.name) && (string.IsNullOrEmpty(existing.name) || meta.name.Length < existing.name.Length))
-                        seenIds[externalId] = meta;
-                    continue;
-                }
-
-                seenIds[externalId] = meta;
+                if (!fetchAll) break;
+                // A page shorter than the API page size means we've reached the end of the list.
+                if (dataArr.Count < CatalogPageSize) break;
+                apiOffset += CatalogPageSize;
             }
+
+            if (fetchAll)
+                return seenIds.Values.Skip(startOffset).Take(CatalogPageSize).ToList();
 
             return seenIds.Values.ToList();
         }
