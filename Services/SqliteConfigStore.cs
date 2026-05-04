@@ -242,6 +242,21 @@ namespace AnimeList.Services
             await cmd.ExecuteNonQueryAsync();
         }
 
+        public async Task DeleteByUserAsync(TokenData tokenData)
+        {
+            if (tokenData == null) return;
+            var userKey = GetUserKey(tokenData);
+            if (string.IsNullOrEmpty(userKey)) return;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM configs WHERE service = $s AND user_key = $k";
+            cmd.Parameters.AddWithValue("$s", (int)tokenData.anime_service);
+            cmd.Parameters.AddWithValue("$k", userKey);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
         /// <summary>
         /// Identity column for the unique index. user_id for AniList (extracted from the JWT),
         /// username for Kitsu (the credentials the user typed). Anonymous installs have neither.

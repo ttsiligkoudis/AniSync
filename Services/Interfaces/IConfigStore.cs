@@ -49,5 +49,12 @@ namespace AnimeList.Services.Interfaces
         /// Used by the "Delete Configuration" Danger Zone action.
         /// </summary>
         Task DeleteAsync(string uid);
+
+        /// <summary>
+        /// Removes the row matching the user identity carried in <paramref name="tokenData"/>.
+        /// No-op if the token has no user_key (anonymous) or no matching row exists. Used by
+        /// the Disconnect / Logout flow so a sign-out also clears the persisted install.
+        /// </summary>
+        Task DeleteByUserAsync(TokenData tokenData);
     }
 }

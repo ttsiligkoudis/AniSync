@@ -8,11 +8,13 @@ namespace AnimeList.Controllers
     {
         private readonly ITokenService _tokenService;
         private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IConfigStore _configStore;
 
-        public AuthController(ITokenService tokenService, IHttpContextAccessor httpContextAccessor)
+        public AuthController(ITokenService tokenService, IHttpContextAccessor httpContextAccessor, IConfigStore configStore)
         {
             _tokenService = tokenService;
             _httpContextAccessor = httpContextAccessor;
+            _configStore = configStore;
         }
 
         [HttpGet]
@@ -53,6 +55,17 @@ namespace AnimeList.Controllers
 
         public async Task<IActionResult> Logout()
         {
+            // Read the session token directly so we can identify the user without going
+            // through GetAccessTokenAsync (which would refresh the upstream token and write
+            // back to the row we're about to delete).
+            var sessionStr = HttpContext.Session.GetString("AccessToken");
+            if (!string.IsNullOrEmpty(sessionStr))
+            {
+                var tokenData = DeserializeObject<TokenData>(sessionStr);
+                if (tokenData != null && !tokenData.anonymousUser)
+                    await _configStore.DeleteByUserAsync(tokenData);
+            }
+
             await _tokenService.RemoveCachedUser();
 
             return RedirectToAction("Index", "Home");
