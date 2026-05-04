@@ -47,6 +47,18 @@ namespace AnimeList
             _ => "-userCount",
         };
 
+        /// <summary>
+        /// Maps a UI sort label to a MyAnimeList <c>ranking_type</c> value.
+        /// MAL's anime ranking endpoint exposes a fixed set of buckets; the UI sort
+        /// labels are translated to the closest matching one.
+        /// </summary>
+        public static string SortToMal(string sort) => sort switch
+        {
+            SortScore => "all",
+            SortRecent => "airing",
+            _ => "bypopularity",
+        };
+
         public static List<string> GetOptions(bool includeDefault) 
         {
             var options = new List<string>{
@@ -116,6 +128,18 @@ namespace AnimeList
         public static readonly string clientSecret = "bAgns7Q0rGxXnhGRRoq84slYleN4NIe2SkoSDOZ1";
         public static readonly string redirectUri = "https://anisync.fly.dev/Auth/Callback";
 #endif
+
+        /// <summary>
+        /// Generates a PKCE code-verifier — 64 random bytes, base64url-encoded. MAL only
+        /// supports <c>code_challenge_method=plain</c>, so the same string is sent as the
+        /// challenge in the authorize step and as the verifier in the token-exchange step.
+        /// </summary>
+        public static string GenerateCodeVerifier()
+        {
+            var bytes = new byte[64];
+            System.Security.Cryptography.RandomNumberGenerator.Fill(bytes);
+            return Base64UrlEncode(bytes);
+        }
 
         public static bool IsTokenExpired(DateTime? expirationDate)
         {
@@ -398,14 +422,30 @@ namespace AnimeList
 
         /// <summary>
         /// Maps a <see cref="ListType"/> to the status/sort string the chosen service expects.
-        /// Both services share most names; Kitsu renames a couple ("planned" / "on_hold") and
-        /// has no equivalent of AniList's "REPEATING".
+        /// AniList uses uppercase enum values ("CURRENT", "REPEATING"). Kitsu uses lowercase
+        /// with two renames ("planned" / "on_hold") and has no "Repeating". MAL uses the same
+        /// shape as Kitsu but with "watching" / "plan_to_watch" instead, and treats rewatching
+        /// as a per-entry boolean rather than a separate list — so we still emit "watching"
+        /// for ListType.Repeating and let the caller filter on is_rewatching.
         /// </summary>
         public static string GetListTypeString(ListType list, TokenData tokenData)
         {
-            var isKitsu = (tokenData?.anime_service ?? AnimeService.Kitsu) == AnimeService.Kitsu;
-            if (!isKitsu) return list.ToString().ToUpper();
+            var service = tokenData?.anime_service ?? AnimeService.Kitsu;
+            if (service == AnimeService.Anilist) return list.ToString().ToUpper();
 
+            if (service == AnimeService.MyAnimeList)
+            {
+                return list switch
+                {
+                    ListType.Current => "watching",
+                    ListType.Repeating => "watching", // filter-side: is_rewatching=true
+                    ListType.Planning => "plan_to_watch",
+                    ListType.Paused => "on_hold",
+                    _ => list.ToString().ToLower(),
+                };
+            }
+
+            // Kitsu
             return list switch
             {
                 ListType.Planning => "planned",

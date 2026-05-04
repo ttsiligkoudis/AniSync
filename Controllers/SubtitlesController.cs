@@ -9,13 +9,15 @@ namespace AnimeList.Controllers
         private readonly ITokenService _tokenService;
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
+        private readonly IMalService _malService;
         private readonly IConfigStore _configStore;
 
-        public SubtitlesController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IConfigStore configStore)
+        public SubtitlesController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, IConfigStore configStore)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
+            _malService = malService;
             _configStore = configStore;
         }
 
@@ -40,10 +42,18 @@ namespace AnimeList.Controllers
                 || season is null || episode is null)
                 return empty;
 
-            if (tokenData.anime_service == AnimeService.Anilist)
-                await _anilistService.SaveAnimeEntryAsync(tokenData, animeId, season, episode.Value);
-            else
-                await _kitsuService.SaveAnimeEntryAsync(tokenData, animeId, season, episode.Value);
+            switch (tokenData.anime_service)
+            {
+                case AnimeService.Anilist:
+                    await _anilistService.SaveAnimeEntryAsync(tokenData, animeId, season, episode.Value);
+                    break;
+                case AnimeService.MyAnimeList:
+                    await _malService.SaveAnimeEntryAsync(tokenData, animeId, season, episode.Value);
+                    break;
+                default:
+                    await _kitsuService.SaveAnimeEntryAsync(tokenData, animeId, season, episode.Value);
+                    break;
+            }
 
             return empty;
         }

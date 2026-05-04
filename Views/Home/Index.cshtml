@@ -7,6 +7,11 @@
     // either one means "logged in and we can render the install link".
     var isLoggedIn = !string.IsNullOrEmpty(tokenDataStr) || !string.IsNullOrEmpty(configUid);
     var isAnilist = animeService == AnimeService.Anilist;
+    var isMal = animeService == AnimeService.MyAnimeList;
+    var isKitsu = !isAnilist && !isMal;
+    // Numeric service id used by the JS picker (matches the AnimeService enum order).
+    var serviceIndex = isAnilist ? 1 : isMal ? 2 : 0;
+    var serviceDisplay = isAnilist ? "AniList" : isMal ? "MyAnimeList" : "Kitsu";
     var stremioStr = "https://web.stremio.com/#/addons?addon=";
     bool anonymousUser = ViewBag.AnonymousUser == true;
 
@@ -38,13 +43,12 @@
 
 @if (!anonymousUser)
 {
-    <!-- Service toggle (always visible) -->
-    <div class="service-toggle">
-        <span class="label @(!isAnilist ? "active" : "")" id="labelKitsu">Kitsu</span>
-        <div class="toggle-track @(isAnilist ? "anilist" : "kitsu") @(isLoggedIn ? "disabled" : "")" id="serviceToggle">
-            <div class="toggle-thumb"></div>
-        </div>
-        <span class="label @(isAnilist ? "active" : "")" id="labelAnilist">AniList</span>
+    <!-- Service picker (always visible). Locks to the chosen service once the user is
+         logged in — disconnect to switch to a different provider. -->
+    <div class="service-toggle @(isLoggedIn ? "disabled" : "")" id="serviceToggle">
+        <span class="label @(isKitsu ? "active" : "")" id="labelKitsu" data-service="0">Kitsu</span>
+        <span class="label @(isAnilist ? "active" : "")" id="labelAnilist" data-service="1">AniList</span>
+        <span class="label @(isMal ? "active" : "")" id="labelMal" data-service="2">MyAnimeList</span>
     </div>
 }
 
@@ -137,7 +141,9 @@
                 </label>
                 <hr class="option-sep" />
 
-                @if (isAnilist)
+                @* AniList exposes REPEATING as a real status; MAL has an is_rewatching flag the *@
+                @* MalService surfaces as a synthetic Rewatching list. Kitsu has no equivalent. *@
+                @if (isAnilist || isMal)
                 {
                     <span class="option-name">Rewatching</span>
                     <label class="switch">
@@ -313,7 +319,7 @@ else
 {
     <!-- Login -->
     <div class="card-section" id="loginCard">
-        <div id="kitsuCreds" style="display:@(!isAnilist ? "block" : "none")">
+        <div id="kitsuCreds" style="display:@(isKitsu ? "block" : "none")">
             <div class="cred-group">
                 <label for="username" class="required">Username</label>
                 <input type="text" id="username" />
@@ -324,7 +330,7 @@ else
             </div>
         </div>
         <a id="loginUrl" class="btn-primary-action btn-login" href='@Url.Action("Login", "Auth", new { animeService })'>
-            Login with <span id="loginServiceName">@animeService</span>
+            Login with <span id="loginServiceName">@serviceDisplay</span>
         </a>
     </div>
 
@@ -336,7 +342,9 @@ else
 }
 
 <script>
-    var isAnilist = @Html.Raw(isAnilist.ToString().ToLower());
+    // Numeric service selector: 0 = Kitsu, 1 = AniList, 2 = MyAnimeList. Mirrors the
+    // AnimeService enum on the server.
+    var selectedService = @serviceIndex;
     var loginBaseUrl = '@Url.Action("Login", "Auth")';
     // Origin (scheme://host) of the addon — used to build the manifest URL and the
     // stremio:// deep-link. These never include flags; flags live in the URL path bytes.
@@ -498,15 +506,25 @@ else
     $('.catalogCheck, .discoverCheck').on('change', refreshAllToggles);
     refreshAllToggles();
 
-    // ── Service toggle ────────────────────────────────────────────────
-    $('#serviceToggle, #labelKitsu, #labelAnilist').on('click', function () {
-        isAnilist = !isAnilist;
-        var track = $('#serviceToggle');
-        track.toggleClass('anilist', isAnilist).toggleClass('kitsu', !isAnilist);
-        $('#labelAnilist').toggleClass('active', isAnilist);
-        $('#labelKitsu').toggleClass('active', !isAnilist);
-        $('#loginServiceName').text(isAnilist ? 'AniList' : 'Kitsu');
-        $('#kitsuCreds').toggle(!isAnilist);
+    // ── Service picker ────────────────────────────────────────────────
+    function serviceLabel(svc) {
+        if (svc === 1) return 'AniList';
+        if (svc === 2) return 'MyAnimeList';
+        return 'Kitsu';
+    }
+
+    $('#serviceToggle .label').on('click', function () {
+        // Once authenticated the picker is locked — the user has to disconnect
+        // (which deletes the stored token) before switching providers.
+        if ($('#serviceToggle').hasClass('disabled')) return;
+        var svc = parseInt($(this).attr('data-service'), 10);
+        if (isNaN(svc)) return;
+        selectedService = svc;
+        $('#serviceToggle .label').removeClass('active');
+        $(this).addClass('active');
+        $('#loginServiceName').text(serviceLabel(svc));
+        // Only the Kitsu password-grant flow needs the username/password fields visible.
+        $('#kitsuCreds').toggle(svc === 0);
         updateLoginUrl();
     });
 
@@ -619,9 +637,10 @@ else
     $('#username, #password').on('input', updateLoginUrl);
 
     function updateLoginUrl() {
-        var svc = isAnilist ? 1 : 0;
-        var href = loginBaseUrl + '?animeService=' + svc;
-        if (!isAnilist) {
+        var href = loginBaseUrl + '?animeService=' + selectedService;
+        // Kitsu uses the password grant — credentials are typed into the form and
+        // posted to /Auth/Login. The other providers are OAuth-redirected.
+        if (selectedService === 0) {
             var username = $('#username').val();
             var password = encodeURIComponent($('#password').val());
             href += '&username=' + username + '&password=' + password;
@@ -633,14 +652,14 @@ else
 
     $('#loginUrl').on('click', function (e) {
         e.preventDefault();
-        if (!isAnilist && ($('#username').val() == '' || $('#password').val() == '')) return;
+        if (selectedService === 0 && ($('#username').val() == '' || $('#password').val() == '')) return;
         window.location.href = $('#loginUrl').attr('href');
     });
 
     $('#loginAnonymousUrl').on('click', function (e) {
         e.preventDefault();
         var href = $('#loginAnonymousUrl').attr('href');
-        href += isAnilist ? '?animeService=1&anonymous=true' : '?animeService=0&anonymous=true';
+        href += '?animeService=' + selectedService + '&anonymous=true';
         window.location.href = href;
     });
 </script>

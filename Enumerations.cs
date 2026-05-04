@@ -5,7 +5,8 @@
         public enum AnimeService
         {
             Kitsu,
-            Anilist
+            Anilist,
+            MyAnimeList
         }
 
         public enum MetaType

@@ -69,13 +69,24 @@ main {
     font-size: 0.85rem;
     font-weight: 600;
     color: #666;
-    transition: color 0.2s;
+    transition: color 0.2s, background 0.2s;
     cursor: pointer;
     user-select: none;
+    padding: 0.3rem 0.8rem;
+    border-radius: 1.5rem;
 }
 
 .service-toggle .label.active {
     color: #fff;
+    background: rgba(255,255,255,0.12);
+}
+
+.service-toggle.disabled .label {
+    cursor: default;
+}
+
+.service-toggle.disabled .label:not(.active) {
+    opacity: 0.5;
 }
 
 .toggle-track {

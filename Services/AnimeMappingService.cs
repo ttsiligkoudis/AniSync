@@ -351,7 +351,7 @@ namespace AnimeList.Services
                     return animeId.Replace(anilistPrefix, "");
 
                 var mapping = await GetAnilistMapping(animeId);
-                return mapping?.KitsuId?.ToString();
+                return PickServiceId(mapping, service);
             }
             else if (animeId.StartsWith(kitsuPrefix))
             {
@@ -363,26 +363,37 @@ namespace AnimeList.Services
                     return animeId.Replace(kitsuPrefix, "");
 
                 var mapping = await GetKitsuMapping(animeId);
-                return mapping?.AnilistId?.ToString();
+                return PickServiceId(mapping, service);
             }
             else if (animeId.StartsWith(imdbPrefix))
             {
                 var mapping = await GetImdbMapping(animeId, season);
-                return service == AnimeService.Anilist ? mapping?.FirstOrDefault()?.AnilistId?.ToString() : mapping?.FirstOrDefault()?.KitsuId?.ToString();
+                return PickServiceId(mapping?.FirstOrDefault(), service);
             }
             else if (animeId.StartsWith(tmdbPrefix))
             {
                 var mapping = await GetTmdbMapping(animeId, season);
-                return service == AnimeService.Anilist ? mapping?.FirstOrDefault()?.AnilistId?.ToString() : mapping?.FirstOrDefault()?.KitsuId?.ToString();
+                return PickServiceId(mapping?.FirstOrDefault(), service);
             }
             else if (animeId.StartsWith(malPrefix))
             {
+                if (service == AnimeService.MyAnimeList)
+                    return animeId.Replace(malPrefix, "");
+
                 var mapping = await GetMalMapping(animeId);
-                return service == AnimeService.Anilist ? mapping?.AnilistId?.ToString() : mapping?.KitsuId?.ToString();
+                return PickServiceId(mapping, service);
             }
 
             return animeId;
         }
+
+        private static string PickServiceId(AnimeIdMapping mapping, AnimeService service) => service switch
+        {
+            AnimeService.Anilist => mapping?.AnilistId?.ToString(),
+            AnimeService.Kitsu => mapping?.KitsuId?.ToString(),
+            AnimeService.MyAnimeList => mapping?.MalId?.ToString(),
+            _ => null,
+        };
 
         /// <summary>
         /// Returns distinct season numbers for all mapping entries that share the same base anime ID.

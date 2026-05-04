@@ -43,7 +43,7 @@ namespace AnimeList.Controllers
                 id = "community.AniSync",
                 version = "1.0.0",
                 name = name,
-                description = "Fetches anime list from Kitsu/AniList to track your anime progress while using stremio",
+                description = "Fetches anime list from Kitsu/AniList/MyAnimeList to track your anime progress while using stremio",
                 logo = $"{Request.Scheme}://{Request.Host}/logo.png",
                 resources = [ "catalog", "meta", "subtitles", "stream" ],
                 types = [ MetaType.movie.ToString(), MetaType.series.ToString() ],
@@ -86,9 +86,11 @@ namespace AnimeList.Controllers
                 manifest.catalogs.Add(BuildUserListCatalog(ListType.Dropped, "Dropped", tokenData,
                     configuration.discoverOnlyDropped));
 
-            // AniList-only: Kitsu has no "repeating" status
+            // AniList and MyAnimeList both expose a rewatching concept (a separate status on
+            // AniList, an is_rewatching boolean on MAL); Kitsu has neither.
             if (isAuthenticated && configuration.showRepeating
-                && tokenData?.anime_service == AnimeService.Anilist)
+                && (tokenData?.anime_service == AnimeService.Anilist
+                    || tokenData?.anime_service == AnimeService.MyAnimeList))
                 manifest.catalogs.Add(BuildUserListCatalog(ListType.Repeating, "Rewatching", tokenData,
                     configuration.discoverOnlyRepeating));
 

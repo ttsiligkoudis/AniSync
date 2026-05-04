@@ -258,12 +258,14 @@ namespace AnimeList.Services
         }
 
         /// <summary>
-        /// Identity column for the unique index. user_id for AniList (extracted from the JWT),
-        /// username for Kitsu (the credentials the user typed). Anonymous installs have neither.
+        /// Identity column for the unique index. user_id for AniList (from the JWT) and MAL
+        /// (from /users/@me), username for Kitsu (the credentials the user typed). Anonymous
+        /// installs have neither.
         /// </summary>
         private static string GetUserKey(TokenData td) => td.anime_service switch
         {
             AnimeService.Anilist => td.user_id,
+            AnimeService.MyAnimeList => td.user_id,
             AnimeService.Kitsu => td.username,
             _ => null,
         };

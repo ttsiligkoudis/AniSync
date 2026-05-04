@@ -142,7 +142,7 @@ namespace AnimeList.Services
 
         /// <summary>
         /// Picks the most stable id for the requested service, in priority order:
-        /// IMDb &gt; TMDB &gt; service-native (kitsu/anilist) &gt; anilist fallback.
+        /// IMDb &gt; TMDB &gt; service-native (kitsu/mal/anilist) &gt; anilist fallback.
         /// </summary>
         private async Task<string> ResolveExternalIdAsync(int anilistId, AnimeService translateTo)
         {
@@ -153,6 +153,8 @@ namespace AnimeList.Services
 
             if (translateTo == AnimeService.Kitsu && mapping?.KitsuId != null)
                 return $"{kitsuPrefix}{mapping.KitsuId}";
+            if (translateTo == AnimeService.MyAnimeList && mapping?.MalId != null)
+                return $"{malPrefix}{mapping.MalId}";
 
             return $"{anilistPrefix}{anilistId}";
         }

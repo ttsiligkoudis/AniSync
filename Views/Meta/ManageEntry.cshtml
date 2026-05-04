@@ -2,6 +2,7 @@
 @{
     Layout = "_Layout";
     var isAnilist = Model.AnimeService == AnimeService.Anilist;
+    var isMal = Model.AnimeService == AnimeService.MyAnimeList;
     var isSeries = Model.Type == MetaType.series.ToString();
     var hasSeasons = Model.Seasons?.Count > 0;
 }
@@ -58,6 +59,17 @@
                     <option value="DROPPED" selected="@(Model.Status == "DROPPED")">Dropped</option>
                     <option value="REPEATING" selected="@(Model.Status == "REPEATING")">Rewatching</option>
                 }
+                else if (isMal)
+                {
+                    @* MAL has no native "rewatching" status — MalService translates the synthetic *@
+                    @* "rewatching" value into (status=watching, is_rewatching=true) at the boundary. *@
+                    <option value="watching" selected="@(Model.Status == "watching")">Watching</option>
+                    <option value="plan_to_watch" selected="@(Model.Status == "plan_to_watch")">Planning</option>
+                    <option value="completed" selected="@(Model.Status == "completed")">Completed</option>
+                    <option value="on_hold" selected="@(Model.Status == "on_hold")">On Hold</option>
+                    <option value="dropped" selected="@(Model.Status == "dropped")">Dropped</option>
+                    <option value="rewatching" selected="@(Model.Status == "rewatching")">Rewatching</option>
+                }
                 else
                 {
                     <option value="current" selected="@(Model.Status == "current")">Watching</option>
@@ -84,8 +96,9 @@
             // AniList score range depends on the user's profile setting (POINT_100 vs POINT_10_DECIMAL etc.).
             // We can't know it server-side without an extra query, so allow the full 0-100 range and let the
             // user enter what their account expects. Kitsu always uses 0-10 (we translate ratingTwenty/2).
+            // MAL is fixed 0-10 integer.
             var scoreMax = isAnilist ? "100" : "10";
-            var scoreStep = isAnilist ? "0.1" : "0.5";
+            var scoreStep = isAnilist ? "0.1" : isMal ? "1" : "0.5";
         }
 
         <!-- Score -->

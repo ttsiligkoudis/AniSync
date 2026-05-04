@@ -10,15 +10,17 @@ namespace AnimeList.Controllers
         private readonly IAnimeMappingService _mappingService;
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
+        private readonly IMalService _malService;
         private readonly IConfigStore _configStore;
 
         public StreamController(ITokenService tokenService, IAnimeMappingService mappingService,
-            IAnilistService anilistService, IKitsuService kitsuService, IConfigStore configStore)
+            IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, IConfigStore configStore)
         {
             _tokenService = tokenService;
             _mappingService = mappingService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
+            _malService = malService;
             _configStore = configStore;
         }
 
@@ -61,9 +63,12 @@ namespace AnimeList.Controllers
                 var resolvedAnimeId = await _mappingService.GetIdByService(animeId, animeService);
                 if (!string.IsNullOrEmpty(resolvedAnimeId))
                 {
-                    var externalLinks = animeService == AnimeService.Anilist
-                        ? await _anilistService.GetExternalLinksAsync(animeId, tokenData)
-                        : await _kitsuService.GetExternalLinksAsync(animeId, tokenData);
+                    var externalLinks = animeService switch
+                    {
+                        AnimeService.Anilist => await _anilistService.GetExternalLinksAsync(animeId, tokenData),
+                        AnimeService.MyAnimeList => await _malService.GetExternalLinksAsync(animeId, tokenData),
+                        _ => await _kitsuService.GetExternalLinksAsync(animeId, tokenData),
+                    };
 
                     // Group all episodes of the same anime so Stremio can advance through them as a binge
                     var bingeGroup = $"anisync:{animeService}:{resolvedAnimeId}";

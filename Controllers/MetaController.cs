@@ -10,15 +10,17 @@ namespace AnimeList.Controllers
         private readonly ITokenService _tokenService;
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
+        private readonly IMalService _malService;
         private readonly ITmdbService _tmdbService;
         private readonly ICinemetaService _cinemetaService;
         private readonly IAnimeMappingService _mappingService;
 
-        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService)
+        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
+            _malService = malService;
             _tmdbService = tmdbService;
             _cinemetaService = cinemetaService;
             _mappingService = mappingService;
@@ -39,13 +41,20 @@ namespace AnimeList.Controllers
                 return (result, !deserialize);
             }
 
-            // Translate mal: ids into the user's chosen service id before dispatching
+            // Translate cross-service ids that the user's chosen service can handle natively.
+            // For mal: ids we always need to translate (no MalService for non-MAL users); for
+            // anilist:/kitsu: ids we leave them alone — the dispatch below picks the right
+            // service per-prefix and the cross-service fallback inside MetaController handles
+            // mismatches.
             if (id.StartsWith(malPrefix))
             {
                 var service = tokenData?.anime_service ?? AnimeService.Kitsu;
-                var resolved = await _mappingService.GetIdByService(id, service);
-                if (string.IsNullOrEmpty(resolved)) return (null, false);
-                id = (service == AnimeService.Anilist ? anilistPrefix : kitsuPrefix) + resolved;
+                if (service != AnimeService.MyAnimeList)
+                {
+                    var resolved = await _mappingService.GetIdByService(id, service);
+                    if (string.IsNullOrEmpty(resolved)) return (null, false);
+                    id = (service == AnimeService.Anilist ? anilistPrefix : kitsuPrefix) + resolved;
+                }
             }
 
             if (id.StartsWith(tmdbPrefix))
@@ -74,6 +83,21 @@ namespace AnimeList.Controllers
                 {
                     var mapping = await _mappingService.GetAnilistMapping(id);
                     if (mapping?.KitsuId != null)
+                        result = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData);
+                }
+            }
+            else if (id.StartsWith(malPrefix))
+            {
+                result = await _malService.GetAnimeByIdAsync(id, tokenData);
+
+                // Same fallback shape as Kitsu/AniList — if MAL has nothing for the id,
+                // try whichever sister service has a mapping so the page still renders.
+                if (result == null)
+                {
+                    var mapping = await _mappingService.GetMalMapping(id);
+                    if (mapping?.AnilistId != null)
+                        result = await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData);
+                    else if (mapping?.KitsuId != null)
                         result = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData);
                 }
             }
@@ -127,9 +151,12 @@ namespace AnimeList.Controllers
             // Fetch the user's entry against the resolved per-mapping id rather than the
             // original IMDb id — that's what makes the displayed status / progress / score
             // reflect the cour the user picked, not "whichever cour FirstOrDefault picked".
-            var entry = animeService == AnimeService.Anilist
-                ? await _anilistService.GetAnimeEntryAsync(tokenData, selectedEntryId, null)
-                : await _kitsuService.GetAnimeEntryAsync(tokenData, selectedEntryId, null);
+            var entry = animeService switch
+            {
+                AnimeService.Anilist => await _anilistService.GetAnimeEntryAsync(tokenData, selectedEntryId, null),
+                AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, selectedEntryId, null),
+                _ => await _kitsuService.GetAnimeEntryAsync(tokenData, selectedEntryId, null),
+            };
 
             var totalEpisodes = entry?.TotalEpisodes
                 ?? seasons.FirstOrDefault(s => s.Id == selectedEntryId)?.TotalEpisodes;
@@ -189,9 +216,9 @@ namespace AnimeList.Controllers
 
             // Filter to mappings that actually have an id for the user's service.
             mappings = mappings
-                .Where(m => animeService == AnimeService.Anilist ? m.AnilistId.HasValue : m.KitsuId.HasValue)
+                .Where(m => HasServiceId(m, animeService))
                 .OrderBy(m => m.Season ?? int.MaxValue)
-                .ThenBy(m => animeService == AnimeService.Anilist ? m.AnilistId : m.KitsuId)
+                .ThenBy(m => SortKey(m, animeService))
                 .ToList();
 
             if (mappings.Count == 0) return ([], id, null);
@@ -232,9 +259,12 @@ namespace AnimeList.Controllers
             int? episodeCount = null;
             try
             {
-                (name, episodeCount) = service == AnimeService.Anilist
-                    ? await _anilistService.GetAnimeSummaryAsync(entryId)
-                    : await _kitsuService.GetAnimeSummaryAsync(entryId);
+                (name, episodeCount) = service switch
+                {
+                    AnimeService.Anilist => await _anilistService.GetAnimeSummaryAsync(entryId),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeSummaryAsync(entryId),
+                    _ => await _kitsuService.GetAnimeSummaryAsync(entryId),
+                };
             }
             catch
             {
@@ -251,10 +281,26 @@ namespace AnimeList.Controllers
             return new EntrySeason { Id = entryId, Label = label, TotalEpisodes = episodeCount };
         }
 
-        private static string BuildEntryId(AnimeIdMapping mapping, AnimeService service) =>
-            service == AnimeService.Anilist
-                ? (mapping.AnilistId.HasValue ? $"{anilistPrefix}{mapping.AnilistId}" : null)
-                : (mapping.KitsuId.HasValue ? $"{kitsuPrefix}{mapping.KitsuId}" : null);
+        private static string BuildEntryId(AnimeIdMapping mapping, AnimeService service) => service switch
+        {
+            AnimeService.Anilist => mapping.AnilistId.HasValue ? $"{anilistPrefix}{mapping.AnilistId}" : null,
+            AnimeService.MyAnimeList => mapping.MalId.HasValue ? $"{malPrefix}{mapping.MalId}" : null,
+            _ => mapping.KitsuId.HasValue ? $"{kitsuPrefix}{mapping.KitsuId}" : null,
+        };
+
+        private static bool HasServiceId(AnimeIdMapping mapping, AnimeService service) => service switch
+        {
+            AnimeService.Anilist => mapping.AnilistId.HasValue,
+            AnimeService.MyAnimeList => mapping.MalId.HasValue,
+            _ => mapping.KitsuId.HasValue,
+        };
+
+        private static int? SortKey(AnimeIdMapping mapping, AnimeService service) => service switch
+        {
+            AnimeService.Anilist => mapping.AnilistId,
+            AnimeService.MyAnimeList => mapping.MalId,
+            _ => mapping.KitsuId,
+        };
 
         /// <summary>
         /// Translates a (URL season, URL episode) pair on a Cinemeta-style flat-numbered
@@ -307,9 +353,12 @@ namespace AnimeList.Controllers
             if (tokenData == null || string.IsNullOrWhiteSpace(tokenData.access_token))
                 return new JsonResult(new { success = false });
 
-            var entry = tokenData.anime_service == AnimeService.Anilist
-                ? await _anilistService.GetAnimeEntryAsync(tokenData, id, season)
-                : await _kitsuService.GetAnimeEntryAsync(tokenData, id, season);
+            var entry = tokenData.anime_service switch
+            {
+                AnimeService.Anilist => await _anilistService.GetAnimeEntryAsync(tokenData, id, season),
+                AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, id, season),
+                _ => await _kitsuService.GetAnimeEntryAsync(tokenData, id, season),
+            };
 
             return new JsonResult(new
             {
@@ -336,22 +385,39 @@ namespace AnimeList.Controllers
             // Empty status = the "None" option in the UI = "remove from list".
             if (string.IsNullOrEmpty(request.Status))
             {
-                if (tokenData.anime_service == AnimeService.Anilist)
-                    await _anilistService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
-                else
-                    await _kitsuService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                switch (tokenData.anime_service)
+                {
+                    case AnimeService.Anilist:
+                        await _anilistService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                        break;
+                    case AnimeService.MyAnimeList:
+                        await _malService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                        break;
+                    default:
+                        await _kitsuService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                        break;
+                }
                 return new JsonResult(new { success = true });
             }
 
             DateTime? startedAt = ParseDate(request.StartedAt);
             DateTime? finishedAt = ParseDate(request.FinishedAt);
 
-            if (tokenData.anime_service == AnimeService.Anilist)
-                await _anilistService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
-                    request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
-            else
-                await _kitsuService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
-                    request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+            switch (tokenData.anime_service)
+            {
+                case AnimeService.Anilist:
+                    await _anilistService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                        request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                    break;
+                case AnimeService.MyAnimeList:
+                    await _malService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                        request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                    break;
+                default:
+                    await _kitsuService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                        request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                    break;
+            }
 
             return new JsonResult(new { success = true });
         }

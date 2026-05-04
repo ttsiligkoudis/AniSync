@@ -56,6 +56,7 @@ builder.Services.AddSingleton<IConfigStore, SqliteConfigStore>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAnilistService, AnilistService>();
 builder.Services.AddScoped<IKitsuService, KitsuService>();
+builder.Services.AddScoped<IMalService, MalService>();
 builder.Services.AddScoped<ITmdbService, TmdbService>();
 builder.Services.AddScoped<ICinemetaService, CinemetaService>();
 builder.Services.AddScoped<IAnilistFallback, AnilistFallback>();
