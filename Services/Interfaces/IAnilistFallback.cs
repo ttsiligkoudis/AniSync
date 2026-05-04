@@ -25,5 +25,19 @@ namespace AnimeList.Services.Interfaces
         /// service for use in cross-service rendering.
         /// </summary>
         Task<List<Link>> GetRecommendationsAsync(int anilistId, AnimeService translateTo);
+
+        /// <summary>
+        /// Fetches the legal-streaming destinations (Crunchyroll, Netflix, …) for an AniList
+        /// anime id. Used by services that don't expose streaming links natively (currently
+        /// MyAnimeList) so MAL users still see the same external-service streams in Stremio.
+        /// </summary>
+        Task<List<StreamingLink>> GetExternalLinksAsync(int anilistId);
+
+        /// <summary>
+        /// Fetches the YouTube trailer id for an AniList anime id, or null if the anime has
+        /// no trailer or it's not on YouTube. Used by services that don't expose trailers
+        /// reliably (currently MyAnimeList).
+        /// </summary>
+        Task<string> GetYoutubeTrailerIdAsync(int anilistId);
     }
 }

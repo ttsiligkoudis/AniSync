@@ -134,9 +134,11 @@ namespace AnimeList.Services
             var resolvedAnimeId = await _mappingService.GetIdByService(id, AnimeService.MyAnimeList);
             if (string.IsNullOrEmpty(resolvedAnimeId)) return null;
 
+            // `videos` carries promo/PV YouTube URLs when MAL has them — we use the first one
+            // as the trailer and fall back to AniList through the mapping otherwise.
             const string fields =
                 "id,title,alternative_titles,main_picture,pictures,synopsis,mean,media_type,status," +
-                "num_episodes,start_season,broadcast,source,genres,studios,recommendations,related_anime";
+                "num_episodes,start_season,broadcast,source,genres,studios,recommendations,related_anime,videos";
 
             var json = await GetJsonAsync($"{MalApi}/anime/{resolvedAnimeId}?fields={fields}", tokenData);
             if (json == null) return null;
@@ -164,6 +166,21 @@ namespace AnimeList.Services
                     .Where(n => !string.IsNullOrEmpty(n))
                     .ToList(),
             };
+
+            // Trailer: try MAL's own `videos` first (rare but present on some titles), then
+            // fall back through the mapping to AniList's `trailer` field. Either way we keep
+            // the result tightly scoped to YouTube ids since that's all Stremio renders.
+            var trailerId = ExtractMalYoutubeTrailerId(json);
+            if (string.IsNullOrEmpty(trailerId) && mapping?.AnilistId != null)
+            {
+                try { trailerId = await _anilistFallback.GetYoutubeTrailerIdAsync(mapping.AnilistId.Value); }
+                catch { /* best-effort enrichment */ }
+            }
+            if (!string.IsNullOrEmpty(trailerId))
+            {
+                anime.trailers.Add(new Trailer(trailerId));
+                anime.trailerStreams.Add(new TrailerStream(trailerId, anime.name));
+            }
 
             if (json["studios"] is JArray studios)
             {
@@ -239,12 +256,16 @@ namespace AnimeList.Services
             return (name, episodeCount);
         }
 
-        public Task<List<StreamingLink>> GetExternalLinksAsync(string animeId, TokenData tokenData)
+        public async Task<List<StreamingLink>> GetExternalLinksAsync(string animeId, TokenData tokenData)
         {
-            // MyAnimeList doesn't expose a structured streaming-link list, so this is always
-            // empty. Crunchyroll/Netflix integration relies on AniList/Kitsu for users on those
-            // services; MAL users just don't see external streams.
-            return Task.FromResult<List<StreamingLink>>([]);
+            // MyAnimeList's API has no streaming-link field, so cross-service over to AniList
+            // through the mapping. This gives MAL users the same Crunchyroll/Netflix/HiDive
+            // entries the other services surface in Stremio's external streams.
+            var anilistIdRaw = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
+            if (!int.TryParse(anilistIdRaw, out var anilistId)) return [];
+
+            try { return await _anilistFallback.GetExternalLinksAsync(anilistId); }
+            catch { return []; }
         }
 
         public async Task<AnimeEntry> GetAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)
@@ -526,6 +547,44 @@ namespace AnimeList.Services
         private static DateTime? ParseMalDate(string raw)
         {
             return DateTime.TryParse(raw, out var dt) ? dt : null;
+        }
+
+        /// <summary>
+        /// Pulls the YouTube video id out of MAL's <c>videos</c> array. The field is sparsely
+        /// populated and MAL stores full URLs (not bare ids), so we parse the first watch URL we
+        /// find. Returns null when nothing usable is in the response.
+        /// </summary>
+        private static string ExtractMalYoutubeTrailerId(JObject json)
+        {
+            if (json["videos"] is not JArray videos) return null;
+            foreach (var v in videos.OfType<JObject>())
+            {
+                var url = (string)v["url"];
+                if (string.IsNullOrEmpty(url)) continue;
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) continue;
+
+                // youtu.be/<id> — id is the path segment.
+                if (uri.Host.Contains("youtu.be", StringComparison.OrdinalIgnoreCase))
+                {
+                    var segment = uri.AbsolutePath.Trim('/');
+                    if (!string.IsNullOrEmpty(segment)) return segment;
+                    continue;
+                }
+
+                // youtube.com/watch?v=<id> — pull from the query string. We avoid
+                // System.Web.HttpUtility so the project doesn't gain a new dependency.
+                if (!uri.Host.Contains("youtube.com", StringComparison.OrdinalIgnoreCase)) continue;
+                var query = uri.Query.TrimStart('?');
+                foreach (var pair in query.Split('&'))
+                {
+                    var eq = pair.IndexOf('=');
+                    if (eq <= 0) continue;
+                    if (!string.Equals(pair[..eq], "v", StringComparison.OrdinalIgnoreCase)) continue;
+                    var id = Uri.UnescapeDataString(pair[(eq + 1)..]);
+                    if (!string.IsNullOrEmpty(id)) return id;
+                }
+            }
+            return null;
         }
     }
 }

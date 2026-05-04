@@ -140,6 +140,58 @@ namespace AnimeList.Services
             return result;
         }
 
+        public async Task<List<StreamingLink>> GetExternalLinksAsync(int anilistId)
+        {
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($id: Int) {
+                        Media(id: $id, type: ANIME) {
+                            externalLinks { site url type }
+                        }
+                    }",
+                variables = new { id = anilistId }
+            });
+
+            var data = await PostJsonAsync(requestBody);
+            var links = data?.Media?.externalLinks;
+            if (links == null) return [];
+
+            var result = new List<StreamingLink>();
+            foreach (var link in links)
+            {
+                if ((string)link.type != "STREAMING") continue;
+                var site = (string)link.site;
+                var url = (string)link.url;
+                if (string.IsNullOrEmpty(url)) continue;
+                result.Add(new StreamingLink { Site = site, Url = url });
+            }
+            return result;
+        }
+
+        public async Task<string> GetYoutubeTrailerIdAsync(int anilistId)
+        {
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($id: Int) {
+                        Media(id: $id, type: ANIME) {
+                            trailer { id site }
+                        }
+                    }",
+                variables = new { id = anilistId }
+            });
+
+            var data = await PostJsonAsync(requestBody);
+            var trailer = data?.Media?.trailer;
+            if (trailer == null) return null;
+            // AniList stores YouTube videos as {site: "youtube", id: "<videoId>"}; other
+            // hosters (Dailymotion etc.) are skipped because Stremio's Trailer model only
+            // accepts a YouTube id.
+            if ((string)trailer.site != "youtube") return null;
+            return (string)trailer.id;
+        }
+
         /// <summary>
         /// Picks the most stable id for the requested service, in priority order:
         /// IMDb &gt; TMDB &gt; service-native (kitsu/mal/anilist) &gt; anilist fallback.
