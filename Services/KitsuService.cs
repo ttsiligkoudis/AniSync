@@ -53,124 +53,179 @@ namespace AnimeList.Services
 
             await _mappingService.EnsureLoadedAsync();
             var seenIds = new Dictionary<string, Meta>();
-            int apiOffset = 0;
 
-            while (true)
-            {
-                // In fetch-all mode we walk from offset 0 ourselves and apply the user's
-                // `skip` post-dedup. In single-page mode we honour the caller's skip directly.
-                var apiSkip = fetchAll ? apiOffset.ToString() : skip;
-                var url = BuildListUrl(tokenData, list, apiSkip, resolvedAnimeId, genre, search, sort, isUserList);
+            // First page is sequential — for the fetch-all path we need its meta.count to
+            // fan out the remaining pages in parallel.
+            var firstSkip = fetchAll ? "0" : skip;
+            var firstUrl = BuildListUrl(tokenData, list, firstSkip, resolvedAnimeId, genre, search, sort, isUserList);
+            var firstPage = await FetchKitsuPageAsync(firstUrl, tokenData);
+            if (firstPage == null) return [];
 
-                var request = new HttpRequestMessage(HttpMethod.Get, url);
-                if (!string.IsNullOrWhiteSpace(tokenData?.access_token))
-                {
-                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
-                }
-
-                var client = _clientFactory.CreateClient();
-                var response = await client.SendAsync(request);
-                if (!response.IsSuccessStatusCode) break;
-
-                var content = await response.Content.ReadAsStringAsync();
-                var json = JObject.Parse(content);
-
-                // Build O(1) lookups for `included` resources by id, separated by type
-                var includedAnime = new Dictionary<string, JObject>();
-                var categoryNames = new Dictionary<string, string>();
-                if (json["included"] is JArray includedArr)
-                {
-                    foreach (var inc in includedArr.OfType<JObject>())
-                    {
-                        var incType = (string)inc["type"];
-                        var incId = (string)inc["id"];
-                        if (incId == null) continue;
-
-                        if (incType == "anime") includedAnime[incId] = inc;
-                        else if (incType == "categories")
-                        {
-                            var title = (string)inc["attributes"]?["title"];
-                            if (!string.IsNullOrEmpty(title)) categoryNames[incId] = title;
-                        }
-                    }
-                }
-
-                if (json["data"] is not JArray dataArr || dataArr.Count == 0) break;
-
-                foreach (var entry in dataArr.OfType<JObject>())
-                {
-                    JObject anime;
-                    string entryId = null;
-                    string entryStatus = null;
-
-                    if (isUserList)
-                    {
-                        var animeRefId = (string)entry["relationships"]?["anime"]?["data"]?["id"];
-                        if (string.IsNullOrEmpty(animeRefId) || !includedAnime.TryGetValue(animeRefId, out anime)) continue;
-                        entryId = (string)entry["id"];
-                        entryStatus = (string)entry["attributes"]?["status"];
-                    }
-                    else
-                    {
-                        anime = entry;
-                    }
-
-                    var status = (string)anime["attributes"]?["status"];
-                    if (list == ListType.Current && status is "tba" or "unreleased" or "upcoming") continue;
-
-                    var animeKitsuId = (string)anime["id"];
-
-                    // Resolve category names from the included array
-                    var animeGenres = ExtractCategories(anime, categoryNames);
-
-                    // Filter user list entries by genre when discover-only provides a genre selection
-                    if (!string.IsNullOrEmpty(genre) && isUserList)
-                    {
-                        if (animeGenres == null || !animeGenres.Any(g => string.Equals(g, genre, StringComparison.OrdinalIgnoreCase)))
-                            continue;
-                    }
-
-                    var mapping = await _mappingService.GetKitsuMapping(animeKitsuId);
-
-                    var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                                     !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
-                                     $"{kitsuPrefix}{animeKitsuId}";
-
-                    var subtype = (string)anime["attributes"]?["subtype"];
-                    var isMovie = IsMovieFormat(subtype);
-
-                    var meta = new Meta((string)anime["attributes"]?["description"])
-                    {
-                        id = externalId,
-                        type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
-                        name = ExtractTitle(anime),
-                        poster = (string)anime["attributes"]?["posterImage"]?["large"],
-                        entryId = entryId,
-                        entryStatus = entryStatus,
-                    };
-
-                    // Multiple Kitsu entries (seasons/OVAs) can share the same IMDb ID;
-                    // keep the shortest English title as it's typically the base series name
-                    if (seenIds.TryGetValue(externalId, out var existing))
-                    {
-                        if (!string.IsNullOrEmpty(meta.name) && (string.IsNullOrEmpty(existing.name) || meta.name.Length < existing.name.Length))
-                            seenIds[externalId] = meta;
-                        continue;
-                    }
-
-                    seenIds[externalId] = meta;
-                }
-
-                if (!fetchAll) break;
-                // A page shorter than the API page size means we've reached the end of the list.
-                if (dataArr.Count < CatalogPageSize) break;
-                apiOffset += CatalogPageSize;
-            }
+            await ProcessKitsuPageAsync(firstPage, list, isUserList, genre, seenIds);
 
             if (fetchAll)
+            {
+                // Kitsu caps page[limit] at 20, so a 1000-entry library would otherwise need
+                // 50 serial round-trips (~7-10s on a cold view). Use meta.count to know the
+                // total upfront and fire the remaining pages concurrently. SemaphoreSlim caps
+                // the in-flight count so a power user can't hammer Kitsu's rate limit.
+                var totalCount = (int?)firstPage["meta"]?["count"];
+                var firstDataCount = (firstPage["data"] as JArray)?.Count ?? 0;
+
+                if (totalCount.HasValue && totalCount.Value > CatalogPageSize)
+                {
+                    using var sem = new SemaphoreSlim(8);
+                    var tasks = new List<Task<JObject>>();
+                    for (int offset = CatalogPageSize; offset < totalCount.Value; offset += CatalogPageSize)
+                    {
+                        var url = BuildListUrl(tokenData, list, offset.ToString(), resolvedAnimeId, genre, search, sort, isUserList);
+                        tasks.Add(FetchWithSemaphoreAsync(url, tokenData, sem));
+                    }
+
+                    var pages = await Task.WhenAll(tasks);
+                    foreach (var page in pages)
+                    {
+                        if (page == null) continue;
+                        await ProcessKitsuPageAsync(page, list, isUserList, genre, seenIds);
+                    }
+                }
+                else if (!totalCount.HasValue && firstDataCount >= CatalogPageSize)
+                {
+                    // Fallback: no meta.count (shouldn't happen on Kitsu but defend against
+                    // it anyway) — walk pages serially until we hit one shorter than the
+                    // page size, the same way the rest of the codebase did before.
+                    int offset = CatalogPageSize;
+                    while (true)
+                    {
+                        var url = BuildListUrl(tokenData, list, offset.ToString(), resolvedAnimeId, genre, search, sort, isUserList);
+                        var page = await FetchKitsuPageAsync(url, tokenData);
+                        if (page == null) break;
+
+                        var dataCount = (page["data"] as JArray)?.Count ?? 0;
+                        if (dataCount == 0) break;
+
+                        await ProcessKitsuPageAsync(page, list, isUserList, genre, seenIds);
+                        if (dataCount < CatalogPageSize) break;
+                        offset += CatalogPageSize;
+                    }
+                }
+
                 return seenIds.Values.Skip(startOffset).Take(CatalogPageSize).ToList();
+            }
 
             return seenIds.Values.ToList();
+        }
+
+        private async Task<JObject> FetchKitsuPageAsync(string url, TokenData tokenData)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            if (!string.IsNullOrWhiteSpace(tokenData?.access_token))
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+
+            var response = await _clientFactory.CreateClient().SendAsync(request);
+            if (!response.IsSuccessStatusCode) return null;
+
+            var content = await response.Content.ReadAsStringAsync();
+            return JObject.Parse(content);
+        }
+
+        private async Task<JObject> FetchWithSemaphoreAsync(string url, TokenData tokenData, SemaphoreSlim sem)
+        {
+            await sem.WaitAsync();
+            try { return await FetchKitsuPageAsync(url, tokenData); }
+            finally { sem.Release(); }
+        }
+
+        // Parses a single Kitsu list-style page and merges the entries into <paramref name="seenIds"/>.
+        // Centralised so the parallel-fan-out path and the fallback serial path share the same
+        // dedup, genre-filter, and mapping-resolution logic.
+        private async Task ProcessKitsuPageAsync(JObject json, ListType? list, bool isUserList, string genre, Dictionary<string, Meta> seenIds)
+        {
+            // Build O(1) lookups for `included` resources by id, separated by type
+            var includedAnime = new Dictionary<string, JObject>();
+            var categoryNames = new Dictionary<string, string>();
+            if (json["included"] is JArray includedArr)
+            {
+                foreach (var inc in includedArr.OfType<JObject>())
+                {
+                    var incType = (string)inc["type"];
+                    var incId = (string)inc["id"];
+                    if (incId == null) continue;
+
+                    if (incType == "anime") includedAnime[incId] = inc;
+                    else if (incType == "categories")
+                    {
+                        var title = (string)inc["attributes"]?["title"];
+                        if (!string.IsNullOrEmpty(title)) categoryNames[incId] = title;
+                    }
+                }
+            }
+
+            if (json["data"] is not JArray dataArr) return;
+
+            foreach (var entry in dataArr.OfType<JObject>())
+            {
+                JObject anime;
+                string entryId = null;
+                string entryStatus = null;
+
+                if (isUserList)
+                {
+                    var animeRefId = (string)entry["relationships"]?["anime"]?["data"]?["id"];
+                    if (string.IsNullOrEmpty(animeRefId) || !includedAnime.TryGetValue(animeRefId, out anime)) continue;
+                    entryId = (string)entry["id"];
+                    entryStatus = (string)entry["attributes"]?["status"];
+                }
+                else
+                {
+                    anime = entry;
+                }
+
+                var status = (string)anime["attributes"]?["status"];
+                if (list == ListType.Current && status is "tba" or "unreleased" or "upcoming") continue;
+
+                var animeKitsuId = (string)anime["id"];
+
+                // Resolve category names from the included array
+                var animeGenres = ExtractCategories(anime, categoryNames);
+
+                // Filter user list entries by genre when discover-only provides a genre selection
+                if (!string.IsNullOrEmpty(genre) && isUserList)
+                {
+                    if (animeGenres == null || !animeGenres.Any(g => string.Equals(g, genre, StringComparison.OrdinalIgnoreCase)))
+                        continue;
+                }
+
+                var mapping = await _mappingService.GetKitsuMapping(animeKitsuId);
+
+                var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                                 !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
+                                 $"{kitsuPrefix}{animeKitsuId}";
+
+                var subtype = (string)anime["attributes"]?["subtype"];
+                var isMovie = IsMovieFormat(subtype);
+
+                var meta = new Meta((string)anime["attributes"]?["description"])
+                {
+                    id = externalId,
+                    type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
+                    name = ExtractTitle(anime),
+                    poster = (string)anime["attributes"]?["posterImage"]?["large"],
+                    entryId = entryId,
+                    entryStatus = entryStatus,
+                };
+
+                // Multiple Kitsu entries (seasons/OVAs) can share the same IMDb ID;
+                // keep the shortest English title as it's typically the base series name
+                if (seenIds.TryGetValue(externalId, out var existing))
+                {
+                    if (!string.IsNullOrEmpty(meta.name) && (string.IsNullOrEmpty(existing.name) || meta.name.Length < existing.name.Length))
+                        seenIds[externalId] = meta;
+                    continue;
+                }
+
+                seenIds[externalId] = meta;
+            }
         }
 
         public async Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData)
