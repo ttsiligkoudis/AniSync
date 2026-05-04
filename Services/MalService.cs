@@ -404,9 +404,10 @@ namespace AnimeList.Services
             {
                 var (season, year) = GetSeasonAndYear(genre ?? SeasonCurrent);
                 var seasonLower = season.ToLowerInvariant();
-                url = $"{MalApi}/anime/season/{year}/{seasonLower}?fields={NodeFields}";
-                if (!string.IsNullOrEmpty(sort))
-                    url += $"&sort={SeasonalSortToMal(sort)}";
+                // Default to popularity-descending (matching AniList POPULARITY_DESC and
+                // Kitsu -userCount) so the catalog leads with the season's biggest titles.
+                var sortValue = string.IsNullOrEmpty(sort) ? "anime_num_list_users" : SeasonalSortToMal(sort);
+                url = $"{MalApi}/anime/season/{year}/{seasonLower}?fields={NodeFields}&sort={sortValue}";
             }
             else if (list == ListType.Search)
             {
