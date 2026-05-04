@@ -1,7 +1,6 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
-using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Text;
 
@@ -22,14 +21,6 @@ namespace AnimeList.Services
 
         // Kitsu enforces a maximum of 20 items per page
         private const int CatalogPageSize = 20;
-
-        // Per-user list cache. Stremio paginates through a catalog by calling the same
-        // endpoint with rising `skip` values; without a cache each scroll triggers a
-        // full multi-page fetch + dedup. Caching the deduped list lets every page-2+
-        // request collapse to an in-memory slice.
-        // Key: "{user_id}|{listType}|{genre}". Value: full deduped meta list + expiry.
-        private static readonly ConcurrentDictionary<string, (DateTime Expiry, List<Meta> Metas)> _userListCache = new();
-        private static readonly TimeSpan UserListCacheTtl = TimeSpan.FromMinutes(2);
 
         public KitsuService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IAnilistFallback anilistFallback)
         {
@@ -58,13 +49,6 @@ namespace AnimeList.Services
             // some catalog views can end up paging in circles or refetching the same skip
             // indefinitely. Mirrors AnilistService's MediaListCollection approach.
             var fetchAll = isUserList && string.IsNullOrEmpty(resolvedAnimeId);
-            var startOffset = int.TryParse(skip, out var requestedSkip) ? requestedSkip : 0;
-
-            // Stremio scrolls a catalog by repeatedly hitting GetList with rising `skip`
-            // values; without a cache, every scroll re-runs the entire fetch-all loop.
-            // Serve repeats from the per-user cache and only paginate the slice.
-            if (fetchAll && TryGetCachedUserList(tokenData.user_id, list, genre, out var cachedFull))
-                return cachedFull.Skip(startOffset).Take(CatalogPageSize).ToList();
 
             await _mappingService.EnsureLoadedAsync();
             var seenIds = new Dictionary<string, Meta>();
@@ -87,10 +71,6 @@ namespace AnimeList.Services
                 var totalCount = (int?)firstPage["meta"]?["count"];
                 var firstDataCount = (firstPage["data"] as JArray)?.Count ?? 0;
 
-                // Track partial failures so we don't poison the cache with an incomplete
-                // list — a cached short list would persist for the whole TTL.
-                bool fetchComplete = true;
-
                 if (totalCount.HasValue && totalCount.Value > CatalogPageSize)
                 {
                     using var sem = new SemaphoreSlim(8);
@@ -104,7 +84,7 @@ namespace AnimeList.Services
                     var pages = await Task.WhenAll(tasks);
                     foreach (var page in pages)
                     {
-                        if (page == null) { fetchComplete = false; continue; }
+                        if (page == null) continue;
                         await ProcessKitsuPageAsync(page, list, isUserList, genre, seenIds);
                     }
                 }
@@ -118,7 +98,7 @@ namespace AnimeList.Services
                     {
                         var url = BuildListUrl(tokenData, list, offset.ToString(), resolvedAnimeId, genre, search, sort, isUserList);
                         var page = await FetchKitsuPageAsync(url, tokenData);
-                        if (page == null) { fetchComplete = false; break; }
+                        if (page == null) break;
 
                         var dataCount = (page["data"] as JArray)?.Count ?? 0;
                         if (dataCount == 0) break;
@@ -128,59 +108,9 @@ namespace AnimeList.Services
                         offset += CatalogPageSize;
                     }
                 }
-
-                var fullList = seenIds.Values.ToList();
-                if (fetchComplete) SetCachedUserList(tokenData.user_id, list, genre, fullList);
-
-                return fullList.Skip(startOffset).Take(CatalogPageSize).ToList();
             }
 
             return seenIds.Values.ToList();
-        }
-
-        // ── User-list cache helpers ───────────────────────────────────────
-        // Kept as static class-level methods so the dictionary lives across the per-request
-        // scoped lifetime of KitsuService and is shared between the read and write paths.
-
-        private static string BuildUserListCacheKey(string userId, ListType? list, string genre)
-            => $"{userId}|{list?.ToString() ?? "all"}|{genre ?? ""}";
-
-        private static bool TryGetCachedUserList(string userId, ListType? list, string genre, out List<Meta> metas)
-        {
-            metas = null;
-            if (string.IsNullOrEmpty(userId)) return false;
-            var key = BuildUserListCacheKey(userId, list, genre);
-            if (_userListCache.TryGetValue(key, out var entry))
-            {
-                if (DateTime.UtcNow < entry.Expiry)
-                {
-                    metas = entry.Metas;
-                    return true;
-                }
-                _userListCache.TryRemove(key, out _);
-            }
-            return false;
-        }
-
-        private static void SetCachedUserList(string userId, ListType? list, string genre, List<Meta> metas)
-        {
-            if (string.IsNullOrEmpty(userId)) return;
-            var key = BuildUserListCacheKey(userId, list, genre);
-            _userListCache[key] = (DateTime.UtcNow + UserListCacheTtl, metas);
-        }
-
-        // Save / delete change at least one list and may shift entries between lists, so
-        // wipe every cached key for the user rather than try to figure out which combinations
-        // remain valid. Cheap because key lookup is O(N) over a small dict.
-        private static void InvalidateUserListCache(string userId)
-        {
-            if (string.IsNullOrEmpty(userId)) return;
-            var prefix = userId + "|";
-            foreach (var key in _userListCache.Keys)
-            {
-                if (key.StartsWith(prefix, StringComparison.Ordinal))
-                    _userListCache.TryRemove(key, out _);
-            }
         }
 
         private async Task<JObject> FetchKitsuPageAsync(string url, TokenData tokenData)
@@ -579,11 +509,6 @@ namespace AnimeList.Services
 
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
             await _clientFactory.CreateClient().SendAsync(request);
-
-            // The user just changed (or added) an entry — invalidate every cached list for
-            // them so the next browse reflects the change immediately rather than waiting
-            // out the TTL.
-            InvalidateUserListCache(tokenData.user_id);
         }
 
         public async Task<(string? name, int? episodeCount)> GetAnimeSummaryAsync(string id)
@@ -670,9 +595,6 @@ namespace AnimeList.Services
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
 
             await _clientFactory.CreateClient().SendAsync(request);
-
-            // Drop the user's cached lists so the removal shows up on the next browse.
-            InvalidateUserListCache(tokenData.user_id);
         }
 
         private static DateTime? ParseKitsuDate(string raw)

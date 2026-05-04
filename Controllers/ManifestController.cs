@@ -173,7 +173,11 @@ namespace AnimeList.Controllers
                 type = MetaType.anime.ToString(),
                 id = list.ToString(),
                 name = name,
-                extra = [new("skip"), new("genre") { options = genreOptions, isRequired = discoverOnly }],
+                // No `skip` extra: user-list services already fetch the entire library in one
+                // round-trip on the server side, so paginated client requests would repeat that
+                // cost for nothing. Returning the full list lets Stremio render it locally
+                // without any further calls.
+                extra = [new("genre") { options = genreOptions, isRequired = discoverOnly }],
             };
         }
     }

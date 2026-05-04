@@ -294,13 +294,10 @@ namespace AnimeList.Services
                 seenIds[externalId] = meta;
             }
 
-            // User lists are fetched in full via MediaListCollection; paginate after dedup
-            if (isUserList && string.IsNullOrEmpty(resolvedAnimeId))
-            {
-                var skipCount = int.TryParse(skip, out var s) ? s : 0;
-                return seenIds.Values.Skip(skipCount).Take(CatalogPageSize).ToList();
-            }
-
+            // User-list catalogs no longer carry a `skip` extra in the manifest, so Stremio
+            // asks for the whole list in one round-trip — return the full deduped collection
+            // here instead of paginating it. Discovery catalogs (Trending/Seasonal/Search/
+            // Airing) still paginate via the API's own page mechanism above.
             return seenIds.Values.ToList();
         }
 

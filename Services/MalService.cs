@@ -73,16 +73,14 @@ namespace AnimeList.Services
             if (isUserList && !string.IsNullOrEmpty(resolvedAnimeId))
                 return await GetSingleUserListEntryAsync(resolvedAnimeId, tokenData);
 
-            // For "browse my list" requests we walk every page server-side, dedup across all
-            // of them, and apply the user's `skip` after dedup. Server-side pagination + per-
-            // page dedup returns short pages that confuse Stremio's "fetch until empty" loop —
-            // the catalog can otherwise refetch the same skip in circles. Mirrors the
-            // AnilistService MediaListCollection approach.
+            // For "browse my list" requests we walk every page server-side and dedup across
+            // all of them. The user-list catalogs no longer carry a `skip` extra in the
+            // manifest (one request per catalog open), so the deduped result is returned in
+            // full at the end rather than sliced. Mirrors the AnilistService MediaListCollection
+            // approach.
             var fetchAll = isUserList;
-            var startOffset = int.TryParse(skip, out var requestedSkip) ? requestedSkip : 0;
             // MAL caps animelist at 1000/page, so a single round-trip covers most users; the
-            // ranking/seasonal/search endpoints stay at CatalogPageSize since there's no dedup
-            // multiplication to recover from there.
+            // ranking/seasonal/search endpoints stay at CatalogPageSize.
             var pageSize = fetchAll ? FullFetchPageSize : CatalogPageSize;
 
             await _mappingService.EnsureLoadedAsync();
@@ -147,9 +145,6 @@ namespace AnimeList.Services
                 if (dataArr.Count < pageSize) break;
                 apiOffset += pageSize;
             }
-
-            if (fetchAll)
-                return seenIds.Values.Skip(startOffset).Take(CatalogPageSize).ToList();
 
             return seenIds.Values.ToList();
         }
