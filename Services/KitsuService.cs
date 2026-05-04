@@ -155,7 +155,10 @@ namespace AnimeList.Services
             var resolvedAnimeId = await _mappingService.GetIdByService(id, AnimeService.Kitsu);
             if (string.IsNullOrEmpty(resolvedAnimeId)) return null;
 
-            var url = $"{_kitsuApi}/anime/{resolvedAnimeId}?include=categories,episodes";
+            // animeProductions.producer pulls each studio/producer relationship and the
+            // related producer node (name + slug) so we can surface Studio links the same
+            // way AniList and MAL do.
+            var url = $"{_kitsuApi}/anime/{resolvedAnimeId}?include=categories,episodes,animeProductions.producer";
             var request = new HttpRequestMessage(HttpMethod.Get, url);
             if (!string.IsNullOrWhiteSpace(tokenData?.access_token))
             {
@@ -180,9 +183,13 @@ namespace AnimeList.Services
             var subtype = (string)entry["attributes"]?["subtype"];
             var isMovie = IsMovieFormat(subtype);
 
-            // Pull categories and episodes out of the included array
+            // Pull categories, episodes, animeProductions and producers out of the included array
             var categoryTitles = new List<string>();
             var episodes = new List<JObject>();
+            var animeProductions = new List<JObject>();
+            // producer-id → (name, slug) so we can resolve animeProduction → producer in a
+            // second pass without re-walking included.
+            var producers = new Dictionary<string, (string Name, string Slug)>();
             if (json["included"] is JArray includedArr)
             {
                 foreach (var inc in includedArr.OfType<JObject>())
@@ -196,6 +203,18 @@ namespace AnimeList.Services
                     else if (incType == "episodes")
                     {
                         episodes.Add(inc);
+                    }
+                    else if (incType == "animeProductions")
+                    {
+                        animeProductions.Add(inc);
+                    }
+                    else if (incType == "producers")
+                    {
+                        var pid = (string)inc["id"];
+                        var pname = (string)inc["attributes"]?["name"];
+                        var pslug = (string)inc["attributes"]?["slug"];
+                        if (!string.IsNullOrEmpty(pid) && !string.IsNullOrEmpty(pname))
+                            producers[pid] = (pname, pslug);
                     }
                 }
             }
@@ -213,10 +232,36 @@ namespace AnimeList.Services
             };
 
             var youtubeId = (string)entry["attributes"]?["youtubeVideoId"];
+            if (string.IsNullOrEmpty(youtubeId) && mapping?.AnilistId != null)
+            {
+                // Kitsu's youtubeVideoId is sparsely populated — fall back to AniList through
+                // the cross-service mapping when we can. Mirrors the MAL service's behaviour.
+                try { youtubeId = await _anilistFallback.GetYoutubeTrailerIdAsync(mapping.AnilistId.Value); }
+                catch { /* best-effort enrichment */ }
+            }
             if (!string.IsNullOrEmpty(youtubeId))
             {
                 anime.trailers.Add(new Trailer(youtubeId));
                 anime.trailerStreams.Add(new TrailerStream(youtubeId, anime.name));
+            }
+
+            // Studios: animeProductions are joined to producer nodes. Filter to role=studio
+            // (the actual animation studio); other roles are producers/licensors which
+            // AniList's `isMain=true` heuristic intentionally drops too.
+            foreach (var prod in animeProductions)
+            {
+                if ((string)prod["attributes"]?["role"] != "studio") continue;
+                var producerId = (string)prod["relationships"]?["producer"]?["data"]?["id"];
+                if (string.IsNullOrEmpty(producerId) || !producers.TryGetValue(producerId, out var producer))
+                    continue;
+                anime.links.Add(new Link
+                {
+                    name = producer.Name,
+                    category = "Studio",
+                    // Kitsu doesn't expose public producer pages (slug is internal-only); leave
+                    // url null rather than minting a 404. Stremio shows the name regardless.
+                    url = null,
+                });
             }
 
             if (!isMovie)
