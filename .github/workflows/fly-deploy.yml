@@ -3,13 +3,13 @@
 name: Fly Deploy
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 jobs:
  deploy-fly:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     environment: production
     concurrency:
       group: deploy-fly-${{ github.ref }}
