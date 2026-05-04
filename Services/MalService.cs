@@ -105,8 +105,11 @@ namespace AnimeList.Services
 
                     var listStatus = raw["list_status"] as JObject;
 
-                    // Repeating / Current overlap on MAL — both are status=watching, separated only
-                    // by is_rewatching. Apply the bool-side filter here so the catalogs stay disjoint.
+                    // Repeating is fetched without any status filter (see BuildListUrl) and
+                    // narrowed here on is_rewatching=true. Current is fetched with status=watching
+                    // and we additionally drop is_rewatching=true entries so the same anime can't
+                    // surface in both Currently Watching and Rewatching when a user has it marked
+                    // as both watching and rewatching simultaneously.
                     if (isUserList && list.HasValue)
                     {
                         var isRewatching = (bool?)listStatus?["is_rewatching"] ?? false;
@@ -436,9 +439,13 @@ namespace AnimeList.Services
 
             if (isUserList)
             {
-                // ListType.Repeating reuses the watching list; the is_rewatching post-filter
-                // happens above in GetAnimeListAsync so the URL itself stays simple.
-                var statusFilter = list.HasValue ? $"&status={MalUserListStatus(list.Value)}" : "";
+                // Repeating is special: MAL keeps rewatching entries at their original status
+                // (typically "completed") with is_rewatching=true rather than introducing a
+                // dedicated status. Constraining the wire request to status=watching would
+                // miss those entries entirely, so we omit the status filter for Repeating
+                // and let the post-fetch filter in GetAnimeListAsync narrow on is_rewatching.
+                var statusFilter = list.HasValue && list != ListType.Repeating
+                    ? $"&status={MalUserListStatus(list.Value)}" : "";
                 url = $"{MalApi}/users/@me/animelist?fields={userListFields}&sort=list_updated_at{statusFilter}";
             }
             else if (list == ListType.Seasonal)
