@@ -384,21 +384,27 @@ namespace AnimeList.Services
                     foreach (var episode in sortedEpisodes)
                     {
                         var seasonNumber = SafeGet<int?>(episode, "attributes", "seasonNumber") ?? 1;
+                        if (seasonNumber <= 0) seasonNumber = 1;
                         var thumbnail = SafeGet<string>(episode, "attributes", "thumbnail", "original")
                                         ?? SafeGet<string>(episode, "attributes", "thumbnail", "large");
                         var epTitle = SafeGet<string>(episode, "attributes", "canonicalTitle");
 
                         anime.videos.Add(new Video
                         {
-                            id = $"{externalId}:{episodeNumber}",
+                            id = $"{externalId}:{seasonNumber}:{episodeNumber}",
                             title = string.IsNullOrEmpty(epTitle) ? $"Episode {episodeNumber}" : epTitle,
                             thumbnail = thumbnail,
-                            season = seasonNumber > 0 ? seasonNumber : 1,
+                            season = seasonNumber,
                             episode = episodeNumber,
                         });
                         episodeNumber++;
                     }
                 }
+
+                // Stremio rejects (renders blank) when video.id doesn't share a prefix with
+                // meta.id, so make sure every video lives in the calling service's id space
+                // regardless of whether the loop above ran or Cinemeta filled them in.
+                NormalizeVideoIds(anime.videos, externalId);
             }
 
             // Kitsu's mediaRelationships exposes prequels/sequels but not "audience also liked"
@@ -862,6 +868,19 @@ namespace AnimeList.Services
             return SafeGet<string>(anime, "attributes", "titles", "en")
                 ?? SafeGet<string>(anime, "attributes", "titles", "en_jp")
                 ?? SafeGet<string>(anime, "attributes", "canonicalTitle");
+        }
+
+        private static void NormalizeVideoIds(List<Video> videos, string externalId)
+        {
+            if (videos == null) return;
+            foreach (var v in videos)
+            {
+                var season = v.season > 0 ? v.season : 1;
+                var episode = v.episode > 0 ? v.episode : 1;
+                v.id = $"{externalId}:{season}:{episode}";
+                v.season = season;
+                v.episode = episode;
+            }
         }
     }
 }

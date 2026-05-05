@@ -534,13 +534,13 @@ namespace AnimeList.Services
                         ? (streamingEps.ToObject<List<Video>>() ?? new List<Video>())
                         : new List<Video>();
 
-                    var seasonNumber = GetSeasonNumber(result.relations, (int)result.id);
+                    var seasonNumber = (int?)GetSeasonNumber(result.relations, (int)result.id) ?? 1;
+                    if (seasonNumber <= 0) seasonNumber = 1;
 
                     for (int i = 0; i < anime.videos.Count; i++)
                     {
-                        anime.videos[i].id = $"{externalId}:{i + 1}";
                         anime.videos[i].episode = (i + 1);
-                        anime.videos[i].season = ((int?)seasonNumber ?? 1);
+                        anime.videos[i].season = seasonNumber;
                     }
 
                     if (anime.videos.Count == 0 && mapping?.KitsuId != null)
@@ -549,9 +549,28 @@ namespace AnimeList.Services
                         anime.videos = kitsuAnime?.videos ?? new List<Video>();
                     }
                 }
+
+                // Stremio rejects (renders blank) when video.id doesn't share a prefix with
+                // meta.id. The Kitsu cross-service fallback above leaves kitsu:N-prefixed
+                // ids in place, and the legacy synthetic loops used a :episode shape rather
+                // than the :season:episode shape Stremio expects for series videos.
+                NormalizeVideoIds(anime.videos, externalId);
             }
 
             return anime;
+        }
+
+        private static void NormalizeVideoIds(List<Video> videos, string externalId)
+        {
+            if (videos == null) return;
+            foreach (var v in videos)
+            {
+                var season = v.season > 0 ? v.season : 1;
+                var episode = v.episode > 0 ? v.episode : 1;
+                v.id = $"{externalId}:{season}:{episode}";
+                v.season = season;
+                v.episode = episode;
+            }
         }
 
         private int GetSeasonNumber(dynamic relations, int animeId)

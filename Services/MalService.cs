@@ -282,13 +282,18 @@ namespace AnimeList.Services
                     {
                         anime.videos.Add(new Video
                         {
-                            id = $"{externalId}:{i}",
+                            id = $"{externalId}:1:{i}",
                             title = $"Episode {i}",
                             season = 1,
                             episode = i,
                         });
                     }
                 }
+
+                // Normalise every video id to the meta's external id space — the Kitsu
+                // fallback above leaves kitsu-prefixed ids attached, which Stremio rejects
+                // because they don't share a prefix with meta.id (renders as a blank page).
+                NormalizeVideoIds(anime.videos, externalId);
             }
 
             _logger.LogInformation(
@@ -700,6 +705,22 @@ namespace AnimeList.Services
         private static DateTime? ParseMalDate(string raw)
         {
             return DateTime.TryParse(raw, out var dt) ? dt : null;
+        }
+
+        // Stremio rejects (renders blank) when video.id doesn't share a prefix with meta.id.
+        // The Kitsu cross-service fallback leaves kitsu:N-prefixed ids in place, so rewrite
+        // every video id to the calling service's external id space.
+        private static void NormalizeVideoIds(List<Video> videos, string externalId)
+        {
+            if (videos == null) return;
+            foreach (var v in videos)
+            {
+                var season = v.season > 0 ? v.season : 1;
+                var episode = v.episode > 0 ? v.episode : 1;
+                v.id = $"{externalId}:{season}:{episode}";
+                v.season = season;
+                v.episode = episode;
+            }
         }
 
         /// <summary>
