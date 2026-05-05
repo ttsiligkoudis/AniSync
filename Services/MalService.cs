@@ -20,6 +20,7 @@ namespace AnimeList.Services
         private readonly IConfiguration _configuration;
         private readonly IKitsuService _kitsuService;
         private readonly ICinemetaService _cinemetaService;
+        private readonly ILogger<MalService> _logger;
 
         private const string MalApi = "https://api.myanimelist.net/v2";
 
@@ -49,7 +50,7 @@ namespace AnimeList.Services
 
         public MalService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService,
             IAnilistFallback anilistFallback, IConfiguration configuration, IKitsuService kitsuService,
-            ICinemetaService cinemetaService)
+            ICinemetaService cinemetaService, ILogger<MalService> logger)
         {
             _clientFactory = clientFactory;
             _mappingService = mappingService;
@@ -57,6 +58,7 @@ namespace AnimeList.Services
             _configuration = configuration;
             _kitsuService = kitsuService;
             _cinemetaService = cinemetaService;
+            _logger = logger;
         }
 
         public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true)
@@ -288,6 +290,14 @@ namespace AnimeList.Services
                     }
                 }
             }
+
+            _logger.LogInformation(
+                "MAL GetAnimeByIdAsync: id={Id} resolvedMal={Resolved} mediaType={MediaType} numEpisodes={NumEpisodes} " +
+                "mappingHasImdb={HasImdb} mappingHasKitsu={HasKitsu} mappingHasAnilist={HasAnilist} mappingSeason={Season} " +
+                "name={Name} videos={VideoCount}",
+                id, resolvedAnimeId, mediaType, (int?)json["num_episodes"],
+                !string.IsNullOrEmpty(mapping?.ImdbId), mapping?.KitsuId != null, mapping?.AnilistId != null, mapping?.Season,
+                anime.name, anime.videos.Count);
 
             return anime;
         }
