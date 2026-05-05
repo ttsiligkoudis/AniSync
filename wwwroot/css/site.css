@@ -78,31 +78,35 @@ main {
 
 .service-toggle .label.active {
     color: #fff;
-    background: rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.18);
 }
 
 .service-toggle.disabled .label {
     cursor: default;
 }
 
-/* Not-linked, not-primary: dim hard so the user can see at a glance that those
-   pills aren't actionable. Active pill keeps its full opacity + background pill
-   styling, identical to the login state. */
+/* Not-linked, not-primary: clearly unactionable. Block clicks too so accidental taps
+   on this dim area can't propagate up to a parent handler. */
 .service-toggle.disabled .label:not(.active):not(.linked-pill) {
-    opacity: 0.4;
+    opacity: 0.35;
+    pointer-events: none;
 }
 
 /* Linked-pill = a non-primary provider the user has linked. Tapping promotes it to
-   primary (after a confirm). Renders at full opacity in the same #666 colour as
-   login-state non-active pills, so the picker shape stays consistent across states.
-   The cursor change + hover bump hint that it's interactive, and the copy above
-   the picker spells it out. */
+   primary (after a confirm). Subtle pill background + thin outline so it visibly
+   reads as a button — flat dim text was too easy to mistake for "disabled". */
 .service-toggle.disabled .label.linked-pill {
     cursor: pointer;
+    color: #ccc;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.12);
 }
 
-.service-toggle.disabled .label.linked-pill:hover {
+.service-toggle.disabled .label.linked-pill:hover,
+.service-toggle.disabled .label.linked-pill:active {
     color: #fff;
+    background: rgba(255,255,255,0.08);
+    border-color: rgba(255,255,255,0.22);
 }
 
 /* Short hint that surfaces just above the pill row when the user has at least
