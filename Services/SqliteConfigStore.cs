@@ -76,6 +76,18 @@ namespace AnimeList.Services
                 alter.CommandText = "ALTER TABLE configs ADD COLUMN revision INTEGER NOT NULL DEFAULT 0";
                 alter.ExecuteNonQuery();
             }
+
+            // Idempotent migration: add `linked_tokens` for the multi-provider sync feature.
+            // Holds a JSON array of LinkedToken objects so writes (Manage Entry save/delete,
+            // auto-track) can fan out from the primary provider to additional linked accounts.
+            // Stored as JSON rather than a sibling table because there are at most two rows
+            // per user (the other two providers) and no query patterns benefit from a join.
+            if (!ColumnExists(conn, "configs", "linked_tokens"))
+            {
+                using var alter = conn.CreateCommand();
+                alter.CommandText = "ALTER TABLE configs ADD COLUMN linked_tokens TEXT";
+                alter.ExecuteNonQuery();
+            }
         }
 
         private static bool ColumnExists(SqliteConnection conn, string table, string column)
@@ -255,6 +267,70 @@ namespace AnimeList.Services
             cmd.Parameters.AddWithValue("$s", (int)tokenData.anime_service);
             cmd.Parameters.AddWithValue("$k", userKey);
             await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<List<LinkedToken>> GetLinkedTokensAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return [];
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT linked_tokens FROM configs WHERE uid = $uid LIMIT 1";
+            cmd.Parameters.AddWithValue("$uid", uid);
+            var json = await cmd.ExecuteScalarAsync() as string;
+            return DeserializeLinkedTokens(json);
+        }
+
+        public async Task SetLinkedTokenAsync(string uid, LinkedToken linked)
+        {
+            if (string.IsNullOrEmpty(uid) || linked == null) return;
+
+            // Read-modify-write — link/unlink is rare so we don't bother with row-level locking.
+            // Concurrent links for the same UID could lose one update, but the linking flow is
+            // user-driven (one click per provider) so the chance of collision is negligible.
+            var existing = await GetLinkedTokensAsync(uid);
+            var idx = existing.FindIndex(t => t.Service == linked.Service);
+            if (idx >= 0) existing[idx] = linked;
+            else existing.Add(linked);
+
+            await WriteLinkedTokensAsync(uid, existing);
+        }
+
+        public async Task RemoveLinkedTokenAsync(string uid, AnimeService service)
+        {
+            if (string.IsNullOrEmpty(uid)) return;
+
+            var existing = await GetLinkedTokensAsync(uid);
+            var removed = existing.RemoveAll(t => t.Service == service);
+            if (removed == 0) return;
+
+            await WriteLinkedTokensAsync(uid, existing);
+        }
+
+        private async Task WriteLinkedTokensAsync(string uid, List<LinkedToken> tokens)
+        {
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE configs
+                   SET linked_tokens = $j, updated_at = $u
+                 WHERE uid = $uid
+                """;
+            // Drop the column to NULL when the list is empty so we don't keep "[]" around
+            // forever after the user unlinks their last provider.
+            cmd.Parameters.AddWithValue("$j", tokens.Count == 0 ? (object)DBNull.Value : SerializeObject(tokens));
+            cmd.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$uid", uid);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        private static List<LinkedToken> DeserializeLinkedTokens(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return [];
+            try { return DeserializeObject<List<LinkedToken>>(json) ?? []; }
+            catch { return []; }
         }
 
         /// <summary>

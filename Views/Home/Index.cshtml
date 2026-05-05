@@ -59,6 +59,67 @@
         <button id="disconnectBtn" class="success-badge-action" title="Disconnect">✗</button>
     </span>
 
+    @if (!anonymousUser)
+    {
+        var linkedTokens = (List<AnimeList.Models.LinkedToken>)ViewBag.LinkedTokens ?? new();
+        var linkedByService = linkedTokens.ToDictionary(t => t.Service, t => t);
+        var allServices = new[] { AnimeService.Kitsu, AnimeService.Anilist, AnimeService.MyAnimeList };
+
+        <!-- ─── LINKED ACCOUNTS ─────────────────────────────────────────── -->
+        <section class="section-card">
+            <span class="section-title">Linked Accounts</span>
+            <p class="section-description">
+                Optional sync targets. When you save or auto-track an entry, AniSync writes
+                to your primary account first and then mirrors the change to every linked
+                provider it can map the anime onto.
+            </p>
+
+            <div class="linked-accounts">
+                @foreach (var svc in allServices)
+                {
+                    var label = svc == AnimeService.MyAnimeList ? "MyAnimeList" : svc.ToString();
+                    var isPrimary = svc == animeService;
+                    var linked = linkedByService.GetValueOrDefault(svc);
+                    <div class="linked-account-row" data-service="@((int)svc)" data-service-name="@svc">
+                        <div class="linked-account-name">@label</div>
+                        <div class="linked-account-actions">
+                            @if (isPrimary)
+                            {
+                                <span class="linked-account-badge linked-account-primary">Primary</span>
+                            }
+                            else if (linked != null)
+                            {
+                                <span class="linked-account-badge linked-account-connected">
+                                    @(linked.NeedsReauth ? "Needs re-auth" : "Linked")
+                                </span>
+                                <form method="post" action="/Auth/UnlinkProvider" class="linked-account-form">
+                                    <input type="hidden" name="service" value="@svc" />
+                                    <button type="submit" class="btn-ghost btn-ghost-sm">Unlink</button>
+                                </form>
+                            }
+                            else if (svc == AnimeService.Kitsu)
+                            {
+                                <button type="button" class="btn-ghost btn-ghost-sm linked-account-toggle">Link</button>
+                            }
+                            else
+                            {
+                                <a class="btn-ghost btn-ghost-sm" href="/Auth/LinkProvider?service=@svc">Link ↗</a>
+                            }
+                        </div>
+                        @if (svc == AnimeService.Kitsu && !isPrimary && linked == null)
+                        {
+                            <form method="post" action="/Auth/LinkKitsu" class="linked-account-creds linked-kitsu-form">
+                                <input type="text" name="username" placeholder="Kitsu username" required />
+                                <input type="password" name="password" placeholder="Kitsu password" required />
+                                <button type="submit" class="btn-primary-action btn-ghost-sm">Link Kitsu</button>
+                            </form>
+                        }
+                    </div>
+                }
+            </div>
+        </section>
+    }
+
     <!-- ─── CATALOGS ────────────────────────────────────────────────── -->
     <section class="section-card">
         <span class="section-title">Catalogs</span>
@@ -530,6 +591,14 @@ else
 
     $('#disconnectBtn').on('click', function () {
         window.location.href = '@Url.Action("Logout", "Auth")';
+    });
+
+    // ── Linked Accounts ───────────────────────────────────────────────
+    // The Kitsu link row shows a button by default; clicking expands the inline
+    // username/password form (Kitsu uses password-grant, no OAuth redirect).
+    $('.linked-account-toggle').on('click', function () {
+        var $row = $(this).closest('.linked-account-row');
+        $row.find('.linked-kitsu-form').toggleClass('expanded');
     });
 
     // ── Copy manifest URL ─────────────────────────────────────────────

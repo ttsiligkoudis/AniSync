@@ -16,6 +16,11 @@ namespace AnimeList.Controllers
         // and, for MAL specifically, the PKCE verifier.
         private const string OauthServiceKey = "OauthService";
         private const string MalCodeVerifierKey = "MalCodeVerifier";
+        // Distinguishes a primary login from a link-additional-provider flow — both go
+        // through /Auth/Callback for OAuth providers, and we need to know which on return.
+        private const string OauthFlowKey = "OauthFlow";
+        private const string OauthFlowLogin = "Login";
+        private const string OauthFlowLink = "Link";
 
         public AuthController(ITokenService tokenService, IHttpContextAccessor httpContextAccessor, IConfigStore configStore, IConfiguration configuration)
         {
@@ -42,29 +47,12 @@ namespace AnimeList.Controllers
             else if (animeService == AnimeService.Anilist)
             {
                 HttpContext.Session.SetString(OauthServiceKey, AnimeService.Anilist.ToString());
+                HttpContext.Session.SetString(OauthFlowKey, OauthFlowLogin);
                 return Redirect($"https://anilist.co/api/v2/oauth/authorize?client_id={clientId}&response_type=code");
             }
             else if (animeService == AnimeService.MyAnimeList)
             {
-                var malClientId = _configuration["Mal:ClientId"];
-                var malRedirectUri = _configuration["Mal:RedirectUri"];
-                if (string.IsNullOrEmpty(malClientId) || string.IsNullOrEmpty(malRedirectUri))
-                    return BadRequest("MyAnimeList client is not configured. Set Mal:ClientId and Mal:RedirectUri.");
-
-                // MAL only supports code_challenge_method=plain, so the verifier and the
-                // challenge are the same value. Stash the verifier in the session so the
-                // shared /Auth/Callback can finish the exchange.
-                var verifier = GenerateCodeVerifier();
-                HttpContext.Session.SetString(OauthServiceKey, AnimeService.MyAnimeList.ToString());
-                HttpContext.Session.SetString(MalCodeVerifierKey, verifier);
-
-                var url =
-                    "https://myanimelist.net/v1/oauth2/authorize" +
-                    $"?response_type=code&client_id={Uri.EscapeDataString(malClientId)}" +
-                    $"&code_challenge={Uri.EscapeDataString(verifier)}" +
-                    "&code_challenge_method=plain" +
-                    $"&redirect_uri={Uri.EscapeDataString(malRedirectUri)}";
-                return Redirect(url);
+                return BeginMalOauth(OauthFlowLogin) ?? RedirectToAction("Index", "Home");
             }
             else
             {
@@ -74,28 +62,169 @@ namespace AnimeList.Controllers
             }
         }
 
+        /// <summary>
+        /// Builds the MAL authorize redirect (with PKCE), tagging the session with the
+        /// supplied flow ("Login" or "Link") so /Auth/Callback knows which side to land on.
+        /// Returns the redirect, or a BadRequest when MAL credentials aren't configured.
+        /// </summary>
+        private IActionResult BeginMalOauth(string flow)
+        {
+            var malClientId = _configuration["Mal:ClientId"];
+            var malRedirectUri = _configuration["Mal:RedirectUri"];
+            if (string.IsNullOrEmpty(malClientId) || string.IsNullOrEmpty(malRedirectUri))
+                return BadRequest("MyAnimeList client is not configured. Set Mal:ClientId and Mal:RedirectUri.");
+
+            // MAL only supports code_challenge_method=plain, so the verifier and the
+            // challenge are the same value. Stash the verifier in the session so the
+            // shared /Auth/Callback can finish the exchange.
+            var verifier = GenerateCodeVerifier();
+            HttpContext.Session.SetString(OauthServiceKey, AnimeService.MyAnimeList.ToString());
+            HttpContext.Session.SetString(OauthFlowKey, flow);
+            HttpContext.Session.SetString(MalCodeVerifierKey, verifier);
+
+            var url =
+                "https://myanimelist.net/v1/oauth2/authorize" +
+                $"?response_type=code&client_id={Uri.EscapeDataString(malClientId)}" +
+                $"&code_challenge={Uri.EscapeDataString(verifier)}" +
+                "&code_challenge_method=plain" +
+                $"&redirect_uri={Uri.EscapeDataString(malRedirectUri)}";
+            return Redirect(url);
+        }
+
         [HttpGet]
         public async Task<IActionResult> Callback(string code)
         {
-            // Read which provider initiated the flow before clearing the session — both
-            // AniList and MAL hit this endpoint with the same query shape.
+            // Read flow + provider before clearing — both AniList and MAL share this URL,
+            // and the link-additional-provider flow lands here too.
             var oauthService = HttpContext.Session.GetString(OauthServiceKey);
+            var oauthFlow = HttpContext.Session.GetString(OauthFlowKey);
             var malVerifier = HttpContext.Session.GetString(MalCodeVerifierKey);
 
-            HttpContext.Session.Remove("AccessToken");
             HttpContext.Session.Remove(OauthServiceKey);
+            HttpContext.Session.Remove(OauthFlowKey);
             HttpContext.Session.Remove(MalCodeVerifierKey);
 
+            var isLink = oauthFlow == OauthFlowLink;
+            // Capture the primary's session token *before* the login path clears it. The
+            // link path needs it to find the primary's UID and attach the linked token.
+            var primarySession = HttpContext.Session.GetString("AccessToken");
+
+            if (!isLink)
+                HttpContext.Session.Remove("AccessToken");
+
+            TokenData linkedTokenData = null;
             if (oauthService == AnimeService.MyAnimeList.ToString())
-            {
-                await _tokenService.GetAccessTokenByMalCodeAsync(code, malVerifier);
-            }
+                linkedTokenData = await _tokenService.GetAccessTokenByMalCodeAsync(code, malVerifier, setSession: !isLink);
             else
-            {
-                await _tokenService.GetAccessTokenByCodeAsync(code);
-            }
+                linkedTokenData = await _tokenService.GetAccessTokenByCodeAsync(code, setSession: !isLink);
+
+            if (isLink && linkedTokenData != null && !string.IsNullOrEmpty(primarySession))
+                await PersistLinkedTokenAsync(primarySession, linkedTokenData);
 
             return RedirectToAction("Index", "Home");
+        }
+
+        /// <summary>
+        /// Resolves the primary user's UID via UpsertAsync (idempotent — same UID across
+        /// re-logins) and stores the freshly-exchanged linked token under it. The store
+        /// keys linked tokens on (uid, service) so re-linking the same provider replaces
+        /// the prior token cleanly.
+        /// </summary>
+        private async Task PersistLinkedTokenAsync(string primarySessionJson, TokenData linkedTokenData)
+        {
+            var primary = DeserializeObject<TokenData>(primarySessionJson);
+            if (primary == null || primary.anonymousUser) return;
+            // Don't allow linking the same service the user is logged in with — the primary
+            // already covers it and silently overwriting that path would be confusing.
+            if (linkedTokenData.anime_service == primary.anime_service) return;
+
+            var uid = await _configStore.UpsertAsync(primary);
+            await _configStore.SetLinkedTokenAsync(uid, new LinkedToken
+            {
+                Service = linkedTokenData.anime_service,
+                TokenData = linkedTokenData,
+                NeedsReauth = false,
+            });
+        }
+
+        /// <summary>
+        /// Starts an OAuth flow that will store the resulting token as a linked provider
+        /// rather than the primary login. Requires the user to already be logged in.
+        /// </summary>
+        [HttpGet]
+        public IActionResult LinkProvider(AnimeService service)
+        {
+            var primary = GetSessionPrimary();
+            if (primary == null) return BadRequest("Log in with a primary provider first.");
+            if (primary.anime_service == service) return BadRequest("This provider is already your primary account.");
+
+            if (service == AnimeService.Anilist)
+            {
+                HttpContext.Session.SetString(OauthServiceKey, AnimeService.Anilist.ToString());
+                HttpContext.Session.SetString(OauthFlowKey, OauthFlowLink);
+                return Redirect($"https://anilist.co/api/v2/oauth/authorize?client_id={clientId}&response_type=code");
+            }
+
+            if (service == AnimeService.MyAnimeList)
+            {
+                return BeginMalOauth(OauthFlowLink);
+            }
+
+            // Kitsu uses password grant — UI posts to /Auth/LinkKitsu instead.
+            return BadRequest("Use /Auth/LinkKitsu for Kitsu.");
+        }
+
+        /// <summary>
+        /// Links a Kitsu account using the username/password grant Kitsu requires. Posted
+        /// from the inline form on the configure page.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> LinkKitsu(string username, string password)
+        {
+            var primary = GetSessionPrimary();
+            if (primary == null) return BadRequest("Log in with a primary provider first.");
+            if (primary.anime_service == AnimeService.Kitsu) return BadRequest("This provider is already your primary account.");
+
+            var linked = await _tokenService.GetAccessTokenByCredsAsync(username, password, setContext: false);
+            if (linked == null || string.IsNullOrEmpty(linked.access_token))
+                return BadRequest("Kitsu credentials were rejected.");
+
+            var uid = await _configStore.UpsertAsync(primary);
+            await _configStore.SetLinkedTokenAsync(uid, new LinkedToken
+            {
+                Service = AnimeService.Kitsu,
+                TokenData = linked,
+                NeedsReauth = false,
+            });
+
+            return RedirectToAction("Index", "Home");
+        }
+
+        /// <summary>
+        /// Removes a linked provider for the currently-authenticated primary user. POST so
+        /// it can't be triggered by a CSRF-style image-tag GET.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> UnlinkProvider(AnimeService service)
+        {
+            var primary = GetSessionPrimary();
+            if (primary == null) return BadRequest("Log in with a primary provider first.");
+
+            var uid = await _configStore.UpsertAsync(primary);
+            await _configStore.RemoveLinkedTokenAsync(uid, service);
+            return RedirectToAction("Index", "Home");
+        }
+
+        /// <summary>
+        /// Reads and deserialises the primary's tokenData from the session. Returns null
+        /// if there's no session, the user is anonymous, or deserialisation fails.
+        /// </summary>
+        private TokenData GetSessionPrimary()
+        {
+            var sessionStr = HttpContext.Session.GetString("AccessToken");
+            if (string.IsNullOrEmpty(sessionStr)) return null;
+            var token = DeserializeObject<TokenData>(sessionStr);
+            return token == null || token.anonymousUser ? null : token;
         }
 
         public async Task<IActionResult> Logout()

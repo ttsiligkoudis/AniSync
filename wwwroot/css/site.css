@@ -540,6 +540,93 @@ main {
 
 .btn-ghost svg { flex-shrink: 0; }
 
+/* Compact ghost-button for inline actions like the Linked Accounts row, where
+   the default flex:1 1 8rem would stretch a tiny "Unlink" pill across the row. */
+.btn-ghost-sm {
+    flex: 0 0 auto;
+    padding: 0.4rem 0.85rem;
+    font-size: 0.82rem;
+    border-radius: 8px;
+}
+
+/* ── Linked Accounts ── */
+.linked-accounts {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.linked-account-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.9rem;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+}
+
+.linked-account-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #ddd;
+}
+
+.linked-account-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.linked-account-form {
+    display: inline;
+    margin: 0;
+}
+
+.linked-account-badge {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.linked-account-primary {
+    color: #aaa;
+    background: rgba(255,255,255,0.06);
+}
+
+.linked-account-connected {
+    color: #6fd97a;
+    background: rgba(111, 217, 122, 0.12);
+}
+
+.linked-account-creds {
+    grid-column: 1 / -1;
+    display: none;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+
+.linked-account-creds.expanded {
+    display: flex;
+}
+
+.linked-account-creds input[type="text"],
+.linked-account-creds input[type="password"] {
+    padding: 0.5rem 0.75rem;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    color: #eee;
+    font-family: inherit;
+    font-size: 0.9rem;
+}
+
 .btn-danger-pill {
     flex: 1 1 9rem;
     padding: 0.6rem 1.25rem;

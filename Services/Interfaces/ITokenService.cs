@@ -9,7 +9,13 @@ namespace AnimeList.Services.Interfaces
         Task RemoveCachedUser();
 
         #region Anilist
-        Task<TokenData> GetAccessTokenByCodeAsync(string code);
+        /// <summary>
+        /// Exchanges an AniList authorization code for an access/refresh token pair.
+        /// Setting <paramref name="setSession"/> false skips writing the result to the
+        /// session — used by the link-provider flow so a linked AniList account doesn't
+        /// overwrite the primary login.
+        /// </summary>
+        Task<TokenData> GetAccessTokenByCodeAsync(string code, bool setSession = true);
         #endregion
 
         #region Kitsu
@@ -19,10 +25,10 @@ namespace AnimeList.Services.Interfaces
         #region MyAnimeList
         /// <summary>
         /// Exchanges a MyAnimeList authorization code (with the original PKCE verifier) for an
-        /// access/refresh token pair. Persists the resulting <see cref="TokenData"/> to the
-        /// session so the caller can return the user to the configure page.
+        /// access/refresh token pair. Setting <paramref name="setSession"/> false skips the
+        /// session write — used by the link-provider flow.
         /// </summary>
-        Task<TokenData> GetAccessTokenByMalCodeAsync(string code, string codeVerifier);
+        Task<TokenData> GetAccessTokenByMalCodeAsync(string code, string codeVerifier, bool setSession = true);
         #endregion
     }
 }

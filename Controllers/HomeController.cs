@@ -41,6 +41,9 @@ public class HomeController : Controller
                 ViewBag.ConfigUid = uid;
                 // Used as cache-busting bytes in the install URL — see Index.cshtml's JS.
                 ViewBag.ConfigRevision = await _configStore.GetRevisionAsync(uid);
+                // Linked secondary accounts the multi-provider sync will fan writes out to.
+                // The view renders a per-service Link / Unlink row from this list.
+                ViewBag.LinkedTokens = await _configStore.GetLinkedTokensAsync(uid);
             }
             else
             {

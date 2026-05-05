@@ -56,5 +56,22 @@ namespace AnimeList.Services.Interfaces
         /// the Disconnect / Logout flow so a sign-out also clears the persisted install.
         /// </summary>
         Task DeleteByUserAsync(TokenData tokenData);
+
+        /// <summary>
+        /// Reads the additional (non-primary) provider tokens linked to a UID. Empty list if
+        /// the UID is unknown or has no links. Used by the multi-provider sync feature.
+        /// </summary>
+        Task<List<LinkedToken>> GetLinkedTokensAsync(string uid);
+
+        /// <summary>
+        /// Inserts or updates a linked-provider token for a UID, keyed on
+        /// <see cref="LinkedToken.Service"/>. Replaces any existing token for the same service.
+        /// </summary>
+        Task SetLinkedTokenAsync(string uid, LinkedToken linked);
+
+        /// <summary>
+        /// Removes the linked token for a (uid, service) pair. No-op if no matching link exists.
+        /// </summary>
+        Task RemoveLinkedTokenAsync(string uid, AnimeService service);
     }
 }

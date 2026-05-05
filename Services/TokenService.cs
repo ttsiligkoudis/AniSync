@@ -161,7 +161,7 @@ namespace AnimeList.Services
         }
 
         #region Anilist
-        public async Task<TokenData> GetAccessTokenByCodeAsync(string code)
+        public async Task<TokenData> GetAccessTokenByCodeAsync(string code, bool setSession = true)
         {
             var client = _clientFactory.CreateClient();
             var response = await client.PostAsync("https://anilist.co/api/v2/oauth/token", new FormUrlEncodedContent(new[]
@@ -173,7 +173,7 @@ namespace AnimeList.Services
             new KeyValuePair<string, string>("code", code)
             }));
 
-            return await ParseAnilistTokenResponseAsync(response);
+            return await ParseAnilistTokenResponseAsync(response, setSession);
         }
 
         private async Task<TokenData> RefreshAccessToken(string refreshToken)
@@ -188,10 +188,12 @@ namespace AnimeList.Services
 
             var response = await _clientFactory.CreateClient().PostAsync("https://anilist.co/api/v2/oauth/token", requestData);
 
-            return await ParseAnilistTokenResponseAsync(response);
+            // Refresh-driven exchange: never overwrites the active session — that's reserved
+            // for the initial login response.
+            return await ParseAnilistTokenResponseAsync(response, setSession: false);
         }
 
-        private async Task<TokenData> ParseAnilistTokenResponseAsync(HttpResponseMessage response)
+        private async Task<TokenData> ParseAnilistTokenResponseAsync(HttpResponseMessage response, bool setSession)
         {
             if (!response.IsSuccessStatusCode) return null;
 
@@ -204,7 +206,8 @@ namespace AnimeList.Services
                 var handler = new JwtSecurityTokenHandler();
                 var jwtToken = handler.ReadJwtToken(tokenData.access_token);
                 tokenData.user_id = jwtToken.Claims.FirstOrDefault(c => c.Type == "sub")?.Value;
-                _httpContextAccessor.HttpContext?.Session.SetString("AccessToken", SerializeObject(tokenData));
+                if (setSession)
+                    _httpContextAccessor.HttpContext?.Session.SetString("AccessToken", SerializeObject(tokenData));
             }
 
             return tokenData;
@@ -275,7 +278,7 @@ namespace AnimeList.Services
         #endregion Kitsu
 
         #region MyAnimeList
-        public async Task<TokenData> GetAccessTokenByMalCodeAsync(string code, string codeVerifier)
+        public async Task<TokenData> GetAccessTokenByMalCodeAsync(string code, string codeVerifier, bool setSession = true)
         {
             var fields = new List<KeyValuePair<string, string>>
             {
@@ -293,7 +296,10 @@ namespace AnimeList.Services
             var response = await _clientFactory.CreateClient()
                 .PostAsync("https://myanimelist.net/v1/oauth2/token", new FormUrlEncodedContent(fields));
 
-            return await ParseMalTokenResponseAsync(response, persistSession: true);
+            // Initial code-exchange: always fetch identity. setSession is decoupled because
+            // the link-provider flow wants the user info but must not overwrite the primary's
+            // session entry.
+            return await ParseMalTokenResponseAsync(response, fetchUser: true, setSession: setSession);
         }
 
         private async Task<TokenData> RefreshMalAccessToken(string refreshToken)
@@ -310,10 +316,12 @@ namespace AnimeList.Services
             var response = await _clientFactory.CreateClient()
                 .PostAsync("https://myanimelist.net/v1/oauth2/token", new FormUrlEncodedContent(fields));
 
-            return await ParseMalTokenResponseAsync(response, persistSession: false);
+            // Refresh: don't re-fetch identity (the caller patches user_id/username back
+            // from the prior token) and never write to the session.
+            return await ParseMalTokenResponseAsync(response, fetchUser: false, setSession: false);
         }
 
-        private async Task<TokenData> ParseMalTokenResponseAsync(HttpResponseMessage response, bool persistSession)
+        private async Task<TokenData> ParseMalTokenResponseAsync(HttpResponseMessage response, bool fetchUser, bool setSession)
         {
             if (!response.IsSuccessStatusCode) return null;
 
@@ -324,15 +332,15 @@ namespace AnimeList.Services
             tokenData.anime_service = AnimeService.MyAnimeList;
             tokenData.expiration_date = DateTime.UtcNow.AddSeconds(tokenData.expires_in ?? 0);
 
-            // Only the initial code-exchange needs to fetch /users/@me — refresh responses
-            // omit the user, but the caller patches identity back in from the prior token.
-            if (persistSession)
+            if (fetchUser)
             {
                 var (userId, userName) = await GetMalUserAsync(tokenData.access_token);
                 tokenData.user_id = userId;
                 tokenData.username = userName;
-                _httpContextAccessor.HttpContext?.Session.SetString("AccessToken", SerializeObject(tokenData));
             }
+
+            if (setSession)
+                _httpContextAccessor.HttpContext?.Session.SetString("AccessToken", SerializeObject(tokenData));
 
             return tokenData;
         }
