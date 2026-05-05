@@ -619,7 +619,6 @@ else
         // reloads with the new state.
         if ($('#serviceToggle').hasClass('disabled')) {
             if (!$pill.hasClass('linked-pill')) return;
-            var name = $pill.attr('data-service-name');
             var svcEnum = $pill.attr('data-service-name');
             var label = serviceLabel(parseInt($pill.attr('data-service'), 10));
             if (!confirm('Switch your primary account to ' + label + '? Future writes will originate from this account first.')) return;
