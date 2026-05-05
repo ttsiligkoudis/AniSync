@@ -49,5 +49,10 @@
         // JS flips the bit when the toggle is unchecked.
         public bool hideManageEntry { get; set; }
         public bool disableAutoTrack { get; set; }
+        // Default-off (so default-zero installs = grouping ON), surfaced as the positive
+        // "Group anime seasons" toggle. When set, catalog cards use service-native ids
+        // (kitsu:N / anilist:N / mal:N) instead of the IMDb fallback that collapses every
+        // cour of a franchise into one entry.
+        public bool disableSeasonGrouping { get; set; }
     }
 }

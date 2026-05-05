@@ -404,6 +404,7 @@ namespace AnimeList
             cfg.hideManageEntry = (flags3 & 0x04) != 0;
             cfg.disableAutoTrack = (flags3 & 0x08) != 0;
             cfg.discoverOnlyAiring = (flags3 & 0x10) != 0;
+            cfg.disableSeasonGrouping = (flags3 & 0x20) != 0;
         }
 
         private static Configuration DecodeBinaryConfig(byte[] data, int headerLen, byte flags1, byte flags2, byte flags3)

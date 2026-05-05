@@ -56,7 +56,7 @@ namespace AnimeList.Services
             _kitsuService = kitsuService;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true)
         {
             // MAL has no airing schedule endpoint, so use the AniList fallback like Kitsu does.
             if (list == ListType.Airing)
@@ -72,7 +72,7 @@ namespace AnimeList.Services
             // Single-anime user-list lookup: MAL's /users/@me/animelist endpoint can't filter
             // by anime id, so hit the anime detail with my_list_status and synthesize the result.
             if (isUserList && !string.IsNullOrEmpty(resolvedAnimeId))
-                return await GetSingleUserListEntryAsync(resolvedAnimeId, tokenData);
+                return await GetSingleUserListEntryAsync(resolvedAnimeId, tokenData, groupSeasons);
 
             // For "browse my list" requests we walk every page server-side and dedup across
             // all of them. The user-list catalogs no longer carry a `skip` extra in the
@@ -132,7 +132,7 @@ namespace AnimeList.Services
                     if (list != ListType.Seasonal && !string.IsNullOrEmpty(genre) && !MatchesGenre(node, genre))
                         continue;
 
-                    var meta = await BuildMetaAsync(node, listStatus);
+                    var meta = await BuildMetaAsync(node, listStatus, groupSeasons);
                     if (meta == null) continue;
 
                     if (seenIds.TryGetValue(meta.id, out var existing))
@@ -153,7 +153,7 @@ namespace AnimeList.Services
             return seenIds.Values.ToList();
         }
 
-        public async Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData)
+        public async Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData, bool groupSeasons = true)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(id, AnimeService.MyAnimeList);
             if (string.IsNullOrEmpty(resolvedAnimeId)) return null;
@@ -169,9 +169,14 @@ namespace AnimeList.Services
 
             var mapping = await _mappingService.GetMalMapping($"{malPrefix}{resolvedAnimeId}");
 
-            var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                             !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
-                             $"{malPrefix}{(string)json["id"]}";
+            // Same toggle as the catalog path: when grouping is on, prefer cross-service ids
+            // so meta.id matches what the user clicked from a grouped catalog. When off, keep
+            // the response in this service's native id space.
+            var externalId = groupSeasons
+                ? (!string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                    !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
+                    $"{malPrefix}{(string)json["id"]}")
+                : $"{malPrefix}{(string)json["id"]}";
 
             var mediaType = (string)json["media_type"];
             var isMovie = IsMovieFormat(mediaType);
@@ -428,7 +433,7 @@ namespace AnimeList.Services
             throw new HttpRequestException($"MyAnimeList {op} returned {(int)response.StatusCode}");
         }
 
-        private async Task<Meta> BuildMetaAsync(JObject node, JObject listStatus)
+        private async Task<Meta> BuildMetaAsync(JObject node, JObject listStatus, bool groupSeasons = true)
         {
             var malIdRaw = node["id"];
             if (malIdRaw == null) return null;
@@ -436,9 +441,15 @@ namespace AnimeList.Services
 
             var mapping = await _mappingService.GetMalMapping($"{malPrefix}{malIdStr}");
 
-            var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                             !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
-                             $"{malPrefix}{malIdStr}";
+            // groupSeasons=true → fall through to IMDb / TMDB before the native MAL id so
+            // multiple cours of a franchise collapse to one card via the dedup step in the
+            // caller. When the user disables grouping, every cour gets its own native id and
+            // dedup is a no-op since native ids don't collide.
+            var externalId = groupSeasons
+                ? (!string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                    !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
+                    $"{malPrefix}{malIdStr}")
+                : $"{malPrefix}{malIdStr}";
 
             var mediaType = (string)node["media_type"];
             var isMovie = IsMovieFormat(mediaType);
@@ -507,7 +518,7 @@ namespace AnimeList.Services
         /// MAL doesn't have an animelist?anime_id filter, so this is the only round-trip that
         /// gives us "is this on the user's list, and at what status?" for a known anime.
         /// </summary>
-        private async Task<List<Meta>> GetSingleUserListEntryAsync(string resolvedMalId, TokenData tokenData)
+        private async Task<List<Meta>> GetSingleUserListEntryAsync(string resolvedMalId, TokenData tokenData, bool groupSeasons = true)
         {
             // The detail endpoint returns the user's list metadata under `my_list_status` (not
             // `list_status` like the user-list endpoint), so the fields spec uses MyListStatusFields.
@@ -520,7 +531,7 @@ namespace AnimeList.Services
             if (listStatus == null) return [];
 
             await _mappingService.EnsureLoadedAsync();
-            var meta = await BuildMetaAsync(json, listStatus);
+            var meta = await BuildMetaAsync(json, listStatus, groupSeasons);
             return meta == null ? [] : [meta];
         }
 

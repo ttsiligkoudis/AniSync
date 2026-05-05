@@ -16,8 +16,9 @@ namespace AnimeList.Controllers
         private readonly IAnimeMappingService _mappingService;
         private readonly ISyncService _syncService;
         private readonly IFillerListService _fillerListService;
+        private readonly IConfigStore _configStore;
 
-        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService, ISyncService syncService, IFillerListService fillerListService)
+        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService, ISyncService syncService, IFillerListService fillerListService, IConfigStore configStore)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
@@ -28,11 +29,16 @@ namespace AnimeList.Controllers
             _mappingService = mappingService;
             _syncService = syncService;
             _fillerListService = fillerListService;
+            _configStore = configStore;
         }
 
         private async Task<(dynamic?, bool)> GetByIDInternal(string config, string id, bool deserialize = false)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync(config);
+            // Mirror CatalogController so meta.id stays in the same id space the
+            // catalog emitted — clicking through to a card opens the matching detail.
+            var configuration = await ResolveConfigAsync(config, _configStore);
+            var groupSeasons = configuration?.disableSeasonGrouping != true;
 
             dynamic result = null;
 
@@ -65,7 +71,7 @@ namespace AnimeList.Controllers
                 result = await _tmdbService.GetAnimeByIdAsync(id, tokenData);
             else if (id.StartsWith(kitsuPrefix))
             {
-                result = await _kitsuService.GetAnimeByIdAsync(id, tokenData);
+                result = await _kitsuService.GetAnimeByIdAsync(id, tokenData, groupSeasons);
 
                 // Cross-service fallback: Kitsu can return null for entries that exist in
                 // Stremio's catalogs but are missing / age-restricted / wrong-id on Kitsu's
@@ -75,24 +81,24 @@ namespace AnimeList.Controllers
                 {
                     var mapping = await _mappingService.GetKitsuMapping(id);
                     if (mapping?.AnilistId != null)
-                        result = await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData);
+                        result = await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData, groupSeasons);
                 }
             }
             else if (id.StartsWith(anilistPrefix))
             {
-                result = await _anilistService.GetAnimeByIdAsync(id, tokenData);
+                result = await _anilistService.GetAnimeByIdAsync(id, tokenData, groupSeasons);
 
                 // Symmetric fallback for AniList primary failures.
                 if (result == null)
                 {
                     var mapping = await _mappingService.GetAnilistMapping(id);
                     if (mapping?.KitsuId != null)
-                        result = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData);
+                        result = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData, groupSeasons);
                 }
             }
             else if (id.StartsWith(malPrefix))
             {
-                result = await _malService.GetAnimeByIdAsync(id, tokenData);
+                result = await _malService.GetAnimeByIdAsync(id, tokenData, groupSeasons);
 
                 // Same fallback shape as Kitsu/AniList — if MAL has nothing for the id,
                 // try whichever sister service has a mapping so the page still renders.
@@ -100,9 +106,9 @@ namespace AnimeList.Controllers
                 {
                     var mapping = await _mappingService.GetMalMapping(id);
                     if (mapping?.AnilistId != null)
-                        result = await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData);
+                        result = await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData, groupSeasons);
                     else if (mapping?.KitsuId != null)
-                        result = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData);
+                        result = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData, groupSeasons);
                 }
             }
 

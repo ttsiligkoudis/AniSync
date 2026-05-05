@@ -109,6 +109,7 @@ public class HomeController : Controller
             // "Auto-track progress") so flip the bool here.
             ViewBag.ShowManageEntry = configuration.hideManageEntry != true;
             ViewBag.AutoTrackProgress = configuration.disableAutoTrack != true;
+            ViewBag.GroupSeasons = configuration.disableSeasonGrouping != true;
         }
 
         return View();

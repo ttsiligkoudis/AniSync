@@ -30,7 +30,7 @@ namespace AnimeList.Services
             _anilistFallback = anilistFallback;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true)
         {
             // Kitsu has no native airing-schedule endpoint; delegate to the AniList fallback
             // and translate ids back to Kitsu for downstream meta/manage flows.
@@ -196,9 +196,15 @@ namespace AnimeList.Services
 
                 var mapping = await _mappingService.GetKitsuMapping(animeKitsuId);
 
-                var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                                 !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
-                                 $"{kitsuPrefix}{animeKitsuId}";
+                // groupSeasons=true → fall through to IMDb / TMDB before native so multiple
+                // cours of a franchise collapse to one card via the dedup step below. When the
+                // user disables grouping, every cour gets its own native id and dedup is a
+                // no-op since native ids don't collide.
+                var externalId = groupSeasons
+                    ? (!string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                       !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
+                       $"{kitsuPrefix}{animeKitsuId}")
+                    : $"{kitsuPrefix}{animeKitsuId}";
 
                 var subtype = (string)anime["attributes"]?["subtype"];
                 var isMovie = IsMovieFormat(subtype);
@@ -226,7 +232,7 @@ namespace AnimeList.Services
             }
         }
 
-        public async Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData)
+        public async Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData, bool groupSeasons = true)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(id, AnimeService.Kitsu);
             if (string.IsNullOrEmpty(resolvedAnimeId)) return null;
@@ -252,9 +258,14 @@ namespace AnimeList.Services
 
             var mapping = await _mappingService.GetKitsuMapping(resolvedAnimeId);
 
-            var externalId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                             !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
-                             $"{kitsuPrefix}{(string)entry["id"]}";
+            // Same toggle as the catalog path: when grouping is on, prefer cross-service ids
+            // so meta.id matches what the user clicked from a grouped catalog. When off, keep
+            // the response in this service's native id space.
+            var externalId = groupSeasons
+                ? (!string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                   !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
+                   $"{kitsuPrefix}{(string)entry["id"]}")
+                : $"{kitsuPrefix}{(string)entry["id"]}";
 
             var subtype = (string)entry["attributes"]?["subtype"];
             var isMovie = IsMovieFormat(subtype);

@@ -10,13 +10,15 @@ namespace AnimeList.Controllers
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
+        private readonly IConfigStore _configStore;
 
-        public CatalogController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService)
+        public CatalogController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, IConfigStore configStore)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
+            _configStore = configStore;
         }
 
         [HttpGet("{config}/[controller]/{metaType}/{listType}/{extras}.json")]
@@ -43,11 +45,17 @@ namespace AnimeList.Controllers
                 return new JsonResult(new { metas = ExpiredMetas() });
             }
 
+            // The "Group anime seasons" toggle defaults ON (disableSeasonGrouping=false);
+            // when the user opts out, services emit their native id per cour instead of
+            // collapsing a franchise via the IMDb/TMDB cross-service mapping.
+            var configuration = await ResolveConfigAsync(config, _configStore);
+            var groupSeasons = configuration?.disableSeasonGrouping != true;
+
             var metas = animeService switch
             {
-                AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort),
-                _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort),
+                AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasons),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasons),
+                _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasons),
             };
 
             return new JsonResult(new { metas });

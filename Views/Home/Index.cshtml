@@ -36,6 +36,7 @@
     bool showExternalStreams = ViewBag.ShowExternalStreams ?? false;
     bool showManageEntry = ViewBag.ShowManageEntry ?? true;
     bool autoTrackProgress = ViewBag.AutoTrackProgress ?? true;
+    bool groupSeasons = ViewBag.GroupSeasons ?? true;
 
     // Linked secondary providers (multi-provider sync). Defined here so both the service
     // picker (which lights up linked pills as click-to-promote-to-primary buttons) and
@@ -313,6 +314,22 @@
                 <span class="slider"></span>
             </label>
         </div>
+
+        @* Group multi-cour franchises into a single card via the IMDb / TMDB cross-service
+           mapping. Disable this to surface every cour as its own card with the service-native
+           id (kitsu:N / anilist:N / mal:N). *@
+        <div class="streams-grid">
+            <div class="stream-option">
+                <div class="option-name-wrap">
+                    <span class="option-name">Group anime seasons</span>
+                    <span class="option-name-sub">Collapse multi-cour franchises into a single catalog card. Off shows every cour separately.</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="groupSeasons" @(groupSeasons ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
     </section>
 
     <!-- ─── STREAMS ─────────────────────────────────────────────────── -->
@@ -556,6 +573,10 @@ else
         var $autoTrack = $('#autoTrackProgress');
         if ($autoTrack.length && !$autoTrack.is(':checked')) flags3 |= 0x08;
         if ($('#discoverOnlyAiring').is(':checked'))     flags3 |= 0x10;
+        // Inverse bit again: default-checked "Group anime seasons" leaves the bit at 0,
+        // so legacy installs (zero flags) keep the existing IMDb-grouped behavior.
+        var $group = $('#groupSeasons');
+        if ($group.length && !$group.is(':checked'))     flags3 |= 0x20;
 
         return { flags1: flags1, flags2: flags2, flags3: flags3 };
     }
@@ -604,7 +625,7 @@ else
     // Catalog + stream toggles — recompute the manifest URL whenever flags change. (For
     // v5 the path bytes don't actually change since flags live in DB, but we still call
     // refreshUrls() to keep the path in sync after a SaveConfig response bumps revision.)
-    $('.catalogCheck, .discoverCheck, #showExternalStreams, #showManageEntry, #autoTrackProgress')
+    $('.catalogCheck, .discoverCheck, #showExternalStreams, #showManageEntry, #autoTrackProgress, #groupSeasons')
         .on('change', refreshUrls);
 
     // When an enable checkbox is toggled, enable/disable its discover-only sibling
