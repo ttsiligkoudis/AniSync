@@ -456,16 +456,18 @@ namespace AnimeList
         }
 
         /// <summary>
-        /// Walks a JSON object along the given path, returning null at the first missing or null segment.
-        /// Works on Newtonsoft <see cref="JToken"/> trees (the runtime type of <c>DeserializeObject&lt;dynamic&gt;</c>).
+        /// Walks a JSON object along the given path, returning null at the first missing,
+        /// JSON-null, or non-object segment. Newtonsoft's <see cref="JToken"/> indexer throws
+        /// when invoked on a <see cref="JValue"/>, so we gate every step on <c>is JObject</c>
+        /// rather than just null-checking.
         /// </summary>
         public static JToken SafeGet(JToken token, params string[] path)
         {
             var current = token;
             foreach (var part in path)
             {
-                if (current == null || current.Type == JTokenType.Null) return null;
-                current = current[part];
+                if (current is not JObject obj) return null;
+                current = obj[part];
             }
             return current is { Type: JTokenType.Null } ? null : current;
         }

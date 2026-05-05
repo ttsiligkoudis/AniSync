@@ -69,7 +69,7 @@ namespace AnimeList.Services
                 // 50 serial round-trips (~7-10s on a cold view). Use meta.count to know the
                 // total upfront and fire the remaining pages concurrently. SemaphoreSlim caps
                 // the in-flight count so a power user can't hammer Kitsu's rate limit.
-                var totalCount = (int?)firstPage["meta"]?["count"];
+                var totalCount = SafeGet<int?>(firstPage, "meta", "count");
                 var firstDataCount = (firstPage["data"] as JArray)?.Count ?? 0;
 
                 if (totalCount.HasValue && totalCount.Value > CatalogPageSize)
@@ -153,7 +153,7 @@ namespace AnimeList.Services
                     if (incType == "anime") includedAnime[incId] = inc;
                     else if (incType == "categories")
                     {
-                        var title = (string)inc["attributes"]?["title"];
+                        var title = SafeGet<string>(inc, "attributes", "title");
                         if (!string.IsNullOrEmpty(title)) categoryNames[incId] = title;
                     }
                 }
@@ -169,17 +169,17 @@ namespace AnimeList.Services
 
                 if (isUserList)
                 {
-                    var animeRefId = (string)entry["relationships"]?["anime"]?["data"]?["id"];
+                    var animeRefId = SafeGet<string>(entry, "relationships", "anime", "data", "id");
                     if (string.IsNullOrEmpty(animeRefId) || !includedAnime.TryGetValue(animeRefId, out anime)) continue;
                     entryId = (string)entry["id"];
-                    entryStatus = (string)entry["attributes"]?["status"];
+                    entryStatus = SafeGet<string>(entry, "attributes", "status");
                 }
                 else
                 {
                     anime = entry;
                 }
 
-                var status = (string)anime["attributes"]?["status"];
+                var status = SafeGet<string>(anime, "attributes", "status");
                 if (list == ListType.Current && status is "tba" or "unreleased" or "upcoming") continue;
 
                 var animeKitsuId = (string)anime["id"];
@@ -206,15 +206,15 @@ namespace AnimeList.Services
                        $"{kitsuPrefix}{animeKitsuId}")
                     : $"{kitsuPrefix}{animeKitsuId}";
 
-                var subtype = (string)anime["attributes"]?["subtype"];
+                var subtype = SafeGet<string>(anime, "attributes", "subtype");
                 var isMovie = IsMovieFormat(subtype);
 
-                var meta = new Meta((string)anime["attributes"]?["description"])
+                var meta = new Meta(SafeGet<string>(anime, "attributes", "description"))
                 {
                     id = externalId,
                     type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
                     name = ExtractTitle(anime),
-                    poster = (string)anime["attributes"]?["posterImage"]?["large"],
+                    poster = SafeGet<string>(anime, "attributes", "posterImage", "large"),
                     entryId = entryId,
                     entryStatus = entryStatus,
                 };
@@ -267,7 +267,7 @@ namespace AnimeList.Services
                    $"{kitsuPrefix}{(string)entry["id"]}")
                 : $"{kitsuPrefix}{(string)entry["id"]}";
 
-            var subtype = (string)entry["attributes"]?["subtype"];
+            var subtype = SafeGet<string>(entry, "attributes", "subtype");
             var isMovie = IsMovieFormat(subtype);
 
             // Pull categories, episodes, animeProductions and producers out of the included array
@@ -284,7 +284,7 @@ namespace AnimeList.Services
                     var incType = (string)inc["type"];
                     if (incType == "categories")
                     {
-                        var catTitle = (string)inc["attributes"]?["title"];
+                        var catTitle = SafeGet<string>(inc, "attributes", "title");
                         if (!string.IsNullOrEmpty(catTitle)) categoryTitles.Add(catTitle);
                     }
                     else if (incType == "episodes")
@@ -298,27 +298,27 @@ namespace AnimeList.Services
                     else if (incType == "producers")
                     {
                         var pid = (string)inc["id"];
-                        var pname = (string)inc["attributes"]?["name"];
-                        var pslug = (string)inc["attributes"]?["slug"];
+                        var pname = SafeGet<string>(inc, "attributes", "name");
+                        var pslug = SafeGet<string>(inc, "attributes", "slug");
                         if (!string.IsNullOrEmpty(pid) && !string.IsNullOrEmpty(pname))
                             producers[pid] = (pname, pslug);
                     }
                 }
             }
 
-            var anime = new Meta((string)entry["attributes"]?["description"])
+            var anime = new Meta(SafeGet<string>(entry, "attributes", "description"))
             {
                 id = externalId,
                 type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
                 name = ExtractTitle(entry),
-                poster = (string)entry["attributes"]?["posterImage"]?["large"],
-                background = (string)entry["attributes"]?["coverImage"]?["original"]
-                             ?? (string)entry["attributes"]?["coverImage"]?["large"]
-                             ?? (string)entry["attributes"]?["posterImage"]?["original"],
+                poster = SafeGet<string>(entry, "attributes", "posterImage", "large"),
+                background = SafeGet<string>(entry, "attributes", "coverImage", "original")
+                             ?? SafeGet<string>(entry, "attributes", "coverImage", "large")
+                             ?? SafeGet<string>(entry, "attributes", "posterImage", "original"),
                 genres = categoryTitles.Count > 0 ? categoryTitles : null,
             };
 
-            var youtubeId = (string)entry["attributes"]?["youtubeVideoId"];
+            var youtubeId = SafeGet<string>(entry, "attributes", "youtubeVideoId");
             if (string.IsNullOrEmpty(youtubeId) && mapping?.AnilistId != null)
             {
                 // Kitsu's youtubeVideoId is sparsely populated — fall back to AniList through
@@ -337,8 +337,8 @@ namespace AnimeList.Services
             // AniList's `isMain=true` heuristic intentionally drops too.
             foreach (var prod in animeProductions)
             {
-                if ((string)prod["attributes"]?["role"] != "studio") continue;
-                var producerId = (string)prod["relationships"]?["producer"]?["data"]?["id"];
+                if (SafeGet<string>(prod, "attributes", "role") != "studio") continue;
+                var producerId = SafeGet<string>(prod, "relationships", "producer", "data", "id");
                 if (string.IsNullOrEmpty(producerId) || !producers.TryGetValue(producerId, out var producer))
                     continue;
                 anime.links.Add(new Link
@@ -354,17 +354,17 @@ namespace AnimeList.Services
             if (!isMovie)
             {
                 var sortedEpisodes = episodes
-                    .OrderBy(e => (int?)e["attributes"]?["seasonNumber"] ?? 1)
-                    .ThenBy(e => (int?)e["attributes"]?["number"] ?? 0)
+                    .OrderBy(e => SafeGet<int?>(e, "attributes", "seasonNumber") ?? 1)
+                    .ThenBy(e => SafeGet<int?>(e, "attributes", "number") ?? 0)
                     .ToList();
 
                 int episodeNumber = 1;
                 foreach (var episode in sortedEpisodes)
                 {
-                    var seasonNumber = (int?)episode["attributes"]?["seasonNumber"] ?? 1;
-                    var thumbnail = (string)episode["attributes"]?["thumbnail"]?["original"]
-                                    ?? (string)episode["attributes"]?["thumbnail"]?["large"];
-                    var epTitle = (string)episode["attributes"]?["canonicalTitle"];
+                    var seasonNumber = SafeGet<int?>(episode, "attributes", "seasonNumber") ?? 1;
+                    var thumbnail = SafeGet<string>(episode, "attributes", "thumbnail", "original")
+                                    ?? SafeGet<string>(episode, "attributes", "thumbnail", "large");
+                    var epTitle = SafeGet<string>(episode, "attributes", "canonicalTitle");
 
                     anime.videos.Add(new Video
                     {
@@ -431,7 +431,7 @@ namespace AnimeList.Services
 
             if ((json["data"] as JArray)?.OfType<JObject>().FirstOrDefault() is JObject libEntry)
             {
-                var attrs = libEntry["attributes"];
+                var attrs = libEntry["attributes"] as JObject;
                 entry.EntryId = (string)libEntry["id"];
                 entry.Status = (string)attrs?["status"];
                 entry.Progress = (int?)attrs?["progress"] ?? 0;
@@ -444,9 +444,11 @@ namespace AnimeList.Services
                 entry.FinishedAt = ParseKitsuDate((string)attrs?["finishedAt"]);
             }
 
-            entry.TotalEpisodes = (int?)(json["included"] as JArray)?
+            entry.TotalEpisodes = (int?)((json["included"] as JArray)?
                 .OfType<JObject>()
-                .FirstOrDefault(i => (string)i["type"] == "anime")?["attributes"]?["episodeCount"]
+                .FirstOrDefault(i => (string)i["type"] == "anime") is JObject animeInc
+                    ? SafeGet<int?>(animeInc, "attributes", "episodeCount")
+                    : null)
                 ?? await GetTotalEpisodesAsync(tokenData, resolvedKitsuId);
 
             return entry;
@@ -558,7 +560,7 @@ namespace AnimeList.Services
             if (json["data"] is not JObject entry) return (null, null);
 
             var name = ExtractTitle(entry);
-            var episodeCount = (int?)entry["attributes"]?["episodeCount"];
+            var episodeCount = SafeGet<int?>(entry, "attributes", "episodeCount");
             return (name, episodeCount);
         }
 
@@ -585,7 +587,7 @@ namespace AnimeList.Services
                 {
                     if ((string)inc["type"] != "streamers") continue;
                     var sid = (string)inc["id"];
-                    var name = (string)inc["attributes"]?["siteName"];
+                    var name = SafeGet<string>(inc, "attributes", "siteName");
                     if (!string.IsNullOrEmpty(sid) && !string.IsNullOrEmpty(name)) streamers[sid] = name;
                 }
             }
@@ -596,10 +598,10 @@ namespace AnimeList.Services
                 foreach (var inc in included2.OfType<JObject>())
                 {
                     if ((string)inc["type"] != "streamingLinks") continue;
-                    var linkUrl = (string)inc["attributes"]?["url"];
+                    var linkUrl = SafeGet<string>(inc, "attributes", "url");
                     if (string.IsNullOrEmpty(linkUrl)) continue;
 
-                    var streamerId = (string)inc["relationships"]?["streamer"]?["data"]?["id"];
+                    var streamerId = SafeGet<string>(inc, "relationships", "streamer", "data", "id");
                     var siteName = streamerId != null && streamers.TryGetValue(streamerId, out var n) ? n : "Stream";
                     result.Add(new StreamingLink { Site = siteName, Url = linkUrl });
                 }
@@ -662,7 +664,7 @@ namespace AnimeList.Services
             var firstPage = await FetchKitsuPageAsync(firstUrl, tokenData);
             if (firstPage == null) return [];
 
-            var totalCount = (int?)firstPage["meta"]?["count"];
+            var totalCount = SafeGet<int?>(firstPage, "meta", "count");
             var firstDataCount = (firstPage["data"] as JArray)?.Count ?? 0;
 
             var entries = new List<AnimeEntry>();
@@ -722,7 +724,7 @@ namespace AnimeList.Services
                     if ((string)inc["type"] != "anime") continue;
                     var id = (string)inc["id"];
                     if (string.IsNullOrEmpty(id)) continue;
-                    animeEpisodes[id] = (int?)inc["attributes"]?["episodeCount"];
+                    animeEpisodes[id] = SafeGet<int?>(inc, "attributes", "episodeCount");
                 }
             }
 
@@ -730,10 +732,10 @@ namespace AnimeList.Services
 
             foreach (var libEntry in dataArr.OfType<JObject>())
             {
-                var animeRefId = (string)libEntry["relationships"]?["anime"]?["data"]?["id"];
+                var animeRefId = SafeGet<string>(libEntry, "relationships", "anime", "data", "id");
                 if (string.IsNullOrEmpty(animeRefId)) continue;
 
-                var attrs = libEntry["attributes"];
+                var attrs = libEntry["attributes"] as JObject;
                 var ratingTwenty = (int?)attrs?["ratingTwenty"];
 
                 entries.Add(new AnimeEntry
@@ -776,7 +778,7 @@ namespace AnimeList.Services
             var content = await response.Content.ReadAsStringAsync();
             var json = JObject.Parse(content);
 
-            return (int?)json["data"]?["attributes"]?["episodeCount"];
+            return SafeGet<int?>(json, "data", "attributes", "episodeCount");
         }
 
         private string BuildListUrl(TokenData tokenData, ListType? list, string skip, string resolvedAnimeId, string genre, string search, string sort, bool isUserList)
@@ -822,8 +824,7 @@ namespace AnimeList.Services
         {
             if (categoryNames.Count == 0) return null;
 
-            var refs = anime["relationships"]?["categories"]?["data"] as JArray;
-            if (refs == null) return null;
+            if (SafeGet(anime, "relationships", "categories", "data") is not JArray refs) return null;
 
             return refs.OfType<JObject>()
                 .Select(c => (string)c["id"])
@@ -835,9 +836,9 @@ namespace AnimeList.Services
 
         private static string ExtractTitle(JObject anime)
         {
-            return (string)anime["attributes"]?["titles"]?["en"]
-                ?? (string)anime["attributes"]?["titles"]?["en_jp"]
-                ?? (string)anime["attributes"]?["canonicalTitle"];
+            return SafeGet<string>(anime, "attributes", "titles", "en")
+                ?? SafeGet<string>(anime, "attributes", "titles", "en_jp")
+                ?? SafeGet<string>(anime, "attributes", "canonicalTitle");
         }
     }
 }
