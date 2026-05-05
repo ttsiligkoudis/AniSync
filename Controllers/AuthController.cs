@@ -267,11 +267,11 @@ namespace AnimeList.Controllers
 
             var uid = await _configStore.UpsertAsync(primary);
             var started = _syncJobService.TryStart(uid, primary);
-            var status = _syncJobService.GetStatus(uid);
+            var payload = ProjectStatus(_syncJobService.GetStatus(uid));
 
             return started
-                ? StatusCode(202, status)
-                : Ok(status); // already running — return current status without restarting
+                ? StatusCode(202, payload)
+                : Ok(payload); // already running — return current status without restarting
         }
 
         /// <summary>
@@ -285,7 +285,27 @@ namespace AnimeList.Controllers
             if (primary == null) return Ok(new { status = (object)null });
 
             var uid = await _configStore.UpsertAsync(primary);
-            return Ok(new { status = _syncJobService.GetStatus(uid) });
+            return Ok(new { status = ProjectStatus(_syncJobService.GetStatus(uid)) });
+        }
+
+        /// <summary>
+        /// Project the SyncJobStatus into a lowercase-keyed shape so the JS poller doesn't
+        /// have to care which JSON serializer ASP.NET Core has wired up under the hood
+        /// (System.Text.Json defaults to camelCase, but a Newtonsoft swap would flip that).
+        /// </summary>
+        private static object ProjectStatus(SyncJobStatus s)
+        {
+            if (s == null) return null;
+            return new
+            {
+                running = s.Running,
+                total = s.Total,
+                completed = s.Completed,
+                failed = s.Failed,
+                message = s.Message,
+                startedAt = s.StartedAt,
+                finishedAt = s.FinishedAt,
+            };
         }
 
         /// <summary>

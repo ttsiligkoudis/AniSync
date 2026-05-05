@@ -165,6 +165,24 @@
                     </div>
                 }
             </div>
+
+            @* Manual full-sync block — kicks the SyncNow background job and watches it
+               via SyncStatus polling. Only visible when at least one healthy linked
+               account exists, since there's nothing to sync to otherwise. *@
+            @if (hasSwappableLinks)
+            {
+                <div class="full-sync-row">
+                    <div class="full-sync-text">
+                        <strong>Backfill linked accounts</strong>
+                        <span>Push every entry from your @serviceDisplay library to your linked accounts in one go. Useful right after first linking.</span>
+                    </div>
+                    <button type="button" id="syncNowBtn" class="btn-ghost btn-ghost-sm">Sync from primary</button>
+                </div>
+                <div id="syncProgress" class="full-sync-progress" hidden>
+                    <div class="full-sync-bar"><div class="full-sync-bar-fill" id="syncProgressFill"></div></div>
+                    <div class="full-sync-status" id="syncProgressMessage">Starting…</div>
+                </div>
+            }
         </section>
     }
 
@@ -700,6 +718,87 @@ else
         var $row = $(this).closest('.linked-account-row');
         $row.find('.linked-kitsu-form').toggleClass('expanded');
     });
+
+    // ── Full-sync ─────────────────────────────────────────────────────
+    // Kicks /Auth/SyncNow and watches /Auth/SyncStatus on a 2s cadence. Status
+    // persists server-side after the worker finishes, so the final "Done" line
+    // stays visible until the user navigates away.
+    var syncPollTimer = null;
+
+    function renderSyncStatus(status) {
+        var $progress = $('#syncProgress');
+        var $fill = $('#syncProgressFill');
+        var $msg = $('#syncProgressMessage');
+        var $btn = $('#syncNowBtn');
+
+        if (!status) {
+            $progress.attr('hidden', 'hidden');
+            $btn.prop('disabled', false).text('Sync from primary');
+            return;
+        }
+
+        $progress.removeAttr('hidden');
+        var pct = status.total > 0
+            ? Math.min(100, Math.round(((status.completed + status.failed) / status.total) * 100))
+            : 0;
+        $fill.css('width', pct + '%');
+        $msg.text(status.message || '');
+
+        if (status.running) {
+            $btn.prop('disabled', true).text('Syncing…');
+        } else {
+            $btn.prop('disabled', false).text('Sync from primary');
+        }
+    }
+
+    async function pollSyncStatus() {
+        try {
+            var resp = await fetch('/Auth/SyncStatus', { headers: { Accept: 'application/json' } });
+            if (!resp.ok) return;
+            var body = await resp.json();
+            renderSyncStatus(body.status);
+            // Stop polling once the worker reports done — the final state stays on screen.
+            if (body.status && !body.status.running) {
+                clearInterval(syncPollTimer);
+                syncPollTimer = null;
+            }
+        } catch (e) {
+            // Network blip on poll — keep the timer running, the next tick will retry.
+        }
+    }
+
+    $('#syncNowBtn').on('click', async function () {
+        var $btn = $(this);
+        if ($btn.prop('disabled')) return;
+        if (!confirm('Backfill every entry from your primary library to all linked accounts? This can take a few minutes for large lists.')) return;
+
+        $btn.prop('disabled', true).text('Starting…');
+        try {
+            var resp = await fetch('/Auth/SyncNow', { method: 'POST' });
+            if (!resp.ok && resp.status !== 202) {
+                var msg = (await resp.text()) || 'Couldn\'t start the sync.';
+                alert(msg);
+                $btn.prop('disabled', false).text('Sync from primary');
+                return;
+            }
+            var body = await resp.json();
+            renderSyncStatus(body);
+        } catch (e) {
+            alert('Couldn\'t start the sync: ' + e.message);
+            $btn.prop('disabled', false).text('Sync from primary');
+            return;
+        }
+
+        if (syncPollTimer == null) {
+            syncPollTimer = setInterval(pollSyncStatus, 2000);
+        }
+    });
+
+    // On page load, surface any in-flight job (e.g. user refreshed mid-sync) so the
+    // progress strip picks back up where it was.
+    if ($('#syncNowBtn').length) {
+        pollSyncStatus();
+    }
 
     // ── Copy manifest URL ─────────────────────────────────────────────
     $('#copyManifestBtn').on('click', async function () {
