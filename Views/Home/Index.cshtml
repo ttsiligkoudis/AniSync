@@ -104,6 +104,15 @@
                                         <a class="btn-ghost btn-ghost-sm" href="/Auth/LinkProvider?service=@svc">Re-link ↗</a>
                                     }
                                 }
+                                else
+                                {
+                                    @* Promote the link to primary. UID is preserved server-side so *@
+                                    @* the user's install URL keeps working — only the primary slot rotates. *@
+                                    <form method="post" action="/Auth/SetPrimary" class="linked-account-form">
+                                        <input type="hidden" name="service" value="@svc" />
+                                        <button type="submit" class="btn-ghost btn-ghost-sm">Make primary</button>
+                                    </form>
+                                }
                                 <form method="post" action="/Auth/UnlinkProvider" class="linked-account-form">
                                     <input type="hidden" name="service" value="@svc" />
                                     <button type="submit" class="btn-ghost btn-ghost-sm">Unlink</button>

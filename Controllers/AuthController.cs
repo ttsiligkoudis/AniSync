@@ -201,6 +201,29 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
+        /// Promotes a linked provider to primary on the current install. UID is preserved so
+        /// existing Stremio installs keep working — only the primary slot rotates. POST to
+        /// avoid CSRF-style triggers via image tags or prefetch.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> SetPrimary(AnimeService service)
+        {
+            var primary = GetSessionPrimary();
+            if (primary == null) return BadRequest("Log in with a primary provider first.");
+            if (primary.anime_service == service) return BadRequest("This provider is already your primary account.");
+
+            var uid = await _configStore.UpsertAsync(primary);
+            var newPrimary = await _configStore.SwapPrimaryAsync(uid, service);
+            if (newPrimary == null)
+                return BadRequest("Couldn't promote that link — it may need re-auth, or the same account is already a primary on another install.");
+
+            // Push the new primary into the session so subsequent requests dispatch through
+            // its service. The UID stayed the same, so install URLs continue to resolve.
+            HttpContext.Session.SetString("AccessToken", SerializeObject(newPrimary));
+            return RedirectToAction("Index", "Home");
+        }
+
+        /// <summary>
         /// Removes a linked provider for the currently-authenticated primary user. POST so
         /// it can't be triggered by a CSRF-style image-tag GET.
         /// </summary>

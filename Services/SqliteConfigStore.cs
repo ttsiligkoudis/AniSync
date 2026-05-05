@@ -308,6 +308,83 @@ namespace AnimeList.Services
             await WriteLinkedTokensAsync(uid, existing);
         }
 
+        public async Task<TokenData> SwapPrimaryAsync(string uid, AnimeService newPrimaryService)
+        {
+            if (string.IsNullOrEmpty(uid)) return null;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+
+            // Read the current row so we can reshuffle primary <-> linked atomically below.
+            string oldPrimaryJson = null;
+            string linkedJson = null;
+            using (var read = conn.CreateCommand())
+            {
+                read.CommandText = "SELECT token_json, linked_tokens FROM configs WHERE uid = $uid LIMIT 1";
+                read.Parameters.AddWithValue("$uid", uid);
+                using var reader = await read.ExecuteReaderAsync();
+                if (!await reader.ReadAsync()) return null;
+                oldPrimaryJson = reader.GetString(0);
+                linkedJson = reader.IsDBNull(1) ? null : reader.GetString(1);
+            }
+
+            var oldPrimary = DeserializeObject<TokenData>(oldPrimaryJson);
+            if (oldPrimary == null) return null;
+
+            var linked = DeserializeLinkedTokens(linkedJson);
+            var idx = linked.FindIndex(l => l.Service == newPrimaryService);
+            if (idx < 0) return null;
+
+            var chosen = linked[idx];
+            // Refuse to promote a broken link — would just leave the user effectively logged
+            // out and trigger another re-auth round-trip immediately.
+            if (chosen.NeedsReauth || chosen.TokenData == null) return null;
+
+            // Build the new linked list: the chosen one moves out, the old primary moves in.
+            // We don't carry NeedsReauth across because we only got here on a healthy primary.
+            linked.RemoveAt(idx);
+            linked.Add(new LinkedToken
+            {
+                Service = oldPrimary.anime_service,
+                TokenData = oldPrimary,
+                NeedsReauth = false,
+            });
+
+            var newPrimary = chosen.TokenData;
+            var newServiceInt = (int)newPrimary.anime_service;
+            var newUserKey = GetUserKey(newPrimary);
+            var newPrimaryJson = SerializeObject(newPrimary);
+            var newLinkedJson = linked.Count == 0 ? (object)DBNull.Value : SerializeObject(linked);
+
+            using var update = conn.CreateCommand();
+            update.CommandText = """
+                UPDATE configs
+                   SET service = $s, user_key = $k, token_json = $j,
+                       linked_tokens = $l, updated_at = $u
+                 WHERE uid = $uid
+                """;
+            update.Parameters.AddWithValue("$s", newServiceInt);
+            update.Parameters.AddWithValue("$k", (object)newUserKey ?? DBNull.Value);
+            update.Parameters.AddWithValue("$j", newPrimaryJson);
+            update.Parameters.AddWithValue("$l", newLinkedJson);
+            update.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            update.Parameters.AddWithValue("$uid", uid);
+
+            try
+            {
+                await update.ExecuteNonQueryAsync();
+            }
+            catch (SqliteException)
+            {
+                // Unique (service, user_key) collision — another configs row already owns
+                // this identity, e.g. the user has a separate install elsewhere with the
+                // linked account as primary. The caller surfaces a friendly error.
+                return null;
+            }
+
+            return newPrimary;
+        }
+
         private async Task WriteLinkedTokensAsync(string uid, List<LinkedToken> tokens)
         {
             using var conn = new SqliteConnection(_connectionString);
