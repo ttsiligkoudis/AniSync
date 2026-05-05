@@ -10,6 +10,7 @@ namespace AnimeList.Controllers
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly IConfigStore _configStore;
         private readonly IConfiguration _configuration;
+        private readonly ISyncJobService _syncJobService;
 
         // Keys we stash in the session while a callback-based OAuth flow is in flight.
         // We need to remember which provider initiated the flow (the callback URL is shared)
@@ -22,12 +23,13 @@ namespace AnimeList.Controllers
         private const string OauthFlowLogin = "Login";
         private const string OauthFlowLink = "Link";
 
-        public AuthController(ITokenService tokenService, IHttpContextAccessor httpContextAccessor, IConfigStore configStore, IConfiguration configuration)
+        public AuthController(ITokenService tokenService, IHttpContextAccessor httpContextAccessor, IConfigStore configStore, IConfiguration configuration, ISyncJobService syncJobService)
         {
             _tokenService = tokenService;
             _httpContextAccessor = httpContextAccessor;
             _configStore = configStore;
             _configuration = configuration;
+            _syncJobService = syncJobService;
         }
 
         [HttpGet]
@@ -250,6 +252,40 @@ namespace AnimeList.Controllers
             var uid = await _configStore.UpsertAsync(primary);
             await _configStore.RemoveLinkedTokenAsync(uid, service);
             return RedirectToAction("Index", "Home");
+        }
+
+        /// <summary>
+        /// Kicks off a background full-library sync from the primary into every linked
+        /// provider. Returns 202 with the initial status JSON; the configure page polls
+        /// <see cref="SyncStatus"/> for progress.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> SyncNow()
+        {
+            var primary = GetSessionPrimary();
+            if (primary == null) return BadRequest("Log in with a primary provider first.");
+
+            var uid = await _configStore.UpsertAsync(primary);
+            var started = _syncJobService.TryStart(uid, primary);
+            var status = _syncJobService.GetStatus(uid);
+
+            return started
+                ? StatusCode(202, status)
+                : Ok(status); // already running — return current status without restarting
+        }
+
+        /// <summary>
+        /// Returns the current full-sync job status for the logged-in user, or null when
+        /// no job has ever run for this install.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> SyncStatus()
+        {
+            var primary = GetSessionPrimary();
+            if (primary == null) return Ok(new { status = (object)null });
+
+            var uid = await _configStore.UpsertAsync(primary);
+            return Ok(new { status = _syncJobService.GetStatus(uid) });
         }
 
         /// <summary>
