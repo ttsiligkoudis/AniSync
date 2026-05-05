@@ -519,7 +519,7 @@ namespace AnimeList.Services
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
             Console.Error.WriteLine($"[Kitsu] {(existing?.EntryId != null ? "PATCH" : "POST")} library-entries id={resolvedKitsuId} status={status} progress={progress}.");
             var saveResponse = await _clientFactory.CreateClient().SendAsync(request);
-            ThrowIfApiCallFailed(saveResponse, "save");
+            await ThrowIfApiCallFailed(saveResponse, "save");
         }
 
         public async Task<(string? name, int? episodeCount)> GetAnimeSummaryAsync(string id)
@@ -606,20 +606,30 @@ namespace AnimeList.Services
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
 
             var deleteResponse = await _clientFactory.CreateClient().SendAsync(request);
-            ThrowIfApiCallFailed(deleteResponse, "delete");
+            await ThrowIfApiCallFailed(deleteResponse, "delete");
         }
 
         // Save / delete used to be fire-and-forget — a 401 from a stale linked token would
         // disappear into the void and the user would think the sync had worked. Surface
         // those failures so SyncService can flag NeedsReauth on the linked account row.
-        private static void ThrowIfApiCallFailed(HttpResponseMessage response, string op)
+        // Body is included on validation failures (Kitsu's 422 carries `errors[].detail`)
+        // so we can diagnose specifically which attribute Kitsu rejected.
+        private static async Task ThrowIfApiCallFailed(HttpResponseMessage response, string op)
         {
             if (response.IsSuccessStatusCode) return;
             if (response.StatusCode == HttpStatusCode.Unauthorized
                 || response.StatusCode == HttpStatusCode.Forbidden)
                 throw new UnauthorizedAccessException($"Kitsu {op} returned {(int)response.StatusCode}");
-            throw new HttpRequestException($"Kitsu {op} returned {(int)response.StatusCode}");
+
+            string body = null;
+            try { body = await response.Content.ReadAsStringAsync(); }
+            catch { /* best-effort */ }
+            var detail = string.IsNullOrEmpty(body) ? "" : $" — body: {Truncate(body, 600)}";
+            throw new HttpRequestException($"Kitsu {op} returned {(int)response.StatusCode}{detail}");
         }
+
+        private static string Truncate(string s, int max)
+            => s.Length <= max ? s : s[..max] + "…";
 
         private static DateTime? ParseKitsuDate(string raw)
         {
