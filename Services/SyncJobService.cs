@@ -10,10 +10,16 @@ namespace AnimeList.Services
         // SyncStatus poll instantiates a fresh SyncJobService, but the dictionary is shared.
         private static readonly ConcurrentDictionary<string, SyncJobStatus> _jobs = new();
 
-        // Cap the per-job concurrency so one user's full sync doesn't trip Kitsu's rate
-        // limit (and so a 1000-entry library doesn't fire 3000 simultaneous Save calls
-        // against the wider linked-provider set).
-        private const int FanOutConcurrency = 4;
+        // Cap the per-job concurrency so one user's full sync doesn't trip the linked
+        // providers' rate limits — Kitsu sits around 5 req/s and MAL is closer to 2,
+        // so 2 concurrent fan-outs (each making 2 inner save calls) keeps us under
+        // both ceilings without serializing too much.
+        private const int FanOutConcurrency = 2;
+        // Per-entry watchdog. HttpClient's default 100s timeout is too lenient when one
+        // linked provider gets slow — the whole queue stalls behind a single hung call.
+        // Failing fast and moving on keeps the overall sync visibly progressing; the
+        // abandoned background task wraps up under HttpClient's own timeout eventually.
+        private static readonly TimeSpan EntryWatchdog = TimeSpan.FromSeconds(45);
 
         private readonly IServiceScopeFactory _scopeFactory;
 
@@ -116,10 +122,25 @@ namespace AnimeList.Services
             await sem.WaitAsync();
             try
             {
-                await sync.FanOutSaveAsync(primary, entry.MediaId, season: null, entry.Progress,
+                var work = sync.FanOutSaveAsync(primary, entry.MediaId, season: null, entry.Progress,
                     entry.Status, entry.Score, entry.Notes, entry.RewatchCount,
                     entry.StartedAt, entry.FinishedAt);
-                lock (status) status.Completed++;
+
+                // Race the fan-out against a watchdog so a single hung linked-provider call
+                // doesn't pin a semaphore slot for HttpClient's full 100-second default.
+                // The abandoned task winds down on its own under that default; this just
+                // releases the queue so the next entry can start.
+                var winner = await Task.WhenAny(work, Task.Delay(EntryWatchdog));
+                if (winner != work)
+                {
+                    Console.Error.WriteLine($"[SyncJob] entry {entry.MediaId} timed out after {EntryWatchdog.TotalSeconds:F0}s");
+                    lock (status) status.Failed++;
+                }
+                else
+                {
+                    await work; // already completed — observe any exception
+                    lock (status) status.Completed++;
+                }
             }
             catch (Exception ex)
             {
