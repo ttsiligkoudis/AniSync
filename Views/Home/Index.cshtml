@@ -733,15 +733,22 @@ else
 
     // ── Full-sync (client-driven) ────────────────────────────────────
     // Server is stateless: we GET the entry list once, then loop POSTing
-    // batches and tracking progress here. AbortController is the cancel
-    // mechanism — Cancel button or browser close both stop the loop.
-    // Closing the page = the sync stops, no zombie work continues server-side.
+    // batches in a small worker pool and tracking progress here.
+    // AbortController is the cancel mechanism — Cancel button or browser
+    // close both stop the loop. Closing the page = the sync stops, no
+    // zombie work continues server-side.
     var syncAbort = null;
-    // Batch size for /Auth/SyncBatch. Small enough that the bar moves in
-    // visible increments and Cancel is responsive (next iteration check
-    // is at most one batch away), big enough that the per-batch HTTP
-    // overhead is amortised across a few entries.
+    // Each batch processes sequentially server-side, so batch size sets
+    // both the per-batch latency (-> Cancel responsiveness floor) and the
+    // HTTP overhead amortisation. 5 is the sweet spot.
     var SYNC_BATCH_SIZE = 5;
+    // Run two batches in flight at the same time. Inside each
+    // FanOutSaveAsync the linked targets are already hit in parallel, so
+    // 2 client-side workers + 2-3 linked providers means up to ~6
+    // simultaneous upstream calls — borderline-safe given Kitsu ~5/s,
+    // MAL ~2-3/s, and AniList's burst tolerance. Bumping to 3 starts
+    // tripping MAL 429s in practice.
+    var SYNC_PARALLEL = 2;
 
     function showSyncModal() {
         $('#syncModal').removeAttr('hidden').attr('aria-hidden', 'false');
@@ -785,35 +792,56 @@ else
 
             setSyncProgress('Syncing 0 / ' + total, 0, total);
 
+            // Pre-slice so workers just pull the next ready batch from a shared queue
+            // — keeps the dispatch loop branch-free and the worker code small.
+            var batches = [];
             for (var i = 0; i < entries.length; i += SYNC_BATCH_SIZE) {
-                if (syncAbort.signal.aborted) break;
-                var slice = entries.slice(i, i + SYNC_BATCH_SIZE);
-
-                try {
-                    var r = await fetch('/Auth/SyncBatch', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ entries: slice }),
-                        signal: syncAbort.signal,
-                    });
-                    if (!r.ok) {
-                        // Server rejected the whole batch (e.g. session expired). Count
-                        // every entry as failed but keep going — later batches might
-                        // succeed if the cause was transient.
-                        failed += slice.length;
-                    } else {
-                        var result = await r.json();
-                        completed += result.completed || 0;
-                        failed += result.failed || 0;
-                    }
-                } catch (e) {
-                    if (e.name === 'AbortError') break;
-                    failed += slice.length;
-                }
-
-                processed = completed + failed;
-                setSyncProgress('Syncing ' + processed + ' / ' + total, processed, total);
+                batches.push(entries.slice(i, i + SYNC_BATCH_SIZE));
             }
+
+            // JS is single-threaded so cursor / counter increments don't race even
+            // though SYNC_PARALLEL workers all touch them. The cooperative await
+            // points are the only places another worker can run, and by that point
+            // we've already committed our increment.
+            var nextBatch = 0;
+
+            async function syncWorker() {
+                while (!syncAbort.signal.aborted) {
+                    var idx = nextBatch++;
+                    if (idx >= batches.length) return;
+                    var slice = batches[idx];
+
+                    try {
+                        var r = await fetch('/Auth/SyncBatch', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ entries: slice }),
+                            signal: syncAbort.signal,
+                        });
+                        if (!r.ok) {
+                            // Server rejected the whole batch (e.g. session expired). Count
+                            // every entry as failed but keep going — later batches might
+                            // succeed if the cause was transient.
+                            failed += slice.length;
+                        } else {
+                            var result = await r.json();
+                            completed += result.completed || 0;
+                            failed += result.failed || 0;
+                        }
+                    } catch (e) {
+                        if (e.name === 'AbortError') return;
+                        failed += slice.length;
+                    }
+
+                    processed = completed + failed;
+                    setSyncProgress('Syncing ' + processed + ' / ' + total, processed, total);
+                }
+            }
+
+            // Spin up the worker pool and wait for the queue to drain.
+            var workers = [];
+            for (var w = 0; w < SYNC_PARALLEL; w++) workers.push(syncWorker());
+            await Promise.all(workers);
 
             if (syncAbort.signal.aborted) {
                 setSyncProgress('Cancelled at ' + processed + ' / ' + total, processed, total);
