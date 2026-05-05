@@ -469,8 +469,15 @@ namespace AnimeList.Services
                 ["progress"] = progress,
                 ["status"] = status,
             };
-            if (score.HasValue)
-                attributes["ratingTwenty"] = (int)Math.Round(Math.Clamp(score.Value, 0, 10) * 2);
+            // Kitsu's ratingTwenty has a hard minimum of 2 (anything 0 or 1 is rejected
+            // with a 422). Skip the field entirely when the caller's score doesn't clear
+            // that floor — better to leave the existing rating untouched than to fail the
+            // whole save because of a "no rating" sentinel from a sister service.
+            if (score.HasValue && score.Value > 0)
+            {
+                var ratingTwenty = (int)Math.Round(Math.Clamp(score.Value, 0, 10) * 2);
+                if (ratingTwenty >= 2) attributes["ratingTwenty"] = ratingTwenty;
+            }
             if (notes != null) attributes["notes"] = notes;
             if (rewatchCount.HasValue) attributes["reconsumeCount"] = rewatchCount.Value;
             if (startedAt.HasValue) attributes["startedAt"] = startedAt.Value.ToString("yyyy-MM-dd");

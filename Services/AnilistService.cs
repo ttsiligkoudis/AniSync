@@ -607,7 +607,11 @@ namespace AnimeList.Services
                 entry.EntryId = (string)ml.id?.ToString();
                 entry.Status = (string)ml.status;
                 entry.Progress = (int?)ml.progress ?? 0;
-                entry.Score = (double?)ml.score;
+                // AniList returns 0 for "no score" (instead of null). Coalesce so the
+                // Manage Entry form shows an empty input and the sync fan-out doesn't
+                // propagate a 0 that Kitsu would 422 on (ratingTwenty min is 2).
+                var rawScore = (double?)ml.score;
+                entry.Score = (rawScore.HasValue && rawScore > 0) ? rawScore : null;
                 entry.Notes = (string)ml.notes;
                 entry.RewatchCount = (int?)ml.repeat ?? 0;
                 entry.StartedAt = FuzzyDateToDateTime(ml.startedAt);

@@ -318,7 +318,11 @@ namespace AnimeList.Services
                 // alongside the real ones — mirrors AniList's REPEATING.
                 entry.Status = isRewatching ? "rewatching" : rawStatus;
                 entry.Progress = (int?)mls["num_episodes_watched"] ?? 0;
-                entry.Score = (double?)mls["score"];
+                // MAL returns 0 for "no rating set" instead of null. Treat it as null so the
+                // Manage Entry input renders empty (and doesn't propagate a 0 through the
+                // sync fan-out — Kitsu's ratingTwenty has a hard minimum of 2 and 422s on 0).
+                var rawScore = (double?)mls["score"];
+                entry.Score = (rawScore.HasValue && rawScore.Value > 0) ? rawScore : null;
                 entry.Notes = (string)mls["comments"];
                 entry.RewatchCount = (int?)mls["num_times_rewatched"] ?? 0;
                 entry.StartedAt = ParseMalDate((string)mls["start_date"]);
