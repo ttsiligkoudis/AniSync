@@ -1,6 +1,7 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 
@@ -508,7 +509,8 @@ namespace AnimeList.Services
             }
 
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
-            await _clientFactory.CreateClient().SendAsync(request);
+            var saveResponse = await _clientFactory.CreateClient().SendAsync(request);
+            ThrowIfApiCallFailed(saveResponse, "save");
         }
 
         public async Task<(string? name, int? episodeCount)> GetAnimeSummaryAsync(string id)
@@ -594,7 +596,20 @@ namespace AnimeList.Services
             var request = new HttpRequestMessage(HttpMethod.Delete, $"{_kitsuApi}/library-entries/{existing.EntryId}");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
 
-            await _clientFactory.CreateClient().SendAsync(request);
+            var deleteResponse = await _clientFactory.CreateClient().SendAsync(request);
+            ThrowIfApiCallFailed(deleteResponse, "delete");
+        }
+
+        // Save / delete used to be fire-and-forget — a 401 from a stale linked token would
+        // disappear into the void and the user would think the sync had worked. Surface
+        // those failures so SyncService can flag NeedsReauth on the linked account row.
+        private static void ThrowIfApiCallFailed(HttpResponseMessage response, string op)
+        {
+            if (response.IsSuccessStatusCode) return;
+            if (response.StatusCode == HttpStatusCode.Unauthorized
+                || response.StatusCode == HttpStatusCode.Forbidden)
+                throw new UnauthorizedAccessException($"Kitsu {op} returned {(int)response.StatusCode}");
+            throw new HttpRequestException($"Kitsu {op} returned {(int)response.StatusCode}");
         }
 
         private static DateTime? ParseKitsuDate(string raw)

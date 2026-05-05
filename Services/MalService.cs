@@ -1,6 +1,7 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
+using System.Net;
 using System.Net.Http.Headers;
 
 namespace AnimeList.Services
@@ -387,7 +388,8 @@ namespace AnimeList.Services
             };
             ApplyAuth(request, tokenData);
 
-            await _clientFactory.CreateClient().SendAsync(request);
+            var saveResponse = await _clientFactory.CreateClient().SendAsync(request);
+            ThrowIfApiCallFailed(saveResponse, "save");
         }
 
         public async Task DeleteAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)
@@ -399,7 +401,19 @@ namespace AnimeList.Services
 
             var request = new HttpRequestMessage(HttpMethod.Delete, $"{MalApi}/anime/{resolvedMalId}/my_list_status");
             ApplyAuth(request, tokenData);
-            await _clientFactory.CreateClient().SendAsync(request);
+            var deleteResponse = await _clientFactory.CreateClient().SendAsync(request);
+            ThrowIfApiCallFailed(deleteResponse, "delete");
+        }
+
+        // MAL silently dropped 401s before — letting them bubble up gives SyncService a
+        // chance to flag NeedsReauth on a linked-account row whose token has been revoked.
+        private static void ThrowIfApiCallFailed(HttpResponseMessage response, string op)
+        {
+            if (response.IsSuccessStatusCode) return;
+            if (response.StatusCode == HttpStatusCode.Unauthorized
+                || response.StatusCode == HttpStatusCode.Forbidden)
+                throw new UnauthorizedAccessException($"MyAnimeList {op} returned {(int)response.StatusCode}");
+            throw new HttpRequestException($"MyAnimeList {op} returned {(int)response.StatusCode}");
         }
 
         private async Task<Meta> BuildMetaAsync(JObject node, JObject listStatus)

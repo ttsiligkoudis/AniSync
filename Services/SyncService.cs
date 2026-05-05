@@ -25,7 +25,9 @@ namespace AnimeList.Services
             string status = null, double? score = null, string notes = null, int? rewatchCount = null,
             DateTime? startedAt = null, DateTime? finishedAt = null)
         {
-            var linkedTokens = await GetActiveLinkedTokensAsync(primary);
+            if (primary == null || primary.anonymousUser) return;
+            var uid = await _configStore.UpsertAsync(primary);
+            var linkedTokens = await GetActiveLinkedTokensAsync(uid);
             if (linkedTokens.Count == 0) return;
 
             // Normalise the source-side ListType once so each per-target call doesn't have
@@ -35,7 +37,7 @@ namespace AnimeList.Services
             var normalisedScore = NormaliseScoreToTen(score, primary.anime_service);
 
             var tasks = linkedTokens.Select(linked =>
-                SaveToProviderAsync(linked, sourceListType, animeId, season, progress,
+                SaveToProviderAsync(uid, linked, sourceListType, animeId, season, progress,
                     normalisedScore, notes, rewatchCount, startedAt, finishedAt));
 
             await Task.WhenAll(tasks);
@@ -43,19 +45,18 @@ namespace AnimeList.Services
 
         public async Task FanOutDeleteAsync(TokenData primary, string animeId, int? season)
         {
-            var linkedTokens = await GetActiveLinkedTokensAsync(primary);
+            if (primary == null || primary.anonymousUser) return;
+            var uid = await _configStore.UpsertAsync(primary);
+            var linkedTokens = await GetActiveLinkedTokensAsync(uid);
             if (linkedTokens.Count == 0) return;
 
-            var tasks = linkedTokens.Select(linked => DeleteFromProviderAsync(linked, animeId, season));
+            var tasks = linkedTokens.Select(linked => DeleteFromProviderAsync(uid, linked, animeId, season));
             await Task.WhenAll(tasks);
         }
 
-        private async Task<List<LinkedToken>> GetActiveLinkedTokensAsync(TokenData primary)
+        private async Task<List<LinkedToken>> GetActiveLinkedTokensAsync(string uid)
         {
-            if (primary == null || primary.anonymousUser) return [];
-            // UpsertAsync is idempotent — same UID for re-logins of the same user — so we
-            // use it instead of a dedicated "find UID" lookup.
-            var uid = await _configStore.UpsertAsync(primary);
+            if (string.IsNullOrEmpty(uid)) return [];
             var linked = await _configStore.GetLinkedTokensAsync(uid);
             var active = new List<LinkedToken>();
 
@@ -88,13 +89,31 @@ namespace AnimeList.Services
             return active;
         }
 
+        private async Task TryRefreshAsync(string uid, LinkedToken target)
+        {
+            // Trigger a forced re-issue (Kitsu re-auths via stored creds; AniList/MAL hit
+            // the OAuth refresh endpoint). Used when a save fails 401 even though the
+            // expiration date said the token was still good — server-side revocation.
+            var refreshed = await TryRefreshAsync(target.TokenData);
+            if (refreshed != null && !string.IsNullOrEmpty(refreshed.access_token))
+            {
+                target.TokenData = refreshed;
+                await _configStore.SetLinkedTokenAsync(uid, target);
+            }
+            else
+            {
+                target.NeedsReauth = true;
+                await _configStore.SetLinkedTokenAsync(uid, target);
+            }
+        }
+
         private async Task<TokenData> TryRefreshAsync(TokenData token)
         {
             try { return await _tokenService.RefreshLinkedTokenAsync(token); }
             catch { return null; }
         }
 
-        private async Task SaveToProviderAsync(LinkedToken target, ListType? sourceListType,
+        private async Task SaveToProviderAsync(string uid, LinkedToken target, ListType? sourceListType,
             string animeId, int? season, int progress, double? score, string notes,
             int? rewatchCount, DateTime? startedAt, DateTime? finishedAt)
         {
@@ -118,15 +137,24 @@ namespace AnimeList.Services
                         break;
                 }
             }
-            catch
+            catch (UnauthorizedAccessException ex)
             {
-                // Best-effort sync. A single linked provider failing — token expired,
-                // mapping gap, transient API error — must not fail the primary save.
-                // Tier 3 hooks NeedsReauth handling for the 401 case.
+                // Server-side revocation — the token's date said valid but the API rejected
+                // it. Try one immediate refresh; if that also fails, flag NeedsReauth so the
+                // UI surfaces it and future fan-outs skip the link.
+                Console.Error.WriteLine($"[Sync] {target.Service} save 401: {ex.Message} — flagging for re-auth.");
+                await TryRefreshAsync(uid, target);
+            }
+            catch (Exception ex)
+            {
+                // Best-effort sync. Log so a deploy log diagnoses why a particular target's
+                // save fell over (mapping gap, transient 5xx, etc.) without failing the
+                // primary save the user is actually waiting on.
+                Console.Error.WriteLine($"[Sync] {target.Service} save failed: {ex.Message}");
             }
         }
 
-        private async Task DeleteFromProviderAsync(LinkedToken target, string animeId, int? season)
+        private async Task DeleteFromProviderAsync(string uid, LinkedToken target, string animeId, int? season)
         {
             try
             {
@@ -143,9 +171,14 @@ namespace AnimeList.Services
                         break;
                 }
             }
-            catch
+            catch (UnauthorizedAccessException ex)
             {
-                // best-effort
+                Console.Error.WriteLine($"[Sync] {target.Service} delete 401: {ex.Message} — flagging for re-auth.");
+                await TryRefreshAsync(uid, target);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Sync] {target.Service} delete failed: {ex.Message}");
             }
         }
 

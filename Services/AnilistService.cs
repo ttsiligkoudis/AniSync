@@ -1,6 +1,7 @@
 ﻿using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
+using System.Net;
 using System.Net.Http.Headers;
 
 namespace AnimeList.Services
@@ -677,7 +678,8 @@ namespace AnimeList.Services
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
 
             var client = _clientFactory.CreateClient();
-            await client.SendAsync(request);
+            var saveResponse = await client.SendAsync(request);
+            ThrowIfApiCallFailed(saveResponse, "save");
         }
 
         public async Task DeleteAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)
@@ -705,7 +707,21 @@ namespace AnimeList.Services
             };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
 
-            await _clientFactory.CreateClient().SendAsync(request);
+            var deleteResponse = await _clientFactory.CreateClient().SendAsync(request);
+            ThrowIfApiCallFailed(deleteResponse, "delete");
+        }
+
+        // GraphQL mutations always come back 200 even when they error out at the field level
+        // — but the transport layer can still 401 when the bearer is rotated. Catch both
+        // so SyncService can flag NeedsReauth on a stale linked AniList token instead of
+        // silently dropping the user's save.
+        private static void ThrowIfApiCallFailed(HttpResponseMessage response, string op)
+        {
+            if (response.IsSuccessStatusCode) return;
+            if (response.StatusCode == HttpStatusCode.Unauthorized
+                || response.StatusCode == HttpStatusCode.Forbidden)
+                throw new UnauthorizedAccessException($"AniList {op} returned {(int)response.StatusCode}");
+            throw new HttpRequestException($"AniList {op} returned {(int)response.StatusCode}");
         }
 
         public async Task<(string? name, int? episodeCount)> GetAnimeSummaryAsync(string id)
