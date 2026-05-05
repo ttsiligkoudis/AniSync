@@ -61,6 +61,10 @@ builder.Services.AddScoped<ITmdbService, TmdbService>();
 builder.Services.AddScoped<ICinemetaService, CinemetaService>();
 builder.Services.AddScoped<IAnilistFallback, AnilistFallback>();
 builder.Services.AddScoped<ISyncService, SyncService>();
+// Singleton — its (malId, episode) → markers cache is the whole point. Per-request
+// scoping would defeat the cache. The service depends only on IHttpClientFactory
+// which is itself singleton-safe.
+builder.Services.AddSingleton<IAniSkipService, AniSkipService>();
 
 var app = builder.Build();
 

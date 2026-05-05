@@ -11,16 +11,19 @@ namespace AnimeList.Controllers
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
+        private readonly IAniSkipService _aniSkipService;
         private readonly IConfigStore _configStore;
 
         public StreamController(ITokenService tokenService, IAnimeMappingService mappingService,
-            IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, IConfigStore configStore)
+            IAnilistService anilistService, IKitsuService kitsuService, IMalService malService,
+            IAniSkipService aniSkipService, IConfigStore configStore)
         {
             _tokenService = tokenService;
             _mappingService = mappingService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
+            _aniSkipService = aniSkipService;
             _configStore = configStore;
         }
 
@@ -34,6 +37,13 @@ namespace AnimeList.Controllers
 
             if (!TryParseAnimeId(id, out var animeId, out var season, out var episode))
                 return empty;
+
+            // AniSkip lookup once per request — every emitted stream gets the same
+            // skipIntro / skipOutro hints, so there's no point fetching per-stream.
+            // Returns null when there's no episode, no MAL mapping, or no markers
+            // available; the helper folds the result into the per-stream behaviorHints
+            // object.
+            var skipHints = await BuildSkipHintsAsync(animeId, season, episode);
 
             var streams = new List<object>();
 
@@ -53,6 +63,7 @@ namespace AnimeList.Controllers
                 {
                     title = "📝 Manage Entry",
                     externalUrl = manageUrl,
+                    behaviorHints = MergeBehaviorHints(bingeGroup: null, skipHints),
                 });
             }
 
@@ -80,13 +91,78 @@ namespace AnimeList.Controllers
                             name = link.Site,
                             title = $"Watch on {link.Site}",
                             externalUrl = link.Url,
-                            behaviorHints = new { bingeGroup },
+                            behaviorHints = MergeBehaviorHints(bingeGroup, skipHints),
                         });
                     }
                 }
             }
 
             return new JsonResult(new { streams });
+        }
+
+        /// <summary>
+        /// Resolves the supplied animeId+season to a MAL anime id, asks AniSkip for that
+        /// episode's markers, and shapes them into the field names Stremio Enhanced
+        /// (the main client that auto-skips today) recognises. Returns null when the
+        /// chain bails at any step — every caller treats null as "no skip data, just
+        /// emit the regular behaviorHints".
+        ///
+        /// Known limitation: for IMDb-flat shows (e.g. Cinemeta sends one big "Season 1
+        /// Episode N" range for a multi-cour franchise), we resolve to the first cour's
+        /// MAL id and pass the absolute episode through. AniSkip won't usually find a
+        /// match for that since each cour has its own per-cour episode numbering. A
+        /// proper fix would mirror MetaController.BuildSeasonsAsync's auto-cour-detect.
+        /// </summary>
+        private async Task<Dictionary<string, object>> BuildSkipHintsAsync(string animeId, int? season, int? episode)
+        {
+            if (!episode.HasValue || episode.Value <= 0) return null;
+
+            var malIdRaw = await _mappingService.GetIdByService(animeId, AnimeService.MyAnimeList, season);
+            if (!int.TryParse(malIdRaw, out var malId) || malId <= 0) return null;
+
+            var markers = await _aniSkipService.GetSkipTimesAsync(malId, episode.Value);
+            if (markers.Count == 0) return null;
+
+            // AniSkip returns multiple types; map them into Stremio Enhanced's expected
+            // shape. When the same anime has both an "op" and a "mixed-op" we take
+            // whichever lands last (mixed variants tend to be more accurate when they
+            // exist) — the simple foreach overwrite handles that without extra logic.
+            var hints = new Dictionary<string, object>();
+            foreach (var m in markers)
+            {
+                switch (m.Type)
+                {
+                    case "op":
+                    case "mixed-op":
+                        hints["skipIntro"] = new { start = m.Start, end = m.End };
+                        break;
+                    case "ed":
+                    case "mixed-ed":
+                        hints["skipOutro"] = new { start = m.Start, end = m.End };
+                        break;
+                    case "recap":
+                        hints["skipRecap"] = new { start = m.Start, end = m.End };
+                        break;
+                }
+            }
+            return hints.Count > 0 ? hints : null;
+        }
+
+        /// <summary>
+        /// Builds a single behaviorHints object combining whatever bingeGroup the caller
+        /// has and whatever skip hints we have. Returns null when neither is set so the
+        /// stream JSON stays compact.
+        /// </summary>
+        private static object MergeBehaviorHints(string bingeGroup, Dictionary<string, object> skipHints)
+        {
+            if (string.IsNullOrEmpty(bingeGroup) && (skipHints == null || skipHints.Count == 0))
+                return null;
+
+            var dict = new Dictionary<string, object>();
+            if (!string.IsNullOrEmpty(bingeGroup)) dict["bingeGroup"] = bingeGroup;
+            if (skipHints != null)
+                foreach (var kv in skipHints) dict[kv.Key] = kv.Value;
+            return dict;
         }
     }
 }
