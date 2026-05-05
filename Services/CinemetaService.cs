@@ -80,13 +80,25 @@ namespace AnimeList.Services
                 var result = JObject.Parse(content);
                 if (SafeGet(result, "meta", "videos") is not JArray videosArr) return [];
 
-                // Filter to the target cour's season if provided. Renumber locally so each
-                // cour renders as a clean S1 E1..N — Cinemeta's flat episodes don't align
-                // with any service's per-cour numbering, and a single-cour view in Stremio
-                // shouldn't show "Season 2 Episode 1" when the user clicked into a card
-                // representing only that cour.
-                return videosArr.OfType<JObject>()
-                    .Where(v => !cinemetaSeason.HasValue || (int?)v["season"] == cinemetaSeason.Value)
+                var allVideos = videosArr.OfType<JObject>().ToList();
+                if (allVideos.Count == 0) return [];
+
+                // Try filtering to the requested cour's season first; fall back to the entire
+                // flat list if the filter zeroed out. Fribb's `season` field is a per-source
+                // dictionary (trakt/tmdb/etc.) and AnimeIdMapping.Season returns whichever key
+                // appears first — that doesn't always match Cinemeta's IMDb season layout, so
+                // the filter sometimes excludes every video. Showing the whole franchise list
+                // is wrong for a single-cour card, but it beats showing no episodes at all.
+                var filtered = cinemetaSeason.HasValue
+                    ? allVideos.Where(v => (int?)v["season"] == cinemetaSeason.Value).ToList()
+                    : allVideos;
+                if (filtered.Count == 0) filtered = allVideos;
+
+                // Renumber locally so each cour renders as a clean S1 E1..N — Cinemeta's flat
+                // episodes don't align with any service's per-cour numbering, and a single-
+                // cour view in Stremio shouldn't show "Season 2 Episode 1" when the user
+                // clicked into a card representing only that cour.
+                return filtered
                     .OrderBy(v => (int?)v["season"] ?? 0)
                     .ThenBy(v => (int?)v["episode"] ?? (int?)v["number"] ?? 0)
                     .Select((v, idx) => new Video
