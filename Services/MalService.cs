@@ -186,9 +186,9 @@ namespace AnimeList.Services
                 id = externalId,
                 type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
                 name = ExtractTitle(json),
-                poster = (string)json["main_picture"]?["large"] ?? (string)json["main_picture"]?["medium"],
-                background = (json["pictures"] as JArray)?.OfType<JObject>().FirstOrDefault()?["large"]?.ToString()
-                             ?? (string)json["main_picture"]?["large"],
+                poster = SafeGet<string>(json, "main_picture", "large") ?? SafeGet<string>(json, "main_picture", "medium"),
+                background = SafeGet<string>((json["pictures"] as JArray)?.OfType<JObject>().FirstOrDefault(), "large")
+                             ?? SafeGet<string>(json, "main_picture", "large"),
                 genres = (json["genres"] as JArray)?
                     .OfType<JObject>()
                     .Select(g => (string)g["name"])
@@ -459,7 +459,7 @@ namespace AnimeList.Services
                 id = externalId,
                 type = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString(),
                 name = ExtractTitle(node),
-                poster = (string)node["main_picture"]?["large"] ?? (string)node["main_picture"]?["medium"],
+                poster = SafeGet<string>(node, "main_picture", "large") ?? SafeGet<string>(node, "main_picture", "medium"),
                 entryId = listStatus != null ? malIdStr : null,
                 entryStatus = (string)listStatus?["status"],
             };
@@ -604,7 +604,7 @@ namespace AnimeList.Services
 
         private static string ExtractTitle(JObject anime)
         {
-            return (string)anime["alternative_titles"]?["en"]
+            return SafeGet<string>(anime, "alternative_titles", "en")
                 ?? (string)anime["title"];
         }
 
