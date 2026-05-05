@@ -206,14 +206,14 @@ namespace AnimeList.Controllers
         /// avoid CSRF-style triggers via image tags or prefetch.
         /// </summary>
         [HttpPost]
-        public async Task<IActionResult> SetPrimary(AnimeService service)
+        public async Task<IActionResult> SetPrimary(AnimeService service, bool force = false)
         {
             var primary = GetSessionPrimary();
             if (primary == null) return BadRequest("Log in with a primary provider first.");
             if (primary.anime_service == service) return BadRequest("This provider is already your primary account.");
 
             var uid = await _configStore.UpsertAsync(primary);
-            var (newPrimary, reason) = await _configStore.SwapPrimaryAsync(uid, service);
+            var (newPrimary, reason) = await _configStore.SwapPrimaryAsync(uid, service, resolveCollision: force);
             if (newPrimary == null)
                 return BadRequest(BuildSwapErrorMessage(reason, service));
 

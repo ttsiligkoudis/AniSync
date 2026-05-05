@@ -79,10 +79,14 @@ namespace AnimeList.Services.Interfaces
         /// The chosen link becomes the primary on this row; the previous primary moves into the
         /// linked-tokens array. The UID is preserved so existing install URLs keep working.
         /// Returns the new primary's <see cref="TokenData"/> on success along with a null reason,
-        /// or <c>(null, reason)</c> when the swap is rejected. <paramref name="newPrimaryService"/>
-        /// reasons: <c>"uid-missing"</c>, <c>"no-primary"</c>, <c>"not-linked"</c>,
+        /// or <c>(null, reason)</c> when the swap is rejected. Reasons:
+        /// <c>"uid-missing"</c>, <c>"no-primary"</c>, <c>"not-linked"</c>,
         /// <c>"needs-reauth"</c>, <c>"no-token"</c>, <c>"collision"</c>.
+        /// When <paramref name="resolveCollision"/> is true, a unique-key collision causes the
+        /// stale row to be deleted before retrying instead of returning <c>"collision"</c> —
+        /// callers should only set this after asking the user, since it nukes the other row's
+        /// flags / linked tokens / install URL.
         /// </summary>
-        Task<(TokenData newPrimary, string reason)> SwapPrimaryAsync(string uid, AnimeService newPrimaryService);
+        Task<(TokenData newPrimary, string reason)> SwapPrimaryAsync(string uid, AnimeService newPrimaryService, bool resolveCollision = false);
     }
 }

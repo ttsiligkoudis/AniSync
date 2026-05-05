@@ -625,6 +625,43 @@ else
         return 'Kitsu';
     }
 
+    // Posts the SetPrimary swap and handles the collision-error case by offering a
+    // second confirmation that retries with force=true. fetch lets us read the server's
+    // 400 response body — a plain form-submit would just navigate to the error page.
+    async function promotePrimary(svcEnum, label, force) {
+        var params = new URLSearchParams();
+        params.set('service', svcEnum);
+        if (force) params.set('force', 'true');
+
+        var resp = await fetch('/Auth/SetPrimary', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params.toString(),
+            redirect: 'follow',
+        });
+
+        if (resp.ok || resp.redirected) {
+            window.location.href = resp.redirected ? resp.url : '/';
+            return;
+        }
+
+        var errorText = (await resp.text()) || 'Unknown error.';
+        // Collision surfaces as the "already the primary on another install" message —
+        // offer the force path with a clear heads-up about what it sacrifices.
+        if (!force && /already the primary on another/i.test(errorText)) {
+            var msg = errorText
+                + '\n\nThis usually means an old AniSync session for this account is still in our database. '
+                + 'You can force the swap, which will remove that other install (its install URL will stop working in Stremio). '
+                + 'Continue?';
+            if (confirm(msg)) {
+                await promotePrimary(svcEnum, label, true);
+            }
+            return;
+        }
+
+        alert(errorText);
+    }
+
     $('#serviceToggle .label').on('click', function () {
         var $pill = $(this);
 
@@ -637,11 +674,7 @@ else
             var label = serviceLabel(parseInt($pill.attr('data-service'), 10));
             if (!confirm('Switch your primary account to ' + label + '? Future writes will originate from this account first.')) return;
 
-            // Throw-away form — a fetch wouldn't follow the redirect Razor returns,
-            // and a static <form> in the row is more markup than this is worth.
-            var $form = $('<form method="post" action="/Auth/SetPrimary"></form>');
-            $form.append($('<input type="hidden" name="service" />').val(svcEnum));
-            $form.appendTo('body').trigger('submit');
+            promotePrimary(svcEnum, label, false);
             return;
         }
 

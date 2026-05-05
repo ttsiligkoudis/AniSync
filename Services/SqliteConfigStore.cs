@@ -308,7 +308,7 @@ namespace AnimeList.Services
             await WriteLinkedTokensAsync(uid, existing);
         }
 
-        public async Task<(TokenData newPrimary, string reason)> SwapPrimaryAsync(string uid, AnimeService newPrimaryService)
+        public async Task<(TokenData newPrimary, string reason)> SwapPrimaryAsync(string uid, AnimeService newPrimaryService, bool resolveCollision = false)
         {
             if (string.IsNullOrEmpty(uid)) return (null, "uid-missing");
 
@@ -357,23 +357,45 @@ namespace AnimeList.Services
             var newPrimaryJson = SerializeObject(newPrimary);
             var newLinkedJson = linked.Count == 0 ? (object)DBNull.Value : SerializeObject(linked);
 
-            using var update = conn.CreateCommand();
-            update.CommandText = """
-                UPDATE configs
-                   SET service = $s, user_key = $k, token_json = $j,
-                       linked_tokens = $l, updated_at = $u
-                 WHERE uid = $uid
-                """;
-            update.Parameters.AddWithValue("$s", newServiceInt);
-            update.Parameters.AddWithValue("$k", (object)newUserKey ?? DBNull.Value);
-            update.Parameters.AddWithValue("$j", newPrimaryJson);
-            update.Parameters.AddWithValue("$l", newLinkedJson);
-            update.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-            update.Parameters.AddWithValue("$uid", uid);
+            // Helper closure — repeats the UPDATE for the resolveCollision retry path below.
+            async Task<int> RunUpdate()
+            {
+                using var update = conn.CreateCommand();
+                update.CommandText = """
+                    UPDATE configs
+                       SET service = $s, user_key = $k, token_json = $j,
+                           linked_tokens = $l, updated_at = $u
+                     WHERE uid = $uid
+                    """;
+                update.Parameters.AddWithValue("$s", newServiceInt);
+                update.Parameters.AddWithValue("$k", (object)newUserKey ?? DBNull.Value);
+                update.Parameters.AddWithValue("$j", newPrimaryJson);
+                update.Parameters.AddWithValue("$l", newLinkedJson);
+                update.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+                update.Parameters.AddWithValue("$uid", uid);
+                return await update.ExecuteNonQueryAsync();
+            }
 
             try
             {
-                await update.ExecuteNonQueryAsync();
+                await RunUpdate();
+            }
+            catch (SqliteException) when (resolveCollision)
+            {
+                // Force path: delete the colliding row first, then retry the swap. The
+                // colliding row keeps its own UID, flags, and linked_tokens — caller must
+                // have warned the user that other-install state is lost.
+                using (var del = conn.CreateCommand())
+                {
+                    del.CommandText = "DELETE FROM configs WHERE service = $s AND user_key = $k AND uid <> $uid";
+                    del.Parameters.AddWithValue("$s", newServiceInt);
+                    del.Parameters.AddWithValue("$k", (object)newUserKey ?? DBNull.Value);
+                    del.Parameters.AddWithValue("$uid", uid);
+                    await del.ExecuteNonQueryAsync();
+                }
+
+                try { await RunUpdate(); }
+                catch (SqliteException) { return (null, "collision"); }
             }
             catch (SqliteException)
             {
