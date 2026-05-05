@@ -661,31 +661,69 @@ main {
     line-height: 1.3;
 }
 
-.full-sync-progress {
-    margin-top: 0.7rem;
+/* Full-sync modal — stays mounted in the DOM and toggles via [hidden]. The user
+   asked for Cancel/Close to be the only way to dismiss, so we don't wire any
+   click-outside / Esc handling on the JS side. */
+.sync-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(0, 0, 0, 0.7);
     display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
 }
 
-.full-sync-bar {
-    height: 6px;
-    background: rgba(255,255,255,0.06);
+.sync-modal[hidden] {
+    display: none;
+}
+
+.sync-modal-card {
+    background: #1a1a1a;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    padding: 1.5rem;
+    width: min(92vw, 420px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+
+.sync-modal-title {
+    font-size: 1.05rem;
+    margin: 0 0 0.6rem;
+    color: #fff;
+}
+
+.sync-modal-message {
+    font-size: 0.85rem;
+    color: #bbb;
+    margin: 0 0 1rem;
+    min-height: 1.2rem;
+}
+
+.sync-modal-bar {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.06);
     border-radius: 999px;
     overflow: hidden;
 }
 
-.full-sync-bar-fill {
+.sync-modal-bar-fill {
     height: 100%;
     width: 0%;
     background: linear-gradient(90deg, #7b5bf5, #6341d4);
-    transition: width 0.3s ease-out;
+    transition: width 0.25s ease-out;
 }
 
-.full-sync-status {
-    font-size: 0.78rem;
-    color: #aaa;
-    text-align: center;
+.sync-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 1.25rem;
+}
+
+.sync-modal-actions .btn-primary-action {
+    width: auto;
+    padding: 0.55rem 1.2rem;
 }
 
 .btn-danger-pill {
