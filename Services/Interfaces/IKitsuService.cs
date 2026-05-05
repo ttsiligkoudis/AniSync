@@ -40,6 +40,14 @@ namespace AnimeList.Services.Interfaces
         /// Manage Entry page is saved with the "None" status.
         /// </summary>
         Task DeleteAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null);
+
+        /// <summary>
+        /// Returns the user's entire Kitsu library with full <see cref="AnimeEntry"/> state
+        /// attached, used by the manual full-sync flow. <see cref="AnimeEntry.MediaId"/>
+        /// carries the <c>kitsu:</c> prefix so callers can hand it to the sync fan-out
+        /// without re-prefixing.
+        /// </summary>
+        Task<List<AnimeEntry>> GetUserListEntriesAsync(TokenData tokenData);
     }
 }
 

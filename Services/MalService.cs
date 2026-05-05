@@ -597,6 +597,65 @@ namespace AnimeList.Services
                 ?? (string)anime["title"];
         }
 
+        public async Task<List<AnimeEntry>> GetUserListEntriesAsync(TokenData tokenData)
+        {
+            if (string.IsNullOrEmpty(tokenData?.access_token)) return [];
+
+            // MAL caps animelist at 1000/page, so a single round-trip covers most users; a
+            // power user with thousands of entries finishes in 2-3 pages. The fields request
+            // pulls every list_status attribute the sync fan-out needs, plus num_episodes
+            // off the node so we can carry TotalEpisodes through.
+            var entries = new List<AnimeEntry>();
+            int offset = 0;
+            while (true)
+            {
+                var fields = $"node{{id,num_episodes}},{UserListStatusFields}";
+                var url = $"{MalApi}/users/@me/animelist?fields={fields}&limit={FullFetchPageSize}&sort=list_updated_at"
+                          + (offset > 0 ? $"&offset={offset}" : "");
+
+                var json = await GetJsonAsync(url, tokenData);
+                if (json == null) break;
+                if (json["data"] is not JArray dataArr || dataArr.Count == 0) break;
+
+                foreach (var raw in dataArr.OfType<JObject>())
+                {
+                    var node = raw["node"] as JObject;
+                    var listStatus = raw["list_status"] as JObject;
+                    if (node == null || listStatus == null) continue;
+
+                    var malId = (string)node["id"]?.ToString();
+                    if (string.IsNullOrEmpty(malId)) continue;
+
+                    var rawStatus = (string)listStatus["status"];
+                    var isRewatching = (bool?)listStatus["is_rewatching"] ?? false;
+                    var rawScore = (double?)listStatus["score"];
+
+                    entries.Add(new AnimeEntry
+                    {
+                        // No EntryId: MAL keys list-status by anime id, and the sync flow
+                        // re-derives that from the prefixed MediaId on save.
+                        // Prefix so the sync orchestrator hands it straight to GetIdByService.
+                        MediaId = $"{malPrefix}{malId}",
+                        // Surface "rewatching" as a synthetic value the sync flow recognises —
+                        // mirrors GetAnimeEntryAsync above.
+                        Status = isRewatching ? "rewatching" : rawStatus,
+                        Progress = (int?)listStatus["num_episodes_watched"] ?? 0,
+                        TotalEpisodes = (int?)node["num_episodes"],
+                        Score = (rawScore.HasValue && rawScore.Value > 0) ? rawScore : null,
+                        Notes = (string)listStatus["comments"],
+                        RewatchCount = (int?)listStatus["num_times_rewatched"] ?? 0,
+                        StartedAt = ParseMalDate((string)listStatus["start_date"]),
+                        FinishedAt = ParseMalDate((string)listStatus["finish_date"]),
+                    });
+                }
+
+                if (dataArr.Count < FullFetchPageSize) break;
+                offset += FullFetchPageSize;
+            }
+
+            return entries;
+        }
+
         private static DateTime? ParseMalDate(string raw)
         {
             return DateTime.TryParse(raw, out var dt) ? dt : null;

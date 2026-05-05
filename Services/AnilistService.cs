@@ -820,6 +820,81 @@ namespace AnimeList.Services
             catch { return null; }
         }
 
+        public async Task<List<AnimeEntry>> GetUserListEntriesAsync(TokenData tokenData)
+        {
+            if (string.IsNullOrEmpty(tokenData?.access_token) || string.IsNullOrEmpty(tokenData.user_id))
+                return [];
+
+            // MediaListCollection returns the user's entire library in one round-trip,
+            // grouped by status. Pull every per-entry field the sync fan-out needs;
+            // skip the heavy media payload (genres, cover, description) since we only
+            // need ids and episode counts here.
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($userId: Int) {
+                        MediaListCollection(userId: $userId, type: ANIME) {
+                            lists {
+                                entries {
+                                    id
+                                    status
+                                    progress
+                                    score
+                                    notes
+                                    repeat
+                                    startedAt { year month day }
+                                    completedAt { year month day }
+                                    media { id episodes }
+                                }
+                            }
+                        }
+                    }",
+                variables = new { userId = tokenData.user_id }
+            });
+
+            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
+            {
+                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+
+            var response = await _clientFactory.CreateClient().SendAsync(request);
+            if (!response.IsSuccessStatusCode) return [];
+
+            var content = await response.Content.ReadAsStringAsync();
+            var data = DeserializeObject<dynamic>(content)?.data;
+            if (data?.MediaListCollection?.lists == null) return [];
+
+            var result = new List<AnimeEntry>();
+            foreach (var lst in data.MediaListCollection.lists)
+            {
+                if (lst?.entries == null) continue;
+                foreach (var ml in lst.entries)
+                {
+                    var mediaId = (string)ml.media?.id?.ToString();
+                    if (string.IsNullOrEmpty(mediaId)) continue;
+
+                    var rawScore = (double?)ml.score;
+                    result.Add(new AnimeEntry
+                    {
+                        EntryId = (string)ml.id?.ToString(),
+                        // Prefix so the sync orchestrator can pass this straight through to
+                        // GetIdByService for cross-service translation.
+                        MediaId = $"{anilistPrefix}{mediaId}",
+                        Status = (string)ml.status,
+                        Progress = (int?)ml.progress ?? 0,
+                        TotalEpisodes = (int?)ml.media?.episodes,
+                        Score = (rawScore.HasValue && rawScore > 0) ? rawScore : null,
+                        Notes = (string)ml.notes,
+                        RewatchCount = (int?)ml.repeat ?? 0,
+                        StartedAt = FuzzyDateToDateTime(ml.startedAt),
+                        FinishedAt = FuzzyDateToDateTime(ml.completedAt),
+                    });
+                }
+            }
+            return result;
+        }
+
         private static object ToFuzzyDate(DateTime dt) => new { year = dt.Year, month = dt.Month, day = dt.Day };
 
         /// <summary>

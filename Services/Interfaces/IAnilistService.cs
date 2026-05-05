@@ -40,6 +40,15 @@ namespace AnimeList.Services.Interfaces
         /// off their list rather than updating it.
         /// </summary>
         Task DeleteAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null);
+
+        /// <summary>
+        /// Returns the user's entire AniList library — every entry across every status — with
+        /// full <see cref="AnimeEntry"/> state attached. Used by the manual full-sync flow to
+        /// backfill linked providers after a fresh link. <see cref="AnimeEntry.MediaId"/> is
+        /// returned with the <c>anilist:</c> prefix already attached so callers can pass it
+        /// straight to the sync fan-out.
+        /// </summary>
+        Task<List<AnimeEntry>> GetUserListEntriesAsync(TokenData tokenData);
     }
 }
 

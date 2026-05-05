@@ -37,5 +37,14 @@ namespace AnimeList.Services.Interfaces
         /// Removes the anime from the user's list. No-op if it isn't there.
         /// </summary>
         Task DeleteAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null);
+
+        /// <summary>
+        /// Returns the user's entire MyAnimeList library with full <see cref="AnimeEntry"/>
+        /// state attached, used by the manual full-sync flow. <see cref="AnimeEntry.MediaId"/>
+        /// carries the <c>mal:</c> prefix so callers can hand it to the sync fan-out
+        /// without re-prefixing. Status surfaces "rewatching" as a synthetic value when
+        /// is_rewatching is set, mirroring <see cref="GetAnimeEntryAsync"/>.
+        /// </summary>
+        Task<List<AnimeEntry>> GetUserListEntriesAsync(TokenData tokenData);
     }
 }

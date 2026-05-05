@@ -638,6 +638,112 @@ namespace AnimeList.Services
         private static string Truncate(string s, int max)
             => s.Length <= max ? s : s[..max] + "…";
 
+        public async Task<List<AnimeEntry>> GetUserListEntriesAsync(TokenData tokenData)
+        {
+            if (string.IsNullOrEmpty(tokenData?.access_token) || string.IsNullOrEmpty(tokenData.user_id))
+                return [];
+
+            // Use the same parallel-fan-out pattern as the catalog list fetch: read meta.count
+            // off the first page, then fire the rest concurrently behind a SemaphoreSlim. Sparse
+            // fields keep each page small — we only need the list_status attributes plus the
+            // related anime id for prefixing on the way back out.
+            var firstUrl = BuildLibraryUrl(tokenData.user_id, offset: 0);
+            var firstPage = await FetchKitsuPageAsync(firstUrl, tokenData);
+            if (firstPage == null) return [];
+
+            var totalCount = (int?)firstPage["meta"]?["count"];
+            var firstDataCount = (firstPage["data"] as JArray)?.Count ?? 0;
+
+            var entries = new List<AnimeEntry>();
+            CollectKitsuEntries(firstPage, entries);
+
+            if (totalCount.HasValue && totalCount.Value > CatalogPageSize)
+            {
+                using var sem = new SemaphoreSlim(8);
+                var tasks = new List<Task<JObject>>();
+                for (int offset = CatalogPageSize; offset < totalCount.Value; offset += CatalogPageSize)
+                {
+                    var url = BuildLibraryUrl(tokenData.user_id, offset);
+                    tasks.Add(FetchWithSemaphoreAsync(url, tokenData, sem));
+                }
+                var pages = await Task.WhenAll(tasks);
+                foreach (var page in pages)
+                    if (page != null) CollectKitsuEntries(page, entries);
+            }
+            else if (!totalCount.HasValue && firstDataCount >= CatalogPageSize)
+            {
+                // Defensive: walk pages serially if Kitsu ever stops shipping meta.count.
+                int offset = CatalogPageSize;
+                while (true)
+                {
+                    var url = BuildLibraryUrl(tokenData.user_id, offset);
+                    var page = await FetchKitsuPageAsync(url, tokenData);
+                    if (page == null) break;
+                    var dataCount = (page["data"] as JArray)?.Count ?? 0;
+                    if (dataCount == 0) break;
+                    CollectKitsuEntries(page, entries);
+                    if (dataCount < CatalogPageSize) break;
+                    offset += CatalogPageSize;
+                }
+            }
+
+            return entries;
+        }
+
+        private string BuildLibraryUrl(string userId, int offset) =>
+            $"{_kitsuApi}/users/{userId}/library-entries"
+            + "?filter[kind]=anime"
+            + "&include=anime"
+            + "&fields[anime]=episodeCount"
+            + "&fields[libraryEntries]=status,progress,ratingTwenty,reconsumeCount,startedAt,finishedAt,notes,anime"
+            + $"&page[limit]={CatalogPageSize}"
+            + (offset > 0 ? $"&page[offset]={offset}" : "");
+
+        private static void CollectKitsuEntries(JObject json, List<AnimeEntry> entries)
+        {
+            // Build a sparse anime-id → episodeCount map from the include payload so each
+            // entry can carry its TotalEpisodes through the sync without an extra round trip.
+            var animeEpisodes = new Dictionary<string, int?>();
+            if (json["included"] is JArray includedArr)
+            {
+                foreach (var inc in includedArr.OfType<JObject>())
+                {
+                    if ((string)inc["type"] != "anime") continue;
+                    var id = (string)inc["id"];
+                    if (string.IsNullOrEmpty(id)) continue;
+                    animeEpisodes[id] = (int?)inc["attributes"]?["episodeCount"];
+                }
+            }
+
+            if (json["data"] is not JArray dataArr) return;
+
+            foreach (var libEntry in dataArr.OfType<JObject>())
+            {
+                var animeRefId = (string)libEntry["relationships"]?["anime"]?["data"]?["id"];
+                if (string.IsNullOrEmpty(animeRefId)) continue;
+
+                var attrs = libEntry["attributes"];
+                var ratingTwenty = (int?)attrs?["ratingTwenty"];
+
+                entries.Add(new AnimeEntry
+                {
+                    EntryId = (string)libEntry["id"],
+                    // Prefix so the sync orchestrator can hand this straight to GetIdByService.
+                    MediaId = $"{kitsuPrefix}{animeRefId}",
+                    Status = (string)attrs?["status"],
+                    Progress = (int?)attrs?["progress"] ?? 0,
+                    TotalEpisodes = animeEpisodes.GetValueOrDefault(animeRefId),
+                    // Translate Kitsu's ratingTwenty (2–20) back to the shared 0–10 scale,
+                    // dropping the "no score" sentinel (null or 0) on the way.
+                    Score = (ratingTwenty.HasValue && ratingTwenty.Value > 0) ? ratingTwenty.Value / 2.0 : null,
+                    Notes = (string)attrs?["notes"],
+                    RewatchCount = (int?)attrs?["reconsumeCount"] ?? 0,
+                    StartedAt = ParseKitsuDate((string)attrs?["startedAt"]),
+                    FinishedAt = ParseKitsuDate((string)attrs?["finishedAt"]),
+                });
+            }
+        }
+
         private static DateTime? ParseKitsuDate(string raw)
         {
             return DateTime.TryParse(raw, out var dt) ? dt : null;
