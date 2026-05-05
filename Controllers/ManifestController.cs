@@ -9,15 +9,43 @@ namespace AnimeList.Controllers
     {
         private readonly ITokenService _tokenService;
         private readonly IConfigStore _configStore;
+        private readonly ILogger<ManifestController> _logger;
 
-        public ManifestController(ITokenService tokenService, IConfigStore configStore)
+        public ManifestController(ITokenService tokenService, IConfigStore configStore, ILogger<ManifestController> logger)
         {
             _tokenService = tokenService;
             _configStore = configStore;
+            _logger = logger;
         }
 
         [HttpGet("{config}/manifest.json")]
         public async Task<JsonResult> Get(string config)
+        {
+            try
+            {
+                return await BuildManifestAsync(config);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Manifest build failed (config={Config}).", config);
+                // Stremio rejects an addon whose manifest 5xxs, so emit a minimal valid
+                // shell — the search catalog alone is enough for the addon to register.
+                // The user will see no catalogs until the underlying issue is fixed.
+                return new JsonResult(new Manifest
+                {
+                    id = "community.AniSync",
+                    version = "1.0.0",
+                    name = "AniSync",
+                    description = "AniSync (degraded mode — see server logs).",
+                    resources = ["catalog", "meta", "subtitles", "stream"],
+                    types = [MetaType.movie.ToString(), MetaType.series.ToString()],
+                    behaviorHints = new BehaviorHints { configurable = true },
+                    idPrefixes = [anilistPrefix, kitsuPrefix, imdbPrefix, tmdbPrefix, malPrefix],
+                });
+            }
+        }
+
+        private async Task<JsonResult> BuildManifestAsync(string config)
         {
             // Hydrates flags from the config store for v5 URLs; v3/v4 URLs carry them inline.
             var configuration = await ResolveConfigAsync(config, _configStore);

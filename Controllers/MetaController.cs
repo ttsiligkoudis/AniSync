@@ -17,8 +17,9 @@ namespace AnimeList.Controllers
         private readonly ISyncService _syncService;
         private readonly IFillerListService _fillerListService;
         private readonly IConfigStore _configStore;
+        private readonly ILogger<MetaController> _logger;
 
-        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService, ISyncService syncService, IFillerListService fillerListService, IConfigStore configStore)
+        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService, ISyncService syncService, IFillerListService fillerListService, IConfigStore configStore, ILogger<MetaController> logger)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
@@ -30,6 +31,7 @@ namespace AnimeList.Controllers
             _syncService = syncService;
             _fillerListService = fillerListService;
             _configStore = configStore;
+            _logger = logger;
         }
 
         private async Task<(dynamic?, bool)> GetByIDInternal(string config, string id, bool deserialize = false)
@@ -124,22 +126,32 @@ namespace AnimeList.Controllers
         [HttpGet("{config}/[controller]/{metaType}/{id}.json")]
         public async Task<IActionResult> GetByID(string config, MetaType metaType, string id)
         {
-            (var anime, var serialized) = await GetByIDInternal(config, id);
-
-            // Enrich the response's videos[] with filler/canon labels from
-            // AnimeFillerList. The two render paths take slightly different shapes —
-            // cinemeta hands us a serialised JSON string (so we round-trip parse →
-            // mutate → re-serialise), per-service paths hand us a Meta we can mutate
-            // in place. Both ultimately call the same FillerListService.
-            if (anime != null)
+            try
             {
-                if (serialized)
-                    anime = await EnrichSerializedWithFillerAsync((string)anime);
-                else
-                    await EnrichMetaWithFillerAsync((Meta)anime);
-            }
+                (var anime, var serialized) = await GetByIDInternal(config, id);
 
-            return serialized ? Content(anime, "application/json") : new JsonResult(new { meta = anime });
+                // Enrich the response's videos[] with filler/canon labels from
+                // AnimeFillerList. The two render paths take slightly different shapes —
+                // cinemeta hands us a serialised JSON string (so we round-trip parse →
+                // mutate → re-serialise), per-service paths hand us a Meta we can mutate
+                // in place. Both ultimately call the same FillerListService.
+                if (anime != null)
+                {
+                    if (serialized)
+                        anime = await EnrichSerializedWithFillerAsync((string)anime);
+                    else
+                        await EnrichMetaWithFillerAsync((Meta)anime);
+                }
+
+                return serialized ? Content(anime, "application/json") : new JsonResult(new { meta = anime });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Meta GetByID failed (id={Id}, type={MetaType}).", id, metaType);
+                // Stremio interprets {meta:null} as "no metadata"; the detail page falls back
+                // to the catalog entry's poster + title and stops asking on the same id.
+                return new JsonResult(new { meta = (object)null });
+            }
         }
 
         /// <summary>
@@ -213,6 +225,21 @@ namespace AnimeList.Controllers
 
         [HttpGet("{config}/[controller]/ManageEntry/{*id}")]
         public async Task<IActionResult> ManageEntry(string config, string id, int? season = null, int? episode = null)
+        {
+            try
+            {
+                return await ManageEntryInternal(config, id, season, episode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ManageEntry render failed (id={Id}, season={Season}, episode={Episode}).", id, season, episode);
+                // Render the unauthenticated/empty view so the user gets a graceful
+                // "nothing to manage" page rather than a stack trace.
+                return View("ManageEntry", new ManageEntryViewModel { Id = id, Config = config });
+            }
+        }
+
+        private async Task<IActionResult> ManageEntryInternal(string config, string id, int? season, int? episode)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync(config);
 
@@ -440,87 +467,104 @@ namespace AnimeList.Controllers
         [HttpGet("{config}/[controller]/GetEntry")]
         public async Task<JsonResult> GetEntry(string config, string id, int? season)
         {
-            var tokenData = await _tokenService.GetAccessTokenAsync(config);
+            try
+            {
+                var tokenData = await _tokenService.GetAccessTokenAsync(config);
 
-            if (tokenData == null || string.IsNullOrWhiteSpace(tokenData.access_token))
+                if (tokenData == null || string.IsNullOrWhiteSpace(tokenData.access_token))
+                    return new JsonResult(new { success = false });
+
+                var entry = tokenData.anime_service switch
+                {
+                    AnimeService.Anilist => await _anilistService.GetAnimeEntryAsync(tokenData, id, season),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, id, season),
+                    _ => await _kitsuService.GetAnimeEntryAsync(tokenData, id, season),
+                };
+
+                return new JsonResult(new
+                {
+                    success = true,
+                    status = entry?.Status,
+                    progress = entry?.Progress ?? 0,
+                    totalEpisodes = entry?.TotalEpisodes,
+                    score = entry?.Score,
+                    notes = entry?.Notes,
+                    rewatchCount = entry?.RewatchCount ?? 0,
+                    startedAt = entry?.StartedAt?.ToString("yyyy-MM-dd"),
+                    finishedAt = entry?.FinishedAt?.ToString("yyyy-MM-dd"),
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetEntry failed (id={Id}, season={Season}).", id, season);
                 return new JsonResult(new { success = false });
-
-            var entry = tokenData.anime_service switch
-            {
-                AnimeService.Anilist => await _anilistService.GetAnimeEntryAsync(tokenData, id, season),
-                AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, id, season),
-                _ => await _kitsuService.GetAnimeEntryAsync(tokenData, id, season),
-            };
-
-            return new JsonResult(new
-            {
-                success = true,
-                status = entry?.Status,
-                progress = entry?.Progress ?? 0,
-                totalEpisodes = entry?.TotalEpisodes,
-                score = entry?.Score,
-                notes = entry?.Notes,
-                rewatchCount = entry?.RewatchCount ?? 0,
-                startedAt = entry?.StartedAt?.ToString("yyyy-MM-dd"),
-                finishedAt = entry?.FinishedAt?.ToString("yyyy-MM-dd"),
-            });
+            }
         }
 
         [HttpPost("{config}/[controller]/SaveEntry")]
         public async Task<JsonResult> SaveEntry(string config, [FromBody] SaveEntryRequest request)
         {
-            var tokenData = await _tokenService.GetAccessTokenAsync(config);
-
-            if (tokenData == null || string.IsNullOrWhiteSpace(tokenData.access_token))
-                return new JsonResult(new { success = false });
-
-            // Empty status = the "None" option in the UI = "remove from list".
-            if (string.IsNullOrEmpty(request.Status))
+            try
             {
+                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+
+                if (tokenData == null || string.IsNullOrWhiteSpace(tokenData.access_token))
+                    return new JsonResult(new { success = false });
+
+                // Empty status = the "None" option in the UI = "remove from list".
+                if (string.IsNullOrEmpty(request.Status))
+                {
+                    switch (tokenData.anime_service)
+                    {
+                        case AnimeService.Anilist:
+                            await _anilistService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                            break;
+                        case AnimeService.MyAnimeList:
+                            await _malService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                            break;
+                        default:
+                            await _kitsuService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                            break;
+                    }
+                    // Mirror the delete to every linked secondary account. Best-effort: per-target
+                    // failures inside SyncService are swallowed so the primary delete still wins.
+                    await _syncService.FanOutDeleteAsync(tokenData, request.Id, request.Season);
+                    return new JsonResult(new { success = true });
+                }
+
+                DateTime? startedAt = ParseDate(request.StartedAt);
+                DateTime? finishedAt = ParseDate(request.FinishedAt);
+
                 switch (tokenData.anime_service)
                 {
                     case AnimeService.Anilist:
-                        await _anilistService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                        await _anilistService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
                         break;
                     case AnimeService.MyAnimeList:
-                        await _malService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                        await _malService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
                         break;
                     default:
-                        await _kitsuService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                        await _kitsuService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
                         break;
                 }
-                // Mirror the delete to every linked secondary account. Best-effort: per-target
-                // failures inside SyncService are swallowed so the primary delete still wins.
-                await _syncService.FanOutDeleteAsync(tokenData, request.Id, request.Season);
+
+                // Sync the same change to linked secondary providers. SyncService normalises status
+                // and score, fans the writes out concurrently, and silently drops mapping gaps so
+                // a partial-coverage anime doesn't fail the user's save.
+                await _syncService.FanOutSaveAsync(tokenData, request.Id, request.Season, request.Progress,
+                    request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+
                 return new JsonResult(new { success = true });
             }
-
-            DateTime? startedAt = ParseDate(request.StartedAt);
-            DateTime? finishedAt = ParseDate(request.FinishedAt);
-
-            switch (tokenData.anime_service)
+            catch (Exception ex)
             {
-                case AnimeService.Anilist:
-                    await _anilistService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
-                        request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
-                    break;
-                case AnimeService.MyAnimeList:
-                    await _malService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
-                        request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
-                    break;
-                default:
-                    await _kitsuService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
-                        request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
-                    break;
+                _logger.LogError(ex, "SaveEntry failed (id={Id}, season={Season}, status={Status}).",
+                    request?.Id, request?.Season, request?.Status);
+                return new JsonResult(new { success = false });
             }
-
-            // Sync the same change to linked secondary providers. SyncService normalises status
-            // and score, fans the writes out concurrently, and silently drops mapping gaps so
-            // a partial-coverage anime doesn't fail the user's save.
-            await _syncService.FanOutSaveAsync(tokenData, request.Id, request.Season, request.Progress,
-                request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
-
-            return new JsonResult(new { success = true });
         }
 
         private static DateTime? ParseDate(string s) =>

@@ -11,14 +11,16 @@ namespace AnimeList.Controllers
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
         private readonly IConfigStore _configStore;
+        private readonly ILogger<CatalogController> _logger;
 
-        public CatalogController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, IConfigStore configStore)
+        public CatalogController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, IConfigStore configStore, ILogger<CatalogController> logger)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
             _configStore = configStore;
+            _logger = logger;
         }
 
         [HttpGet("{config}/[controller]/{metaType}/{listType}/{extras}.json")]
@@ -35,30 +37,41 @@ namespace AnimeList.Controllers
         [HttpGet("{config}/[controller]/{metaType}/{listType}.json")]
         public async Task<ActionResult> GetList(string config, MetaType metaType, ListType listType, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null)
         {
-            if (genre?.Equals(DefaultOption, StringComparison.OrdinalIgnoreCase) == true) genre = null;
-
-            var tokenData = await _tokenService.GetAccessTokenAsync(config);
-            var animeService = tokenData?.anime_service ?? AnimeService.Kitsu;
-
-            if (!string.IsNullOrWhiteSpace(tokenData?.access_token) && IsTokenExpired(tokenData.expiration_date))
+            try
             {
-                return new JsonResult(new { metas = ExpiredMetas() });
+                if (genre?.Equals(DefaultOption, StringComparison.OrdinalIgnoreCase) == true) genre = null;
+
+                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+                var animeService = tokenData?.anime_service ?? AnimeService.Kitsu;
+
+                if (!string.IsNullOrWhiteSpace(tokenData?.access_token) && IsTokenExpired(tokenData.expiration_date))
+                {
+                    return new JsonResult(new { metas = ExpiredMetas() });
+                }
+
+                // The "Group anime seasons" toggle defaults ON (disableSeasonGrouping=false);
+                // when the user opts out, services emit their native id per cour instead of
+                // collapsing a franchise via the IMDb/TMDB cross-service mapping.
+                var configuration = await ResolveConfigAsync(config, _configStore);
+                var groupSeasons = configuration?.disableSeasonGrouping != true;
+
+                var metas = animeService switch
+                {
+                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasons),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasons),
+                    _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasons),
+                };
+
+                return new JsonResult(new { metas });
             }
-
-            // The "Group anime seasons" toggle defaults ON (disableSeasonGrouping=false);
-            // when the user opts out, services emit their native id per cour instead of
-            // collapsing a franchise via the IMDb/TMDB cross-service mapping.
-            var configuration = await ResolveConfigAsync(config, _configStore);
-            var groupSeasons = configuration?.disableSeasonGrouping != true;
-
-            var metas = animeService switch
+            catch (Exception ex)
             {
-                AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasons),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasons),
-                _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasons),
-            };
-
-            return new JsonResult(new { metas });
+                _logger.LogError(ex, "Catalog request failed (listType={ListType}, animeId={AnimeId}, genre={Genre}, search={Search}, sort={Sort}, skip={Skip}).",
+                    listType, animeId, genre, search, sort, skip);
+                // Stremio expects a JSON envelope even on failure — empty metas keeps the
+                // catalog row from rendering "(unknown error)" in the UI.
+                return new JsonResult(new { metas = Array.Empty<object>() });
+            }
         }
 
         /// <summary>

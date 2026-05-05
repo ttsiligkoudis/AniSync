@@ -13,10 +13,11 @@ namespace AnimeList.Controllers
         private readonly IMalService _malService;
         private readonly IAniSkipService _aniSkipService;
         private readonly IConfigStore _configStore;
+        private readonly ILogger<StreamController> _logger;
 
         public StreamController(ITokenService tokenService, IAnimeMappingService mappingService,
             IAnilistService anilistService, IKitsuService kitsuService, IMalService malService,
-            IAniSkipService aniSkipService, IConfigStore configStore)
+            IAniSkipService aniSkipService, IConfigStore configStore, ILogger<StreamController> logger)
         {
             _tokenService = tokenService;
             _mappingService = mappingService;
@@ -25,15 +26,29 @@ namespace AnimeList.Controllers
             _malService = malService;
             _aniSkipService = aniSkipService;
             _configStore = configStore;
+            _logger = logger;
         }
 
         [HttpGet("{config}/stream/{type}/{id}.json")]
         public async Task<JsonResult> GetStreams(string config, string type, string id)
         {
+            var empty = new JsonResult(new { streams = Array.Empty<object>() });
+            try
+            {
+                return await GetStreamsInternal(config, type, id, empty);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Stream request failed (id={Id}, type={Type}).", id, type);
+                return empty;
+            }
+        }
+
+        private async Task<JsonResult> GetStreamsInternal(string config, string type, string id, JsonResult empty)
+        {
             var tokenData = await _tokenService.GetAccessTokenAsync(config);
             // Hydrates flags from the config store for v5 URLs; v3/v4 carry them inline.
             var configuration = await ResolveConfigAsync(config, _configStore);
-            var empty = new JsonResult(new { streams = Array.Empty<object>() });
 
             if (!TryParseAnimeId(id, out var animeId, out var season, out var episode))
                 return empty;
