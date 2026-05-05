@@ -604,6 +604,11 @@ main {
     background: rgba(111, 217, 122, 0.12);
 }
 
+.linked-account-warn {
+    color: #f5c453;
+    background: rgba(245, 196, 83, 0.14);
+}
+
 .linked-account-creds {
     grid-column: 1 / -1;
     display: none;

@@ -89,9 +89,21 @@
                             }
                             else if (linked != null)
                             {
-                                <span class="linked-account-badge linked-account-connected">
-                                    @(linked.NeedsReauth ? "Needs re-auth" : "Linked")
+                                var needsReauth = linked.NeedsReauth;
+                                <span class="linked-account-badge @(needsReauth ? "linked-account-warn" : "linked-account-connected")">
+                                    @(needsReauth ? "Needs re-auth" : "Linked")
                                 </span>
+                                @if (needsReauth)
+                                {
+                                    if (svc == AnimeService.Kitsu)
+                                    {
+                                        <button type="button" class="btn-ghost btn-ghost-sm linked-account-toggle">Re-link</button>
+                                    }
+                                    else
+                                    {
+                                        <a class="btn-ghost btn-ghost-sm" href="/Auth/LinkProvider?service=@svc">Re-link ↗</a>
+                                    }
+                                }
                                 <form method="post" action="/Auth/UnlinkProvider" class="linked-account-form">
                                     <input type="hidden" name="service" value="@svc" />
                                     <button type="submit" class="btn-ghost btn-ghost-sm">Unlink</button>
@@ -106,7 +118,9 @@
                                 <a class="btn-ghost btn-ghost-sm" href="/Auth/LinkProvider?service=@svc">Link ↗</a>
                             }
                         </div>
-                        @if (svc == AnimeService.Kitsu && !isPrimary && linked == null)
+                        @* The Kitsu inline credentials form covers both first-time link and *@
+                        @* re-link after a needs-reauth transition (password rotated, etc.). *@
+                        @if (svc == AnimeService.Kitsu && !isPrimary && (linked == null || linked.NeedsReauth))
                         {
                             <form method="post" action="/Auth/LinkKitsu" class="linked-account-creds linked-kitsu-form">
                                 <input type="text" name="username" placeholder="Kitsu username" required />

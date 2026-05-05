@@ -345,6 +345,40 @@ namespace AnimeList.Services
             return tokenData;
         }
 
+        public async Task<TokenData> RefreshLinkedTokenAsync(TokenData token)
+        {
+            if (token == null) return null;
+
+            switch (token.anime_service)
+            {
+                case AnimeService.Anilist:
+                    if (string.IsNullOrEmpty(token.refresh_token)) return null;
+                    return await RefreshAccessToken(token.refresh_token);
+
+                case AnimeService.MyAnimeList:
+                    if (string.IsNullOrEmpty(token.refresh_token)) return null;
+                    var refreshed = await RefreshMalAccessToken(token.refresh_token);
+                    if (refreshed == null) return null;
+                    // MAL refresh responses don't echo the user info back; preserve identity
+                    // from the prior linked token so the cached row stays usable.
+                    refreshed.user_id ??= token.user_id;
+                    refreshed.username ??= token.username;
+                    return refreshed;
+
+                case AnimeService.Kitsu:
+                    // Kitsu has no refresh token — re-issue via the stored creds. The link
+                    // flow only ever stores live (username, password) pairs, so a missing
+                    // password means the linked token was anonymous and can't be refreshed.
+                    if (string.IsNullOrEmpty(token.username) || string.IsNullOrEmpty(token.password))
+                        return null;
+                    return await GetAccessTokenByCredsAsync(token.username, token.password,
+                        setContext: false, userId: token.user_id);
+
+                default:
+                    return null;
+            }
+        }
+
         private async Task<(string userId, string userName)> GetMalUserAsync(string accessToken)
         {
             var request = new HttpRequestMessage(HttpMethod.Get, "https://api.myanimelist.net/v2/users/@me");

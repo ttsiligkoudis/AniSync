@@ -11,14 +11,16 @@ namespace AnimeList.Controllers
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
         private readonly IConfigStore _configStore;
+        private readonly ISyncService _syncService;
 
-        public SubtitlesController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, IConfigStore configStore)
+        public SubtitlesController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, IConfigStore configStore, ISyncService syncService)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
             _configStore = configStore;
+            _syncService = syncService;
         }
 
         [HttpGet("{config}/subtitles/{type}/{id}/{fileName}.json")]
@@ -54,6 +56,11 @@ namespace AnimeList.Controllers
                     await _kitsuService.SaveAnimeEntryAsync(tokenData, animeId, season, episode.Value);
                     break;
             }
+
+            // Mirror the auto-tracked progress to linked secondary providers. Status is left
+            // null so each target service preserves its existing entry status (or creates a
+            // sensible default when the entry is new — the per-service default is "watching").
+            await _syncService.FanOutSaveAsync(tokenData, animeId, season, episode.Value);
 
             return empty;
         }

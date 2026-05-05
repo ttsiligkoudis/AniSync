@@ -30,6 +30,13 @@ namespace AnimeList.Services.Interfaces
         /// </summary>
         Task<TokenData> GetAccessTokenByMalCodeAsync(string code, string codeVerifier, bool setSession = true);
         #endregion
+
+        /// <summary>
+        /// Refreshes a linked secondary-provider token without touching the primary's session
+        /// or in-memory token caches. Returns null when refresh fails — the caller should mark
+        /// the linked token as needing re-auth and stop trying to use it.
+        /// </summary>
+        Task<TokenData> RefreshLinkedTokenAsync(TokenData token);
     }
 }
 

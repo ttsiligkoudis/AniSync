@@ -9,14 +9,16 @@ namespace AnimeList.Services
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
+        private readonly ITokenService _tokenService;
 
         public SyncService(IConfigStore configStore, IAnilistService anilistService,
-            IKitsuService kitsuService, IMalService malService)
+            IKitsuService kitsuService, IMalService malService, ITokenService tokenService)
         {
             _configStore = configStore;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
+            _tokenService = tokenService;
         }
 
         public async Task FanOutSaveAsync(TokenData primary, string animeId, int? season, int progress,
@@ -55,9 +57,41 @@ namespace AnimeList.Services
             // use it instead of a dedicated "find UID" lookup.
             var uid = await _configStore.UpsertAsync(primary);
             var linked = await _configStore.GetLinkedTokensAsync(uid);
-            // Skip tokens flagged as needing re-auth so a stale token doesn't 401-loop on
-            // every save. The user re-links via the configure page and writes resume.
-            return linked.Where(l => !l.NeedsReauth).ToList();
+            var active = new List<LinkedToken>();
+
+            foreach (var l in linked)
+            {
+                // Skip already-broken links so the refresh below doesn't re-loop on each save.
+                if (l.NeedsReauth || l.TokenData == null) continue;
+
+                // Lazy refresh on the boundary: linked tokens never go through the primary's
+                // GetAccessTokenAsync path, so we have to handle expiry ourselves. If refresh
+                // fails — token revoked, password rotated on Kitsu, etc. — flip the
+                // NeedsReauth flag so the UI can prompt the user to re-link and the next
+                // fan-out skips this provider cleanly.
+                if (IsTokenExpired(l.TokenData.expiration_date))
+                {
+                    var refreshed = await TryRefreshAsync(l.TokenData);
+                    if (refreshed == null || string.IsNullOrEmpty(refreshed.access_token))
+                    {
+                        l.NeedsReauth = true;
+                        await _configStore.SetLinkedTokenAsync(uid, l);
+                        continue;
+                    }
+                    l.TokenData = refreshed;
+                    await _configStore.SetLinkedTokenAsync(uid, l);
+                }
+
+                active.Add(l);
+            }
+
+            return active;
+        }
+
+        private async Task<TokenData> TryRefreshAsync(TokenData token)
+        {
+            try { return await _tokenService.RefreshLinkedTokenAsync(token); }
+            catch { return null; }
         }
 
         private async Task SaveToProviderAsync(LinkedToken target, ListType? sourceListType,
