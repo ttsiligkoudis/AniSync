@@ -44,6 +44,15 @@ public class HomeController : Controller
                 // Linked secondary accounts the multi-provider sync will fan writes out to.
                 // The view renders a per-service Link / Unlink row from this list.
                 ViewBag.LinkedTokens = await _configStore.GetLinkedTokensAsync(uid);
+
+                // Hydrate the session from the config-URL-derived tokenData when the user
+                // arrives via a v5 install URL (or any path that resolves identity from the
+                // store rather than the cookie). Without this, post-login endpoints —
+                // SetPrimary, SyncNow, LinkProvider, etc. — would all bail with "log in with
+                // a primary provider first" because they read the session's AccessToken.
+                // The config URL is already a per-user bearer token, so trusting it as a
+                // login signal is consistent with the rest of the app.
+                HttpContext.Session.SetString("AccessToken", SerializeObject(tokenData));
             }
             else
             {
