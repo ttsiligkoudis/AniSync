@@ -54,6 +54,18 @@ namespace AnimeList.Services
             await Task.WhenAll(tasks);
         }
 
+        public async Task<List<AnimeEntry>> GetPrimaryEntriesAsync(TokenData primary)
+        {
+            if (primary == null || primary.anonymousUser) return [];
+            return primary.anime_service switch
+            {
+                AnimeService.Anilist => await _anilistService.GetUserListEntriesAsync(primary),
+                AnimeService.Kitsu => await _kitsuService.GetUserListEntriesAsync(primary),
+                AnimeService.MyAnimeList => await _malService.GetUserListEntriesAsync(primary),
+                _ => [],
+            };
+        }
+
         private async Task<List<LinkedToken>> GetActiveLinkedTokensAsync(string uid)
         {
             if (string.IsNullOrEmpty(uid)) return [];

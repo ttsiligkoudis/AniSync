@@ -10,7 +10,7 @@ namespace AnimeList.Controllers
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly IConfigStore _configStore;
         private readonly IConfiguration _configuration;
-        private readonly ISyncJobService _syncJobService;
+        private readonly ISyncService _syncService;
 
         // Keys we stash in the session while a callback-based OAuth flow is in flight.
         // We need to remember which provider initiated the flow (the callback URL is shared)
@@ -23,13 +23,13 @@ namespace AnimeList.Controllers
         private const string OauthFlowLogin = "Login";
         private const string OauthFlowLink = "Link";
 
-        public AuthController(ITokenService tokenService, IHttpContextAccessor httpContextAccessor, IConfigStore configStore, IConfiguration configuration, ISyncJobService syncJobService)
+        public AuthController(ITokenService tokenService, IHttpContextAccessor httpContextAccessor, IConfigStore configStore, IConfiguration configuration, ISyncService syncService)
         {
             _tokenService = tokenService;
             _httpContextAccessor = httpContextAccessor;
             _configStore = configStore;
             _configuration = configuration;
-            _syncJobService = syncJobService;
+            _syncService = syncService;
         }
 
         [HttpGet]
@@ -255,57 +255,90 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
-        /// Kicks off a background full-library sync from the primary into every linked
-        /// provider. Returns 202 with the initial status JSON; the configure page polls
-        /// <see cref="SyncStatus"/> for progress.
+        /// Returns the primary's full library so the client can drive the backfill loop.
+        /// One round-trip — the server holds no per-job state. Cancellation, batching,
+        /// and progress live entirely on the configure page in JS.
         /// </summary>
-        [HttpPost]
-        public async Task<IActionResult> SyncNow()
+        [HttpGet]
+        public async Task<IActionResult> SyncEntries()
         {
             var primary = GetSessionPrimary();
             if (primary == null) return BadRequest("Log in with a primary provider first.");
 
-            var uid = await _configStore.UpsertAsync(primary);
-            var started = _syncJobService.TryStart(uid, primary);
-            var payload = ProjectStatus(_syncJobService.GetStatus(uid));
+            var entries = await _syncService.GetPrimaryEntriesAsync(primary);
+            return Ok(new
+            {
+                total = entries.Count,
+                // Lowercase shape so the JS contract doesn't depend on the serializer's
+                // default casing — System.Text.Json's camelCase is on by default in MVC,
+                // but explicit > implicit when the client poller is going to depend on it.
+                entries = entries.Select(e => new
+                {
+                    mediaId = e.MediaId,
+                    status = e.Status,
+                    progress = e.Progress,
+                    score = e.Score,
+                    notes = e.Notes,
+                    rewatchCount = e.RewatchCount,
+                    startedAt = e.StartedAt,
+                    finishedAt = e.FinishedAt,
+                }).ToList(),
+            });
+        }
 
-            return started
-                ? StatusCode(202, payload)
-                : Ok(payload); // already running — return current status without restarting
+        public class SyncBatchRequest
+        {
+            public List<SyncBatchEntry> Entries { get; set; }
+        }
+
+        public class SyncBatchEntry
+        {
+            public string MediaId { get; set; }
+            public string Status { get; set; }
+            public int Progress { get; set; }
+            public double? Score { get; set; }
+            public string Notes { get; set; }
+            public int? RewatchCount { get; set; }
+            public DateTime? StartedAt { get; set; }
+            public DateTime? FinishedAt { get; set; }
         }
 
         /// <summary>
-        /// Returns the current full-sync job status for the logged-in user, or null when
-        /// no job has ever run for this install.
+        /// Fans out a batch of primary-library entries through the existing sync path. The
+        /// client picks the batch size (typically a handful of entries per request so the
+        /// progress bar moves in visible increments and Cancel is responsive). Returns
+        /// per-batch counts; the client accumulates the running total locally.
         /// </summary>
-        [HttpGet]
-        public async Task<IActionResult> SyncStatus()
+        [HttpPost]
+        public async Task<IActionResult> SyncBatch([FromBody] SyncBatchRequest request)
         {
             var primary = GetSessionPrimary();
-            if (primary == null) return Ok(new { status = (object)null });
+            if (primary == null) return BadRequest("Log in with a primary provider first.");
 
-            var uid = await _configStore.UpsertAsync(primary);
-            return Ok(new { status = ProjectStatus(_syncJobService.GetStatus(uid)) });
-        }
-
-        /// <summary>
-        /// Project the SyncJobStatus into a lowercase-keyed shape so the JS poller doesn't
-        /// have to care which JSON serializer ASP.NET Core has wired up under the hood
-        /// (System.Text.Json defaults to camelCase, but a Newtonsoft swap would flip that).
-        /// </summary>
-        private static object ProjectStatus(SyncJobStatus s)
-        {
-            if (s == null) return null;
-            return new
+            int completed = 0, failed = 0;
+            foreach (var entry in request?.Entries ?? new())
             {
-                running = s.Running,
-                total = s.Total,
-                completed = s.Completed,
-                failed = s.Failed,
-                message = s.Message,
-                startedAt = s.StartedAt,
-                finishedAt = s.FinishedAt,
-            };
+                if (string.IsNullOrEmpty(entry?.MediaId))
+                {
+                    failed++;
+                    continue;
+                }
+
+                try
+                {
+                    await _syncService.FanOutSaveAsync(primary, entry.MediaId, season: null,
+                        entry.Progress, entry.Status, entry.Score, entry.Notes,
+                        entry.RewatchCount, entry.StartedAt, entry.FinishedAt);
+                    completed++;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[SyncBatch] entry {entry.MediaId} failed: {ex.Message}");
+                    failed++;
+                }
+            }
+
+            return Ok(new { completed, failed });
         }
 
         /// <summary>

@@ -23,5 +23,12 @@ namespace AnimeList.Services.Interfaces
         /// Mirrors a delete against the linked providers attached to <paramref name="primary"/>.
         /// </summary>
         Task FanOutDeleteAsync(TokenData primary, string animeId, int? season);
+
+        /// <summary>
+        /// Returns every entry in the primary's library (status, progress, score, …) so the
+        /// client-side full-sync flow can iterate them in batches. Dispatches to the right
+        /// per-service GetUserListEntriesAsync based on <see cref="TokenData.anime_service"/>.
+        /// </summary>
+        Task<List<AnimeEntry>> GetPrimaryEntriesAsync(TokenData primary);
     }
 }

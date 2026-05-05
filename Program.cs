@@ -61,10 +61,6 @@ builder.Services.AddScoped<ITmdbService, TmdbService>();
 builder.Services.AddScoped<ICinemetaService, CinemetaService>();
 builder.Services.AddScoped<IAnilistFallback, AnilistFallback>();
 builder.Services.AddScoped<ISyncService, SyncService>();
-// Singleton — the in-memory job dictionary needs to survive across requests, but since
-// we only read DI-scoped services lazily inside the worker (via IServiceScopeFactory)
-// this doesn't trap any per-request state.
-builder.Services.AddSingleton<ISyncJobService, SyncJobService>();
 
 var app = builder.Build();
 
