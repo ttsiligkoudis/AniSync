@@ -14,8 +14,9 @@ namespace AnimeList.Controllers
         private readonly ITmdbService _tmdbService;
         private readonly ICinemetaService _cinemetaService;
         private readonly IAnimeMappingService _mappingService;
+        private readonly ISyncService _syncService;
 
-        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService)
+        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService, ISyncService syncService)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
@@ -24,6 +25,7 @@ namespace AnimeList.Controllers
             _tmdbService = tmdbService;
             _cinemetaService = cinemetaService;
             _mappingService = mappingService;
+            _syncService = syncService;
         }
 
         private async Task<(dynamic?, bool)> GetByIDInternal(string config, string id, bool deserialize = false)
@@ -397,6 +399,9 @@ namespace AnimeList.Controllers
                         await _kitsuService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
                         break;
                 }
+                // Mirror the delete to every linked secondary account. Best-effort: per-target
+                // failures inside SyncService are swallowed so the primary delete still wins.
+                await _syncService.FanOutDeleteAsync(tokenData, request.Id, request.Season);
                 return new JsonResult(new { success = true });
             }
 
@@ -418,6 +423,12 @@ namespace AnimeList.Controllers
                         request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
                     break;
             }
+
+            // Sync the same change to linked secondary providers. SyncService normalises status
+            // and score, fans the writes out concurrently, and silently drops mapping gaps so
+            // a partial-coverage anime doesn't fail the user's save.
+            await _syncService.FanOutSaveAsync(tokenData, request.Id, request.Season, request.Progress,
+                request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
 
             return new JsonResult(new { success = true });
         }

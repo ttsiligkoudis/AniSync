@@ -60,6 +60,7 @@ builder.Services.AddScoped<IMalService, MalService>();
 builder.Services.AddScoped<ITmdbService, TmdbService>();
 builder.Services.AddScoped<ICinemetaService, CinemetaService>();
 builder.Services.AddScoped<IAnilistFallback, AnilistFallback>();
+builder.Services.AddScoped<ISyncService, SyncService>();
 
 var app = builder.Build();
 
