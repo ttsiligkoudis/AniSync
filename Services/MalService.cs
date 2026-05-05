@@ -253,9 +253,18 @@ namespace AnimeList.Services
                 // MAL has no per-episode endpoint at all (only num_episodes), so prefer
                 // Cinemeta whenever we have an IMDb mapping. Falls back to Kitsu through
                 // the cross-service mapping, then to a plain Episode-N synthetic list.
+                // try/catch because a malformed mapping (Season parser, etc.) shouldn't
+                // take the meta page down.
                 if (!string.IsNullOrEmpty(mapping?.ImdbId))
                 {
-                    anime.videos = await _cinemetaService.GetEpisodesAsync(mapping.ImdbId, mapping.Season, externalId);
+                    try
+                    {
+                        anime.videos = await _cinemetaService.GetEpisodesAsync(mapping.ImdbId, mapping.Season, externalId);
+                    }
+                    catch
+                    {
+                        anime.videos = [];
+                    }
                 }
 
                 if (anime.videos.Count == 0 && mapping?.KitsuId != null)

@@ -509,10 +509,18 @@ namespace AnimeList.Services
             {
                 // Prefer Cinemeta when we have an IMDb mapping — its per-episode coverage
                 // is richer than AniList's streamingEpisodes (which only carries entries for
-                // episodes that aired on a partner streaming service).
+                // episodes that aired on a partner streaming service). try/catch because a
+                // malformed mapping (Season parser, etc.) shouldn't take the meta page down.
                 if (!string.IsNullOrEmpty(mapping?.ImdbId))
                 {
-                    anime.videos = await _cinemetaService.GetEpisodesAsync(mapping.ImdbId, mapping.Season, externalId);
+                    try
+                    {
+                        anime.videos = await _cinemetaService.GetEpisodesAsync(mapping.ImdbId, mapping.Season, externalId);
+                    }
+                    catch
+                    {
+                        anime.videos = new List<Video>();
+                    }
                 }
 
                 if (anime.videos.Count == 0)

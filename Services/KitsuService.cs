@@ -358,10 +358,19 @@ namespace AnimeList.Services
                 // Prefer Cinemeta when we have an IMDb mapping — its per-episode coverage
                 // (titles, thumbs, synopses, air dates) is dramatically richer than Kitsu's
                 // volunteer-maintained episode catalog. Falls through to the local episode
-                // include when there's no IMDb mapping or Cinemeta returns nothing.
+                // include when there's no IMDb mapping or Cinemeta returns nothing. Wrapped
+                // in try/catch because a malformed mapping (Season parser, etc.) shouldn't
+                // take the whole meta page down.
                 if (!string.IsNullOrEmpty(mapping?.ImdbId))
                 {
-                    anime.videos = await _cinemetaService.GetEpisodesAsync(mapping.ImdbId, mapping.Season, externalId);
+                    try
+                    {
+                        anime.videos = await _cinemetaService.GetEpisodesAsync(mapping.ImdbId, mapping.Season, externalId);
+                    }
+                    catch
+                    {
+                        anime.videos = [];
+                    }
                 }
 
                 if (anime.videos.Count == 0)
