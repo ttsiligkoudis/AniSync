@@ -36,6 +36,13 @@
     bool showExternalStreams = ViewBag.ShowExternalStreams ?? false;
     bool showManageEntry = ViewBag.ShowManageEntry ?? true;
     bool autoTrackProgress = ViewBag.AutoTrackProgress ?? true;
+
+    // Linked secondary providers (multi-provider sync). Defined here so both the service
+    // picker (which lights up linked pills as click-to-promote-to-primary buttons) and
+    // the Linked Accounts card below can consume the same data.
+    var linkedTokens = (List<AnimeList.Models.LinkedToken>)ViewBag.LinkedTokens ?? new();
+    var linkedByService = linkedTokens.ToDictionary(t => t.Service, t => t);
+    var hasSwappableLinks = linkedTokens.Any(t => !t.NeedsReauth);
 }
 
 <h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
@@ -43,12 +50,25 @@
 
 @if (!anonymousUser)
 {
-    <!-- Service picker (always visible). Locks to the chosen service once the user is
-         logged in — disconnect to switch to a different provider. -->
+    @* Linked secondary providers double as click-to-promote-to-primary buttons
+       once the user has at least one healthy link. The hint above the picker
+       only renders in that state — it'd otherwise confuse fresh installs. *@
+    var kitsuLinked  = isLoggedIn && linkedByService.TryGetValue(AnimeService.Kitsu,        out var kl) && !kl.NeedsReauth;
+    var anilistLinked = isLoggedIn && linkedByService.TryGetValue(AnimeService.Anilist,      out var al) && !al.NeedsReauth;
+    var malLinked    = isLoggedIn && linkedByService.TryGetValue(AnimeService.MyAnimeList, out var ml) && !ml.NeedsReauth;
+
+    if (hasSwappableLinks)
+    {
+        <p class="service-toggle-hint">Tap another account below to make it your primary.</p>
+    }
+
+    <!-- Service picker (always visible). Pre-login it picks which provider to authenticate
+         with; post-login the primary pill is locked but linked-pill rows become click-to-
+         swap so the user can rotate the primary without unlinking. -->
     <div class="service-toggle @(isLoggedIn ? "disabled" : "")" id="serviceToggle">
-        <span class="label @(isKitsu ? "active" : "")" id="labelKitsu" data-service="0">Kitsu</span>
-        <span class="label @(isAnilist ? "active" : "")" id="labelAnilist" data-service="1">AniList</span>
-        <span class="label @(isMal ? "active" : "")" id="labelMal" data-service="2">MyAnimeList</span>
+        <span class="label @(isKitsu ? "active" : (kitsuLinked ? "linked-pill" : ""))" id="labelKitsu" data-service="0" data-service-name="Kitsu">Kitsu</span>
+        <span class="label @(isAnilist ? "active" : (anilistLinked ? "linked-pill" : ""))" id="labelAnilist" data-service="1" data-service-name="Anilist">AniList</span>
+        <span class="label @(isMal ? "active" : (malLinked ? "linked-pill" : ""))" id="labelMal" data-service="2" data-service-name="MyAnimeList">MyAnimeList</span>
     </div>
 }
 
@@ -61,8 +81,9 @@
 
     @if (!anonymousUser)
     {
-        var linkedTokens = (List<AnimeList.Models.LinkedToken>)ViewBag.LinkedTokens ?? new();
-        var linkedByService = linkedTokens.ToDictionary(t => t.Service, t => t);
+        // linkedTokens / linkedByService come from the page-top @{} block. Promotion to
+        // primary lives in the service picker pills above; this section just lists
+        // which providers are linked and offers Unlink / Re-link.
         var allServices = new[] { AnimeService.Kitsu, AnimeService.Anilist, AnimeService.MyAnimeList };
 
         <!-- ─── LINKED ACCOUNTS ─────────────────────────────────────────── -->
@@ -93,6 +114,8 @@
                                 <span class="linked-account-badge @(needsReauth ? "linked-account-warn" : "linked-account-connected")">
                                     @(needsReauth ? "Needs re-auth" : "Linked")
                                 </span>
+                                @* Promotion to primary is now driven by the service-picker pills at *@
+                                @* the top of the page; this row only handles re-link / unlink. *@
                                 @if (needsReauth)
                                 {
                                     if (svc == AnimeService.Kitsu)
@@ -103,15 +126,6 @@
                                     {
                                         <a class="btn-ghost btn-ghost-sm" href="/Auth/LinkProvider?service=@svc">Re-link ↗</a>
                                     }
-                                }
-                                else
-                                {
-                                    @* Promote the link to primary. UID is preserved server-side so *@
-                                    @* the user's install URL keeps working — only the primary slot rotates. *@
-                                    <form method="post" action="/Auth/SetPrimary" class="linked-account-form">
-                                        <input type="hidden" name="service" value="@svc" />
-                                        <button type="submit" class="btn-ghost btn-ghost-sm">Make primary</button>
-                                    </form>
                                 }
                                 <form method="post" action="/Auth/UnlinkProvider" class="linked-account-form">
                                     <input type="hidden" name="service" value="@svc" />
@@ -598,14 +612,31 @@ else
     }
 
     $('#serviceToggle .label').on('click', function () {
-        // Once authenticated the picker is locked — the user has to disconnect
-        // (which deletes the stored token) before switching providers.
-        if ($('#serviceToggle').hasClass('disabled')) return;
-        var svc = parseInt($(this).attr('data-service'), 10);
+        var $pill = $(this);
+        // Post-login the picker is locked, except that linked-pill rows act as a
+        // promote-to-primary shortcut. Tap → confirm → POST /Auth/SetPrimary; the
+        // server rotates the primary slot in place (UID preserved) and the page
+        // reloads with the new state.
+        if ($('#serviceToggle').hasClass('disabled')) {
+            if (!$pill.hasClass('linked-pill')) return;
+            var name = $pill.attr('data-service-name');
+            var svcEnum = $pill.attr('data-service-name');
+            var label = serviceLabel(parseInt($pill.attr('data-service'), 10));
+            if (!confirm('Switch your primary account to ' + label + '? Future writes will originate from this account first.')) return;
+
+            // Build and submit a tiny throw-away form. Using fetch wouldn't follow
+            // the redirect Razor returns, and a static <form> in the row is more
+            // markup than this is worth.
+            var $form = $('<form method="post" action="/Auth/SetPrimary"></form>');
+            $form.append($('<input type="hidden" name="service" />').val(svcEnum));
+            $form.appendTo('body').trigger('submit');
+            return;
+        }
+        var svc = parseInt($pill.attr('data-service'), 10);
         if (isNaN(svc)) return;
         selectedService = svc;
         $('#serviceToggle .label').removeClass('active');
-        $(this).addClass('active');
+        $pill.addClass('active');
         $('#loginServiceName').text(serviceLabel(svc));
         // Only the Kitsu password-grant flow needs the username/password fields visible.
         $('#kitsuCreds').toggle(svc === 0);

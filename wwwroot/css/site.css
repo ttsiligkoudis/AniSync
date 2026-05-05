@@ -89,6 +89,31 @@ main {
     opacity: 0.5;
 }
 
+/* Linked-pill: a service the user has linked but isn't currently their primary.
+   Rendered post-login as a click-to-promote-to-primary affordance, so it stays
+   readable and clickable even when the parent .service-toggle is .disabled. */
+.service-toggle.disabled .label.linked-pill {
+    opacity: 1;
+    cursor: pointer;
+    color: #ccc;
+    border: 1px solid rgba(255,255,255,0.18);
+}
+
+.service-toggle.disabled .label.linked-pill:hover {
+    color: #fff;
+    background: rgba(255,255,255,0.07);
+    border-color: rgba(255,255,255,0.28);
+}
+
+/* Short hint that surfaces just above the pill row when the user has at least
+   one healthy linked account, telling them the pills now double as a swap UI. */
+.service-toggle-hint {
+    font-size: 0.78rem;
+    color: #999;
+    text-align: center;
+    margin: 0 0 0.4rem;
+}
+
 .toggle-track {
     position: relative;
     width: 50px;
