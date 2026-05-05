@@ -50,25 +50,36 @@
 
 @if (!anonymousUser)
 {
-    @* Linked secondary providers double as click-to-promote-to-primary buttons
-       once the user has at least one healthy link. The hint above the picker
-       only renders in that state — it'd otherwise confuse fresh installs. *@
-    var kitsuLinked  = isLoggedIn && linkedByService.TryGetValue(AnimeService.Kitsu,        out var kl) && !kl.NeedsReauth;
+    @* Pre-login the picker shows all three providers — the user picks one to authenticate.
+       Post-login it shrinks to "primary + healthy linked accounts" so unlinked providers
+       don't tease as tappable. The HTML stays identical between states; the only thing
+       that changes is which pills render. *@
+    var kitsuLinked   = isLoggedIn && linkedByService.TryGetValue(AnimeService.Kitsu,        out var kl) && !kl.NeedsReauth;
     var anilistLinked = isLoggedIn && linkedByService.TryGetValue(AnimeService.Anilist,      out var al) && !al.NeedsReauth;
-    var malLinked    = isLoggedIn && linkedByService.TryGetValue(AnimeService.MyAnimeList, out var ml) && !ml.NeedsReauth;
+    var malLinked     = isLoggedIn && linkedByService.TryGetValue(AnimeService.MyAnimeList, out var ml) && !ml.NeedsReauth;
+
+    var showKitsu   = !isLoggedIn || isKitsu   || kitsuLinked;
+    var showAnilist = !isLoggedIn || isAnilist || anilistLinked;
+    var showMal     = !isLoggedIn || isMal     || malLinked;
 
     if (hasSwappableLinks)
     {
         <p class="service-toggle-hint">Tap another account below to make it your primary.</p>
     }
 
-    <!-- Service picker (always visible). Pre-login it picks which provider to authenticate
-         with; post-login the primary pill is locked but linked-pill rows become click-to-
-         swap so the user can rotate the primary without unlinking. -->
-    <div class="service-toggle @(isLoggedIn ? "disabled" : "")" id="serviceToggle">
-        <span class="label @(isKitsu ? "active" : (kitsuLinked ? "linked-pill" : ""))" id="labelKitsu" data-service="0" data-service-name="Kitsu">Kitsu</span>
-        <span class="label @(isAnilist ? "active" : (anilistLinked ? "linked-pill" : ""))" id="labelAnilist" data-service="1" data-service-name="Anilist">AniList</span>
-        <span class="label @(isMal ? "active" : (malLinked ? "linked-pill" : ""))" id="labelMal" data-service="2" data-service-name="MyAnimeList">MyAnimeList</span>
+    <div class="service-toggle" id="serviceToggle">
+        @if (showKitsu)
+        {
+            <span class="label @(isKitsu ? "active" : "")" id="labelKitsu" data-service="0" data-service-name="Kitsu">Kitsu</span>
+        }
+        @if (showAnilist)
+        {
+            <span class="label @(isAnilist ? "active" : "")" id="labelAnilist" data-service="1" data-service-name="Anilist">AniList</span>
+        }
+        @if (showMal)
+        {
+            <span class="label @(isMal ? "active" : "")" id="labelMal" data-service="2" data-service-name="MyAnimeList">MyAnimeList</span>
+        }
     </div>
 }
 
@@ -443,6 +454,9 @@ else
     // Numeric service selector: 0 = Kitsu, 1 = AniList, 2 = MyAnimeList. Mirrors the
     // AnimeService enum on the server.
     var selectedService = @serviceIndex;
+    // Post-login the picker only shows the primary + healthy linked accounts, so any
+    // non-active pill click is unambiguously a swap-primary intent.
+    var isLoggedInState = @(isLoggedIn ? "true" : "false");
     var loginBaseUrl = '@Url.Action("Login", "Auth")';
     // Origin (scheme://host) of the addon — used to build the manifest URL and the
     // stremio:// deep-link. These never include flags; flags live in the URL path bytes.
@@ -613,24 +627,24 @@ else
 
     $('#serviceToggle .label').on('click', function () {
         var $pill = $(this);
-        // Post-login the picker is locked, except that linked-pill rows act as a
-        // promote-to-primary shortcut. Tap → confirm → POST /Auth/SetPrimary; the
-        // server rotates the primary slot in place (UID preserved) and the page
-        // reloads with the new state.
-        if ($('#serviceToggle').hasClass('disabled')) {
-            if (!$pill.hasClass('linked-pill')) return;
+
+        if (isLoggedInState) {
+            // Active pill = current primary, no-op. Any other rendered pill is a healthy
+            // linked account — tap → confirm → POST /Auth/SetPrimary. The server rotates
+            // the primary slot in place (UID preserved) and the page reloads.
+            if ($pill.hasClass('active')) return;
             var svcEnum = $pill.attr('data-service-name');
             var label = serviceLabel(parseInt($pill.attr('data-service'), 10));
             if (!confirm('Switch your primary account to ' + label + '? Future writes will originate from this account first.')) return;
 
-            // Build and submit a tiny throw-away form. Using fetch wouldn't follow
-            // the redirect Razor returns, and a static <form> in the row is more
-            // markup than this is worth.
+            // Throw-away form — a fetch wouldn't follow the redirect Razor returns,
+            // and a static <form> in the row is more markup than this is worth.
             var $form = $('<form method="post" action="/Auth/SetPrimary"></form>');
             $form.append($('<input type="hidden" name="service" />').val(svcEnum));
             $form.appendTo('body').trigger('submit');
             return;
         }
+
         var svc = parseInt($pill.attr('data-service'), 10);
         if (isNaN(svc)) return;
         selectedService = svc;
