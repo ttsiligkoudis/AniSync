@@ -78,10 +78,11 @@ namespace AnimeList.Services.Interfaces
         /// Swaps the primary provider with the linked token of <paramref name="newPrimaryService"/>.
         /// The chosen link becomes the primary on this row; the previous primary moves into the
         /// linked-tokens array. The UID is preserved so existing install URLs keep working.
-        /// Returns the new primary's <see cref="TokenData"/> on success, or null when the link
-        /// doesn't exist, is flagged for re-auth, or would collide with another install
-        /// (the same identity already has its own configs row).
+        /// Returns the new primary's <see cref="TokenData"/> on success along with a null reason,
+        /// or <c>(null, reason)</c> when the swap is rejected. <paramref name="newPrimaryService"/>
+        /// reasons: <c>"uid-missing"</c>, <c>"no-primary"</c>, <c>"not-linked"</c>,
+        /// <c>"needs-reauth"</c>, <c>"no-token"</c>, <c>"collision"</c>.
         /// </summary>
-        Task<TokenData> SwapPrimaryAsync(string uid, AnimeService newPrimaryService);
+        Task<(TokenData newPrimary, string reason)> SwapPrimaryAsync(string uid, AnimeService newPrimaryService);
     }
 }

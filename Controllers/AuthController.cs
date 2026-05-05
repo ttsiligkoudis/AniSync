@@ -213,14 +213,28 @@ namespace AnimeList.Controllers
             if (primary.anime_service == service) return BadRequest("This provider is already your primary account.");
 
             var uid = await _configStore.UpsertAsync(primary);
-            var newPrimary = await _configStore.SwapPrimaryAsync(uid, service);
+            var (newPrimary, reason) = await _configStore.SwapPrimaryAsync(uid, service);
             if (newPrimary == null)
-                return BadRequest("Couldn't promote that link — it may need re-auth, or the same account is already a primary on another install.");
+                return BadRequest(BuildSwapErrorMessage(reason, service));
 
             // Push the new primary into the session so subsequent requests dispatch through
             // its service. The UID stayed the same, so install URLs continue to resolve.
             HttpContext.Session.SetString("AccessToken", SerializeObject(newPrimary));
             return RedirectToAction("Index", "Home");
+        }
+
+        private static string BuildSwapErrorMessage(string reason, AnimeService service)
+        {
+            // Keep the messages actionable — when we can name the fix, we do.
+            return reason switch
+            {
+                "needs-reauth" => $"The {service} link needs re-authentication. Re-link it from the Linked Accounts section, then try again.",
+                "not-linked"   => $"{service} isn't linked to this install — link it first from the Linked Accounts section.",
+                "no-token"     => $"The stored {service} link is incomplete. Unlink and re-link it before promoting.",
+                "collision"    => $"The {service} account is already the primary on another AniSync install. Disconnect that install before promoting it here.",
+                "no-primary"   => "No primary account is set for this install — log in first.",
+                _              => $"Couldn't promote {service} ({reason ?? "unknown"}).",
+            };
         }
 
         /// <summary>

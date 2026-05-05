@@ -308,9 +308,9 @@ namespace AnimeList.Services
             await WriteLinkedTokensAsync(uid, existing);
         }
 
-        public async Task<TokenData> SwapPrimaryAsync(string uid, AnimeService newPrimaryService)
+        public async Task<(TokenData newPrimary, string reason)> SwapPrimaryAsync(string uid, AnimeService newPrimaryService)
         {
-            if (string.IsNullOrEmpty(uid)) return null;
+            if (string.IsNullOrEmpty(uid)) return (null, "uid-missing");
 
             using var conn = new SqliteConnection(_connectionString);
             await conn.OpenAsync();
@@ -323,22 +323,23 @@ namespace AnimeList.Services
                 read.CommandText = "SELECT token_json, linked_tokens FROM configs WHERE uid = $uid LIMIT 1";
                 read.Parameters.AddWithValue("$uid", uid);
                 using var reader = await read.ExecuteReaderAsync();
-                if (!await reader.ReadAsync()) return null;
+                if (!await reader.ReadAsync()) return (null, "no-primary");
                 oldPrimaryJson = reader.GetString(0);
                 linkedJson = reader.IsDBNull(1) ? null : reader.GetString(1);
             }
 
             var oldPrimary = DeserializeObject<TokenData>(oldPrimaryJson);
-            if (oldPrimary == null) return null;
+            if (oldPrimary == null) return (null, "no-primary");
 
             var linked = DeserializeLinkedTokens(linkedJson);
             var idx = linked.FindIndex(l => l.Service == newPrimaryService);
-            if (idx < 0) return null;
+            if (idx < 0) return (null, "not-linked");
 
             var chosen = linked[idx];
             // Refuse to promote a broken link — would just leave the user effectively logged
             // out and trigger another re-auth round-trip immediately.
-            if (chosen.NeedsReauth || chosen.TokenData == null) return null;
+            if (chosen.NeedsReauth) return (null, "needs-reauth");
+            if (chosen.TokenData == null) return (null, "no-token");
 
             // Build the new linked list: the chosen one moves out, the old primary moves in.
             // We don't carry NeedsReauth across because we only got here on a healthy primary.
@@ -379,10 +380,10 @@ namespace AnimeList.Services
                 // Unique (service, user_key) collision — another configs row already owns
                 // this identity, e.g. the user has a separate install elsewhere with the
                 // linked account as primary. The caller surfaces a friendly error.
-                return null;
+                return (null, "collision");
             }
 
-            return newPrimary;
+            return (newPrimary, null);
         }
 
         private async Task WriteLinkedTokensAsync(string uid, List<LinkedToken> tokens)

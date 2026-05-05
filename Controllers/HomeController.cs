@@ -58,37 +58,48 @@ public class HomeController : Controller
 
         ViewBag.AnimeService = tokenData?.anime_service ?? AnimeService.Kitsu;
 
+        // Hydrate the toggle flags. The URL-config path covers Stremio's manifest deep-link
+        // (v3/v4/v5 bytes in the path); the UID fallback covers everything else — direct
+        // visits to /Home, redirects after primary swap, login-completion landings — so the
+        // page always reflects the user's saved state instead of falling back to defaults.
+        Configuration configuration = null;
         if (!string.IsNullOrEmpty(config))
         {
-            // ResolveConfigAsync hydrates the flag bits from the store for v5 URLs (where
-            // the bytes in the URL only carry the UID). For v3/v4 the flags come from the
-            // URL bytes inline.
-            var configuration = await ResolveConfigAsync(config, _configStore);
+            configuration = await ResolveConfigAsync(config, _configStore);
+        }
+        else if (!string.IsNullOrEmpty((string)ViewBag.ConfigUid))
+        {
+            var (f1, f2, f3, _) = await _configStore.GetFlagsAsync((string)ViewBag.ConfigUid);
+            configuration = new Configuration();
+            ApplyBinaryFlags(configuration, f1, f2, f3);
+        }
 
-            ViewBag.ShowCurrent = configuration?.showCurrent;
-            ViewBag.ShowCompleted = configuration?.showCompleted;
-            ViewBag.ShowTrending = configuration?.showTrending;
-            ViewBag.ShowSeasonal = configuration?.showSeasonal;
-            ViewBag.ShowPlanning = configuration?.showPlanning;
-            ViewBag.ShowPaused = configuration?.showPaused;
-            ViewBag.ShowDropped = configuration?.showDropped;
-            ViewBag.ShowRepeating = configuration?.showRepeating;
-            ViewBag.ShowAiring = configuration?.showAiring;
-            ViewBag.DiscoverOnlyCurrent = configuration?.discoverOnlyCurrent;
-            ViewBag.DiscoverOnlyCompleted = configuration?.discoverOnlyCompleted;
-            ViewBag.DiscoverOnlyTrending = configuration?.discoverOnlyTrending;
-            ViewBag.DiscoverOnlySeasonal = configuration?.discoverOnlySeasonal;
-            ViewBag.DiscoverOnlyPlanning = configuration?.discoverOnlyPlanning;
-            ViewBag.DiscoverOnlyPaused = configuration?.discoverOnlyPaused;
-            ViewBag.DiscoverOnlyDropped = configuration?.discoverOnlyDropped;
-            ViewBag.DiscoverOnlyRepeating = configuration?.discoverOnlyRepeating;
-            ViewBag.DiscoverOnlyAiring = configuration?.discoverOnlyAiring;
-            ViewBag.ShowExternalStreams = configuration?.showExternalStreams;
+        if (configuration != null)
+        {
+            ViewBag.ShowCurrent = configuration.showCurrent;
+            ViewBag.ShowCompleted = configuration.showCompleted;
+            ViewBag.ShowTrending = configuration.showTrending;
+            ViewBag.ShowSeasonal = configuration.showSeasonal;
+            ViewBag.ShowPlanning = configuration.showPlanning;
+            ViewBag.ShowPaused = configuration.showPaused;
+            ViewBag.ShowDropped = configuration.showDropped;
+            ViewBag.ShowRepeating = configuration.showRepeating;
+            ViewBag.ShowAiring = configuration.showAiring;
+            ViewBag.DiscoverOnlyCurrent = configuration.discoverOnlyCurrent;
+            ViewBag.DiscoverOnlyCompleted = configuration.discoverOnlyCompleted;
+            ViewBag.DiscoverOnlyTrending = configuration.discoverOnlyTrending;
+            ViewBag.DiscoverOnlySeasonal = configuration.discoverOnlySeasonal;
+            ViewBag.DiscoverOnlyPlanning = configuration.discoverOnlyPlanning;
+            ViewBag.DiscoverOnlyPaused = configuration.discoverOnlyPaused;
+            ViewBag.DiscoverOnlyDropped = configuration.discoverOnlyDropped;
+            ViewBag.DiscoverOnlyRepeating = configuration.discoverOnlyRepeating;
+            ViewBag.DiscoverOnlyAiring = configuration.discoverOnlyAiring;
+            ViewBag.ShowExternalStreams = configuration.showExternalStreams;
             // Inverse-sense flags: stored as "hide/disable" so default-zero rows mean
             // "show / enabled" — the UI toggles, however, are positive ("Manage Entry",
             // "Auto-track progress") so flip the bool here.
-            ViewBag.ShowManageEntry = configuration?.hideManageEntry != true;
-            ViewBag.AutoTrackProgress = configuration?.disableAutoTrack != true;
+            ViewBag.ShowManageEntry = configuration.hideManageEntry != true;
+            ViewBag.AutoTrackProgress = configuration.disableAutoTrack != true;
         }
 
         return View();
