@@ -65,6 +65,10 @@ builder.Services.AddScoped<ISyncService, SyncService>();
 // scoping would defeat the cache. The service depends only on IHttpClientFactory
 // which is itself singleton-safe.
 builder.Services.AddSingleton<IAniSkipService, AniSkipService>();
+// Same reasoning — the slug → episode-category cache should outlive any single
+// request, and AnimeFillerList scrapes are expensive enough that we really want
+// them cached for days, not seconds.
+builder.Services.AddSingleton<IFillerListService, FillerListService>();
 
 var app = builder.Build();
 

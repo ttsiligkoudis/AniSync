@@ -15,8 +15,9 @@ namespace AnimeList.Controllers
         private readonly ICinemetaService _cinemetaService;
         private readonly IAnimeMappingService _mappingService;
         private readonly ISyncService _syncService;
+        private readonly IFillerListService _fillerListService;
 
-        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService, ISyncService syncService)
+        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService, ISyncService syncService, IFillerListService fillerListService)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
@@ -26,6 +27,7 @@ namespace AnimeList.Controllers
             _cinemetaService = cinemetaService;
             _mappingService = mappingService;
             _syncService = syncService;
+            _fillerListService = fillerListService;
         }
 
         private async Task<(dynamic?, bool)> GetByIDInternal(string config, string id, bool deserialize = false)
@@ -118,8 +120,90 @@ namespace AnimeList.Controllers
         {
             (var anime, var serialized) = await GetByIDInternal(config, id);
 
+            // Enrich the response's videos[] with filler/canon labels from
+            // AnimeFillerList. The two render paths take slightly different shapes —
+            // cinemeta hands us a serialised JSON string (so we round-trip parse →
+            // mutate → re-serialise), per-service paths hand us a Meta we can mutate
+            // in place. Both ultimately call the same FillerListService.
+            if (anime != null)
+            {
+                if (serialized)
+                    anime = await EnrichSerializedWithFillerAsync((string)anime);
+                else
+                    await EnrichMetaWithFillerAsync((Meta)anime);
+            }
+
             return serialized ? Content(anime, "application/json") : new JsonResult(new { meta = anime });
         }
+
+        /// <summary>
+        /// Mutates a Meta in place: looks up filler categories for each episode and
+        /// prefixes the video's title with a coloured emoji. Best-effort — silently
+        /// no-ops when the show isn't on AnimeFillerList or the lookup fails.
+        /// </summary>
+        private async Task EnrichMetaWithFillerAsync(Meta meta)
+        {
+            if (meta == null || string.IsNullOrEmpty(meta.name) || meta.videos == null || meta.videos.Count == 0)
+                return;
+
+            var categories = await _fillerListService.GetEpisodeCategoriesAsync(meta.name);
+            if (categories.Count == 0) return;
+
+            foreach (var video in meta.videos)
+            {
+                if (!categories.TryGetValue(video.episode, out var category)) continue;
+                var prefix = FillerPrefix(category);
+                if (!string.IsNullOrEmpty(prefix))
+                    video.title = prefix + (video.title ?? string.Empty);
+            }
+        }
+
+        /// <summary>
+        /// Same enrichment but operating on the raw cinemeta JSON string. Parses to
+        /// JObject, mutates videos[].title, returns the re-serialised JSON. Returns
+        /// the input unchanged on any error so a parser blow-up never breaks the
+        /// regular meta response.
+        /// </summary>
+        private async Task<string> EnrichSerializedWithFillerAsync(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return json;
+            try
+            {
+                var obj = JObject.Parse(json);
+                var meta = obj["meta"] as JObject;
+                var name = (string)meta?["name"];
+                var videos = meta?["videos"] as JArray;
+                if (string.IsNullOrEmpty(name) || videos == null || videos.Count == 0) return json;
+
+                var categories = await _fillerListService.GetEpisodeCategoriesAsync(name);
+                if (categories.Count == 0) return json;
+
+                foreach (var v in videos.OfType<JObject>())
+                {
+                    var episode = (int?)v["episode"];
+                    if (!episode.HasValue) continue;
+                    if (!categories.TryGetValue(episode.Value, out var category)) continue;
+                    var prefix = FillerPrefix(category);
+                    if (string.IsNullOrEmpty(prefix)) continue;
+                    var existing = (string)v["title"] ?? string.Empty;
+                    v["title"] = prefix + existing;
+                }
+
+                return obj.ToString(Newtonsoft.Json.Formatting.None);
+            }
+            catch
+            {
+                return json;
+            }
+        }
+
+        private static string FillerPrefix(string category) => category switch
+        {
+            "canon" => "🟦 ",
+            "filler" => "🟨 ",
+            "mixed" => "🟧 ",
+            _ => string.Empty,
+        };
 
         [HttpGet("{config}/[controller]/ManageEntry/{*id}")]
         public async Task<IActionResult> ManageEntry(string config, string id, int? season = null, int? episode = null)
