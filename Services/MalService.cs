@@ -19,6 +19,7 @@ namespace AnimeList.Services
         private readonly IAnilistFallback _anilistFallback;
         private readonly IConfiguration _configuration;
         private readonly IKitsuService _kitsuService;
+        private readonly ICinemetaService _cinemetaService;
 
         private const string MalApi = "https://api.myanimelist.net/v2";
 
@@ -47,13 +48,15 @@ namespace AnimeList.Services
         private const string MyListStatusFields = "my_list_status{status,score,num_episodes_watched,is_rewatching,num_times_rewatched,start_date,finish_date,comments}";
 
         public MalService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService,
-            IAnilistFallback anilistFallback, IConfiguration configuration, IKitsuService kitsuService)
+            IAnilistFallback anilistFallback, IConfiguration configuration, IKitsuService kitsuService,
+            ICinemetaService cinemetaService)
         {
             _clientFactory = clientFactory;
             _mappingService = mappingService;
             _anilistFallback = anilistFallback;
             _configuration = configuration;
             _kitsuService = kitsuService;
+            _cinemetaService = cinemetaService;
         }
 
         public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true)
@@ -247,9 +250,23 @@ namespace AnimeList.Services
 
             if (!isMovie)
             {
-                var episodeCount = (int?)json["num_episodes"] ?? 0;
-                if (episodeCount > 0)
+                // MAL has no per-episode endpoint at all (only num_episodes), so prefer
+                // Cinemeta whenever we have an IMDb mapping. Falls back to Kitsu through
+                // the cross-service mapping, then to a plain Episode-N synthetic list.
+                if (!string.IsNullOrEmpty(mapping?.ImdbId))
                 {
+                    anime.videos = await _cinemetaService.GetEpisodesAsync(mapping.ImdbId, mapping.Season, externalId);
+                }
+
+                if (anime.videos.Count == 0 && mapping?.KitsuId != null)
+                {
+                    var fallback = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", null);
+                    anime.videos = fallback?.videos ?? [];
+                }
+
+                if (anime.videos.Count == 0)
+                {
+                    var episodeCount = (int?)json["num_episodes"] ?? 0;
                     for (int i = 1; i <= episodeCount; i++)
                     {
                         anime.videos.Add(new Video
@@ -260,12 +277,6 @@ namespace AnimeList.Services
                             episode = i,
                         });
                     }
-                }
-                else if (mapping?.KitsuId != null)
-                {
-                    // MAL only gives us a count; defer to Kitsu when we want per-episode titles.
-                    var fallback = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", null);
-                    anime.videos = fallback?.videos ?? [];
                 }
             }
 

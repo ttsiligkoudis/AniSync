@@ -12,6 +12,7 @@ namespace AnimeList.Services
         private readonly IHttpClientFactory _clientFactory;
         private readonly IAnimeMappingService _mappingService;
         private readonly IAnilistFallback _anilistFallback;
+        private readonly ICinemetaService _cinemetaService;
         private readonly string _kitsuApi = "https://kitsu.io/api/edge";
         private static readonly HashSet<ListType> _userLists =
         [
@@ -23,11 +24,12 @@ namespace AnimeList.Services
         // Kitsu enforces a maximum of 20 items per page
         private const int CatalogPageSize = 20;
 
-        public KitsuService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IAnilistFallback anilistFallback)
+        public KitsuService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IAnilistFallback anilistFallback, ICinemetaService cinemetaService)
         {
             _clientFactory = clientFactory;
             _mappingService = mappingService;
             _anilistFallback = anilistFallback;
+            _cinemetaService = cinemetaService;
         }
 
         public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true)
@@ -353,28 +355,40 @@ namespace AnimeList.Services
 
             if (!isMovie)
             {
-                var sortedEpisodes = episodes
-                    .OrderBy(e => SafeGet<int?>(e, "attributes", "seasonNumber") ?? 1)
-                    .ThenBy(e => SafeGet<int?>(e, "attributes", "number") ?? 0)
-                    .ToList();
-
-                int episodeNumber = 1;
-                foreach (var episode in sortedEpisodes)
+                // Prefer Cinemeta when we have an IMDb mapping — its per-episode coverage
+                // (titles, thumbs, synopses, air dates) is dramatically richer than Kitsu's
+                // volunteer-maintained episode catalog. Falls through to the local episode
+                // include when there's no IMDb mapping or Cinemeta returns nothing.
+                if (!string.IsNullOrEmpty(mapping?.ImdbId))
                 {
-                    var seasonNumber = SafeGet<int?>(episode, "attributes", "seasonNumber") ?? 1;
-                    var thumbnail = SafeGet<string>(episode, "attributes", "thumbnail", "original")
-                                    ?? SafeGet<string>(episode, "attributes", "thumbnail", "large");
-                    var epTitle = SafeGet<string>(episode, "attributes", "canonicalTitle");
+                    anime.videos = await _cinemetaService.GetEpisodesAsync(mapping.ImdbId, mapping.Season, externalId);
+                }
 
-                    anime.videos.Add(new Video
+                if (anime.videos.Count == 0)
+                {
+                    var sortedEpisodes = episodes
+                        .OrderBy(e => SafeGet<int?>(e, "attributes", "seasonNumber") ?? 1)
+                        .ThenBy(e => SafeGet<int?>(e, "attributes", "number") ?? 0)
+                        .ToList();
+
+                    int episodeNumber = 1;
+                    foreach (var episode in sortedEpisodes)
                     {
-                        id = $"{externalId}:{episodeNumber}",
-                        title = string.IsNullOrEmpty(epTitle) ? $"Episode {episodeNumber}" : epTitle,
-                        thumbnail = thumbnail,
-                        season = seasonNumber > 0 ? seasonNumber : 1,
-                        episode = episodeNumber,
-                    });
-                    episodeNumber++;
+                        var seasonNumber = SafeGet<int?>(episode, "attributes", "seasonNumber") ?? 1;
+                        var thumbnail = SafeGet<string>(episode, "attributes", "thumbnail", "original")
+                                        ?? SafeGet<string>(episode, "attributes", "thumbnail", "large");
+                        var epTitle = SafeGet<string>(episode, "attributes", "canonicalTitle");
+
+                        anime.videos.Add(new Video
+                        {
+                            id = $"{externalId}:{episodeNumber}",
+                            title = string.IsNullOrEmpty(epTitle) ? $"Episode {episodeNumber}" : epTitle,
+                            thumbnail = thumbnail,
+                            season = seasonNumber > 0 ? seasonNumber : 1,
+                            episode = episodeNumber,
+                        });
+                        episodeNumber++;
+                    }
                 }
             }
 

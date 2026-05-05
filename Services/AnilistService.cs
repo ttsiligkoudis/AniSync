@@ -12,6 +12,7 @@ namespace AnimeList.Services
         private readonly IAnimeMappingService _mappingService;
         private readonly IKitsuService _kitsuService;
         private readonly IAnilistFallback _anilistFallback;
+        private readonly ICinemetaService _cinemetaService;
         private readonly string _anilistApi = "https://graphql.anilist.co";
         private static readonly HashSet<ListType> _userLists =
         [
@@ -19,12 +20,13 @@ namespace AnimeList.Services
             ListType.Planning, ListType.Paused, ListType.Dropped, ListType.Repeating,
         ];
 
-        public AnilistService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IKitsuService kitsuService, IAnilistFallback anilistFallback)
+        public AnilistService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IKitsuService kitsuService, IAnilistFallback anilistFallback, ICinemetaService cinemetaService)
         {
             _clientFactory = clientFactory;
             _mappingService = mappingService;
             _kitsuService = kitsuService;
             _anilistFallback = anilistFallback;
+            _cinemetaService = cinemetaService;
         }
 
         private const int CatalogPageSize = 50;
@@ -505,28 +507,39 @@ namespace AnimeList.Services
 
             if (!isMovie)
             {
-                // streamingEpisodes can be null on AniList for anime that haven't aired yet
-                // or simply lack the data — ToObject on a JTokenType.Null returns null, and
-                // accessing the field at all on a JObject returns null for missing keys.
-                // Default to an empty list so the iteration / fallback below is NRE-safe.
-                JToken streamingEps = result.streamingEpisodes as JToken;
-                anime.videos = (streamingEps != null && streamingEps.Type != JTokenType.Null)
-                    ? (streamingEps.ToObject<List<Video>>() ?? new List<Video>())
-                    : new List<Video>();
-
-                var seasonNumber = GetSeasonNumber(result.relations, (int)result.id);
-
-                for (int i = 0; i < anime.videos.Count; i++)
+                // Prefer Cinemeta when we have an IMDb mapping — its per-episode coverage
+                // is richer than AniList's streamingEpisodes (which only carries entries for
+                // episodes that aired on a partner streaming service).
+                if (!string.IsNullOrEmpty(mapping?.ImdbId))
                 {
-                    anime.videos[i].id = $"{externalId}:{i + 1}";
-                    anime.videos[i].episode = (i + 1);
-                    anime.videos[i].season = ((int?)seasonNumber ?? 1);
+                    anime.videos = await _cinemetaService.GetEpisodesAsync(mapping.ImdbId, mapping.Season, externalId);
                 }
 
-                if (anime.videos.Count == 0 && mapping?.KitsuId != null)
+                if (anime.videos.Count == 0)
                 {
-                    var kitsuAnime = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", null);
-                    anime.videos = kitsuAnime?.videos ?? new List<Video>();
+                    // streamingEpisodes can be null on AniList for anime that haven't aired yet
+                    // or simply lack the data — ToObject on a JTokenType.Null returns null, and
+                    // accessing the field at all on a JObject returns null for missing keys.
+                    // Default to an empty list so the iteration / fallback below is NRE-safe.
+                    JToken streamingEps = result.streamingEpisodes as JToken;
+                    anime.videos = (streamingEps != null && streamingEps.Type != JTokenType.Null)
+                        ? (streamingEps.ToObject<List<Video>>() ?? new List<Video>())
+                        : new List<Video>();
+
+                    var seasonNumber = GetSeasonNumber(result.relations, (int)result.id);
+
+                    for (int i = 0; i < anime.videos.Count; i++)
+                    {
+                        anime.videos[i].id = $"{externalId}:{i + 1}";
+                        anime.videos[i].episode = (i + 1);
+                        anime.videos[i].season = ((int?)seasonNumber ?? 1);
+                    }
+
+                    if (anime.videos.Count == 0 && mapping?.KitsuId != null)
+                    {
+                        var kitsuAnime = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", null);
+                        anime.videos = kitsuAnime?.videos ?? new List<Video>();
+                    }
                 }
             }
 

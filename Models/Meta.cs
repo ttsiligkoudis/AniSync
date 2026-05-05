@@ -47,6 +47,11 @@ namespace AnimeList.Models
         public string thumbnail { get; set; }
         public int season { get; set; }
         public int episode { get; set; }
+        // ISO-8601 air date — Stremio renders this in the episode card.
+        public string released { get; set; }
+        // Per-episode synopsis. Populated from Cinemeta when a cross-service IMDb mapping
+        // exists; otherwise null and Stremio falls back to the show synopsis.
+        public string overview { get; set; }
     }
 
     public class Edge

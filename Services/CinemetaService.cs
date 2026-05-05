@@ -1,3 +1,4 @@
+using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
 
@@ -62,6 +63,47 @@ namespace AnimeList.Services
             catch
             {
                 return null;
+            }
+        }
+
+        public async Task<List<Video>> GetEpisodesAsync(string imdbId, int? cinemetaSeason, string targetExternalId)
+        {
+            try
+            {
+                var client = _clientFactory.CreateClient();
+                client.Timeout = TimeSpan.FromSeconds(5);
+
+                var response = await client.GetAsync($"{_cinemetaApi}/series/{imdbId}.json");
+                if (!response.IsSuccessStatusCode) return [];
+
+                var content = await response.Content.ReadAsStringAsync();
+                var result = JObject.Parse(content);
+                if (SafeGet(result, "meta", "videos") is not JArray videosArr) return [];
+
+                // Filter to the target cour's season if provided. Renumber locally so each
+                // cour renders as a clean S1 E1..N — Cinemeta's flat episodes don't align
+                // with any service's per-cour numbering, and a single-cour view in Stremio
+                // shouldn't show "Season 2 Episode 1" when the user clicked into a card
+                // representing only that cour.
+                return videosArr.OfType<JObject>()
+                    .Where(v => !cinemetaSeason.HasValue || (int?)v["season"] == cinemetaSeason.Value)
+                    .OrderBy(v => (int?)v["season"] ?? 0)
+                    .ThenBy(v => (int?)v["episode"] ?? (int?)v["number"] ?? 0)
+                    .Select((v, idx) => new Video
+                    {
+                        id = $"{targetExternalId}:1:{idx + 1}",
+                        title = (string)v["name"] ?? (string)v["title"],
+                        thumbnail = (string)v["thumbnail"],
+                        season = 1,
+                        episode = idx + 1,
+                        released = (string)v["released"] ?? (string)v["firstAired"],
+                        overview = (string)v["overview"] ?? (string)v["description"],
+                    })
+                    .ToList();
+            }
+            catch
+            {
+                return [];
             }
         }
     }
