@@ -623,7 +623,11 @@ namespace AnimeList.Services
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist, season);
 
-            if (string.IsNullOrEmpty(resolvedAnimeId)) return;
+            if (string.IsNullOrEmpty(resolvedAnimeId))
+            {
+                Console.Error.WriteLine($"[AniList] Save skipped — no AniList mapping for animeId={animeId} season={season}.");
+                return;
+            }
 
             if (string.IsNullOrEmpty(status))
             {

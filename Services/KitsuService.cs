@@ -446,8 +446,16 @@ namespace AnimeList.Services
             DateTime? startedAt = null, DateTime? finishedAt = null)
         {
             var resolvedKitsuId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu, season);
-            if (string.IsNullOrEmpty(resolvedKitsuId)) return;
-            if (string.IsNullOrEmpty(tokenData?.access_token) || string.IsNullOrEmpty(tokenData?.user_id)) return;
+            if (string.IsNullOrEmpty(resolvedKitsuId))
+            {
+                Console.Error.WriteLine($"[Kitsu] Save skipped — no Kitsu mapping for animeId={animeId} season={season}.");
+                return;
+            }
+            if (string.IsNullOrEmpty(tokenData?.access_token) || string.IsNullOrEmpty(tokenData?.user_id))
+            {
+                Console.Error.WriteLine($"[Kitsu] Save skipped — token has no access_token/user_id (id={resolvedKitsuId}).");
+                return;
+            }
 
             var existing = await GetAnimeEntryAsync(tokenData, $"{kitsuPrefix}{resolvedKitsuId}", season);
 
@@ -509,6 +517,7 @@ namespace AnimeList.Services
             }
 
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            Console.Error.WriteLine($"[Kitsu] {(existing?.EntryId != null ? "PATCH" : "POST")} library-entries id={resolvedKitsuId} status={status} progress={progress}.");
             var saveResponse = await _clientFactory.CreateClient().SendAsync(request);
             ThrowIfApiCallFailed(saveResponse, "save");
         }

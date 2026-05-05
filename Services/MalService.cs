@@ -332,10 +332,18 @@ namespace AnimeList.Services
             string status = null, double? score = null, string notes = null, int? rewatchCount = null,
             DateTime? startedAt = null, DateTime? finishedAt = null)
         {
-            if (string.IsNullOrEmpty(tokenData?.access_token)) return;
+            if (string.IsNullOrEmpty(tokenData?.access_token))
+            {
+                Console.Error.WriteLine($"[MAL] Save skipped — token has no access_token (animeId={animeId}).");
+                return;
+            }
 
             var resolvedMalId = await _mappingService.GetIdByService(animeId, AnimeService.MyAnimeList, season);
-            if (string.IsNullOrEmpty(resolvedMalId)) return;
+            if (string.IsNullOrEmpty(resolvedMalId))
+            {
+                Console.Error.WriteLine($"[MAL] Save skipped — no MAL mapping for animeId={animeId} season={season}.");
+                return;
+            }
 
             // If the caller didn't specify a status (e.g. subtitle-driven auto-progress), look
             // up the current entry: existing rows keep their status, new rows default to
