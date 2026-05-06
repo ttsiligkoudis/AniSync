@@ -16,9 +16,6 @@ namespace AnimeList.Services.Interfaces
         /// <param name="imdbId">The IMDb tt-id of the show.</param>
         /// <param name="cinemetaSeason">When set, filters Cinemeta's flat video list to
         /// episodes from this season. When null, every episode is returned.</param>
-        /// <param name="targetExternalId">The id space the caller wants the resulting
-        /// video ids prefixed with (e.g. <c>kitsu:1234</c>) so playback resolves back
-        /// to the calling service.</param>
-        Task<List<Video>> GetEpisodesAsync(string imdbId, int? cinemetaSeason, string targetExternalId);
+        Task<List<Video>> GetEpisodesAsync(string imdbId, int? cinemetaSeason);
     }
 }

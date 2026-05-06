@@ -263,10 +263,21 @@ namespace AnimeList.Services
             // Same toggle as the catalog path: when grouping is on, prefer cross-service ids
             // so meta.id matches what the user clicked from a grouped catalog. When off, keep
             // the response in this service's native id space.
+            // videoId will still use the groupId since it is better source for streams.
+            var groupId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                   !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" : null;
+
+            var hasGroupId = !string.IsNullOrEmpty(groupId);
+
+            // fallback to the kitsu id (if available) when no groupId is available.
+            // in that case the videoId must not have the :season inside since kitsuIds are not seasonal.
+            if (!hasGroupId)
+            {
+                groupId = $"{kitsuPrefix}{(string)entry["id"]}";
+            }
+
             var externalId = groupSeasons
-                ? (!string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                   !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
-                   $"{kitsuPrefix}{(string)entry["id"]}")
+                ? groupId
                 : $"{kitsuPrefix}{(string)entry["id"]}";
 
             var subtype = SafeGet<string>(entry, "attributes", "subtype");
@@ -365,7 +376,7 @@ namespace AnimeList.Services
                 {
                     try
                     {
-                        anime.videos = await _cinemetaService.GetEpisodesAsync(mapping.ImdbId, mapping.Season, externalId);
+                        anime.videos = await _cinemetaService.GetEpisodesAsync(mapping.ImdbId, mapping.Season);
                     }
                     catch
                     {
@@ -391,7 +402,7 @@ namespace AnimeList.Services
 
                         anime.videos.Add(new Video
                         {
-                            id = $"{externalId}:{seasonNumber}:{episodeNumber}",
+                            id = hasGroupId ? $"{groupId}:{seasonNumber}:{episodeNumber}" : $"{groupId}:{episodeNumber}",
                             title = string.IsNullOrEmpty(epTitle) ? $"Episode {episodeNumber}" : epTitle,
                             thumbnail = thumbnail,
                             season = seasonNumber,
@@ -404,7 +415,7 @@ namespace AnimeList.Services
                 // Stremio rejects (renders blank) when video.id doesn't share a prefix with
                 // meta.id, so make sure every video lives in the calling service's id space
                 // regardless of whether the loop above ran or Cinemeta filled them in.
-                NormalizeVideoIds(anime.videos, externalId);
+                NormalizeVideoIds(anime.videos, groupId, hasGroupId);
             }
 
             // Kitsu's mediaRelationships exposes prequels/sequels but not "audience also liked"
@@ -870,14 +881,14 @@ namespace AnimeList.Services
                 ?? SafeGet<string>(anime, "attributes", "canonicalTitle");
         }
 
-        private static void NormalizeVideoIds(List<Video> videos, string externalId)
+        private static void NormalizeVideoIds(List<Video> videos, string externalId, bool hasGroupId)
         {
             if (videos == null) return;
             foreach (var v in videos)
             {
                 var season = v.season > 0 ? v.season : 1;
                 var episode = v.episode > 0 ? v.episode : 1;
-                v.id = $"{externalId}:{season}:{episode}";
+                v.id = hasGroupId ? $"{externalId}:{season}:{episode}" : $"{externalId}:{episode}";
                 v.season = season;
                 v.episode = episode;
             }

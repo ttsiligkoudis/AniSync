@@ -52,6 +52,9 @@ namespace AnimeList.Models
         // Per-episode synopsis. Populated from Cinemeta when a cross-service IMDb mapping
         // exists; otherwise null and Stremio falls back to the show synopsis.
         public string overview { get; set; }
+        public string description { get; set; }
+        public string name { get; set; }
+        public string firstAired{ get; set; }
     }
 
     public class Edge

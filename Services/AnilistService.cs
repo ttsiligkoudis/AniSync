@@ -413,11 +413,21 @@ namespace AnimeList.Services
             // Same toggle as the catalog path: when grouping is on, prefer cross-service ids
             // so meta.id matches what the user clicked from a grouped catalog. When off, keep
             // the response in this service's native id space.
+            // videoId will still use the groupId since it is better source for streams.
+            var groupId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" : null;
+
+            var hasGroupId = !string.IsNullOrEmpty(groupId);
+
+            // fallback to the kitsu id (if available) when no groupId is available.
+            // in that case the videoId must not have the :season inside since kitsuIds are not seasonal.
+            if (!hasGroupId)
+            {
+                groupId = mapping.KitsuId.HasValue ? $"{kitsuPrefix}{mapping.KitsuId}" : $"{anilistPrefix}{result.id}";
+            }
+
             var externalId = groupSeasons
-                ? (!string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                    !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
-                    mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
-                    $"{anilistPrefix}{result.id}")
+                ? groupId
                 : $"{anilistPrefix}{result.id}";
 
             var anime = new Meta(result.description)
@@ -515,7 +525,7 @@ namespace AnimeList.Services
                 {
                     try
                     {
-                        anime.videos = await _cinemetaService.GetEpisodesAsync(mapping.ImdbId, mapping.Season, externalId);
+                        anime.videos = await _cinemetaService.GetEpisodesAsync(mapping.ImdbId, mapping.Season);
                     }
                     catch
                     {
@@ -554,20 +564,20 @@ namespace AnimeList.Services
                 // meta.id. The Kitsu cross-service fallback above leaves kitsu:N-prefixed
                 // ids in place, and the legacy synthetic loops used a :episode shape rather
                 // than the :season:episode shape Stremio expects for series videos.
-                NormalizeVideoIds(anime.videos, externalId);
+                NormalizeVideoIds(anime.videos, groupId, hasGroupId);
             }
 
             return anime;
         }
 
-        private static void NormalizeVideoIds(List<Video> videos, string externalId)
+        private static void NormalizeVideoIds(List<Video> videos, string externalId, bool hasGroupId)
         {
             if (videos == null) return;
             foreach (var v in videos)
             {
                 var season = v.season > 0 ? v.season : 1;
                 var episode = v.episode > 0 ? v.episode : 1;
-                v.id = $"{externalId}:{season}:{episode}";
+                v.id = hasGroupId ? $"{externalId}:{season}:{episode}" : $"{externalId}:{episode}";
                 v.season = season;
                 v.episode = episode;
             }
