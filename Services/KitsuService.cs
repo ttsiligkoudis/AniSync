@@ -113,6 +113,14 @@ namespace AnimeList.Services
                 }
             }
 
+            // When seasons are ungrouped, sort user libraries alphabetically by name so the
+            // multiple cours of a franchise sit next to each other ("Show", "Show Part 2",
+            // "Show Season 2", …). Grouped lists already collapse to one card per franchise.
+            if (isUserList && !groupSeasons)
+                return seenIds.Values
+                    .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
             return seenIds.Values.ToList();
         }
 
