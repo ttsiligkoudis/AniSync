@@ -384,7 +384,9 @@ namespace AnimeList.Services
                 {
                     try
                     {
-                        anime.videos = await _cinemetaService.GetEpisodesAsync(mapping.ImdbId, mapping.Season);
+                        var kitsuIdInt = int.TryParse(resolvedAnimeId, out var kid) ? kid : 0;
+                        var currentEpisodeCount = SafeGet<int?>(entry, "attributes", "episodeCount") ?? 0;
+                        anime.videos = await GetCourEpisodesAsync(mapping.ImdbId, mapping.Season, kitsuIdInt, currentEpisodeCount);
                     }
                     catch
                     {
@@ -890,6 +892,48 @@ namespace AnimeList.Services
             return SafeGet<string>(anime, "attributes", "titles", "en")
                 ?? SafeGet<string>(anime, "attributes", "titles", "en_jp")
                 ?? SafeGet<string>(anime, "attributes", "canonicalTitle");
+        }
+
+        // Returns the slice of Cinemeta's videos that belongs to the cour identified by
+        // <paramref name="currentKitsuId"/>. Tries the Cinemeta-season filter first; if it
+        // empties, falls back to cumulative-episode slicing using preceding cours' episode
+        // counts. Mirrors the AutoSelectSeason logic in MetaController.
+        private async Task<List<Video>> GetCourEpisodesAsync(string imdbId, int? cinemetaSeason, int currentKitsuId, int currentEpisodeCount)
+        {
+            var allVideos = await _cinemetaService.GetEpisodesAsync(imdbId, null);
+            if (allVideos.Count == 0) return [];
+
+            allVideos = allVideos
+                .OrderBy(v => v.season)
+                .ThenBy(v => v.episode)
+                .ToList();
+
+            if (cinemetaSeason.HasValue)
+            {
+                var bySeason = allVideos.Where(v => v.season == cinemetaSeason.Value).ToList();
+                if (bySeason.Count > 0) return bySeason;
+            }
+
+            var franchise = (await _mappingService.GetImdbMapping(imdbId))
+                .Where(m => m.KitsuId.HasValue)
+                .OrderBy(m => m.Season ?? int.MaxValue)
+                .ThenBy(m => m.KitsuId)
+                .ToList();
+
+            if (franchise.Count <= 1) return allVideos;
+
+            var index = franchise.FindIndex(m => m.KitsuId == currentKitsuId);
+            if (index < 0) return allVideos;
+
+            int cumulative = 0;
+            for (int i = 0; i < index; i++)
+            {
+                var (_, ep) = await GetAnimeSummaryAsync($"{kitsuPrefix}{franchise[i].KitsuId}");
+                cumulative += ep ?? 0;
+            }
+
+            var take = currentEpisodeCount > 0 ? currentEpisodeCount : allVideos.Count - cumulative;
+            return allVideos.Skip(cumulative).Take(take).ToList();
         }
 
         private static void NormalizeVideoIds(List<Video> videos, string externalId, bool hasGroupId)
