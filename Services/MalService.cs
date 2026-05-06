@@ -756,7 +756,11 @@ namespace AnimeList.Services
         private async Task<List<Video>> GetCourEpisodesAsync(string imdbId, int? cinemetaSeason, int currentMalId, int currentEpisodeCount)
         {
             var allVideos = await _cinemetaService.GetEpisodesAsync(imdbId, null);
-            if (allVideos.Count == 0) return [];
+            if (allVideos.Count == 0)
+            {
+                _logger.LogInformation("MAL GetCourEpisodesAsync: imdb={Imdb} cinemeta returned 0 videos.", imdbId);
+                return [];
+            }
 
             allVideos = allVideos
                 .Where(w => w.season > 0)
@@ -769,6 +773,8 @@ namespace AnimeList.Services
                 .ThenBy(m => m.MalId)
                 .ToList();
 
+            // Skip the season filter when more than one cour shares the same Season number
+            // — the value is then per-source ambiguous and would lump multiple cours together.
             var cinemetaSeasonIsWrong = mappings.Count(w => w.Season == cinemetaSeason) > 1;
 
             List<Video> bySeason;
@@ -776,13 +782,29 @@ namespace AnimeList.Services
             if (!cinemetaSeasonIsWrong && cinemetaSeason.HasValue)
             {
                 bySeason = allVideos.Where(v => v.season == cinemetaSeason.Value).ToList();
-                if (bySeason.Count > 0) return bySeason;
+                if (bySeason.Count > 0)
+                {
+                    _logger.LogInformation("MAL GetCourEpisodesAsync: imdb={Imdb} season-filter matched {Count} videos for season={Season}.",
+                        imdbId, bySeason.Count, cinemetaSeason);
+                    return bySeason;
+                }
             }
 
-            if (mappings.Count <= 1) return allVideos;
+            if (mappings.Count <= 1)
+            {
+                _logger.LogInformation("MAL GetCourEpisodesAsync: imdb={Imdb} single-cour franchise — returning all {Count} videos.",
+                    imdbId, allVideos.Count);
+                return allVideos;
+            }
 
             var index = mappings.FindIndex(m => m.MalId == currentMalId);
-            if (index < 0) return allVideos;
+            if (index < 0)
+            {
+                _logger.LogInformation("MAL GetCourEpisodesAsync: imdb={Imdb} currentMalId={MalId} not found in mappings " +
+                    "(mappings has {Count} cours: [{Ids}]) — returning all {Total} videos.",
+                    imdbId, currentMalId, mappings.Count, string.Join(",", mappings.Select(f => f.MalId)), allVideos.Count);
+                return allVideos;
+            }
 
             int cumulative = 0;
             var updateMappings = false;
@@ -808,6 +830,10 @@ namespace AnimeList.Services
             var take = currentEpisodeCount > 0 ? currentEpisodeCount : allVideos.Count - cumulative;
 
             bySeason = allVideos.Skip(cumulative).Take(take).ToList();
+
+            _logger.LogInformation("MAL GetCourEpisodesAsync: imdb={Imdb} currentMalId={MalId} index={Index}/{Count} " +
+                "cumulative={Cumulative} take={Take} → {Slice} videos (cinemeta total={Total}, cinemetaSeasonIsWrong={Wrong}).",
+                imdbId, currentMalId, index, mappings.Count, cumulative, take, bySeason.Count, allVideos.Count, cinemetaSeasonIsWrong);
 
             // Tried to show the currect episode numbers and season but was finding less stream so i stroped
             //var currentEpisode = 1;

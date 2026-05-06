@@ -8,7 +8,18 @@ namespace AnimeList.Models
     {
         public Meta(dynamic descriptionRich = null)
         {
-            description = string.IsNullOrEmpty((string)descriptionRich) ? string.Empty : HtmlTagPattern().Replace((string)descriptionRich, string.Empty);
+            var raw = (string)descriptionRich;
+            if (string.IsNullOrEmpty(raw))
+            {
+                description = string.Empty;
+                return;
+            }
+
+            // Decode HTML entities first so &lt;i&gt; → <i>, then strip the resulting tags.
+            // AniList descriptions in particular sometimes ship with entity-encoded markup
+            // that the regex alone can't match.
+            var decoded = System.Net.WebUtility.HtmlDecode(raw);
+            description = HtmlTagPattern().Replace(decoded, string.Empty);
         }
 
         public string id { get; set; }
