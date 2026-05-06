@@ -29,6 +29,7 @@ namespace AnimeList.Controllers
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
         private readonly IConfigStore _configStore;
+        private readonly ISyncService _syncService;
         private readonly ILogger<UserApiController> _logger;
 
         public UserApiController(
@@ -37,6 +38,7 @@ namespace AnimeList.Controllers
             IKitsuService kitsuService,
             IMalService malService,
             IConfigStore configStore,
+            ISyncService syncService,
             ILogger<UserApiController> logger)
         {
             _tokenService = tokenService;
@@ -44,6 +46,7 @@ namespace AnimeList.Controllers
             _kitsuService = kitsuService;
             _malService = malService;
             _configStore = configStore;
+            _syncService = syncService;
             _logger = logger;
         }
 
@@ -111,6 +114,167 @@ namespace AnimeList.Controllers
                 return StatusCode(500, new { error = "entry lookup failed" });
             }
         }
+
+        /// <summary>
+        /// Saves an entry on the primary provider and fans the change out to every
+        /// linked secondary. Status / progress / score / notes / dates / rewatch count
+        /// are accepted in the request body. An empty <c>status</c> is interpreted as
+        /// "remove from list" — same convention as the Manage Entry page.
+        ///
+        /// The primary write surfaces synchronously: a 200 means it succeeded. The
+        /// secondary fan-out is best-effort and runs concurrently in the background;
+        /// per-target failures are swallowed and surface on the next <c>GET /linked</c>
+        /// as <c>NeedsReauth</c>.
+        /// </summary>
+        [HttpPost("entries/{id}")]
+        public async Task<IActionResult> SaveEntry(string config, string id, [FromBody] SaveEntryRequest request)
+        {
+            try
+            {
+                if (request == null) return BadRequest(new { error = "missing request body" });
+
+                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+                if (string.IsNullOrEmpty(tokenData?.access_token))
+                    return Unauthorized(new { error = "config has no primary token" });
+
+                var startedAt = ParseDate(request.StartedAt);
+                var finishedAt = ParseDate(request.FinishedAt);
+
+                if (string.IsNullOrEmpty(request.Status))
+                {
+                    // "" status == delete from list. Mirrors MetaController.SaveEntry.
+                    switch (tokenData.anime_service)
+                    {
+                        case AnimeService.Anilist:
+                            await _anilistService.DeleteAnimeEntryAsync(tokenData, id, request.Season);
+                            break;
+                        case AnimeService.MyAnimeList:
+                            await _malService.DeleteAnimeEntryAsync(tokenData, id, request.Season);
+                            break;
+                        default:
+                            await _kitsuService.DeleteAnimeEntryAsync(tokenData, id, request.Season);
+                            break;
+                    }
+                    await _syncService.FanOutDeleteAsync(tokenData, id, request.Season);
+                    return new JsonResult(new { ok = true, removed = true, primary = tokenData.anime_service.ToString() });
+                }
+
+                switch (tokenData.anime_service)
+                {
+                    case AnimeService.Anilist:
+                        await _anilistService.SaveAnimeEntryAsync(tokenData, id, request.Season, request.Progress,
+                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                        break;
+                    case AnimeService.MyAnimeList:
+                        await _malService.SaveAnimeEntryAsync(tokenData, id, request.Season, request.Progress,
+                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                        break;
+                    default:
+                        await _kitsuService.SaveAnimeEntryAsync(tokenData, id, request.Season, request.Progress,
+                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                        break;
+                }
+
+                await _syncService.FanOutSaveAsync(tokenData, id, request.Season, request.Progress,
+                    request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+
+                return new JsonResult(new { ok = true, primary = tokenData.anime_service.ToString() });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "API SaveEntry primary 401 (config={Config}, id={Id}).", config, id);
+                return Unauthorized(new { error = "primary token rejected by upstream" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API SaveEntry failed (config={Config}, id={Id}).", config, id);
+                return StatusCode(500, new { error = "save failed" });
+            }
+        }
+
+        /// <summary>
+        /// Removes an entry from the primary provider's list and fans the delete out
+        /// to every linked secondary. Idempotent — deleting an entry that's not on
+        /// the list returns 200.
+        /// </summary>
+        [HttpDelete("entries/{id}")]
+        public async Task<IActionResult> DeleteEntry(string config, string id, int? season = null)
+        {
+            try
+            {
+                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+                if (string.IsNullOrEmpty(tokenData?.access_token))
+                    return Unauthorized(new { error = "config has no primary token" });
+
+                switch (tokenData.anime_service)
+                {
+                    case AnimeService.Anilist:
+                        await _anilistService.DeleteAnimeEntryAsync(tokenData, id, season);
+                        break;
+                    case AnimeService.MyAnimeList:
+                        await _malService.DeleteAnimeEntryAsync(tokenData, id, season);
+                        break;
+                    default:
+                        await _kitsuService.DeleteAnimeEntryAsync(tokenData, id, season);
+                        break;
+                }
+                await _syncService.FanOutDeleteAsync(tokenData, id, season);
+                return new JsonResult(new { ok = true, primary = tokenData.anime_service.ToString() });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "API DeleteEntry primary 401 (config={Config}, id={Id}).", config, id);
+                return Unauthorized(new { error = "primary token rejected by upstream" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API DeleteEntry failed (config={Config}, id={Id}).", config, id);
+                return StatusCode(500, new { error = "delete failed" });
+            }
+        }
+
+        /// <summary>
+        /// Promotes a linked secondary to primary. The previous primary moves into
+        /// the linked-tokens array; the UID is preserved so existing install URLs
+        /// keep working. Pass <c>force=true</c> to delete a colliding row when the
+        /// target service already has a separate primary on a different UID — this
+        /// nukes the other row's flags and install URL, so callers should confirm
+        /// with the user before sending it.
+        /// </summary>
+        [HttpPost("primary/{service}")]
+        public async Task<IActionResult> Promote(string config, AnimeService service, bool force = false)
+        {
+            try
+            {
+                var configuration = await ResolveConfigAsync(config, _configStore);
+                var uid = configuration?.tokenUid;
+                if (string.IsNullOrEmpty(uid))
+                    return BadRequest(new { error = "config is not stored — only v4/v5 install URLs can swap primary" });
+
+                var (newPrimary, reason) = await _configStore.SwapPrimaryAsync(uid, service, force);
+                if (newPrimary == null)
+                {
+                    var status = reason switch
+                    {
+                        "collision" => StatusCodes.Status409Conflict,
+                        "needs-reauth" => StatusCodes.Status401Unauthorized,
+                        "not-linked" or "no-primary" or "uid-missing" => StatusCodes.Status404NotFound,
+                        _ => StatusCodes.Status400BadRequest,
+                    };
+                    return StatusCode(status, new { ok = false, reason });
+                }
+
+                return new JsonResult(new { ok = true, primary = newPrimary.anime_service.ToString() });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Promote failed (config={Config}, service={Service}).", config, service);
+                return StatusCode(500, new { error = "promote failed" });
+            }
+        }
+
+        private static DateTime? ParseDate(string s) =>
+            DateTime.TryParse(s, out var dt) ? dt : null;
 
         /// <summary>
         /// Lists every linked secondary provider for this config plus the
