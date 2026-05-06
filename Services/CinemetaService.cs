@@ -1,5 +1,6 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace AnimeList.Services
@@ -77,7 +78,15 @@ namespace AnimeList.Services
                 if (!response.IsSuccessStatusCode) return [];
 
                 var content = await response.Content.ReadAsStringAsync();
-                var result = JObject.Parse(content);
+                // DateParseHandling.None keeps `released` as the original ISO string (e.g.
+                // "2020-09-10T11:00:00.000Z"). With the default DateTime handling Newtonsoft
+                // turns it into a DateTime JValue, and a later `(string)v["released"]` cast
+                // calls ToString() in the current culture ("06/26/2026 17:00:00") — Stremio's
+                // renderer throws on that and shows a blank page.
+                var result = JObject.Load(new JsonTextReader(new StringReader(content))
+                {
+                    DateParseHandling = DateParseHandling.None,
+                });
                 if (SafeGet(result, "meta", "videos") is not JArray videosArr) return [];
 
                 var allVideos = videosArr.OfType<JObject>().ToList();
