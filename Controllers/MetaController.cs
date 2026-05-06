@@ -370,25 +370,39 @@ namespace AnimeList.Controllers
             var entryId = BuildEntryId(mapping, service);
             if (entryId == null) return null;
 
+            var mappings = string.IsNullOrEmpty(mapping.ImdbId) ? [] : await _mappingService.GetImdbMapping(mapping.ImdbId);
+
             // Lightweight summary — title + episode count only. Avoids the heavy
             // GetAnimeByIdAsync path (which pulls categories, episodes include, AniList
             // recommendations, etc.) that would otherwise trigger rate limits when we
             // fan out across every cour of a multi-mapping franchise.
-            string name = null;
-            int? episodeCount = null;
-            try
+            string name = mapping.Name;
+            int? episodeCount = mapping.Episodes;
+            var updateMappings = false;
+            if (string.IsNullOrEmpty(name) || !episodeCount.HasValue)
             {
-                (name, episodeCount) = service switch
+                try
                 {
-                    AnimeService.Anilist => await _anilistService.GetAnimeSummaryAsync(entryId),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeSummaryAsync(entryId),
-                    _ => await _kitsuService.GetAnimeSummaryAsync(entryId),
-                };
+                    (name, episodeCount) = service switch
+                    {
+                        AnimeService.Anilist => await _anilistService.GetAnimeSummaryAsync(entryId),
+                        AnimeService.MyAnimeList => await _malService.GetAnimeSummaryAsync(entryId),
+                        _ => await _kitsuService.GetAnimeSummaryAsync(entryId),
+                    };
+                    updateMappings = true;
+                    mapping.Name = name;
+                    mapping.Episodes = episodeCount;
+                }
+                catch
+                {
+                    // Best-effort: a single failed summary still renders the rest of the
+                    // dropdown — the failed option just shows the raw id as its label.
+                }
             }
-            catch
+
+            if (updateMappings)
             {
-                // Best-effort: a single failed summary still renders the rest of the
-                // dropdown — the failed option just shows the raw id as its label.
+                await _mappingService.EnrichImdbMappings([mapping]);
             }
 
             if (episodeCount is 0) episodeCount = null;

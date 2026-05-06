@@ -39,5 +39,11 @@ namespace AnimeList.Models
                 return firstValue.Value<int?>();
             }
         }
+
+        [JsonIgnore]
+        public string Name { get; set; }
+
+        [JsonIgnore]
+        public int? Episodes { get; set; }
     }
 }

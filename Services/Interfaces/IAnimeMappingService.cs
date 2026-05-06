@@ -19,5 +19,7 @@ namespace AnimeList.Services.Interfaces
         /// Returns a sorted list of distinct season numbers available for the given anime ID.
         /// </summary>
         Task<List<int>> GetSeasonsAsync(string animeId);
+
+        Task EnrichImdbMappings(List<AnimeIdMapping> mappings);
     }
 }

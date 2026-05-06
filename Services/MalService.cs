@@ -759,36 +759,66 @@ namespace AnimeList.Services
             if (allVideos.Count == 0) return [];
 
             allVideos = allVideos
+                .Where(w => w.season > 0)
                 .OrderBy(v => v.season)
                 .ThenBy(v => v.episode)
                 .ToList();
 
-            if (cinemetaSeason.HasValue)
-            {
-                var bySeason = allVideos.Where(v => v.season == cinemetaSeason.Value).ToList();
-                if (bySeason.Count > 0) return bySeason;
-            }
-
-            var franchise = (await _mappingService.GetImdbMapping(imdbId))
-                .Where(m => m.MalId.HasValue)
+            var mappings = (await _mappingService.GetImdbMapping(imdbId))
                 .OrderBy(m => m.Season ?? int.MaxValue)
                 .ThenBy(m => m.MalId)
                 .ToList();
 
-            if (franchise.Count <= 1) return allVideos;
+            var cinemetaSeasonIsWrong = mappings.Count(w => w.Season == cinemetaSeason) > 1;
 
-            var index = franchise.FindIndex(m => m.MalId == currentMalId);
+            List<Video> bySeason;
+
+            if (!cinemetaSeasonIsWrong && cinemetaSeason.HasValue)
+            {
+                bySeason = allVideos.Where(v => v.season == cinemetaSeason.Value).ToList();
+                if (bySeason.Count > 0) return bySeason;
+            }
+
+            if (mappings.Count <= 1) return allVideos;
+
+            var index = mappings.FindIndex(m => m.MalId == currentMalId);
             if (index < 0) return allVideos;
 
             int cumulative = 0;
+            var updateMappings = false;
             for (int i = 0; i < index; i++)
             {
-                var (_, ep) = await GetAnimeSummaryAsync($"{malPrefix}{franchise[i].MalId}");
-                cumulative += ep ?? 0;
+                if (!mappings[i].Season.HasValue || mappings[i].Season > 0)
+                {
+                    if (!mappings[i].Episodes.HasValue && mappings[i].KitsuId.HasValue)
+                    {
+                        (mappings[i].Name, mappings[i].Episodes) = await GetAnimeSummaryAsync($"{malPrefix}{mappings[i].MalId}");
+                        updateMappings = true;
+                    }
+
+                    cumulative += mappings[i].Episodes ?? 0;
+                }
+            }
+
+            if (updateMappings)
+            {
+                await _mappingService.EnrichImdbMappings(mappings);
             }
 
             var take = currentEpisodeCount > 0 ? currentEpisodeCount : allVideos.Count - cumulative;
-            return allVideos.Skip(cumulative).Take(take).ToList();
+
+            bySeason = allVideos.Skip(cumulative).Take(take).ToList();
+
+            // Tried to show the currect episode numbers and season but was finding less stream so i stroped
+            //var currentEpisode = 1;
+            //foreach (var item in bySeason)
+            //{
+            //    item.name = item.name?.Contains(item.episode.ToString()) == true ? $"Episode {currentEpisode}" : item.name;
+            //    item.season = index + 1;
+            //    item.episode = currentEpisode++;
+            //}
+
+            return bySeason;
         }
 
         /// <summary>

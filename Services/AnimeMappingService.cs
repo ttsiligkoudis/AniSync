@@ -28,7 +28,7 @@ namespace AnimeList.Services
         private FrozenDictionary<int, AnimeIdMapping> _anilistMapping;
         private FrozenDictionary<int, AnimeIdMapping> _kitsuMapping;
         private FrozenDictionary<int, AnimeIdMapping> _malMapping;
-        private FrozenDictionary<string, List<AnimeIdMapping>> _imdbMapping;
+        private ConcurrentDictionary<string, List<AnimeIdMapping>> _imdbMapping = new();
         private FrozenDictionary<string, List<AnimeIdMapping>> _tmdbMapping;
         private DateTime _lastLoaded = DateTime.MinValue;
 
@@ -73,11 +73,8 @@ namespace AnimeList.Services
             await EnsureMappingsLoadedAsync();
             var entries = new List<AnimeIdMapping>();
 
-            if (_imdbMapping.TryGetValue(imdb, out var frozenEntries))
-                entries.AddRange(frozenEntries);
-
-            if (_enrichedImdbIndex.TryGetValue(imdb, out var enrichedEntries))
-                entries.AddRange(enrichedEntries);
+            if (_imdbMapping.TryGetValue(imdb, out var mappingEntries))
+                entries.AddRange(mappingEntries);
 
             return entries
                 .DistinctBy(e => (e.AnilistId, e.KitsuId))
@@ -95,6 +92,24 @@ namespace AnimeList.Services
         public async Task EnsureLoadedAsync()
         {
             await EnsureMappingsLoadedAsync();
+        }
+
+        public async Task EnrichImdbMappings(List<AnimeIdMapping> mappings)
+        {
+            if (mappings?.Any() != true) return;
+
+            foreach (var group in mappings.GroupBy(g => g.ImdbId))
+            {
+                if (!string.IsNullOrEmpty(group.Key))
+                {
+                    if (_imdbMapping.TryGetValue(group.Key, out var frozenEntries))
+                    {
+                        _imdbMapping.AddOrUpdate(group.Key,
+                            _ => group.ToList(),
+                            (_, list) => group.ToList());
+                    }                 
+                }
+            }
         }
 
         private async Task EnsureMappingsLoadedAsync()
@@ -138,18 +153,15 @@ namespace AnimeList.Services
                     .DistinctBy(e => e.MalId!.Value)
                     .ToFrozenDictionary(e => e.MalId!.Value, e => e);
 
-                _imdbMapping = entries
+                _imdbMapping = new ConcurrentDictionary<string, List<AnimeIdMapping>>(entries
                     .Where(e => !string.IsNullOrEmpty(e.ImdbId))
                     .GroupBy(e => e.ImdbId)
-                    .ToFrozenDictionary(e => e.Key, e => e.ToList());
+                    .ToDictionary(e => e.Key, e => e.ToList()));
 
                 _tmdbMapping = entries
                     .Where(e => !string.IsNullOrEmpty(e.TmdbId))
                     .GroupBy(e => e.TmdbId)
                     .ToFrozenDictionary(e => e.Key, e => e.ToList());
-
-                // Clear enrichment caches; they reference stale entry objects after reload
-                _enrichedImdbIndex = new ConcurrentDictionary<string, List<AnimeIdMapping>>();
 
                 _lastLoaded = DateTime.UtcNow;
             }
@@ -170,8 +182,7 @@ namespace AnimeList.Services
 
             if (_tmdbToImdbCache.TryGetValue(mapping.TmdbId, out var cachedImdb))
             {
-                if (!string.IsNullOrEmpty(cachedImdb))
-                    mapping.ImdbId = cachedImdb;
+                mapping.ImdbId = cachedImdb;
                 return;
             }
 
@@ -184,8 +195,14 @@ namespace AnimeList.Services
 
                 mappings.ForEach(f => f.ImdbId = imdbId);
 
+                var imdbMappings = await GetImdbMapping(imdbId);
+
+                mappings.AddRange(imdbMappings.ExceptBy(
+                    mappings.Select(w => (w.AnilistId, w.KitsuId, w.MalId)),
+                    w => (w.AnilistId, w.KitsuId, w.MalId)));
+
                 mapping.ImdbId = imdbId;
-                _enrichedImdbIndex.AddOrUpdate(imdbId,
+                _imdbMapping.AddOrUpdate(imdbId,
                     _ => mappings,
                     (_, list) => mappings);
             }
