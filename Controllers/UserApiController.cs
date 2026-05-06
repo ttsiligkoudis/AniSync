@@ -273,6 +273,111 @@ namespace AnimeList.Controllers
             }
         }
 
+        /// <summary>
+        /// Walks the primary's full library and fans every entry out to every linked
+        /// secondary. Streams <c>application/x-ndjson</c> progress lines so a long-
+        /// running run gives the caller real-time feedback. Closing the connection
+        /// cancels mid-run via <see cref="HttpContext.RequestAborted"/>.
+        ///
+        /// Output stream: one JSON object per line. Stages:
+        /// <code>
+        /// {"stage":"start","total":127}
+        /// {"stage":"progress","id":"anilist:21","ok":true,"processed":1,"total":127}
+        /// {"stage":"progress","id":"anilist:1","ok":false,"error":"…","processed":2,"failed":1,"total":127}
+        /// {"stage":"done","processed":127,"failed":3,"total":127}
+        /// </code>
+        ///
+        /// Per-target fan-out failures (Crunchyroll-style "this Kitsu link is dead")
+        /// stay swallowed inside SyncService — surface on the next <c>GET /linked</c>
+        /// as <c>NeedsReauth</c>. Per-entry errors here mean "the SyncService call
+        /// itself threw" (network / 5xx / rate limit).
+        /// </summary>
+        [HttpPost("sync")]
+        public async Task Sync(string config)
+        {
+            var ct = HttpContext.RequestAborted;
+
+            Response.ContentType = "application/x-ndjson";
+            Response.Headers["Cache-Control"] = "no-cache";
+
+            try
+            {
+                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+                if (string.IsNullOrEmpty(tokenData?.access_token))
+                {
+                    Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    await WriteJsonLineAsync(new { stage = "error", error = "config has no primary token" }, ct);
+                    return;
+                }
+
+                var entries = await _syncService.GetPrimaryEntriesAsync(tokenData);
+                await WriteJsonLineAsync(new { stage = "start", total = entries.Count }, ct);
+
+                int processed = 0, failed = 0;
+                foreach (var entry in entries)
+                {
+                    if (ct.IsCancellationRequested) break;
+
+                    try
+                    {
+                        await _syncService.FanOutSaveAsync(tokenData, entry.MediaId, null,
+                            entry.Progress, entry.Status, entry.Score, entry.Notes,
+                            entry.RewatchCount, entry.StartedAt, entry.FinishedAt);
+                        processed++;
+                        await WriteJsonLineAsync(new
+                        {
+                            stage = "progress",
+                            id = entry.MediaId,
+                            ok = true,
+                            processed,
+                            total = entries.Count,
+                        }, ct);
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        failed++;
+                        await WriteJsonLineAsync(new
+                        {
+                            stage = "progress",
+                            id = entry.MediaId,
+                            ok = false,
+                            error = ex.Message,
+                            processed,
+                            failed,
+                            total = entries.Count,
+                        }, ct);
+                    }
+                }
+
+                await WriteJsonLineAsync(new
+                {
+                    stage = "done",
+                    processed,
+                    failed,
+                    total = entries.Count,
+                    cancelled = ct.IsCancellationRequested,
+                }, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // Client disconnected mid-run — nothing to send back.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Sync failed (config={Config}).", config);
+                try { await WriteJsonLineAsync(new { stage = "error", error = "sync failed" }, ct); }
+                catch { /* response may already be partially written */ }
+            }
+        }
+
+        private async Task WriteJsonLineAsync(object payload, CancellationToken ct)
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(payload);
+            await Response.WriteAsync(json + "\n", ct);
+            await Response.Body.FlushAsync(ct);
+        }
+
         private static DateTime? ParseDate(string s) =>
             DateTime.TryParse(s, out var dt) ? dt : null;
 
