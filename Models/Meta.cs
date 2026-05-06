@@ -1,4 +1,5 @@
 ﻿
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace AnimeList.Models
@@ -23,9 +24,22 @@ namespace AnimeList.Models
         public List<Link> links { get; set; } = [];
         public string entryId { get; set; }
         public string entryStatus { get; set; }
+        // Tells Stremio this series has scheduled / upcoming episodes so it renders the
+        // "Upcoming" badge for videos whose `released` date is in the future. defaultVideoId
+        // is intentionally null — Stremio uses the videos[] array to decide what to play.
+        public MetaBehaviorHints behaviorHints { get; set; } = new();
 
         [GeneratedRegex("<.*?>")]
         private static partial Regex HtmlTagPattern();
+    }
+
+    public class MetaBehaviorHints
+    {
+        // Always emit as JSON null even though our global STJ options skip nulls — Stremio
+        // expects the field to be present, not absent.
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+        public string defaultVideoId { get; set; }
+        public bool hasScheduledVideos { get; set; } = true;
     }
 
     public class Trailer(dynamic id)
