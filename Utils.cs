@@ -483,5 +483,11 @@ namespace AnimeList
             try { return result.ToObject<T>(); }
             catch { return default; }
         }
+
+        public static bool IsValidUrl(string url)
+        {
+            return !string.IsNullOrWhiteSpace(url) && Uri.TryCreate(url, UriKind.Absolute, out Uri result)
+                   && (result.Scheme == Uri.UriSchemeHttp || result.Scheme == Uri.UriSchemeHttps);
+        }
     }
 }

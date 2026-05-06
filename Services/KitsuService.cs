@@ -435,6 +435,9 @@ namespace AnimeList.Services
                 }
             }
 
+            // links must be valid or stremio throws error and page can't render. 
+            anime.links = anime.links.Where(w => IsValidUrl(w.url)).ToList();
+
             return anime;
         }
 

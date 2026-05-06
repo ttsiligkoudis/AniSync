@@ -307,6 +307,9 @@ namespace AnimeList.Services
                 NormalizeVideoIds(anime.videos, groupId, hasGroupId);
             }
 
+            // links must be valid or stremio throws error and page can't render. 
+            anime.links = anime.links.Where(w => IsValidUrl(w.url)).ToList();
+
             _logger.LogInformation(
                 "MAL GetAnimeByIdAsync: id={Id} resolvedMal={Resolved} mediaType={MediaType} numEpisodes={NumEpisodes} " +
                 "mappingHasImdb={HasImdb} mappingHasKitsu={HasKitsu} mappingHasAnilist={HasAnilist} mappingSeason={Season} " +
