@@ -1,8 +1,11 @@
 using AnimeList.Services;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.OpenApi.Models;
 using System.IO.Compression;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -60,6 +63,47 @@ builder.Services.AddCors(options =>
         });
 });
 
+// OpenAPI / Swagger for the /api/v1 surface. The doc-comments on ApiController
+// surface as endpoint descriptions thanks to GenerateDocumentationFile in the
+// .csproj. The Stremio addon endpoints aren't included in the swagger doc
+// because they're consumed by Stremio itself, not by API clients.
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "AniSync API",
+        Version = "v1",
+        Description = "Public read-only HTTP API for cross-service anime mapping, " +
+                      "unified anime detail, search, discovery, recommendations, " +
+                      "external streaming links, AniSkip OP/ED markers and " +
+                      "AnimeFillerList episode categorisation.",
+    });
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, "AniSync.xml");
+    if (File.Exists(xmlPath))
+        options.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
+});
+
+// Per-IP fixed-window rate limit on /api/v1/*. Conservative defaults — enough
+// for an interactive client, low enough that an abuser can't pin the upstream
+// providers' rate limits. The Stremio addon endpoints aren't gated since
+// Stremio retries are bounded and the user is the rate limit there.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("api", httpContext =>
+    {
+        var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+        return RateLimitPartition.GetFixedWindowLimiter(ip, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 60,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+        });
+    });
+});
+
 builder.Services.AddSingleton<IAnimeMappingService, AnimeMappingService>();
 builder.Services.AddSingleton<IConfigStore, SqliteConfigStore>();
 builder.Services.AddScoped<ITokenService, TokenService>();
@@ -98,9 +142,19 @@ app.UseResponseCompression();
 app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
+app.UseRateLimiter();
 app.UseCors("AllowAllOrigins");
 app.UseSession();
 app.UseAuthorization();
+
+// Swagger UI lives at /api/docs so the addon's /Home/Index landing page isn't
+// shadowed. The raw spec is at /api/swagger/v1/swagger.json.
+app.UseSwagger(c => c.RouteTemplate = "api/swagger/{documentName}/swagger.json");
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/api/swagger/v1/swagger.json", "AniSync API v1");
+    c.RoutePrefix = "api/docs";
+});
 
 app.MapControllerRoute(
     name: "default",

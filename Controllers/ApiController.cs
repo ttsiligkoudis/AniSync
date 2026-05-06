@@ -1,6 +1,7 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Newtonsoft.Json.Linq;
 
 namespace AnimeList.Controllers
@@ -17,6 +18,7 @@ namespace AnimeList.Controllers
     /// </summary>
     [ApiController]
     [Route("api/v1")]
+    [EnableRateLimiting("api")]
     public class ApiController : ControllerBase
     {
         private readonly IAnilistService _anilistService;
