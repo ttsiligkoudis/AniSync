@@ -8,7 +8,16 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHttpClient();
 builder.Services.AddSession();
-builder.Services.AddControllersWithViews();
+// Stremio's video renderer throws when fields like `released` are present with a
+// null value — it expects either a valid ISO date string or the field absent.
+// Drop nulls globally so any optional Meta / Video field that's unset on the C#
+// side simply doesn't appear in the JSON.
+builder.Services.AddControllersWithViews()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.DefaultIgnoreCondition =
+            System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+    });
 builder.Services.AddHttpContextAccessor();
 
 // Brotli + Gzip on outgoing responses. Catalog / meta JSON is the bulk of bandwidth
