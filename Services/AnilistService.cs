@@ -308,11 +308,10 @@ namespace AnimeList.Services
             // here instead of paginating it. Discovery catalogs (Trending/Seasonal/Search/
             // Airing) still paginate via the API's own page mechanism above.
             //
-            // When seasons are ungrouped, sort user libraries alphabetically by name so the
-            // multiple cours of a franchise sit next to each other ("Show", "Show Part 2",
-            // "Show Season 2", …). Grouped lists already collapse to one card per franchise
-            // so ordering matters less, and discovery catalogs preserve the API's ranking.
-            if (isUserList && !groupSeasons)
+            // Sort user libraries alphabetically by name so franchise cours sit next to each
+            // other ("Show", "Show Part 2", "Show Season 2", …) — applies regardless of the
+            // groupSeasons toggle. Discovery catalogs preserve the API's ranking.
+            if (isUserList)
                 return seenIds.Values
                     .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                     .ToList();

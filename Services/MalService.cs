@@ -155,10 +155,10 @@ namespace AnimeList.Services
                 apiOffset += pageSize;
             }
 
-            // When seasons are ungrouped, sort user libraries alphabetically by name so the
-            // multiple cours of a franchise sit next to each other ("Show", "Show Part 2",
-            // "Show Season 2", …). Grouped lists already collapse to one card per franchise.
-            if (isUserList && !groupSeasons)
+            // Sort user libraries alphabetically by name so franchise cours sit next to each
+            // other ("Show", "Show Part 2", "Show Season 2", …). Discovery catalogs keep
+            // their API ranking.
+            if (isUserList)
                 return seenIds.Values
                     .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                     .ToList();
