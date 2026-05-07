@@ -555,6 +555,7 @@ namespace AnimeList.Controllers
         {
             try
             {
+                var resolvedConfig = ResolveConfig(config);
                 var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
                 var uid = configuration?.tokenUid;
                 if (string.IsNullOrEmpty(uid))
