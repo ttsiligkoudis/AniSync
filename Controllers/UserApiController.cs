@@ -30,6 +30,7 @@ namespace AnimeList.Controllers
         private readonly IMalService _malService;
         private readonly IConfigStore _configStore;
         private readonly ISyncService _syncService;
+        private readonly IAnimeMappingService _mappingService;
         private readonly ILogger<UserApiController> _logger;
 
         public UserApiController(
@@ -39,6 +40,7 @@ namespace AnimeList.Controllers
             IMalService malService,
             IConfigStore configStore,
             ISyncService syncService,
+            IAnimeMappingService mappingService,
             ILogger<UserApiController> logger)
         {
             _tokenService = tokenService;
@@ -47,6 +49,7 @@ namespace AnimeList.Controllers
             _malService = malService;
             _configStore = configStore;
             _syncService = syncService;
+            _mappingService = mappingService;
             _logger = logger;
         }
 
@@ -265,6 +268,243 @@ namespace AnimeList.Controllers
             {
                 _logger.LogError(ex, "API DeleteEntry failed (config={Config}, id={Id}).", config, id);
                 return StatusCode(500, new { error = "delete failed" });
+            }
+        }
+
+        /// <summary>
+        /// Bulk save: writes every entry in the request body to the primary and fans
+        /// each one out to linked secondaries. Processed sequentially per-entry so
+        /// upstream rate limits aren't tripped; per-target fan-out within an entry
+        /// stays concurrent. An empty <c>status</c> on an entry deletes it (same
+        /// convention as the single-entry endpoint).
+        ///
+        /// Returns one result row per input entry plus rolled-up counts. Failures
+        /// don't abort the run — useful for migrations where you'd rather see
+        /// partial success than start over on a single bad row.
+        /// </summary>
+        [HttpPost("entries")]
+        public async Task<IActionResult> SaveEntriesBulk(string config, [FromBody] List<SaveEntryRequest> entries)
+        {
+            try
+            {
+                if (entries == null || entries.Count == 0)
+                    return BadRequest(new { error = "request body must be a non-empty array of entries" });
+
+                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+                if (string.IsNullOrEmpty(tokenData?.access_token))
+                    return Unauthorized(new { error = "config has no primary token" });
+
+                var results = new List<object>();
+                int ok = 0, failed = 0;
+
+                foreach (var entry in entries)
+                {
+                    if (string.IsNullOrEmpty(entry?.Id))
+                    {
+                        failed++;
+                        results.Add(new { id = (string)null, ok = false, error = "entry missing id" });
+                        continue;
+                    }
+
+                    try
+                    {
+                        var startedAt = ParseDate(entry.StartedAt);
+                        var finishedAt = ParseDate(entry.FinishedAt);
+
+                        if (string.IsNullOrEmpty(entry.Status))
+                        {
+                            switch (tokenData.anime_service)
+                            {
+                                case AnimeService.Anilist:
+                                    await _anilistService.DeleteAnimeEntryAsync(tokenData, entry.Id, entry.Season);
+                                    break;
+                                case AnimeService.MyAnimeList:
+                                    await _malService.DeleteAnimeEntryAsync(tokenData, entry.Id, entry.Season);
+                                    break;
+                                default:
+                                    await _kitsuService.DeleteAnimeEntryAsync(tokenData, entry.Id, entry.Season);
+                                    break;
+                            }
+                            await _syncService.FanOutDeleteAsync(tokenData, entry.Id, entry.Season);
+                            ok++;
+                            results.Add(new { id = entry.Id, ok = true, removed = true });
+                            continue;
+                        }
+
+                        switch (tokenData.anime_service)
+                        {
+                            case AnimeService.Anilist:
+                                await _anilistService.SaveAnimeEntryAsync(tokenData, entry.Id, entry.Season, entry.Progress,
+                                    entry.Status, entry.Score, entry.Notes, entry.RewatchCount, startedAt, finishedAt);
+                                break;
+                            case AnimeService.MyAnimeList:
+                                await _malService.SaveAnimeEntryAsync(tokenData, entry.Id, entry.Season, entry.Progress,
+                                    entry.Status, entry.Score, entry.Notes, entry.RewatchCount, startedAt, finishedAt);
+                                break;
+                            default:
+                                await _kitsuService.SaveAnimeEntryAsync(tokenData, entry.Id, entry.Season, entry.Progress,
+                                    entry.Status, entry.Score, entry.Notes, entry.RewatchCount, startedAt, finishedAt);
+                                break;
+                        }
+                        await _syncService.FanOutSaveAsync(tokenData, entry.Id, entry.Season, entry.Progress,
+                            entry.Status, entry.Score, entry.Notes, entry.RewatchCount, startedAt, finishedAt);
+                        ok++;
+                        results.Add(new { id = entry.Id, ok = true });
+                    }
+                    catch (Exception ex)
+                    {
+                        failed++;
+                        results.Add(new { id = entry.Id, ok = false, error = ex.Message });
+                    }
+                }
+
+                return new JsonResult(new
+                {
+                    primary = tokenData.anime_service.ToString(),
+                    ok,
+                    failed,
+                    total = entries.Count,
+                    results,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API SaveEntriesBulk failed (config={Config}).", config);
+                return StatusCode(500, new { error = "bulk save failed" });
+            }
+        }
+
+        /// <summary>
+        /// Compares the primary's library against each linked secondary's library and
+        /// surfaces what's out of sync. For each linked provider returns:
+        ///
+        ///   - <c>missing</c>: primary entries the secondary doesn't have at all.
+        ///   - <c>mismatched</c>: entries present on both sides but with a different
+        ///     normalised status or progress.
+        ///
+        /// Status comparison normalises across provider vocabularies so AniList
+        /// <c>CURRENT</c>, Kitsu <c>current</c>, and MAL <c>watching</c> all collapse
+        /// to a single canonical value. Score is intentionally not compared — it sits
+        /// in different scales per provider and produces too many false positives.
+        ///
+        /// Useful for "your trackers are N entries out of sync" UIs and for deciding
+        /// whether to run a full Sync from primary.
+        /// </summary>
+        [HttpGet("sync/diff")]
+        public async Task<IActionResult> Diff(string config)
+        {
+            try
+            {
+                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+                if (string.IsNullOrEmpty(tokenData?.access_token))
+                    return Unauthorized(new { error = "config has no primary token" });
+
+                var configuration = await ResolveConfigAsync(config, _configStore);
+                var uid = configuration?.tokenUid;
+                if (string.IsNullOrEmpty(uid))
+                    return BadRequest(new { error = "config is not stored — diff requires a v4/v5 install URL" });
+
+                var linked = await _configStore.GetLinkedTokensAsync(uid);
+                if (linked.Count == 0)
+                    return new JsonResult(new
+                    {
+                        primary = tokenData.anime_service.ToString(),
+                        diffs = Array.Empty<object>(),
+                    });
+
+                var primaryEntries = await _syncService.GetPrimaryEntriesAsync(tokenData);
+                var diffs = new List<object>();
+
+                foreach (var l in linked)
+                {
+                    if (l.NeedsReauth || l.TokenData == null)
+                    {
+                        diffs.Add(new { service = l.Service.ToString(), needsReauth = true });
+                        continue;
+                    }
+
+                    List<AnimeEntry> secondaryEntries;
+                    try
+                    {
+                        secondaryEntries = l.Service switch
+                        {
+                            AnimeService.Anilist => await _anilistService.GetUserListEntriesAsync(l.TokenData),
+                            AnimeService.Kitsu => await _kitsuService.GetUserListEntriesAsync(l.TokenData),
+                            AnimeService.MyAnimeList => await _malService.GetUserListEntriesAsync(l.TokenData),
+                            _ => [],
+                        };
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "API Diff secondary fetch failed (service={Service}).", l.Service);
+                        diffs.Add(new { service = l.Service.ToString(), error = "secondary fetch failed" });
+                        continue;
+                    }
+
+                    // Index secondary entries by their service-prefixed media id so we can
+                    // resolve a primary entry's mapping in O(1) rather than walking the list.
+                    var byId = secondaryEntries
+                        .Where(e => !string.IsNullOrEmpty(e.MediaId))
+                        .ToDictionary(e => e.MediaId, e => e);
+
+                    var prefix = l.Service switch
+                    {
+                        AnimeService.Anilist => anilistPrefix,
+                        AnimeService.Kitsu => kitsuPrefix,
+                        AnimeService.MyAnimeList => malPrefix,
+                        _ => string.Empty,
+                    };
+
+                    var missing = new List<object>();
+                    var mismatched = new List<object>();
+
+                    foreach (var p in primaryEntries)
+                    {
+                        if (string.IsNullOrEmpty(p.MediaId)) continue;
+
+                        var resolved = await _mappingService.GetIdByService(p.MediaId, l.Service);
+                        if (string.IsNullOrEmpty(resolved)) continue;
+
+                        var key = $"{prefix}{resolved}";
+                        if (!byId.TryGetValue(key, out var s))
+                        {
+                            missing.Add(new { primary = new { p.MediaId, p.Status, p.Progress } });
+                            continue;
+                        }
+
+                        var pStatus = NormalizeListStatus(p.Status);
+                        var sStatus = NormalizeListStatus(s.Status);
+                        if (pStatus != sStatus || p.Progress != s.Progress)
+                        {
+                            mismatched.Add(new
+                            {
+                                primary = new { p.MediaId, p.Status, p.Progress },
+                                secondary = new { s.MediaId, s.Status, s.Progress },
+                            });
+                        }
+                    }
+
+                    diffs.Add(new
+                    {
+                        service = l.Service.ToString(),
+                        missing,
+                        mismatched,
+                        missingCount = missing.Count,
+                        mismatchedCount = mismatched.Count,
+                    });
+                }
+
+                return new JsonResult(new
+                {
+                    primary = tokenData.anime_service.ToString(),
+                    primaryCount = primaryEntries.Count,
+                    diffs,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Diff failed (config={Config}).", config);
+                return StatusCode(500, new { error = "diff failed" });
             }
         }
 
