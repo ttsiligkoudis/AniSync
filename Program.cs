@@ -15,11 +15,19 @@ builder.Services.AddSession();
 // null value — it expects either a valid ISO date string or the field absent.
 // Drop nulls globally so any optional Meta / Video field that's unset on the C#
 // side simply doesn't appear in the JSON.
+//
+// JsonStringEnumConverter renders enums (AnimeService, ListType, …) as their
+// names instead of integer ordinals. Mostly cosmetic for our API responses
+// (we ToString() most enums explicitly anyway), but matters for Swagger: the
+// schema generator picks up the converter and emits string-typed enum
+// dropdowns in /api/docs instead of "Available values: 0, 1, 2".
 builder.Services.AddControllersWithViews()
     .AddJsonOptions(options =>
     {
         options.JsonSerializerOptions.DefaultIgnoreCondition =
             System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+        options.JsonSerializerOptions.Converters.Add(
+            new System.Text.Json.Serialization.JsonStringEnumConverter());
     });
 builder.Services.AddHttpContextAccessor();
 
