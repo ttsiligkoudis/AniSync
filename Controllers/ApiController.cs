@@ -1,4 +1,5 @@
 using AnimeList.Models;
+using AnimeList.Models.Api;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -20,6 +21,10 @@ namespace AnimeList.Controllers
     [ApiController]
     [Route("api/v1")]
     [EnableRateLimiting("api")]
+    [Tags("Public")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ApiError), StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ApiError), StatusCodes.Status500InternalServerError)]
     public class ApiController : ControllerBase
     {
         private readonly IAnilistService _anilistService;
@@ -63,32 +68,33 @@ namespace AnimeList.Controllers
         /// — the other services' ids plus the Fribb season number when known.
         /// </summary>
         [HttpGet("mappings/{id}")]
+        [ProducesResponseType(typeof(MappingListResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Mappings(string id)
         {
             try
             {
-                AnimeIdMapping mapping = null;
-                if (id.StartsWith(imdbPrefix))
+                List<AnimeIdMapping> entries;
+                if (id.StartsWith(imdbPrefix))      entries = await _mappingService.GetImdbMapping(id);
+                else if (id.StartsWith(tmdbPrefix)) entries = await _mappingService.GetTmdbMapping(id);
+                else
                 {
-                    var entries = await _mappingService.GetImdbMapping(id);
-                    return new JsonResult(new { mappings = entries });
+                    AnimeIdMapping single = null;
+                    if (id.StartsWith(malPrefix))           single = await _mappingService.GetMalMapping(id);
+                    else if (id.StartsWith(kitsuPrefix))    single = await _mappingService.GetKitsuMapping(id);
+                    else if (id.StartsWith(anilistPrefix))  single = await _mappingService.GetAnilistMapping(id);
+                    entries = single != null ? [single] : [];
                 }
-                if (id.StartsWith(tmdbPrefix))
-                {
-                    var entries = await _mappingService.GetTmdbMapping(id);
-                    return new JsonResult(new { mappings = entries });
-                }
-                if (id.StartsWith(malPrefix))      mapping = await _mappingService.GetMalMapping(id);
-                else if (id.StartsWith(kitsuPrefix))    mapping = await _mappingService.GetKitsuMapping(id);
-                else if (id.StartsWith(anilistPrefix))  mapping = await _mappingService.GetAnilistMapping(id);
 
-                if (mapping == null) return NotFound(new { error = "no mapping for id" });
-                return new JsonResult(mapping);
+                if (entries == null || entries.Count == 0)
+                    return NotFound(new ApiError("no mapping for id"));
+
+                return new JsonResult(new MappingListResponse(entries));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API Mappings failed (id={Id}).", id);
-                return StatusCode(500, new { error = "lookup failed" });
+                return StatusCode(500, new ApiError("lookup failed"));
             }
         }
 
@@ -99,6 +105,8 @@ namespace AnimeList.Controllers
         /// Cinemeta data when an IMDb mapping is available.
         /// </summary>
         [HttpGet("anime/{id}")]
+        [ProducesResponseType(typeof(AnimeResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Anime(string id)
         {
             try
@@ -107,7 +115,7 @@ namespace AnimeList.Controllers
                 {
                     var raw = await _cinemetaService.GetAnimeByIdAsync(null, id);
                     return raw == null
-                        ? NotFound(new { error = "not found on cinemeta" })
+                        ? NotFound(new ApiError("not found on cinemeta"))
                         : Content(raw, "application/json");
                 }
 
@@ -117,13 +125,13 @@ namespace AnimeList.Controllers
                 else if (id.StartsWith(anilistPrefix))  meta = await _anilistService.GetAnimeByIdAsync(id, null);
                 else if (id.StartsWith(tmdbPrefix))     meta = await _tmdbService.GetAnimeByIdAsync(id, null);
 
-                if (meta == null) return NotFound(new { error = "not found" });
-                return new JsonResult(new { meta });
+                if (meta == null) return NotFound(new ApiError("not found"));
+                return new JsonResult(new AnimeResponse(meta));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API Anime failed (id={Id}).", id);
-                return StatusCode(500, new { error = "lookup failed" });
+                return StatusCode(500, new ApiError("lookup failed"));
             }
         }
 
@@ -133,21 +141,23 @@ namespace AnimeList.Controllers
         /// usable by the caller. Defaults to AniList ids.
         /// </summary>
         [HttpGet("anime/{id}/similar")]
+        [ProducesResponseType(typeof(SimilarResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Similar(string id, AnimeService service = AnimeService.Anilist)
         {
             try
             {
                 var anilistRaw = await _mappingService.GetIdByService(id, AnimeService.Anilist);
                 if (!int.TryParse(anilistRaw, out var anilistId))
-                    return NotFound(new { error = "no anilist mapping for id" });
+                    return NotFound(new ApiError("no anilist mapping for id"));
 
                 var links = await _anilistFallback.GetRecommendationsAsync(anilistId, service);
-                return new JsonResult(new { similar = links });
+                return new JsonResult(new SimilarResponse(links));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API Similar failed (id={Id}, service={Service}).", id, service);
-                return StatusCode(500, new { error = "lookup failed" });
+                return StatusCode(500, new ApiError("lookup failed"));
             }
         }
 
@@ -158,6 +168,8 @@ namespace AnimeList.Controllers
         /// stream button.
         /// </summary>
         [HttpGet("anime/{id}/streams")]
+        [ProducesResponseType(typeof(StreamsResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Streams(string id)
         {
             try
@@ -174,16 +186,16 @@ namespace AnimeList.Controllers
                     // Fall back to AniList through the mapping for IMDb / TMDB ids.
                     var anilistRaw = await _mappingService.GetIdByService(id, AnimeService.Anilist);
                     if (!int.TryParse(anilistRaw, out var anilistId))
-                        return NotFound(new { error = "no anilist mapping for id" });
+                        return NotFound(new ApiError("no anilist mapping for id"));
                     links = await _anilistFallback.GetExternalLinksAsync(anilistId);
                 }
 
-                return new JsonResult(new { streams = links ?? [] });
+                return new JsonResult(new StreamsResponse(links ?? []));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API Streams failed (id={Id}).", id);
-                return StatusCode(500, new { error = "lookup failed" });
+                return StatusCode(500, new ApiError("lookup failed"));
             }
         }
 
@@ -193,12 +205,13 @@ namespace AnimeList.Controllers
         /// coverage). Returns the same Meta shape the catalog endpoints emit.
         /// </summary>
         [HttpGet("search")]
+        [ProducesResponseType(typeof(MetaListResponse), StatusCodes.Status200OK)]
         public async Task<IActionResult> Search(string q, AnimeService service = AnimeService.Anilist, string skip = null)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(q))
-                    return new JsonResult(new { results = Array.Empty<Meta>() });
+                    return new JsonResult(new MetaListResponse([]));
 
                 var metas = service switch
                 {
@@ -206,12 +219,12 @@ namespace AnimeList.Controllers
                     AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, ListType.Search, skip, search: q),
                     _ => await _anilistService.GetAnimeListAsync(null, ListType.Search, skip, search: q),
                 };
-                return new JsonResult(new { results = metas });
+                return new JsonResult(new MetaListResponse(metas));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API Search failed (q={Q}, service={Service}).", q, service);
-                return StatusCode(500, new { error = "search failed" });
+                return StatusCode(500, new ApiError("search failed"));
             }
         }
 
@@ -235,12 +248,14 @@ namespace AnimeList.Controllers
         /// <param name="limit">Maximum number of ranked matches to return. Defaults
         /// to 5; capped at 20.</param>
         [HttpGet("match")]
+        [ProducesResponseType(typeof(MatchResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> Match(string title, AnimeService service = AnimeService.Anilist, int limit = 5)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(title))
-                    return BadRequest(new { error = "title is required" });
+                    return BadRequest(new ApiError("title is required"));
 
                 limit = Math.Clamp(limit, 1, 20);
                 var normalisedQuery = NormalizeTitle(title);
@@ -296,7 +311,7 @@ namespace AnimeList.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API Match failed (title={Title}, service={Service}).", title, service);
-                return StatusCode(500, new { error = "match failed" });
+                return StatusCode(500, new ApiError("match failed"));
             }
         }
 
@@ -307,6 +322,8 @@ namespace AnimeList.Controllers
         /// Stremio catalog extras.
         /// </summary>
         [HttpGet("discover/{kind}")]
+        [ProducesResponseType(typeof(MetaListResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> Discover(string kind, AnimeService service = AnimeService.Anilist,
             string skip = null, string genre = null, string sort = null)
         {
@@ -319,7 +336,7 @@ namespace AnimeList.Controllers
                     "airing" => ListType.Airing,
                     _ => (ListType?)null,
                 };
-                if (!listType.HasValue) return BadRequest(new { error = "kind must be trending|seasonal|airing" });
+                if (!listType.HasValue) return BadRequest(new ApiError("kind must be trending|seasonal|airing"));
 
                 var metas = service switch
                 {
@@ -327,12 +344,12 @@ namespace AnimeList.Controllers
                     AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, listType.Value, skip, genre: genre, sort: sort),
                     _ => await _anilistService.GetAnimeListAsync(null, listType.Value, skip, genre: genre, sort: sort),
                 };
-                return new JsonResult(new { results = metas });
+                return new JsonResult(new MetaListResponse(metas));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API Discover failed (kind={Kind}, service={Service}).", kind, service);
-                return StatusCode(500, new { error = "discover failed" });
+                return StatusCode(500, new ApiError("discover failed"));
             }
         }
 
@@ -344,21 +361,23 @@ namespace AnimeList.Controllers
         /// the resolved id, the upstream is down, or the id can't be resolved to MAL.
         /// </summary>
         [HttpGet("skip/{id}/{episode:int}")]
+        [ProducesResponseType(typeof(SkipResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Skip(string id, int episode)
         {
             try
             {
                 var malId = await ResolveMalIdAsync(id);
                 if (malId is null or <= 0)
-                    return NotFound(new { error = "no MAL mapping for id" });
+                    return NotFound(new ApiError("no MAL mapping for id"));
 
                 var markers = await _aniSkipService.GetSkipTimesAsync(malId.Value, episode);
-                return new JsonResult(new { markers });
+                return new JsonResult(new SkipResponse(markers));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API Skip failed (id={Id}, episode={Episode}).", id, episode);
-                return StatusCode(500, new { error = "skip lookup failed" });
+                return StatusCode(500, new ApiError("skip lookup failed"));
             }
         }
 
@@ -371,6 +390,8 @@ namespace AnimeList.Controllers
         /// fast.
         /// </summary>
         [HttpGet("filler/{*titleOrId}")]
+        [ProducesResponseType(typeof(FillerResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Filler(string titleOrId)
         {
             try
@@ -380,15 +401,15 @@ namespace AnimeList.Controllers
                     : titleOrId;
 
                 if (string.IsNullOrEmpty(title))
-                    return NotFound(new { error = "could not resolve a title for the id" });
+                    return NotFound(new ApiError("could not resolve a title for the id"));
 
                 var categories = await _fillerListService.GetEpisodeCategoriesAsync(title);
-                return new JsonResult(new { title, categories });
+                return new JsonResult(new FillerResponse(title, categories));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API Filler failed (titleOrId={TitleOrId}).", titleOrId);
-                return StatusCode(500, new { error = "filler lookup failed" });
+                return StatusCode(500, new ApiError("filler lookup failed"));
             }
         }
 

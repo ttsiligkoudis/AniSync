@@ -86,32 +86,55 @@ builder.Services.AddSwaggerGen(options =>
         Version = "v1",
         Description =
             "HTTP API for cross-service anime mapping, unified anime detail, search, " +
-            "discovery, recommendations, external streaming links, AniSkip OP/ED markers " +
-            "and AnimeFillerList episode categorisation. User-scoped endpoints under " +
-            "`/users/{config}` accept the UID as either the path segment or the " +
-            "`X-AniSync-Config` header (preferred — keeps the UID out of URLs and access logs).\n\n" +
-            "**Rate limit:** 60 requests / minute / IP, fixed-window. Bursts above the limit " +
-            "receive a 429 with no queueing.",
+            "discovery, recommendations, external streaming links, AniSkip OP/ED markers, " +
+            "AnimeFillerList episode categorisation, and full library / sync management.\n\n" +
+            "**Authentication.** User-scoped endpoints under `/users/{config}` accept the UID " +
+            "as either the path segment or the `X-AniSync-Config` request header. The header " +
+            "is preferred — it keeps the UID out of URLs, Referer logs, and reverse-proxy / " +
+            "CDN access logs. Pass any value (commonly `me`) for the path segment when using " +
+            "the header.\n\n" +
+            "**Rate limit.** 60 requests / minute / IP, fixed-window. Bursts above the limit " +
+            "receive a 429 with no queueing.\n\n" +
+            "**Versioning.** All endpoints live under `/api/v1`. Breaking changes ship behind " +
+            "a new `/api/v2` prefix; `v1` remains supported until explicitly sunsetted via " +
+            "the operation deprecation marker plus a 6-month notice.",
+        Contact = new OpenApiContact
+        {
+            Name = "AniSync on GitHub",
+            Url = new Uri("https://github.com/ttsiligkoudis/AniSync"),
+        },
+        License = new OpenApiLicense
+        {
+            Name = "MIT",
+            Url = new Uri("https://github.com/ttsiligkoudis/AniSync/blob/master/LICENSE"),
+        },
     });
+
+    // Tag descriptions surface in Swagger UI as section subtitles.
+    options.DocumentFilter<TagDescriptionsFilter>();
+
     options.DocInclusionPredicate((_, apiDesc) =>
         apiDesc.RelativePath?.StartsWith("api/v1") == true);
-    // Stable, predictable operationIds (e.g. "getMapping", "saveEntry") so Swagger
-    // Codegen / OpenAPI Generator produce client SDK methods named the way humans
-    // would name them, not "apiV1MappingsIdGet".
+
+    // Stable, predictable operationIds so generated SDKs (Swagger Codegen /
+    // OpenAPI Generator) produce method names like saveEntry() and getAnime()
+    // instead of apiV1MappingsIdGet().
     options.CustomOperationIds(api =>
         api.ActionDescriptor is Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor c
             ? char.ToLowerInvariant(c.ActionName[0]) + c.ActionName[1..]
             : null);
+
     // Document the alternative auth header on every user-scoped endpoint via a
-    // global parameter so it surfaces in Swagger UI's "Try it out" panel.
+    // global parameter so it surfaces in Swagger UI's "Authorize" panel.
     options.AddSecurityDefinition("ConfigHeader", new OpenApiSecurityScheme
     {
         Type = SecuritySchemeType.ApiKey,
         Name = "X-AniSync-Config",
         In = ParameterLocation.Header,
-        Description = "Config UID, alternative to the {config} path segment. " +
-                      "Preferred for HTTP API clients — keeps the UID out of URLs and access logs.",
+        Description = "Config UID. Preferred over the `{config}` path segment because " +
+                      "it keeps the UID out of URLs and access logs.",
     });
+
     var xmlPath = Path.Combine(AppContext.BaseDirectory, "AniSync.xml");
     if (File.Exists(xmlPath))
         options.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);

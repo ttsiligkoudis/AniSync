@@ -1,4 +1,5 @@
 using AnimeList.Models;
+using AnimeList.Models.Api;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -29,6 +30,11 @@ namespace AnimeList.Controllers
     [ApiController]
     [Route("api/v1/users/{config}")]
     [EnableRateLimiting("api")]
+    [Tags("User-scoped")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ApiError), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiError), StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ApiError), StatusCodes.Status500InternalServerError)]
     public class UserApiController : ControllerBase
     {
         private const string ConfigHeaderName = "X-AniSync-Config";
@@ -75,14 +81,16 @@ namespace AnimeList.Controllers
         /// case-insensitive and normalised internally so the same name works
         /// regardless of which provider is primary. Omit to return every entry.</param>
         [HttpGet("library")]
-        public async Task<IActionResult> Library(string config, string status = null)
+        [ProducesResponseType(typeof(LibraryResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> Library(string config, ListStatus? status = null)
         {
             try
             {
                 var resolvedConfig = ResolveConfig(config);
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
-                    return Unauthorized(new { error = "config has no primary token" });
+                    return Unauthorized(new ApiError("config has no primary token"));
 
                 var entries = tokenData.anime_service switch
                 {
@@ -91,27 +99,26 @@ namespace AnimeList.Controllers
                     _ => await _kitsuService.GetUserListEntriesAsync(tokenData),
                 };
 
-                if (!string.IsNullOrEmpty(status))
+                if (status.HasValue)
                 {
-                    var requested = NormalizeListStatus(status);
-                    if (requested == null)
-                        return BadRequest(new { error = "unknown status; expected watching|completed|planning|paused|dropped|rewatching" });
+                    // Map the canonical enum back to the lowercase string the existing
+                    // NormalizeListStatus comparator works on (entry.Status is the
+                    // raw provider-side value).
+                    var requested = NormalizeListStatus(status.Value.ToString());
                     entries = entries
                         .Where(e => NormalizeListStatus(e.Status) == requested)
                         .ToList();
                 }
 
-                return new JsonResult(new
-                {
-                    primary = tokenData.anime_service.ToString(),
-                    status,
-                    entries,
-                });
+                return new JsonResult(new LibraryResponse(
+                    Primary: tokenData.anime_service.ToString(),
+                    Status: status?.ToString().ToLowerInvariant(),
+                    Entries: entries));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API Library failed (config={Config}, status={Status}).", config, status);
-                return StatusCode(500, new { error = "library lookup failed" });
+                return StatusCode(500, new ApiError("library lookup failed"));
             }
         }
 
@@ -124,6 +131,8 @@ namespace AnimeList.Controllers
         /// provider's view of this anime.
         /// </summary>
         [HttpGet("entries/{id}")]
+        [ProducesResponseType(typeof(EntryResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Entry(string config, string id, int? season = null)
         {
             try
@@ -131,7 +140,7 @@ namespace AnimeList.Controllers
                 var resolvedConfig = ResolveConfig(config);
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
-                    return Unauthorized(new { error = "config has no primary token" });
+                    return Unauthorized(new ApiError("config has no primary token"));
 
                 var entry = tokenData.anime_service switch
                 {
@@ -140,13 +149,13 @@ namespace AnimeList.Controllers
                     _ => await _kitsuService.GetAnimeEntryAsync(tokenData, id, season),
                 };
 
-                if (entry == null) return NotFound(new { error = "entry not on user's list" });
-                return new JsonResult(new { entry });
+                if (entry == null) return NotFound(new ApiError("entry not on user's list"));
+                return new JsonResult(new EntryResponse(entry));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API Entry failed (config={Config}, id={Id}, season={Season}).", config, id, season);
-                return StatusCode(500, new { error = "entry lookup failed" });
+                return StatusCode(500, new ApiError("entry lookup failed"));
             }
         }
 
@@ -161,75 +170,88 @@ namespace AnimeList.Controllers
         /// per-target failures are swallowed and surface on the next <c>GET /linked</c>
         /// as <c>NeedsReauth</c>.
         /// </summary>
+        /// <param name="config">Config UID — pass via the <c>X-AniSync-Config</c>
+        /// header (preferred) or the path segment.</param>
+        /// <param name="id">Service-prefixed media id (<c>anilist:N</c>, <c>kitsu:N</c>,
+        /// <c>mal:N</c>). Path segment; the body's id is intentionally absent so
+        /// there's no ambiguity about which one wins.</param>
+        /// <param name="season">Optional cour / season number for multi-cour franchises.
+        /// Query param; same reasoning as <paramref name="id"/>.</param>
+        /// <param name="request">Body — status / progress / score / notes / dates.
+        /// Status is the canonical <see cref="ListStatus"/> enum and is translated
+        /// to the primary provider's vocabulary server-side.</param>
         [HttpPost("entries/{id}")]
-        public async Task<IActionResult> SaveEntry(string config, string id, [FromBody] SaveEntryRequest request)
+        [ProducesResponseType(typeof(SaveEntryResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> SaveEntry(string config, string id, [FromQuery] int? season,
+            [FromBody] ApiSaveEntryRequest request)
         {
             try
             {
-                if (request == null) return BadRequest(new { error = "missing request body" });
+                if (request == null) return BadRequest(new ApiError("missing request body"));
 
                 var resolvedConfig = ResolveConfig(config);
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
-                    return Unauthorized(new { error = "config has no primary token" });
+                    return Unauthorized(new ApiError("config has no primary token"));
 
                 var startedAt = ParseDate(request.StartedAt);
                 var finishedAt = ParseDate(request.FinishedAt);
 
-                if (string.IsNullOrEmpty(request.Status))
+                if (!request.Status.HasValue)
                 {
-                    // "" status == delete from list. Mirrors MetaController.SaveEntry.
+                    // null status == delete from list. The DELETE method is the
+                    // RESTful way to do this, but POST-with-null is the legacy path
+                    // shared with the Manage Entry UI semantics.
                     switch (tokenData.anime_service)
                     {
                         case AnimeService.Anilist:
-                            await _anilistService.DeleteAnimeEntryAsync(tokenData, id, request.Season);
+                            await _anilistService.DeleteAnimeEntryAsync(tokenData, id, season);
                             break;
                         case AnimeService.MyAnimeList:
-                            await _malService.DeleteAnimeEntryAsync(tokenData, id, request.Season);
+                            await _malService.DeleteAnimeEntryAsync(tokenData, id, season);
                             break;
                         default:
-                            await _kitsuService.DeleteAnimeEntryAsync(tokenData, id, request.Season);
+                            await _kitsuService.DeleteAnimeEntryAsync(tokenData, id, season);
                             break;
                     }
-                    await _syncService.FanOutDeleteAsync(tokenData, id, request.Season);
-                    return new JsonResult(new { ok = true, removed = true, primary = tokenData.anime_service.ToString() });
+                    await _syncService.FanOutDeleteAsync(tokenData, id, season);
+                    return new JsonResult(new SaveEntryResponse(true, tokenData.anime_service.ToString(), Removed: true));
                 }
 
-                // Translate canonical / friendly status names ("watching", "completed",
-                // "plan_to_watch", …) to whatever the primary actually accepts. Lets API
-                // callers use one vocabulary regardless of which provider is primary.
-                var translatedStatus = TranslateStatusForService(request.Status, tokenData);
+                // Canonical → primary's vocabulary.
+                var translatedStatus = TranslateStatusForService(request.Status.Value.ToString(), tokenData);
 
                 switch (tokenData.anime_service)
                 {
                     case AnimeService.Anilist:
-                        await _anilistService.SaveAnimeEntryAsync(tokenData, id, request.Season, request.Progress,
+                        await _anilistService.SaveAnimeEntryAsync(tokenData, id, season, request.Progress,
                             translatedStatus, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
                         break;
                     case AnimeService.MyAnimeList:
-                        await _malService.SaveAnimeEntryAsync(tokenData, id, request.Season, request.Progress,
+                        await _malService.SaveAnimeEntryAsync(tokenData, id, season, request.Progress,
                             translatedStatus, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
                         break;
                     default:
-                        await _kitsuService.SaveAnimeEntryAsync(tokenData, id, request.Season, request.Progress,
+                        await _kitsuService.SaveAnimeEntryAsync(tokenData, id, season, request.Progress,
                             translatedStatus, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
                         break;
                 }
 
-                await _syncService.FanOutSaveAsync(tokenData, id, request.Season, request.Progress,
+                await _syncService.FanOutSaveAsync(tokenData, id, season, request.Progress,
                     translatedStatus, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
 
-                return new JsonResult(new { ok = true, primary = tokenData.anime_service.ToString() });
+                return new JsonResult(new SaveEntryResponse(true, tokenData.anime_service.ToString(), Removed: null));
             }
             catch (UnauthorizedAccessException ex)
             {
                 _logger.LogWarning(ex, "API SaveEntry primary 401 (config={Config}, id={Id}).", config, id);
-                return Unauthorized(new { error = "primary token rejected by upstream" });
+                return Unauthorized(new ApiError("primary token rejected by upstream"));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API SaveEntry failed (config={Config}, id={Id}).", config, id);
-                return StatusCode(500, new { error = "save failed" });
+                return StatusCode(500, new ApiError("save failed"));
             }
         }
 
@@ -239,6 +261,7 @@ namespace AnimeList.Controllers
         /// the list returns 200.
         /// </summary>
         [HttpDelete("entries/{id}")]
+        [ProducesResponseType(typeof(SaveEntryResponse), StatusCodes.Status200OK)]
         public async Task<IActionResult> DeleteEntry(string config, string id, int? season = null)
         {
             try
@@ -246,7 +269,7 @@ namespace AnimeList.Controllers
                 var resolvedConfig = ResolveConfig(config);
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
-                    return Unauthorized(new { error = "config has no primary token" });
+                    return Unauthorized(new ApiError("config has no primary token"));
 
                 switch (tokenData.anime_service)
                 {
@@ -261,17 +284,17 @@ namespace AnimeList.Controllers
                         break;
                 }
                 await _syncService.FanOutDeleteAsync(tokenData, id, season);
-                return new JsonResult(new { ok = true, primary = tokenData.anime_service.ToString() });
+                return new JsonResult(new SaveEntryResponse(true, tokenData.anime_service.ToString(), null));
             }
             catch (UnauthorizedAccessException ex)
             {
                 _logger.LogWarning(ex, "API DeleteEntry primary 401 (config={Config}, id={Id}).", config, id);
-                return Unauthorized(new { error = "primary token rejected by upstream" });
+                return Unauthorized(new ApiError("primary token rejected by upstream"));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API DeleteEntry failed (config={Config}, id={Id}).", config, id);
-                return StatusCode(500, new { error = "delete failed" });
+                return StatusCode(500, new ApiError("delete failed"));
             }
         }
 
@@ -287,19 +310,21 @@ namespace AnimeList.Controllers
         /// partial success than start over on a single bad row.
         /// </summary>
         [HttpPost("entries")]
-        public async Task<IActionResult> SaveEntriesBulk(string config, [FromBody] List<SaveEntryRequest> entries)
+        [ProducesResponseType(typeof(BulkSaveResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> SaveEntriesBulk(string config, [FromBody] List<ApiBulkSaveEntry> entries)
         {
             try
             {
                 if (entries == null || entries.Count == 0)
-                    return BadRequest(new { error = "request body must be a non-empty array of entries" });
+                    return BadRequest(new ApiError("request body must be a non-empty array of entries"));
 
                 var resolvedConfig = ResolveConfig(config);
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
-                    return Unauthorized(new { error = "config has no primary token" });
+                    return Unauthorized(new ApiError("config has no primary token"));
 
-                var results = new List<object>();
+                var results = new List<BulkSaveResult>();
                 int ok = 0, failed = 0;
 
                 foreach (var entry in entries)
@@ -307,7 +332,7 @@ namespace AnimeList.Controllers
                     if (string.IsNullOrEmpty(entry?.Id))
                     {
                         failed++;
-                        results.Add(new { id = (string)null, ok = false, error = "entry missing id" });
+                        results.Add(new BulkSaveResult(null, false, null, "entry missing id"));
                         continue;
                     }
 
@@ -316,7 +341,7 @@ namespace AnimeList.Controllers
                         var startedAt = ParseDate(entry.StartedAt);
                         var finishedAt = ParseDate(entry.FinishedAt);
 
-                        if (string.IsNullOrEmpty(entry.Status))
+                        if (!entry.Status.HasValue)
                         {
                             switch (tokenData.anime_service)
                             {
@@ -332,11 +357,11 @@ namespace AnimeList.Controllers
                             }
                             await _syncService.FanOutDeleteAsync(tokenData, entry.Id, entry.Season);
                             ok++;
-                            results.Add(new { id = entry.Id, ok = true, removed = true });
+                            results.Add(new BulkSaveResult(entry.Id, true, true, null));
                             continue;
                         }
 
-                        var translatedStatus = TranslateStatusForService(entry.Status, tokenData);
+                        var translatedStatus = TranslateStatusForService(entry.Status.Value.ToString(), tokenData);
 
                         switch (tokenData.anime_service)
                         {
@@ -356,28 +381,23 @@ namespace AnimeList.Controllers
                         await _syncService.FanOutSaveAsync(tokenData, entry.Id, entry.Season, entry.Progress,
                             translatedStatus, entry.Score, entry.Notes, entry.RewatchCount, startedAt, finishedAt);
                         ok++;
-                        results.Add(new { id = entry.Id, ok = true });
+                        results.Add(new BulkSaveResult(entry.Id, true, null, null));
                     }
                     catch (Exception ex)
                     {
                         failed++;
-                        results.Add(new { id = entry.Id, ok = false, error = ex.Message });
+                        results.Add(new BulkSaveResult(entry.Id, false, null, ex.Message));
                     }
                 }
 
-                return new JsonResult(new
-                {
-                    primary = tokenData.anime_service.ToString(),
-                    ok,
-                    failed,
-                    total = entries.Count,
-                    results,
-                });
+                return new JsonResult(new BulkSaveResponse(
+                    Primary: tokenData.anime_service.ToString(),
+                    Ok: ok, Failed: failed, Total: entries.Count, Results: results));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API SaveEntriesBulk failed (config={Config}).", config);
-                return StatusCode(500, new { error = "bulk save failed" });
+                return StatusCode(500, new ApiError("bulk save failed"));
             }
         }
 
@@ -398,6 +418,8 @@ namespace AnimeList.Controllers
         /// whether to run a full Sync from primary.
         /// </summary>
         [HttpGet("sync/diff")]
+        [ProducesResponseType(typeof(DiffResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> Diff(string config)
         {
             try
@@ -405,12 +427,12 @@ namespace AnimeList.Controllers
                 var resolvedConfig = ResolveConfig(config);
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
-                    return Unauthorized(new { error = "config has no primary token" });
+                    return Unauthorized(new ApiError("config has no primary token"));
 
                 var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
                 var uid = configuration?.tokenUid;
                 if (string.IsNullOrEmpty(uid))
-                    return BadRequest(new { error = "config is not stored — diff requires a v4/v5 install URL" });
+                    return BadRequest(new ApiError("config is not stored — diff requires a v4/v5 install URL"));
 
                 var linked = await _configStore.GetLinkedTokensAsync(uid);
                 if (linked.Count == 0)
@@ -512,7 +534,7 @@ namespace AnimeList.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API Diff failed (config={Config}).", config);
-                return StatusCode(500, new { error = "diff failed" });
+                return StatusCode(500, new ApiError("diff failed"));
             }
         }
 
@@ -525,6 +547,10 @@ namespace AnimeList.Controllers
         /// with the user before sending it.
         /// </summary>
         [HttpPost("primary/{service}")]
+        [ProducesResponseType(typeof(PromoteResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(PromoteResponse), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(PromoteResponse), StatusCodes.Status409Conflict)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> Promote(string config, AnimeService service, bool force = false)
         {
             try
@@ -532,7 +558,7 @@ namespace AnimeList.Controllers
                 var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
                 var uid = configuration?.tokenUid;
                 if (string.IsNullOrEmpty(uid))
-                    return BadRequest(new { error = "config is not stored — only v4/v5 install URLs can swap primary" });
+                    return BadRequest(new ApiError("config is not stored — only v4/v5 install URLs can swap primary"));
 
                 var (newPrimary, reason) = await _configStore.SwapPrimaryAsync(uid, service, force);
                 if (newPrimary == null)
@@ -544,15 +570,15 @@ namespace AnimeList.Controllers
                         "not-linked" or "no-primary" or "uid-missing" => StatusCodes.Status404NotFound,
                         _ => StatusCodes.Status400BadRequest,
                     };
-                    return StatusCode(status, new { ok = false, reason });
+                    return StatusCode(status, new PromoteResponse(false, null, reason));
                 }
 
-                return new JsonResult(new { ok = true, primary = newPrimary.anime_service.ToString() });
+                return new JsonResult(new PromoteResponse(true, newPrimary.anime_service.ToString(), null));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API Promote failed (config={Config}, service={Service}).", config, service);
-                return StatusCode(500, new { error = "promote failed" });
+                return StatusCode(500, new ApiError("promote failed"));
             }
         }
 
@@ -685,6 +711,7 @@ namespace AnimeList.Controllers
         /// configure page does without needing the v5 install URL.
         /// </summary>
         [HttpGet("linked")]
+        [ProducesResponseType(typeof(LinkedResponse), StatusCodes.Status200OK)]
         public async Task<IActionResult> Linked(string config)
         {
             try
@@ -692,7 +719,7 @@ namespace AnimeList.Controllers
                 var resolvedConfig = ResolveConfig(config);
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
-                    return Unauthorized(new { error = "config has no primary token" });
+                    return Unauthorized(new ApiError("config has no primary token"));
 
                 // Only v5 (UID-only) URLs have linked tokens — v3/v4 inline URLs can
                 // only carry the primary, so the linked list is necessarily empty.
@@ -704,20 +731,16 @@ namespace AnimeList.Controllers
                     ? new List<LinkedToken>()
                     : await _configStore.GetLinkedTokensAsync(uid);
 
-                return new JsonResult(new
-                {
-                    primary = tokenData.anime_service.ToString(),
-                    linked = linked.Select(l => new
-                    {
-                        service = l.Service.ToString(),
-                        l.NeedsReauth,
-                    }),
-                });
+                return new JsonResult(new LinkedResponse(
+                    Primary: tokenData.anime_service.ToString(),
+                    Linked: linked
+                        .Select(l => new LinkedSummary(l.Service.ToString(), l.NeedsReauth))
+                        .ToList()));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API Linked failed (config={Config}).", config);
-                return StatusCode(500, new { error = "linked lookup failed" });
+                return StatusCode(500, new ApiError("linked lookup failed"));
             }
         }
     }
