@@ -26,7 +26,9 @@ the API surface composes. Around 300 lines total, no build step.
 5. The background worker hits
    [`GET /api/v1/match`](https://anisync.fly.dev/api/docs) to resolve the
    title into a concrete anime id, then writes progress via
-   [`POST /api/v1/users/{config}/entries/{id}`](https://anisync.fly.dev/api/docs).
+   [`POST /api/v1/me/entries/{id}`](https://anisync.fly.dev/api/docs) with
+   the Config UID in the `X-AniSync-Config` header — never in the URL,
+   so it can't leak through reverse-proxy / CDN access logs.
 
 AniSync's existing fan-out then mirrors that write to every linked secondary —
 no extension-side multi-provider logic needed.

@@ -9,26 +9,21 @@ namespace AnimeList.Controllers
     /// <summary>
     /// User-scoped API surface for non-Stremio clients.
     ///
-    /// <para><b>Authentication.</b> The Config UID is the only authentication
-    /// token. Two transports are accepted:
-    /// </para>
-    /// <list type="bullet">
-    /// <item><c>X-AniSync-Config</c> request header (preferred) — keeps the UID
-    /// out of URLs, referer headers, reverse-proxy access logs, and CDN caches.
-    /// Pass any value (commonly <c>me</c>) for the <c>{config}</c> path
-    /// segment; the header overrides it.</item>
-    /// <item><c>{config}</c> path segment (legacy / Stremio addon protocol) —
-    /// keeps existing install URLs working but leaks through every layer that
-    /// logs request paths. Migrate to the header when you control the caller.</item>
-    /// </list>
+    /// <para><b>Authentication.</b> Every endpoint requires the Config UID via the
+    /// <c>X-AniSync-Config</c> request header. The UID never appears in the URL
+    /// — that's deliberate, so it can't leak through Referer, reverse-proxy /
+    /// CDN access logs, browser history, or shared screenshots. Stremio's addon
+    /// protocol embeds the UID in the path because it has no other transport;
+    /// those routes live in <see cref="CatalogController"/>, <see cref="MetaController"/>,
+    /// <see cref="StreamController"/>, <see cref="SubtitlesController"/>, and
+    /// <see cref="ManifestController"/> and are not part of <c>/api/v1</c>.</para>
     ///
-    /// <para>Treat the UID like a password. If a URL with the UID embedded is
-    /// shared (forum, Discord, screenshot), rotate it by signing out and
-    /// re-linking from the configure page — that mints a fresh UID and
-    /// invalidates the old one.</para>
+    /// <para>Treat the UID like a password. If it leaks (forum post, screenshot,
+    /// log dump) sign out and re-link from the configure page to mint a fresh
+    /// one and invalidate the old.</para>
     /// </summary>
     [ApiController]
-    [Route("api/v1/users/{config}")]
+    [Route("api/v1/me")]
     [EnableRateLimiting("api")]
     [Tags("User-scoped")]
     [Produces("application/json")]
@@ -72,8 +67,6 @@ namespace AnimeList.Controllers
         /// progress, score, notes, dates and a service-prefixed media id. Useful for
         /// backup tooling or migrating to a custom client.
         /// </summary>
-        /// <param name="config">Install-URL config (the same UID Stremio's install
-        /// URL embeds).</param>
         /// <param name="status">Optional list filter. Accepts the friendly names
         /// <c>watching</c> / <c>current</c>, <c>completed</c>, <c>planning</c> /
         /// <c>planned</c> / <c>plan_to_watch</c>, <c>paused</c> / <c>on_hold</c>,
@@ -83,11 +76,12 @@ namespace AnimeList.Controllers
         [HttpGet("library")]
         [ProducesResponseType(typeof(LibraryResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> Library(string config, ListStatus? status = null)
+        public async Task<IActionResult> Library(ListStatus? status = null)
         {
             try
             {
-                var resolvedConfig = ResolveConfig(config);
+                var resolvedConfig = ResolveConfig();
+                if (resolvedConfig == null) return Unauthorized(new ApiError("X-AniSync-Config header required"));
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new ApiError("config has no primary token"));
@@ -117,7 +111,7 @@ namespace AnimeList.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "API Library failed (config={Config}, status={Status}).", config, status);
+                _logger.LogError(ex, "API Library failed (status={Status}).", status);
                 return StatusCode(500, new ApiError("library lookup failed"));
             }
         }
@@ -133,11 +127,12 @@ namespace AnimeList.Controllers
         [HttpGet("entries/{id}")]
         [ProducesResponseType(typeof(EntryResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> Entry(string config, string id, int? season = null)
+        public async Task<IActionResult> Entry(string id, int? season = null)
         {
             try
             {
-                var resolvedConfig = ResolveConfig(config);
+                var resolvedConfig = ResolveConfig();
+                if (resolvedConfig == null) return Unauthorized(new ApiError("X-AniSync-Config header required"));
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new ApiError("config has no primary token"));
@@ -154,7 +149,7 @@ namespace AnimeList.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "API Entry failed (config={Config}, id={Id}, season={Season}).", config, id, season);
+                _logger.LogError(ex, "API Entry failed (id={Id}, season={Season}).", id, season);
                 return StatusCode(500, new ApiError("entry lookup failed"));
             }
         }
@@ -170,8 +165,6 @@ namespace AnimeList.Controllers
         /// per-target failures are swallowed and surface on the next <c>GET /linked</c>
         /// as <c>NeedsReauth</c>.
         /// </summary>
-        /// <param name="config">Config UID — pass via the <c>X-AniSync-Config</c>
-        /// header (preferred) or the path segment.</param>
         /// <param name="id">Service-prefixed media id (<c>anilist:N</c>, <c>kitsu:N</c>,
         /// <c>mal:N</c>). Path segment; the body's id is intentionally absent so
         /// there's no ambiguity about which one wins.</param>
@@ -183,14 +176,15 @@ namespace AnimeList.Controllers
         [HttpPost("entries/{id}")]
         [ProducesResponseType(typeof(SaveEntryResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> SaveEntry(string config, string id, [FromQuery] int? season,
+        public async Task<IActionResult> SaveEntry(string id, [FromQuery] int? season,
             [FromBody] ApiSaveEntryRequest request)
         {
             try
             {
                 if (request == null) return BadRequest(new ApiError("missing request body"));
 
-                var resolvedConfig = ResolveConfig(config);
+                var resolvedConfig = ResolveConfig();
+                if (resolvedConfig == null) return Unauthorized(new ApiError("X-AniSync-Config header required"));
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new ApiError("config has no primary token"));
@@ -245,12 +239,12 @@ namespace AnimeList.Controllers
             }
             catch (UnauthorizedAccessException ex)
             {
-                _logger.LogWarning(ex, "API SaveEntry primary 401 (config={Config}, id={Id}).", config, id);
+                _logger.LogWarning(ex, "API SaveEntry primary 401 (id={Id}).", id);
                 return Unauthorized(new ApiError("primary token rejected by upstream"));
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "API SaveEntry failed (config={Config}, id={Id}).", config, id);
+                _logger.LogError(ex, "API SaveEntry failed (id={Id}).", id);
                 return StatusCode(500, new ApiError("save failed"));
             }
         }
@@ -262,11 +256,12 @@ namespace AnimeList.Controllers
         /// </summary>
         [HttpDelete("entries/{id}")]
         [ProducesResponseType(typeof(SaveEntryResponse), StatusCodes.Status200OK)]
-        public async Task<IActionResult> DeleteEntry(string config, string id, int? season = null)
+        public async Task<IActionResult> DeleteEntry(string id, int? season = null)
         {
             try
             {
-                var resolvedConfig = ResolveConfig(config);
+                var resolvedConfig = ResolveConfig();
+                if (resolvedConfig == null) return Unauthorized(new ApiError("X-AniSync-Config header required"));
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new ApiError("config has no primary token"));
@@ -288,12 +283,12 @@ namespace AnimeList.Controllers
             }
             catch (UnauthorizedAccessException ex)
             {
-                _logger.LogWarning(ex, "API DeleteEntry primary 401 (config={Config}, id={Id}).", config, id);
+                _logger.LogWarning(ex, "API DeleteEntry primary 401 (id={Id}).", id);
                 return Unauthorized(new ApiError("primary token rejected by upstream"));
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "API DeleteEntry failed (config={Config}, id={Id}).", config, id);
+                _logger.LogError(ex, "API DeleteEntry failed (id={Id}).", id);
                 return StatusCode(500, new ApiError("delete failed"));
             }
         }
@@ -312,14 +307,15 @@ namespace AnimeList.Controllers
         [HttpPost("entries")]
         [ProducesResponseType(typeof(BulkSaveResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> SaveEntriesBulk(string config, [FromBody] List<ApiBulkSaveEntry> entries)
+        public async Task<IActionResult> SaveEntriesBulk([FromBody] List<ApiBulkSaveEntry> entries)
         {
             try
             {
                 if (entries == null || entries.Count == 0)
                     return BadRequest(new ApiError("request body must be a non-empty array of entries"));
 
-                var resolvedConfig = ResolveConfig(config);
+                var resolvedConfig = ResolveConfig();
+                if (resolvedConfig == null) return Unauthorized(new ApiError("X-AniSync-Config header required"));
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new ApiError("config has no primary token"));
@@ -396,7 +392,7 @@ namespace AnimeList.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "API SaveEntriesBulk failed (config={Config}).", config);
+                _logger.LogError(ex, "API SaveEntriesBulk failed.");
                 return StatusCode(500, new ApiError("bulk save failed"));
             }
         }
@@ -420,11 +416,12 @@ namespace AnimeList.Controllers
         [HttpGet("sync/diff")]
         [ProducesResponseType(typeof(DiffResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> Diff(string config)
+        public async Task<IActionResult> Diff()
         {
             try
             {
-                var resolvedConfig = ResolveConfig(config);
+                var resolvedConfig = ResolveConfig();
+                if (resolvedConfig == null) return Unauthorized(new ApiError("X-AniSync-Config header required"));
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new ApiError("config has no primary token"));
@@ -533,7 +530,7 @@ namespace AnimeList.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "API Diff failed (config={Config}).", config);
+                _logger.LogError(ex, "API Diff failed.");
                 return StatusCode(500, new ApiError("diff failed"));
             }
         }
@@ -551,11 +548,12 @@ namespace AnimeList.Controllers
         [ProducesResponseType(typeof(PromoteResponse), StatusCodes.Status404NotFound)]
         [ProducesResponseType(typeof(PromoteResponse), StatusCodes.Status409Conflict)]
         [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> Promote(string config, AnimeService service, bool force = false)
+        public async Task<IActionResult> Promote(AnimeService service, bool force = false)
         {
             try
             {
-                var resolvedConfig = ResolveConfig(config);
+                var resolvedConfig = ResolveConfig();
+                if (resolvedConfig == null) return Unauthorized(new ApiError("X-AniSync-Config header required"));
                 var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
                 var uid = configuration?.tokenUid;
                 if (string.IsNullOrEmpty(uid))
@@ -578,7 +576,7 @@ namespace AnimeList.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "API Promote failed (config={Config}, service={Service}).", config, service);
+                _logger.LogError(ex, "API Promote failed (service={Service}).", service);
                 return StatusCode(500, new ApiError("promote failed"));
             }
         }
@@ -607,7 +605,7 @@ namespace AnimeList.Controllers
         // contract via the docstring above.
         [ApiExplorerSettings(IgnoreApi = true)]
         [HttpPost("sync")]
-        public async Task Sync(string config)
+        public async Task Sync()
         {
             var ct = HttpContext.RequestAborted;
 
@@ -616,7 +614,13 @@ namespace AnimeList.Controllers
 
             try
             {
-                var resolvedConfig = ResolveConfig(config);
+                var resolvedConfig = ResolveConfig();
+                if (resolvedConfig == null)
+                {
+                    Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    await WriteJsonLineAsync(new { stage = "error", error = "X-AniSync-Config header required" }, ct);
+                    return;
+                }
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                 {
@@ -680,7 +684,7 @@ namespace AnimeList.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "API Sync failed (config={Config}).", config);
+                _logger.LogError(ex, "API Sync failed.");
                 try { await WriteJsonLineAsync(new { stage = "error", error = "sync failed" }, ct); }
                 catch { /* response may already be partially written */ }
             }
@@ -696,14 +700,14 @@ namespace AnimeList.Controllers
         private static DateTime? ParseDate(string s) =>
             DateTime.TryParse(s, out var dt) ? dt : null;
 
-        // X-AniSync-Config request header overrides the {config} path segment when set.
-        // Lets API callers keep the UID out of URLs (and therefore out of every reverse-
-        // proxy / CDN / referer log in the chain) while we still satisfy the path
-        // template Stremio's addon protocol locks us into.
-        private string ResolveConfig(string config)
+        // Reads the Config UID from the X-AniSync-Config request header.
+        // Returns null when the header is missing / empty so the caller can
+        // short-circuit to a 401. The UID never travels through the URL —
+        // see the controller-level docstring for the security rationale.
+        private string? ResolveConfig()
         {
             var headerValue = Request.Headers[ConfigHeaderName].FirstOrDefault();
-            return string.IsNullOrWhiteSpace(headerValue) ? config : headerValue.Trim();
+            return string.IsNullOrWhiteSpace(headerValue) ? null : headerValue.Trim();
         }
 
         /// <summary>
@@ -713,11 +717,12 @@ namespace AnimeList.Controllers
         /// </summary>
         [HttpGet("linked")]
         [ProducesResponseType(typeof(LinkedResponse), StatusCodes.Status200OK)]
-        public async Task<IActionResult> Linked(string config)
+        public async Task<IActionResult> Linked()
         {
             try
             {
-                var resolvedConfig = ResolveConfig(config);
+                var resolvedConfig = ResolveConfig();
+                if (resolvedConfig == null) return Unauthorized(new ApiError("X-AniSync-Config header required"));
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new ApiError("config has no primary token"));
@@ -740,7 +745,7 @@ namespace AnimeList.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "API Linked failed (config={Config}).", config);
+                _logger.LogError(ex, "API Linked failed.");
                 return StatusCode(500, new ApiError("linked lookup failed"));
             }
         }

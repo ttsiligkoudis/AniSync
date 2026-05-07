@@ -88,11 +88,13 @@ builder.Services.AddSwaggerGen(options =>
             "HTTP API for cross-service anime mapping, unified anime detail, search, " +
             "discovery, recommendations, external streaming links, AniSkip OP/ED markers, " +
             "AnimeFillerList episode categorisation, and full library / sync management.\n\n" +
-            "**Authentication.** User-scoped endpoints under `/users/{config}` accept the UID " +
-            "as either the path segment or the `X-AniSync-Config` request header. The header " +
-            "is preferred — it keeps the UID out of URLs, Referer logs, and reverse-proxy / " +
-            "CDN access logs. Pass any value (commonly `me`) for the path segment when using " +
-            "the header.\n\n" +
+            "**Authentication.** User-scoped endpoints live under `/api/v1/me/*` and require " +
+            "the Config UID via the `X-AniSync-Config` request header. The UID never appears " +
+            "in the URL — that's deliberate, so it can't leak through Referer headers, " +
+            "reverse-proxy / CDN access logs, browser history, or shared screenshots. " +
+            "Stremio's addon protocol still embeds the UID in the path on its own routes " +
+            "(catalog / meta / stream / subtitles / manifest) because the addon protocol has " +
+            "no other transport — those routes are not part of `/api/v1`.\n\n" +
             "**Rate limit.** 60 requests / minute / IP, fixed-window. Bursts above the limit " +
             "receive a 429 with no queueing.\n\n" +
             "**Versioning.** All endpoints live under `/api/v1`. Breaking changes ship behind " +
@@ -131,8 +133,8 @@ builder.Services.AddSwaggerGen(options =>
         Type = SecuritySchemeType.ApiKey,
         Name = "X-AniSync-Config",
         In = ParameterLocation.Header,
-        Description = "Config UID. Preferred over the `{config}` path segment because " +
-                      "it keeps the UID out of URLs and access logs.",
+        Description = "Config UID. Required on every `/api/v1/me/*` endpoint. " +
+                      "Never travels in the URL.",
     });
 
     var xmlPath = Path.Combine(AppContext.BaseDirectory, "AniSync.xml");

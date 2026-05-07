@@ -29,11 +29,18 @@ async function findBestMatch(apiBase, title) {
 }
 
 async function saveProgress(apiBase, uid, mediaId, episode) {
-  const url = `${apiBase}/api/v1/users/${uid}/entries/${encodeURIComponent(mediaId)}`;
+  // /api/v1/me/* — UID rides in the X-AniSync-Config header, never in the URL,
+  // so it can't leak through reverse-proxy / CDN access logs or browser
+  // history. Only the Stremio addon endpoints carry it in the path because
+  // their addon-protocol shape leaves us no choice there.
+  const url = `${apiBase}/api/v1/me/entries/${encodeURIComponent(mediaId)}`;
   const body = { progress: episode, status: 'watching' };
   const r = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-AniSync-Config': uid,
+    },
     body: JSON.stringify(body),
   });
   if (!r.ok) {
