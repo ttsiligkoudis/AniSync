@@ -292,6 +292,10 @@ namespace AnimeList.Controllers
         /// as <c>NeedsReauth</c>. Per-entry errors here mean "the SyncService call
         /// itself threw" (network / 5xx / rate limit).
         /// </summary>
+        // ApiExplorer can't infer a schema for the streaming Task return — mark this
+        // one ignored so swagger.json generates cleanly. Hand-document the streaming
+        // contract via the docstring above.
+        [ApiExplorerSettings(IgnoreApi = true)]
         [HttpPost("sync")]
         public async Task Sync(string config)
         {

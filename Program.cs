@@ -65,8 +65,10 @@ builder.Services.AddCors(options =>
 
 // OpenAPI / Swagger for the /api/v1 surface. The doc-comments on ApiController
 // surface as endpoint descriptions thanks to GenerateDocumentationFile in the
-// .csproj. The Stremio addon endpoints aren't included in the swagger doc
-// because they're consumed by Stremio itself, not by API clients.
+// .csproj. The Stremio addon endpoints are excluded from the swagger doc via
+// DocInclusionPredicate — they're consumed by Stremio itself, and their
+// nested-segment routes (e.g. "{config}/stream/{type}/{id}.json") confuse
+// Swashbuckle's path generation.
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -79,6 +81,8 @@ builder.Services.AddSwaggerGen(options =>
                       "external streaming links, AniSkip OP/ED markers and " +
                       "AnimeFillerList episode categorisation.",
     });
+    options.DocInclusionPredicate((_, apiDesc) =>
+        apiDesc.RelativePath?.StartsWith("api/v1") == true);
     var xmlPath = Path.Combine(AppContext.BaseDirectory, "AniSync.xml");
     if (File.Exists(xmlPath))
         options.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
