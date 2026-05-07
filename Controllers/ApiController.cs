@@ -251,42 +251,109 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
-        /// AniSkip intro/outro/recap markers for one episode. Takes a raw MAL id (numeric)
-        /// because that's the key AniSkip uses internally.
+        /// AniSkip intro/outro/recap markers for one episode. Accepts any prefixed id
+        /// (<c>mal:N</c>, <c>anilist:N</c>, <c>kitsu:N</c>, <c>tt…</c>, <c>tmdb:N</c>)
+        /// or a raw numeric MAL id; non-MAL ids are translated through the cross-
+        /// service mapping. Returns an empty list when AniSkip has no markers for
+        /// the resolved id, the upstream is down, or the id can't be resolved to MAL.
         /// </summary>
-        [HttpGet("skip/{malId:int}/{episode:int}")]
-        public async Task<IActionResult> Skip(int malId, int episode)
+        [HttpGet("skip/{id}/{episode:int}")]
+        public async Task<IActionResult> Skip(string id, int episode)
         {
             try
             {
-                var markers = await _aniSkipService.GetSkipTimesAsync(malId, episode);
+                var malId = await ResolveMalIdAsync(id);
+                if (malId is null or <= 0)
+                    return NotFound(new { error = "no MAL mapping for id" });
+
+                var markers = await _aniSkipService.GetSkipTimesAsync(malId.Value, episode);
                 return new JsonResult(new { markers });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "API Skip failed (malId={MalId}, episode={Episode}).", malId, episode);
+                _logger.LogError(ex, "API Skip failed (id={Id}, episode={Episode}).", id, episode);
                 return StatusCode(500, new { error = "skip lookup failed" });
             }
         }
 
         /// <summary>
-        /// AnimeFillerList episode categorisation by show title. Returns a map of
-        /// episode-number → category (canon / filler / mixed). Negative-cached upstream
-        /// so unknown shows respond fast.
+        /// AnimeFillerList episode categorisation. Accepts either a show title or a
+        /// prefixed id (<c>mal:N</c>, <c>anilist:N</c>, <c>kitsu:N</c>, <c>tt…</c>,
+        /// <c>tmdb:N</c>); ids are resolved to the title via the cross-service mapping
+        /// before the AFL slug lookup. Returns a map of episode-number → category
+        /// (canon / filler / mixed). Negative-cached upstream so unknown shows respond
+        /// fast.
         /// </summary>
-        [HttpGet("filler/{*title}")]
-        public async Task<IActionResult> Filler(string title)
+        [HttpGet("filler/{*titleOrId}")]
+        public async Task<IActionResult> Filler(string titleOrId)
         {
             try
             {
+                var title = LooksLikeId(titleOrId)
+                    ? await ResolveTitleAsync(titleOrId)
+                    : titleOrId;
+
+                if (string.IsNullOrEmpty(title))
+                    return NotFound(new { error = "could not resolve a title for the id" });
+
                 var categories = await _fillerListService.GetEpisodeCategoriesAsync(title);
-                return new JsonResult(new { categories });
+                return new JsonResult(new { title, categories });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "API Filler failed (title={Title}).", title);
+                _logger.LogError(ex, "API Filler failed (titleOrId={TitleOrId}).", titleOrId);
                 return StatusCode(500, new { error = "filler lookup failed" });
             }
+        }
+
+        // Resolves any prefixed id (or a raw MAL integer) to a numeric MAL id.
+        private async Task<int?> ResolveMalIdAsync(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return null;
+
+            // Bare numeric: treat as a MAL id directly so existing callers that hit
+            // /skip/{malId}/{episode} keep working without re-shaping their URLs.
+            if (int.TryParse(id, out var direct)) return direct;
+
+            var raw = await _mappingService.GetIdByService(id, AnimeService.MyAnimeList);
+            return int.TryParse(raw, out var resolved) ? resolved : null;
+        }
+
+        // Looks up the show's canonical title. Tries the prefix's native service
+        // first; for IMDb / TMDB ids walks the mapping until one provider has a
+        // summary. Returns null when nothing in the chain knows the show.
+        private async Task<string> ResolveTitleAsync(string id)
+        {
+            if (id.StartsWith(malPrefix))
+                return (await _malService.GetAnimeSummaryAsync(id)).name;
+            if (id.StartsWith(anilistPrefix))
+                return (await _anilistService.GetAnimeSummaryAsync(id)).name;
+            if (id.StartsWith(kitsuPrefix))
+                return (await _kitsuService.GetAnimeSummaryAsync(id)).name;
+
+            foreach (var (svc, prefix, summary) in new (AnimeService, string, Func<string, Task<(string name, int? episodeCount)>>)[]
+            {
+                (AnimeService.MyAnimeList, malPrefix, _malService.GetAnimeSummaryAsync),
+                (AnimeService.Anilist, anilistPrefix, _anilistService.GetAnimeSummaryAsync),
+                (AnimeService.Kitsu, kitsuPrefix, _kitsuService.GetAnimeSummaryAsync),
+            })
+            {
+                var raw = await _mappingService.GetIdByService(id, svc);
+                if (string.IsNullOrEmpty(raw)) continue;
+                var name = (await summary($"{prefix}{raw}")).name;
+                if (!string.IsNullOrEmpty(name)) return name;
+            }
+            return null;
+        }
+
+        private static bool LooksLikeId(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return false;
+            return s.StartsWith(imdbPrefix)
+                || s.StartsWith(malPrefix)
+                || s.StartsWith(anilistPrefix)
+                || s.StartsWith(kitsuPrefix)
+                || s.StartsWith(tmdbPrefix);
         }
     }
 }
