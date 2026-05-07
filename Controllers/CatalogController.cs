@@ -77,11 +77,22 @@ namespace AnimeList.Controllers
                 // public /api/v1/match endpoint uses. Only applies to Search; other
                 // catalogs (Trending / Seasonal / user lists) keep their intrinsic
                 // ordering. OrderByDescending is stable so ties keep upstream order.
-                if (listType == ListType.Search && !string.IsNullOrWhiteSpace(search) && metas.Count > 1)
+                //
+                // Drop results below the relevance threshold afterwards. Stremio's
+                // search row is small (5-10 visible cards), so dragging in titles
+                // that share only one token ("Boruto: Naruto Next Generations" for a
+                // "Naruto Shippuden" query) is worse than returning fewer results.
+                // 0.3 keeps "Naruto" (0.5) and "Naruto: The Last" (0.33) while
+                // cutting "Boruto" (0.25) and unrelated noise (0).
+                if (listType == ListType.Search && !string.IsNullOrWhiteSpace(search) && metas.Count > 0)
                 {
                     var normalisedQuery = NormalizeTitle(search);
+                    const double minScore = 0.3;
                     metas = metas
-                        .OrderByDescending(m => ScoreMatch(normalisedQuery, m.name))
+                        .Select(m => (meta: m, score: ScoreMatch(normalisedQuery, m.name)))
+                        .Where(x => x.score >= minScore)
+                        .OrderByDescending(x => x.score)
+                        .Select(x => x.meta)
                         .ToList();
                 }
 
