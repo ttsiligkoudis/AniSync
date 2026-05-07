@@ -62,12 +62,21 @@ namespace AnimeList.Controllers
                     _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasons),
                 };
 
+                // Search splits into separate series + movie catalogs in the manifest
+                // so Stremio renders two result rows. The upstream search hit returns
+                // both — filter by the route's metaType so each row carries only the
+                // matching shape.
+                if (listType == ListType.Search && (metaType == MetaType.series || metaType == MetaType.movie))
+                {
+                    var typeName = metaType.ToString();
+                    metas = metas.Where(m => m.type == typeName).ToList();
+                }
+
                 // Re-rank Search results by Jaccard similarity against the normalised
                 // query so the most likely show floats to the top — same scoring the
                 // public /api/v1/match endpoint uses. Only applies to Search; other
                 // catalogs (Trending / Seasonal / user lists) keep their intrinsic
-                // ordering. A stable secondary sort by index isn't needed because
-                // OrderByDescending is a stable sort in LINQ-to-objects.
+                // ordering. OrderByDescending is stable so ties keep upstream order.
                 if (listType == ListType.Search && !string.IsNullOrWhiteSpace(search) && metas.Count > 1)
                 {
                     var normalisedQuery = NormalizeTitle(search);

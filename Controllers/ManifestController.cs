@@ -174,13 +174,23 @@ namespace AnimeList.Controllers
                 });
             }
 
-            // Search catalog: search extra is required, so this catalog only fires when the user
-            // types a query in Stremio's search bar. No discover-page presence.
+            // Search catalogs: split into series + movie rows so Stremio renders two
+            // result strips (Anime and Anime Movies) instead of a single mixed grid.
+            // Same Search id and same upstream call — CatalogController filters by
+            // type. Search extra is required so neither row appears on the discover
+            // page; both fire only when the user types a query.
             manifest.catalogs.Add(new Catalog
             {
-                type = MetaType.anime.ToString(),
+                type = MetaType.series.ToString(),
                 id = ListType.Search.ToString(),
-                name = "Search",
+                name = "Anime",
+                extra = [new("search") { isRequired = true }, new("skip")],
+            });
+            manifest.catalogs.Add(new Catalog
+            {
+                type = MetaType.movie.ToString(),
+                id = ListType.Search.ToString(),
+                name = "Anime Movies",
                 extra = [new("search") { isRequired = true }, new("skip")],
             });
 
