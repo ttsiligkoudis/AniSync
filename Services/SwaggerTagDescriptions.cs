@@ -1,7 +1,7 @@
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
-namespace AnimeList
+namespace AnimeList.Services
 {
     /// <summary>
     /// Adds the section descriptions Swagger UI shows under each tag heading.
