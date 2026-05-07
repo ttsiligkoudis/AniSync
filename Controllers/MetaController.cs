@@ -587,15 +587,19 @@ namespace AnimeList.Controllers
 
     public class SaveEntryRequest
     {
-        public string Id { get; set; }
+        // All reference-type fields nullable so ASP.NET's [ApiController] auto-validation
+        // doesn't treat them as required just because the project has Nullable=enable.
+        // Callers (Manage Entry form, /api/v1 entries POST, the browser extension) only
+        // send the fields the user actually edited; the rest stay null.
+        public string? Id { get; set; }
         public int? Season { get; set; }
-        public string Status { get; set; }
+        public string? Status { get; set; }
         public int Progress { get; set; }
         public double? Score { get; set; }
-        public string Notes { get; set; }
+        public string? Notes { get; set; }
         public int? RewatchCount { get; set; }
-        public string StartedAt { get; set; }
-        public string FinishedAt { get; set; }
+        public string? StartedAt { get; set; }
+        public string? FinishedAt { get; set; }
     }
 }
 
