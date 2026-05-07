@@ -51,12 +51,20 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
-        /// Full library export from the primary provider. Returns every list entry
-        /// (every status) with progress, score, notes, dates and a service-prefixed
-        /// media id. Useful for backup tooling or migrating to a custom client.
+        /// Library export from the primary provider. Returns list entries with
+        /// progress, score, notes, dates and a service-prefixed media id. Useful for
+        /// backup tooling or migrating to a custom client.
         /// </summary>
+        /// <param name="config">Install-URL config (the same UID Stremio's install
+        /// URL embeds).</param>
+        /// <param name="status">Optional list filter. Accepts the friendly names
+        /// <c>watching</c> / <c>current</c>, <c>completed</c>, <c>planning</c> /
+        /// <c>planned</c> / <c>plan_to_watch</c>, <c>paused</c> / <c>on_hold</c>,
+        /// <c>dropped</c>, <c>rewatching</c> / <c>repeating</c>. Aliases are
+        /// case-insensitive and normalised internally so the same name works
+        /// regardless of which provider is primary. Omit to return every entry.</param>
         [HttpGet("library")]
-        public async Task<IActionResult> Library(string config)
+        public async Task<IActionResult> Library(string config, string status = null)
         {
             try
             {
@@ -71,18 +79,45 @@ namespace AnimeList.Controllers
                     _ => await _kitsuService.GetUserListEntriesAsync(tokenData),
                 };
 
+                if (!string.IsNullOrEmpty(status))
+                {
+                    var requested = NormalizeListStatus(status);
+                    if (requested == null)
+                        return BadRequest(new { error = "unknown status; expected watching|completed|planning|paused|dropped|rewatching" });
+                    entries = entries
+                        .Where(e => NormalizeListStatus(e.Status) == requested)
+                        .ToList();
+                }
+
                 return new JsonResult(new
                 {
                     primary = tokenData.anime_service.ToString(),
+                    status,
                     entries,
                 });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "API Library failed (config={Config}).", config);
+                _logger.LogError(ex, "API Library failed (config={Config}, status={Status}).", config, status);
                 return StatusCode(500, new { error = "library lookup failed" });
             }
         }
+
+        // Maps every per-provider status spelling to a single canonical lowercase
+        // name, so the API caller can ask for "watching" or "current" or
+        // "CURRENT" and we'll match the AniList "CURRENT", Kitsu "current", and
+        // MAL "watching" entries uniformly.
+        private static string NormalizeListStatus(string raw) => raw?.Trim().ToLowerInvariant() switch
+        {
+            null or "" => null,
+            "watching" or "current" => "watching",
+            "completed" => "completed",
+            "planning" or "planned" or "plan_to_watch" or "plantowatch" => "planning",
+            "paused" or "on_hold" or "onhold" => "paused",
+            "dropped" => "dropped",
+            "rewatching" or "repeating" => "rewatching",
+            _ => null,
+        };
 
         /// <summary>
         /// One list entry by media id. Returns status / progress / score / notes /
