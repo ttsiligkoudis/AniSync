@@ -87,7 +87,7 @@ namespace AnimeList.Controllers
                 if (listType == ListType.Search && !string.IsNullOrWhiteSpace(search) && metas.Count > 0)
                 {
                     var normalisedQuery = NormalizeTitle(search);
-                    const double minScore = 0.3;
+                    const double minScore = 0.4;
                     metas = metas
                         .Select(m => (meta: m, score: ScoreMatch(normalisedQuery, m.name)))
                         .Where(x => x.score >= minScore)
