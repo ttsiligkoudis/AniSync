@@ -8,8 +8,9 @@
 const DEFAULT_API_BASE = 'https://anisync.fly.dev';
 // Minimum match score below which we don't auto-write. 0.5 is generous enough
 // to forgive year tags and dub/sub suffixes while still rejecting "Demon Slayer"
-// → "Demon Slayer: Mugen Train" mismatches. Tune via the options page later.
-const MIN_SCORE = 0.5;
+// → "Demon Slayer: Mugen Train" mismatches. Manual saves bypass this — if the
+// user hand-types the title, we trust their judgement.
+const MIN_AUTO_SCORE = 0.5;
 
 async function getConfig() {
   const stored = await chrome.storage.local.get(['apiBase', 'uid']);
@@ -29,13 +30,7 @@ async function findBestMatch(apiBase, title) {
 
 async function saveProgress(apiBase, uid, mediaId, episode) {
   const url = `${apiBase}/api/v1/users/${uid}/entries/${encodeURIComponent(mediaId)}`;
-  // Empty status keeps whatever the user already has on the entry —
-  // AniSync's primary saves treat that as "preserve status, just update
-  // progress" which is exactly the auto-track semantics we want.
-  const body = {
-    progress: episode,
-    status: 'watching',
-  };
+  const body = { progress: episode, status: 'watching' };
   const r = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -48,34 +43,44 @@ async function saveProgress(apiBase, uid, mediaId, episode) {
   return r.json();
 }
 
+// Returns a structured result so the floating UI can show "Saved" or the
+// specific error. The auto-fire path also funnels through here but ignores
+// the response — only the manual-confirm button cares.
+async function processWatched(msg) {
+  const { apiBase, uid } = await getConfig();
+  if (!uid) {
+    return { ok: false, error: 'no UID configured — open the extension options' };
+  }
+
+  const match = await findBestMatch(apiBase, msg.title);
+  if (!match) {
+    return { ok: false, error: `no match for "${msg.title}"` };
+  }
+  if (!msg.manual && match.score < MIN_AUTO_SCORE) {
+    return { ok: false, error: `match below threshold (${match.score})`, name: match.name };
+  }
+
+  await saveProgress(apiBase, uid, match.id, msg.episode);
+  return { ok: true, name: match.name, id: match.id, score: match.score, episode: msg.episode };
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg?.type !== 'anisync:watched') return;
+  if (msg?.type !== 'anisync:watched') return false;
 
-  (async () => {
-    try {
-      const { apiBase, uid } = await getConfig();
-      if (!uid) {
-        console.warn('[AniSync] no UID configured; open the extension options.');
-        return;
+  processWatched(msg)
+    .then((result) => {
+      if (result.ok) {
+        console.log(`[AniSync] tracked ${result.name} ep ${result.episode} (id ${result.id}, score ${result.score})`);
+      } else {
+        console.warn('[AniSync] tracking skipped:', result.error, msg.title);
       }
-
-      const match = await findBestMatch(apiBase, msg.title);
-      if (!match) {
-        console.warn('[AniSync] no match for', msg.title);
-        return;
-      }
-      if (match.score < MIN_SCORE) {
-        console.warn(`[AniSync] match below threshold (${match.score}):`, msg.title, '→', match.name);
-        return;
-      }
-
-      await saveProgress(apiBase, uid, match.id, msg.episode);
-      console.log(`[AniSync] tracked ${match.name} ep ${msg.episode} (id ${match.id}, score ${match.score})`);
-    } catch (e) {
+      sendResponse(result);
+    })
+    .catch((e) => {
       console.error('[AniSync] tracking failed:', e);
-    }
-  })();
+      sendResponse({ ok: false, error: e.message ?? String(e) });
+    });
 
-  // Async work; tell Chrome we don't need to keep the message channel open.
-  return false;
+  // Tell Chrome we're going to call sendResponse asynchronously.
+  return true;
 });
