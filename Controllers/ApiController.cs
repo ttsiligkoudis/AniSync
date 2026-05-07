@@ -245,11 +245,16 @@ namespace AnimeList.Controllers
                 limit = Math.Clamp(limit, 1, 20);
                 var normalisedQuery = NormalizeTitle(title);
 
+                // groupSeasons=false forces the catalog to emit service-native ids
+                // (anilist:N / kitsu:N / mal:N) instead of collapsing to IMDb / TMDB.
+                // Downstream callers — including the browser-extension auto-tracker —
+                // use the returned id with /entries/{id} which expects the provider's
+                // native id space, so handing back an IMDb id would 400 on save.
                 var raw = service switch
                 {
-                    AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, ListType.Search, search: title),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, ListType.Search, search: title),
-                    _ => await _anilistService.GetAnimeListAsync(null, ListType.Search, search: title),
+                    AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, ListType.Search, search: title, groupSeasons: false),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, ListType.Search, search: title, groupSeasons: false),
+                    _ => await _anilistService.GetAnimeListAsync(null, ListType.Search, search: title, groupSeasons: false),
                 };
 
                 var ranked = raw
