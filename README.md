@@ -225,6 +225,16 @@ Kitsu's data model has no rewatch state, so the catalog is hidden for Kitsu acco
 Your refresh token expired or was revoked. Click the provider's pill on the configure page and re-authenticate — the rest of your configuration is preserved.
 </details>
 
+<details>
+<summary><strong>I have other anime addons installed and Stremio is showing their (sparser) meta instead of AniSync's.</strong></summary>
+
+Stremio queries every installed addon that declares the same id prefix and picks based on **addon order in your install list** — there's no manifest field that lets an addon claim "I'm the canonical source for these ids". For best results, place AniSync **at the top of your addon order**, or at minimum directly below Cinemeta.
+
+The official Stremio UI doesn't expose drag-to-reorder for installed addons. The community-built [**Stremio Addon Manager**](https://stremio-addon-manager.vercel.app/) does — log in with your Stremio account, drag AniSync above any other anime-tracker addon, save, and restart Stremio so the manifest cache invalidates.
+
+Symptom this fixes: a meta page that shows 1 episode where AniSync would emit 14, or a poster/synopsis that looks wrong for the cour you opened.
+</details>
+
 ---
 
 ## Self-hosting
