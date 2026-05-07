@@ -804,9 +804,16 @@ else
             var body = await resp.json();
             var entries = body.entries || [];
             total = body.total || entries.length;
+            // primaryTotal is the size of the primary's full library; total is just the
+            // entries that actually need writing (the diff against linked secondaries).
+            // The two diverge when most of the library is already in sync.
+            var primaryTotal = body.primaryTotal != null ? body.primaryTotal : total;
 
             if (total === 0) {
-                setSyncProgress('Primary library is empty — nothing to sync.', 0, 0);
+                var doneMsg = primaryTotal === 0
+                    ? 'Primary library is empty — nothing to sync.'
+                    : 'All linked accounts already in sync — nothing to do.';
+                setSyncProgress(doneMsg, 0, 0);
                 setSyncCancelLabel('Close');
                 return;
             }

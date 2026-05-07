@@ -489,5 +489,23 @@ namespace AnimeList
             return !string.IsNullOrWhiteSpace(url) && Uri.TryCreate(url, UriKind.Absolute, out Uri result)
                    && (result.Scheme == Uri.UriSchemeHttp || result.Scheme == Uri.UriSchemeHttps);
         }
+
+        /// <summary>
+        /// Collapses every per-provider list-status spelling to a single canonical
+        /// lowercase name. Lets a caller compare AniList's "CURRENT", Kitsu's
+        /// "current" and MAL's "watching" against each other without re-implementing
+        /// the per-vocabulary mapping. Returns null for unknown / empty inputs.
+        /// </summary>
+        public static string NormalizeListStatus(string raw) => raw?.Trim().ToLowerInvariant() switch
+        {
+            null or "" => null,
+            "watching" or "current" => "watching",
+            "completed" => "completed",
+            "planning" or "planned" or "plan_to_watch" or "plantowatch" => "planning",
+            "paused" or "on_hold" or "onhold" => "paused",
+            "dropped" => "dropped",
+            "rewatching" or "repeating" => "rewatching",
+            _ => null,
+        };
     }
 }

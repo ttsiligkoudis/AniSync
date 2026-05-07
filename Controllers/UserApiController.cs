@@ -106,21 +106,8 @@ namespace AnimeList.Controllers
             }
         }
 
-        // Maps every per-provider status spelling to a single canonical lowercase
-        // name, so the API caller can ask for "watching" or "current" or
-        // "CURRENT" and we'll match the AniList "CURRENT", Kitsu "current", and
-        // MAL "watching" entries uniformly.
-        private static string NormalizeListStatus(string raw) => raw?.Trim().ToLowerInvariant() switch
-        {
-            null or "" => null,
-            "watching" or "current" => "watching",
-            "completed" => "completed",
-            "planning" or "planned" or "plan_to_watch" or "plantowatch" => "planning",
-            "paused" or "on_hold" or "onhold" => "paused",
-            "dropped" => "dropped",
-            "rewatching" or "repeating" => "rewatching",
-            _ => null,
-        };
+        // NormalizeListStatus lives in Utils and is globally usable via the
+        // `using static AnimeList.Utils` import — see Utils.cs for the mapping.
 
         /// <summary>
         /// One list entry by media id. Returns status / progress / score / notes /

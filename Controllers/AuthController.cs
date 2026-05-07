@@ -11,6 +11,11 @@ namespace AnimeList.Controllers
         private readonly IConfigStore _configStore;
         private readonly IConfiguration _configuration;
         private readonly ISyncService _syncService;
+        private readonly IAnilistService _anilistService;
+        private readonly IKitsuService _kitsuService;
+        private readonly IMalService _malService;
+        private readonly IAnimeMappingService _mappingService;
+        private readonly ILogger<AuthController> _logger;
 
         // Keys we stash in the session while a callback-based OAuth flow is in flight.
         // We need to remember which provider initiated the flow (the callback URL is shared)
@@ -23,13 +28,21 @@ namespace AnimeList.Controllers
         private const string OauthFlowLogin = "Login";
         private const string OauthFlowLink = "Link";
 
-        public AuthController(ITokenService tokenService, IHttpContextAccessor httpContextAccessor, IConfigStore configStore, IConfiguration configuration, ISyncService syncService)
+        public AuthController(ITokenService tokenService, IHttpContextAccessor httpContextAccessor,
+            IConfigStore configStore, IConfiguration configuration, ISyncService syncService,
+            IAnilistService anilistService, IKitsuService kitsuService, IMalService malService,
+            IAnimeMappingService mappingService, ILogger<AuthController> logger)
         {
             _tokenService = tokenService;
             _httpContextAccessor = httpContextAccessor;
             _configStore = configStore;
             _configuration = configuration;
             _syncService = syncService;
+            _anilistService = anilistService;
+            _kitsuService = kitsuService;
+            _malService = malService;
+            _mappingService = mappingService;
+            _logger = logger;
         }
 
         [HttpGet]
@@ -265,14 +278,25 @@ namespace AnimeList.Controllers
             var primary = GetSessionPrimary();
             if (primary == null) return BadRequest("Log in with a primary provider first.");
 
-            var entries = await _syncService.GetPrimaryEntriesAsync(primary);
+            var primaryEntries = await _syncService.GetPrimaryEntriesAsync(primary);
+
+            // Pre-compute which entries actually need writing. If a secondary already has
+            // the same status + progress for an entry, fan-out is a no-op — skip it. This
+            // turns "write 247 entries × N secondaries" into "write the diff", which for a
+            // mostly-aligned library means single-digit writes instead of hundreds.
+            var idsToSync = await ComputeOutOfSyncIdsAsync(primary, primaryEntries);
+            var filtered = idsToSync == null
+                ? primaryEntries
+                : primaryEntries.Where(e => idsToSync.Contains(e.MediaId)).ToList();
+
             return Ok(new
             {
-                total = entries.Count,
+                total = filtered.Count,
+                primaryTotal = primaryEntries.Count,
                 // Lowercase shape so the JS contract doesn't depend on the serializer's
                 // default casing — System.Text.Json's camelCase is on by default in MVC,
                 // but explicit > implicit when the client poller is going to depend on it.
-                entries = entries.Select(e => new
+                entries = filtered.Select(e => new
                 {
                     mediaId = e.MediaId,
                     status = e.Status,
@@ -284,6 +308,90 @@ namespace AnimeList.Controllers
                     finishedAt = e.FinishedAt,
                 }).ToList(),
             });
+        }
+
+        /// <summary>
+        /// Builds the union of out-of-sync media ids across every linked secondary so the
+        /// caller can write only the entries that actually differ. An entry is "out of
+        /// sync" if a secondary either has no record of it, or has a different normalised
+        /// status / progress. Returns null when we couldn't safely diff (no UID, no
+        /// healthy secondaries) — callers fall back to syncing everything.
+        /// </summary>
+        private async Task<HashSet<string>> ComputeOutOfSyncIdsAsync(TokenData primary, List<AnimeEntry> primaryEntries)
+        {
+            if (primary == null || primary.anonymousUser) return null;
+
+            var uid = await _configStore.UpsertAsync(primary);
+            if (string.IsNullOrEmpty(uid)) return null;
+
+            var linked = await _configStore.GetLinkedTokensAsync(uid);
+            if (linked.Count == 0) return new HashSet<string>(); // Nothing linked → nothing to sync.
+
+            var idsToSync = new HashSet<string>();
+
+            foreach (var l in linked)
+            {
+                if (l.NeedsReauth || l.TokenData == null) continue;
+
+                List<AnimeEntry> secondary;
+                try
+                {
+                    secondary = l.Service switch
+                    {
+                        AnimeService.Anilist => await _anilistService.GetUserListEntriesAsync(l.TokenData),
+                        AnimeService.Kitsu => await _kitsuService.GetUserListEntriesAsync(l.TokenData),
+                        AnimeService.MyAnimeList => await _malService.GetUserListEntriesAsync(l.TokenData),
+                        _ => [],
+                    };
+                }
+                catch (Exception ex)
+                {
+                    // Couldn't read this secondary — fall back to "sync everything to it".
+                    // FanOutSaveAsync writes to all linked targets anyway, so adding every
+                    // primary id to the set just makes the dead secondary's writes attempted
+                    // (it'll fail per-entry the same way it would in the original full-sync).
+                    _logger.LogWarning(ex, "[SyncEntries] couldn't read {Service} library — including every primary id in the sync set.", l.Service);
+                    foreach (var p in primaryEntries)
+                        if (!string.IsNullOrEmpty(p.MediaId))
+                            idsToSync.Add(p.MediaId);
+                    continue;
+                }
+
+                var prefix = l.Service switch
+                {
+                    AnimeService.Anilist => anilistPrefix,
+                    AnimeService.Kitsu => kitsuPrefix,
+                    AnimeService.MyAnimeList => malPrefix,
+                    _ => string.Empty,
+                };
+
+                var byId = secondary
+                    .Where(e => !string.IsNullOrEmpty(e.MediaId))
+                    .ToDictionary(e => e.MediaId, e => e);
+
+                foreach (var p in primaryEntries)
+                {
+                    if (string.IsNullOrEmpty(p.MediaId)) continue;
+                    if (idsToSync.Contains(p.MediaId)) continue;
+
+                    var resolved = await _mappingService.GetIdByService(p.MediaId, l.Service);
+                    if (string.IsNullOrEmpty(resolved)) continue;
+
+                    var key = $"{prefix}{resolved}";
+                    if (!byId.TryGetValue(key, out var s))
+                    {
+                        idsToSync.Add(p.MediaId); // Missing on this secondary.
+                        continue;
+                    }
+
+                    var pStatus = NormalizeListStatus(p.Status);
+                    var sStatus = NormalizeListStatus(s.Status);
+                    if (pStatus != sStatus || p.Progress != s.Progress)
+                        idsToSync.Add(p.MediaId);
+                }
+            }
+
+            return idsToSync;
         }
 
         public class SyncBatchRequest
