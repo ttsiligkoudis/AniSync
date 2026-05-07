@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "AniSync Auto-Tracker",
+  "version": "0.1.0",
+  "description": "Watches anime episodes on streaming sites and auto-updates your AniSync list (AniList / Kitsu / MAL).",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://www.crunchyroll.com/*",
+    "https://hidive.com/*",
+    "https://www.netflix.com/*",
+    "https://*.fly.dev/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.crunchyroll.com/*/watch/*",
+        "https://hidive.com/stream/*",
+        "https://www.netflix.com/watch/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}

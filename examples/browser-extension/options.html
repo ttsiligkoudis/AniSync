@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>AniSync Auto-Tracker — options</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 1.5rem; max-width: 480px; }
+    label { display: block; margin: 0.75rem 0 0.25rem; font-weight: 600; }
+    input { width: 100%; padding: 0.5rem; font-size: 1rem; box-sizing: border-box; }
+    button { margin-top: 1rem; padding: 0.6rem 1.2rem; font-size: 1rem; cursor: pointer; }
+    .hint { color: #666; font-size: 0.85rem; margin-top: 0.25rem; }
+    .ok { color: #2a8; font-weight: 600; }
+    .err { color: #c33; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>AniSync Auto-Tracker</h1>
+  <p>Watches anime episodes on Crunchyroll / HiDive and writes progress to your AniSync configuration. Fan-out to every linked provider happens automatically server-side.</p>
+
+  <label>API base URL</label>
+  <input id="apiBase" placeholder="https://anisync.fly.dev">
+  <p class="hint">Self-hosters: change this. Otherwise leave the default.</p>
+
+  <label>Config UID</label>
+  <input id="uid" placeholder="22 alphanumeric chars">
+  <p class="hint">Open your AniSync install URL — the UID is the long base64url segment between <code>/</code>s.</p>
+
+  <button id="save">Save</button>
+  <span id="status"></span>
+
+  <script src="options.js"></script>
+</body>
+</html>

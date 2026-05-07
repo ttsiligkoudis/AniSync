@@ -3,6 +3,7 @@ using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Newtonsoft.Json.Linq;
+using System.Text.RegularExpressions;
 
 namespace AnimeList.Controllers
 {
@@ -215,6 +216,86 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
+        /// Best-match resolver for fuzzy / page-scraped titles. Hits the upstream
+        /// search endpoint, normalises every result's title (strips year tags, parens
+        /// content, "Season N" / "Part N" suffixes, punctuation) and scores them by
+        /// Jaccard token overlap against the normalised query. Returns the top
+        /// <paramref name="limit"/> results sorted by score, with the cross-service
+        /// mapping attached so a tracker doesn't need a second round-trip to learn
+        /// the equivalent ids on other providers.
+        ///
+        /// Designed for browser extensions / Plex webhooks / Discord bots that have
+        /// a free-text show name and want a confident anime id back.
+        /// </summary>
+        /// <param name="title">The show title. Page-scraped strings with dub/sub
+        /// suffixes, year tags or romanised variants are fine — the scorer
+        /// normalises them.</param>
+        /// <param name="service">Which provider's search to query. AniList default;
+        /// pick MyAnimeList or Kitsu only if you have a strong reason.</param>
+        /// <param name="limit">Maximum number of ranked matches to return. Defaults
+        /// to 5; capped at 20.</param>
+        [HttpGet("match")]
+        public async Task<IActionResult> Match(string title, AnimeService service = AnimeService.Anilist, int limit = 5)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(title))
+                    return BadRequest(new { error = "title is required" });
+
+                limit = Math.Clamp(limit, 1, 20);
+                var normalisedQuery = NormalizeTitle(title);
+
+                var raw = service switch
+                {
+                    AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, ListType.Search, search: title),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, ListType.Search, search: title),
+                    _ => await _anilistService.GetAnimeListAsync(null, ListType.Search, search: title),
+                };
+
+                var ranked = raw
+                    .Select(m => new { meta = m, score = ScoreMatch(normalisedQuery, m.name) })
+                    .OrderByDescending(x => x.score)
+                    .Take(limit)
+                    .ToList();
+
+                // Build the response with cross-service mappings attached so the caller
+                // can pick whichever id its tracker primary uses without a second hit.
+                var matches = new List<object>();
+                foreach (var r in ranked)
+                {
+                    AnimeIdMapping mapping = null;
+                    if (!string.IsNullOrEmpty(r.meta.id))
+                    {
+                        if (r.meta.id.StartsWith(anilistPrefix))      mapping = await _mappingService.GetAnilistMapping(r.meta.id);
+                        else if (r.meta.id.StartsWith(kitsuPrefix))   mapping = await _mappingService.GetKitsuMapping(r.meta.id);
+                        else if (r.meta.id.StartsWith(malPrefix))     mapping = await _mappingService.GetMalMapping(r.meta.id);
+                    }
+
+                    matches.Add(new
+                    {
+                        id = r.meta.id,
+                        name = r.meta.name,
+                        poster = r.meta.poster,
+                        score = Math.Round(r.score, 3),
+                        mapping,
+                    });
+                }
+
+                return new JsonResult(new
+                {
+                    query = title,
+                    normalised = normalisedQuery,
+                    matches,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Match failed (title={Title}, service={Service}).", title, service);
+                return StatusCode(500, new { error = "match failed" });
+            }
+        }
+
+        /// <summary>
         /// Discovery catalogs: <c>trending</c>, <c>seasonal</c>, <c>airing</c>. The
         /// <paramref name="genre"/> param doubles as the season selector ("This Season",
         /// "Next Season", "Previous Season") for the seasonal endpoint, mirroring the
@@ -354,6 +435,45 @@ namespace AnimeList.Controllers
                 || s.StartsWith(anilistPrefix)
                 || s.StartsWith(kitsuPrefix)
                 || s.StartsWith(tmdbPrefix);
+        }
+
+        // Normalises a show title for fuzzy matching. Strips bracketed / parens
+        // content (e.g. "(Sub)", "(Dub)", "(2024)"), "Season N" / "Part N" / "S2"
+        // suffixes, punctuation, and collapses whitespace. Used by Match() for both
+        // the query and each candidate result so token-overlap scoring isn't fooled
+        // by year tags or stream-site decorations.
+        private static string NormalizeTitle(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return string.Empty;
+            s = s.ToLowerInvariant();
+            s = Regex.Replace(s, @"\([^)]*\)", " ");
+            s = Regex.Replace(s, @"\[[^\]]*\]", " ");
+            s = Regex.Replace(s, @"\bseason\s*\d+\b", " ");
+            s = Regex.Replace(s, @"\bpart\s*\d+\b", " ");
+            s = Regex.Replace(s, @"\bs\d+\b", " ");
+            s = Regex.Replace(s, @"[^a-z0-9\s]", " ");
+            s = Regex.Replace(s, @"\s+", " ").Trim();
+            return s;
+        }
+
+        // Jaccard similarity on the normalised tokens of the query and the candidate
+        // title. 1.0 = identical sets, 0 = disjoint. Cheap, deterministic, and good
+        // enough for the "is this title close to that title" question — Levenshtein
+        // would catch typos better but our inputs are scraped from canonical sources
+        // (provider catalogs / streaming-site DOM), not user free-text.
+        private static double ScoreMatch(string normalisedQuery, string candidate)
+        {
+            if (string.IsNullOrEmpty(normalisedQuery) || string.IsNullOrEmpty(candidate)) return 0;
+            var normalisedCandidate = NormalizeTitle(candidate);
+            if (normalisedQuery == normalisedCandidate) return 1.0;
+            var qTokens = normalisedQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var cTokens = normalisedCandidate.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (qTokens.Length == 0 || cTokens.Length == 0) return 0;
+            var qSet = new HashSet<string>(qTokens);
+            var cSet = new HashSet<string>(cTokens);
+            var intersect = qSet.Intersect(cSet).Count();
+            var union = qSet.Union(cSet).Count();
+            return union > 0 ? (double)intersect / union : 0;
         }
     }
 }
