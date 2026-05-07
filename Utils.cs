@@ -507,5 +507,46 @@ namespace AnimeList
             "rewatching" or "repeating" => "rewatching",
             _ => null,
         };
+
+        /// <summary>
+        /// Translates any canonical / friendly status name (<c>watching</c>,
+        /// <c>completed</c>, <c>plan_to_watch</c>, …) into the raw form the given
+        /// service's save endpoint actually accepts. Pass-through when the input
+        /// is already a known per-service value or doesn't normalise.
+        ///
+        /// Useful at the API write boundary so external callers can use one
+        /// vocabulary regardless of which provider is primary on a given config.
+        /// MAL's REPEATING is rendered as the synthetic <c>rewatching</c> sentinel
+        /// that <c>MalService.SaveAnimeEntryAsync</c> turns into
+        /// <c>status=watching, is_rewatching=true</c> on the wire; Kitsu has no
+        /// rewatching concept so REPEATING degrades to <c>current</c>.
+        /// </summary>
+        public static string TranslateStatusForService(string status, TokenData tokenData)
+        {
+            if (string.IsNullOrEmpty(status)) return status;
+
+            var canonical = NormalizeListStatus(status);
+            if (canonical == null) return status; // unknown vocabulary — pass through.
+
+            var listType = canonical switch
+            {
+                "watching" => ListType.Current,
+                "completed" => ListType.Completed,
+                "planning" => ListType.Planning,
+                "paused" => ListType.Paused,
+                "dropped" => ListType.Dropped,
+                "rewatching" => ListType.Repeating,
+                _ => (ListType?)null,
+            };
+            if (!listType.HasValue) return status;
+
+            var service = tokenData?.anime_service ?? AnimeService.Kitsu;
+            if (listType.Value == ListType.Repeating && service == AnimeService.MyAnimeList)
+                return "rewatching";
+            if (listType.Value == ListType.Repeating && service == AnimeService.Kitsu)
+                return GetListTypeString(ListType.Current, tokenData);
+
+            return GetListTypeString(listType.Value, tokenData);
+        }
     }
 }

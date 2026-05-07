@@ -184,24 +184,29 @@ namespace AnimeList.Controllers
                     return new JsonResult(new { ok = true, removed = true, primary = tokenData.anime_service.ToString() });
                 }
 
+                // Translate canonical / friendly status names ("watching", "completed",
+                // "plan_to_watch", …) to whatever the primary actually accepts. Lets API
+                // callers use one vocabulary regardless of which provider is primary.
+                var translatedStatus = TranslateStatusForService(request.Status, tokenData);
+
                 switch (tokenData.anime_service)
                 {
                     case AnimeService.Anilist:
                         await _anilistService.SaveAnimeEntryAsync(tokenData, id, request.Season, request.Progress,
-                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                            translatedStatus, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
                         break;
                     case AnimeService.MyAnimeList:
                         await _malService.SaveAnimeEntryAsync(tokenData, id, request.Season, request.Progress,
-                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                            translatedStatus, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
                         break;
                     default:
                         await _kitsuService.SaveAnimeEntryAsync(tokenData, id, request.Season, request.Progress,
-                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                            translatedStatus, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
                         break;
                 }
 
                 await _syncService.FanOutSaveAsync(tokenData, id, request.Season, request.Progress,
-                    request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                    translatedStatus, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
 
                 return new JsonResult(new { ok = true, primary = tokenData.anime_service.ToString() });
             }
@@ -318,23 +323,25 @@ namespace AnimeList.Controllers
                             continue;
                         }
 
+                        var translatedStatus = TranslateStatusForService(entry.Status, tokenData);
+
                         switch (tokenData.anime_service)
                         {
                             case AnimeService.Anilist:
                                 await _anilistService.SaveAnimeEntryAsync(tokenData, entry.Id, entry.Season, entry.Progress,
-                                    entry.Status, entry.Score, entry.Notes, entry.RewatchCount, startedAt, finishedAt);
+                                    translatedStatus, entry.Score, entry.Notes, entry.RewatchCount, startedAt, finishedAt);
                                 break;
                             case AnimeService.MyAnimeList:
                                 await _malService.SaveAnimeEntryAsync(tokenData, entry.Id, entry.Season, entry.Progress,
-                                    entry.Status, entry.Score, entry.Notes, entry.RewatchCount, startedAt, finishedAt);
+                                    translatedStatus, entry.Score, entry.Notes, entry.RewatchCount, startedAt, finishedAt);
                                 break;
                             default:
                                 await _kitsuService.SaveAnimeEntryAsync(tokenData, entry.Id, entry.Season, entry.Progress,
-                                    entry.Status, entry.Score, entry.Notes, entry.RewatchCount, startedAt, finishedAt);
+                                    translatedStatus, entry.Score, entry.Notes, entry.RewatchCount, startedAt, finishedAt);
                                 break;
                         }
                         await _syncService.FanOutSaveAsync(tokenData, entry.Id, entry.Season, entry.Progress,
-                            entry.Status, entry.Score, entry.Notes, entry.RewatchCount, startedAt, finishedAt);
+                            translatedStatus, entry.Score, entry.Notes, entry.RewatchCount, startedAt, finishedAt);
                         ok++;
                         results.Add(new { id = entry.Id, ok = true });
                     }
