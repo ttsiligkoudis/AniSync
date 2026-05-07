@@ -3,6 +3,12 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    @* Strip the Referer header on outbound clicks. The configure page URL embeds
+       the user's Config UID; without this meta tag, a click on any external link
+       (or a redirect through a third-party OAuth provider) leaks the UID via
+       Referer. no-referrer is the strictest setting — same protection applied to
+       the Swagger UI page in Program.cs. *@
+    <meta name="referrer" content="no-referrer" />
     <title>AniSync</title>
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />

@@ -84,13 +84,34 @@ builder.Services.AddSwaggerGen(options =>
     {
         Title = "AniSync API",
         Version = "v1",
-        Description = "Public read-only HTTP API for cross-service anime mapping, " +
-                      "unified anime detail, search, discovery, recommendations, " +
-                      "external streaming links, AniSkip OP/ED markers and " +
-                      "AnimeFillerList episode categorisation.",
+        Description =
+            "HTTP API for cross-service anime mapping, unified anime detail, search, " +
+            "discovery, recommendations, external streaming links, AniSkip OP/ED markers " +
+            "and AnimeFillerList episode categorisation. User-scoped endpoints under " +
+            "`/users/{config}` accept the UID as either the path segment or the " +
+            "`X-AniSync-Config` header (preferred — keeps the UID out of URLs and access logs).\n\n" +
+            "**Rate limit:** 60 requests / minute / IP, fixed-window. Bursts above the limit " +
+            "receive a 429 with no queueing.",
     });
     options.DocInclusionPredicate((_, apiDesc) =>
         apiDesc.RelativePath?.StartsWith("api/v1") == true);
+    // Stable, predictable operationIds (e.g. "getMapping", "saveEntry") so Swagger
+    // Codegen / OpenAPI Generator produce client SDK methods named the way humans
+    // would name them, not "apiV1MappingsIdGet".
+    options.CustomOperationIds(api =>
+        api.ActionDescriptor is Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor c
+            ? char.ToLowerInvariant(c.ActionName[0]) + c.ActionName[1..]
+            : null);
+    // Document the alternative auth header on every user-scoped endpoint via a
+    // global parameter so it surfaces in Swagger UI's "Try it out" panel.
+    options.AddSecurityDefinition("ConfigHeader", new OpenApiSecurityScheme
+    {
+        Type = SecuritySchemeType.ApiKey,
+        Name = "X-AniSync-Config",
+        In = ParameterLocation.Header,
+        Description = "Config UID, alternative to the {config} path segment. " +
+                      "Preferred for HTTP API clients — keeps the UID out of URLs and access logs.",
+    });
     var xmlPath = Path.Combine(AppContext.BaseDirectory, "AniSync.xml");
     if (File.Exists(xmlPath))
         options.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
@@ -161,11 +182,17 @@ app.UseAuthorization();
 
 // Swagger UI lives at /api/docs so the addon's /Home/Index landing page isn't
 // shadowed. The raw spec is at /api/swagger/v1/swagger.json.
+//
+// HeadContent injects a strict referrer policy so users clicking links from
+// the Swagger page (e.g. typing a UID into "Try it out" then following a link
+// in a response body) don't leak the URL — including any UID embedded in it —
+// via the Referer header to third parties.
 app.UseSwagger(c => c.RouteTemplate = "api/swagger/{documentName}/swagger.json");
 app.UseSwaggerUI(c =>
 {
     c.SwaggerEndpoint("/api/swagger/v1/swagger.json", "AniSync API v1");
     c.RoutePrefix = "api/docs";
+    c.HeadContent = "<meta name=\"referrer\" content=\"no-referrer\">";
 });
 
 app.MapControllerRoute(

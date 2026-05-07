@@ -6,24 +6,32 @@ using Microsoft.AspNetCore.RateLimiting;
 namespace AnimeList.Controllers
 {
     /// <summary>
-    /// User-scoped read-only API surface (Phase 2). Endpoints take the same
-    /// <c>{config}</c> UID the Stremio install URL carries so a non-Stremio client
-    /// can read the user's library, single-entry state and linked-account list
-    /// without re-implementing the auth flows.
+    /// User-scoped API surface for non-Stremio clients.
     ///
-    /// The UID is the only authentication token. Treat it like a password — anyone
-    /// holding the URL can read the corresponding library. The configure page
-    /// surfaces a "Rotate URL" button that mints a fresh UID and invalidates the
-    /// old one if a URL leaks.
+    /// <para><b>Authentication.</b> The Config UID is the only authentication
+    /// token. Two transports are accepted:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><c>X-AniSync-Config</c> request header (preferred) — keeps the UID
+    /// out of URLs, referer headers, reverse-proxy access logs, and CDN caches.
+    /// Pass any value (commonly <c>me</c>) for the <c>{config}</c> path
+    /// segment; the header overrides it.</item>
+    /// <item><c>{config}</c> path segment (legacy / Stremio addon protocol) —
+    /// keeps existing install URLs working but leaks through every layer that
+    /// logs request paths. Migrate to the header when you control the caller.</item>
+    /// </list>
     ///
-    /// Writes (Manage Entry, sync fan-out, primary swap) ship in Phase 3 once the
-    /// idempotency-key + per-provider error-shape contract is locked.
+    /// <para>Treat the UID like a password. If a URL with the UID embedded is
+    /// shared (forum, Discord, screenshot), rotate it by signing out and
+    /// re-linking from the configure page — that mints a fresh UID and
+    /// invalidates the old one.</para>
     /// </summary>
     [ApiController]
     [Route("api/v1/users/{config}")]
     [EnableRateLimiting("api")]
     public class UserApiController : ControllerBase
     {
+        private const string ConfigHeaderName = "X-AniSync-Config";
         private readonly ITokenService _tokenService;
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
@@ -71,7 +79,8 @@ namespace AnimeList.Controllers
         {
             try
             {
-                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+                var resolvedConfig = ResolveConfig(config);
+                var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new { error = "config has no primary token" });
 
@@ -119,7 +128,8 @@ namespace AnimeList.Controllers
         {
             try
             {
-                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+                var resolvedConfig = ResolveConfig(config);
+                var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new { error = "config has no primary token" });
 
@@ -158,7 +168,8 @@ namespace AnimeList.Controllers
             {
                 if (request == null) return BadRequest(new { error = "missing request body" });
 
-                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+                var resolvedConfig = ResolveConfig(config);
+                var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new { error = "config has no primary token" });
 
@@ -232,7 +243,8 @@ namespace AnimeList.Controllers
         {
             try
             {
-                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+                var resolvedConfig = ResolveConfig(config);
+                var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new { error = "config has no primary token" });
 
@@ -282,7 +294,8 @@ namespace AnimeList.Controllers
                 if (entries == null || entries.Count == 0)
                     return BadRequest(new { error = "request body must be a non-empty array of entries" });
 
-                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+                var resolvedConfig = ResolveConfig(config);
+                var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new { error = "config has no primary token" });
 
@@ -389,11 +402,12 @@ namespace AnimeList.Controllers
         {
             try
             {
-                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+                var resolvedConfig = ResolveConfig(config);
+                var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new { error = "config has no primary token" });
 
-                var configuration = await ResolveConfigAsync(config, _configStore);
+                var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
                 var uid = configuration?.tokenUid;
                 if (string.IsNullOrEmpty(uid))
                     return BadRequest(new { error = "config is not stored — diff requires a v4/v5 install URL" });
@@ -515,7 +529,7 @@ namespace AnimeList.Controllers
         {
             try
             {
-                var configuration = await ResolveConfigAsync(config, _configStore);
+                var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
                 var uid = configuration?.tokenUid;
                 if (string.IsNullOrEmpty(uid))
                     return BadRequest(new { error = "config is not stored — only v4/v5 install URLs can swap primary" });
@@ -575,7 +589,8 @@ namespace AnimeList.Controllers
 
             try
             {
-                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+                var resolvedConfig = ResolveConfig(config);
+                var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                 {
                     Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -654,6 +669,16 @@ namespace AnimeList.Controllers
         private static DateTime? ParseDate(string s) =>
             DateTime.TryParse(s, out var dt) ? dt : null;
 
+        // X-AniSync-Config request header overrides the {config} path segment when set.
+        // Lets API callers keep the UID out of URLs (and therefore out of every reverse-
+        // proxy / CDN / referer log in the chain) while we still satisfy the path
+        // template Stremio's addon protocol locks us into.
+        private string ResolveConfig(string config)
+        {
+            var headerValue = Request.Headers[ConfigHeaderName].FirstOrDefault();
+            return string.IsNullOrWhiteSpace(headerValue) ? config : headerValue.Trim();
+        }
+
         /// <summary>
         /// Lists every linked secondary provider for this config plus the
         /// <c>NeedsReauth</c> flag, so a client can show the same status pills the
@@ -664,7 +689,8 @@ namespace AnimeList.Controllers
         {
             try
             {
-                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+                var resolvedConfig = ResolveConfig(config);
+                var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new { error = "config has no primary token" });
 
@@ -672,7 +698,7 @@ namespace AnimeList.Controllers
                 // only carry the primary, so the linked list is necessarily empty.
                 // ResolveConfigAsync decodes the install URL and pulls tokenUid out of
                 // either the inline JSON (v4) or the embedded UID byte segment (v5).
-                var configuration = await ResolveConfigAsync(config, _configStore);
+                var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
                 var uid = configuration?.tokenUid;
                 var linked = string.IsNullOrEmpty(uid)
                     ? new List<LinkedToken>()
