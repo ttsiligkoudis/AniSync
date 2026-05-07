@@ -548,5 +548,47 @@ namespace AnimeList
 
             return GetListTypeString(listType.Value, tokenData);
         }
+        /// <summary>
+        /// Normalises a show title for fuzzy matching. Strips bracketed / parens
+        /// content (<c>(Sub)</c>, <c>(Dub)</c>, <c>(2024)</c>, <c>[1080p]</c>),
+        /// <c>Season N</c> / <c>Part N</c> / <c>S2</c> suffixes, punctuation, and
+        /// collapses whitespace. Used by both the API <c>/match</c> endpoint and
+        /// the Stremio search catalog so a query like "Bookworm Season 3" still
+        /// scores against "Honzuki no Gekokujou: Adopted Daughter of an Archduke".
+        /// </summary>
+        public static string NormalizeTitle(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return string.Empty;
+            s = s.ToLowerInvariant();
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\([^)]*\)", " ");
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\[[^\]]*\]", " ");
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\bseason\s*\d+\b", " ");
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\bpart\s*\d+\b", " ");
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\bs\d+\b", " ");
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"[^a-z0-9\s]", " ");
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
+            return s;
+        }
+
+        /// <summary>
+        /// Jaccard similarity between the normalised tokens of a query and a candidate
+        /// title. 1.0 = identical sets, 0 = disjoint. Cheap and deterministic — we
+        /// don't need Levenshtein because both inputs come from canonical sources
+        /// (provider catalogs, streaming-site DOM), not user typing.
+        /// </summary>
+        public static double ScoreMatch(string normalisedQuery, string candidate)
+        {
+            if (string.IsNullOrEmpty(normalisedQuery) || string.IsNullOrEmpty(candidate)) return 0;
+            var normalisedCandidate = NormalizeTitle(candidate);
+            if (normalisedQuery == normalisedCandidate) return 1.0;
+            var qTokens = normalisedQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var cTokens = normalisedCandidate.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (qTokens.Length == 0 || cTokens.Length == 0) return 0;
+            var qSet = new HashSet<string>(qTokens);
+            var cSet = new HashSet<string>(cTokens);
+            var intersect = qSet.Intersect(cSet).Count();
+            var union = qSet.Union(cSet).Count();
+            return union > 0 ? (double)intersect / union : 0;
+        }
     }
 }

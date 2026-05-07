@@ -4,7 +4,6 @@ using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Newtonsoft.Json.Linq;
-using System.Text.RegularExpressions;
 
 namespace AnimeList.Controllers
 {
@@ -463,43 +462,8 @@ namespace AnimeList.Controllers
                 || s.StartsWith(tmdbPrefix);
         }
 
-        // Normalises a show title for fuzzy matching. Strips bracketed / parens
-        // content (e.g. "(Sub)", "(Dub)", "(2024)"), "Season N" / "Part N" / "S2"
-        // suffixes, punctuation, and collapses whitespace. Used by Match() for both
-        // the query and each candidate result so token-overlap scoring isn't fooled
-        // by year tags or stream-site decorations.
-        private static string NormalizeTitle(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return string.Empty;
-            s = s.ToLowerInvariant();
-            s = Regex.Replace(s, @"\([^)]*\)", " ");
-            s = Regex.Replace(s, @"\[[^\]]*\]", " ");
-            s = Regex.Replace(s, @"\bseason\s*\d+\b", " ");
-            s = Regex.Replace(s, @"\bpart\s*\d+\b", " ");
-            s = Regex.Replace(s, @"\bs\d+\b", " ");
-            s = Regex.Replace(s, @"[^a-z0-9\s]", " ");
-            s = Regex.Replace(s, @"\s+", " ").Trim();
-            return s;
-        }
-
-        // Jaccard similarity on the normalised tokens of the query and the candidate
-        // title. 1.0 = identical sets, 0 = disjoint. Cheap, deterministic, and good
-        // enough for the "is this title close to that title" question — Levenshtein
-        // would catch typos better but our inputs are scraped from canonical sources
-        // (provider catalogs / streaming-site DOM), not user free-text.
-        private static double ScoreMatch(string normalisedQuery, string candidate)
-        {
-            if (string.IsNullOrEmpty(normalisedQuery) || string.IsNullOrEmpty(candidate)) return 0;
-            var normalisedCandidate = NormalizeTitle(candidate);
-            if (normalisedQuery == normalisedCandidate) return 1.0;
-            var qTokens = normalisedQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            var cTokens = normalisedCandidate.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (qTokens.Length == 0 || cTokens.Length == 0) return 0;
-            var qSet = new HashSet<string>(qTokens);
-            var cSet = new HashSet<string>(cTokens);
-            var intersect = qSet.Intersect(cSet).Count();
-            var union = qSet.Union(cSet).Count();
-            return union > 0 ? (double)intersect / union : 0;
-        }
+        // NormalizeTitle and ScoreMatch live in Utils.cs (globally usable via the
+        // `using static AnimeList.Utils` import) — shared with CatalogController so
+        // the Stremio search ranking and the API /match scoring stay in step.
     }
 }

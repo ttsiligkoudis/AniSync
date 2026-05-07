@@ -62,6 +62,20 @@ namespace AnimeList.Controllers
                     _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasons),
                 };
 
+                // Re-rank Search results by Jaccard similarity against the normalised
+                // query so the most likely show floats to the top — same scoring the
+                // public /api/v1/match endpoint uses. Only applies to Search; other
+                // catalogs (Trending / Seasonal / user lists) keep their intrinsic
+                // ordering. A stable secondary sort by index isn't needed because
+                // OrderByDescending is a stable sort in LINQ-to-objects.
+                if (listType == ListType.Search && !string.IsNullOrWhiteSpace(search) && metas.Count > 1)
+                {
+                    var normalisedQuery = NormalizeTitle(search);
+                    metas = metas
+                        .OrderByDescending(m => ScoreMatch(normalisedQuery, m.name))
+                        .ToList();
+                }
+
                 return new JsonResult(new { metas });
             }
             catch (Exception ex)
