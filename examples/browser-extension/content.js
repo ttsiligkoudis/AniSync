@@ -111,10 +111,44 @@
   }
 
   function detect() {
-    return extractFromJsonLd()
+    return extractFromUrl()
+        || extractFromJsonLd()
         || extractFromMeta()
         || extractFromDocumentTitle()
         || extractFromDom();
+  }
+
+  // Many anime streaming sites encode { title, episode } directly in the URL
+  // path — e.g. /daemons-of-the-shadow-realm-episode-1-english-subbed/. That's
+  // often the only reliable signal when the actual <video> lives in a cross-
+  // origin iframe and the parent DOM has nothing useful. Cheap and runs first.
+  function extractFromUrl() {
+    const path = decodeURIComponent(location.pathname).toLowerCase();
+    const patterns = [
+      /\/([^/]+?)-episode-(\d+)\b/,
+      /\/([^/]+?)-ep-(\d+)\b/,
+      /\/([^/]+?)\/episode-(\d+)\b/,
+      /\/([^/]+?)\/ep-(\d+)\b/,
+      /\/watch\/([^/]+?)\/(\d+)\b/,
+    ];
+    for (const p of patterns) {
+      const m = path.match(p);
+      if (!m) continue;
+      const slug = m[1];
+      const episode = Number(m[2]);
+      if (!slug || !Number.isFinite(episode) || episode <= 0) continue;
+      const title = cleanScrapedTitle(slug.replace(/-/g, ' '));
+      if (title) return { title, episode, source: 'url-slug' };
+    }
+    return null;
+  }
+
+  // Strips the noise-words streaming sites tack onto titles ("english subbed",
+  // "1080p", "raw", …) and title-cases the result.
+  function cleanScrapedTitle(s) {
+    s = s.replace(/\b(english|sub|subbed|dub|dubbed|raw|hd|fhd|sd|1080p|720p|480p)\b/gi, ' ');
+    s = s.replace(/\s+/g, ' ').trim();
+    return s.replace(/\b\w/g, c => c.toUpperCase());
   }
 
   // ── Floating confirm UI ───────────────────────────────────────────────
@@ -256,11 +290,22 @@
   // ── Video watcher ─────────────────────────────────────────────────────
   // Polls for a <video> element (covers SPA navigation that mounts the
   // player after the initial load), then attaches a timeupdate listener
-  // that auto-fires once at 80% playback.
+  // that auto-fires once at 80% playback. Many streaming sites embed the
+  // player in a cross-origin iframe — there's no <video> in the top frame
+  // and we can't reach into the iframe's document. The floating UI still
+  // gets injected so the user has a manual save path.
 
   function watchVideo() {
     const video = document.querySelector('video');
     if (!video) {
+      // No video in the top frame yet — could be a SPA still rendering, or
+      // a cross-origin iframe player we'll never see. Inject the UI now so
+      // the user can save manually on iframed-player sites; keep polling
+      // in case a top-frame video shows up later (SPA route change).
+      if (!injected && shouldShowUi()) {
+        lastDetection = detect();
+        injectUi(lastDetection);
+      }
       setTimeout(watchVideo, 1500);
       return;
     }
@@ -284,6 +329,17 @@
         source: location.hostname,
       });
     });
+  }
+
+  // Heuristic for "is this an episode page?" so we don't blanket-inject the
+  // Track button on every site. Show the UI when the URL or DOM looks like
+  // an episode page (URL slug matches, or any heuristic returned a result).
+  function shouldShowUi() {
+    if (extractFromUrl()) return true;
+    if (extractFromJsonLd()) return true;
+    if (extractFromMeta()) return true;
+    if (extractFromDocumentTitle()) return true;
+    return false;
   }
 
   watchVideo();
