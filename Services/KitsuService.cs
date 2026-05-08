@@ -386,7 +386,9 @@ namespace AnimeList.Services
                     {
                         var kitsuIdInt = int.TryParse(resolvedAnimeId, out var kid) ? kid : 0;
                         var currentEpisodeCount = SafeGet<int?>(entry, "attributes", "episodeCount") ?? 0;
-                        anime.videos = await GetCourEpisodesAsync(mapping.ImdbId, mapping.Season, kitsuIdInt, currentEpisodeCount);
+                        anime.videos = await _cinemetaService.GetCourEpisodesAsync(
+                            mapping.ImdbId, mapping.Season, AnimeService.Kitsu,
+                            kitsuIdInt, currentEpisodeCount, GetAnimeSummaryAsync);
                     }
                     catch
                     {
@@ -892,78 +894,6 @@ namespace AnimeList.Services
             return SafeGet<string>(anime, "attributes", "titles", "en")
                 ?? SafeGet<string>(anime, "attributes", "titles", "en_jp")
                 ?? SafeGet<string>(anime, "attributes", "canonicalTitle");
-        }
-
-        // Returns the slice of Cinemeta's videos that belongs to the cour identified by
-        // <paramref name="currentKitsuId"/>. Tries the Cinemeta-season filter first; if it
-        // empties, falls back to cumulative-episode slicing using preceding cours' episode
-        // counts. Mirrors the AutoSelectSeason logic in MetaController.
-        private async Task<List<Video>> GetCourEpisodesAsync(string imdbId, int? cinemetaSeason, int currentKitsuId, int currentEpisodeCount)
-        {
-            var allVideos = await _cinemetaService.GetEpisodesAsync(imdbId, null);
-            if (allVideos.Count == 0) return [];
-
-            allVideos = allVideos
-                .Where(w => w.season > 0)
-                .OrderBy(v => v.season)
-                .ThenBy(v => v.episode)
-                .ToList();
-
-            var mappings = (await _mappingService.GetImdbMapping(imdbId))
-                .OrderBy(m => m.Season ?? int.MaxValue)
-                .ThenBy(m => m.KitsuId)
-                .ToList();
-
-            var cinemetaSeasonIsWrong = mappings.Count(w => w.Season == cinemetaSeason) > 1;
-
-            List<Video> bySeason;
-
-            if (!cinemetaSeasonIsWrong && cinemetaSeason.HasValue)
-            {
-                bySeason = allVideos.Where(v => v.season == cinemetaSeason.Value).ToList();
-                if (bySeason.Count > 0) return bySeason;
-            }
-
-            if (mappings.Count <= 1) return allVideos;
-
-            var index = mappings.FindIndex(m => m.KitsuId == currentKitsuId);
-            if (index < 0) return allVideos;
-
-            int cumulative = 0;
-            var updateMappings = false;
-            for (int i = 0; i < index; i++)
-            {
-                if (!mappings[i].Season.HasValue || mappings[i].Season > 0)
-                {
-                    if (!mappings[i].Episodes.HasValue && mappings[i].KitsuId.HasValue)
-                    {
-                        (mappings[i].Name, mappings[i].Episodes) = await GetAnimeSummaryAsync($"{kitsuPrefix}{mappings[i].KitsuId}");
-                        updateMappings = true;
-                    }
-
-                    cumulative += mappings[i].Episodes ?? 0;
-                }
-            }
-
-            if (updateMappings)
-            {
-                await _mappingService.EnrichImdbMappings(mappings);
-            }
-
-            var take = currentEpisodeCount > 0 ? currentEpisodeCount : allVideos.Count - cumulative;
-            
-            bySeason = allVideos.Skip(cumulative).Take(take).ToList();
-
-            // Tried to show the currect episode numbers and season but was finding less stream so i stroped
-            //var currentEpisode = 1;
-            //foreach (var item in bySeason)
-            //{
-            //    item.name = item.name?.Contains(item.episode.ToString()) == true ? $"Episode {currentEpisode}" : item.name;
-            //    item.season = index + 1;
-            //    item.episode = currentEpisode++;
-            //}
-
-            return bySeason;
         }
 
         private static void NormalizeVideoIds(List<Video> videos, string externalId, bool hasGroupId)
