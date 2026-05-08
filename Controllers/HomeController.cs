@@ -25,10 +25,14 @@ public class HomeController : Controller
     {
         var tokenData = await _tokenService.GetAccessTokenAsync(config);
 
+        string configUid = null;
+        long configRevision = 0;
+        List<LinkedToken> linkedTokens = new();
+        string encodedTokenData = null;
+
         if (tokenData != null)
         {
             tokenData.expires_in = null;
-            ViewBag.AnonymousUser = tokenData.anonymousUser;
 
             // Authenticated users get a v5 (UID-only) install URL: store the token JSON in
             // the config store and hand the JS just the UID. Idempotent — the same user
@@ -37,13 +41,12 @@ public class HomeController : Controller
             // no benefit to a DB row plus no stable identity to dedupe on.
             if (!tokenData.anonymousUser)
             {
-                var uid = await _configStore.UpsertAsync(tokenData);
-                ViewBag.ConfigUid = uid;
+                configUid = await _configStore.UpsertAsync(tokenData);
                 // Used as cache-busting bytes in the install URL — see Index.cshtml's JS.
-                ViewBag.ConfigRevision = await _configStore.GetRevisionAsync(uid);
+                configRevision = await _configStore.GetRevisionAsync(configUid);
                 // Linked secondary accounts the multi-provider sync will fan writes out to.
                 // The view renders a per-service Link / Unlink row from this list.
-                ViewBag.LinkedTokens = await _configStore.GetLinkedTokensAsync(uid);
+                linkedTokens = await _configStore.GetLinkedTokensAsync(configUid);
 
                 // Hydrate the session from the config-URL-derived tokenData when the user
                 // arrives via a v5 install URL (or any path that resolves identity from the
@@ -61,11 +64,9 @@ public class HomeController : Controller
                     tokenData.access_token = null;
                     tokenData.refresh_token = null;
                 }
-                ViewBag.TokenData = CompressToUrlSafe(SerializeObject(tokenData, Formatting.None, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore }));
+                encodedTokenData = CompressToUrlSafe(SerializeObject(tokenData, Formatting.None, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore }));
             }
         }
-
-        ViewBag.AnimeService = tokenData?.anime_service ?? AnimeService.Kitsu;
 
         // Hydrate the toggle flags. The URL-config path covers Stremio's manifest deep-link
         // (v3/v4/v5 bytes in the path); the UID fallback covers everything else — direct
@@ -76,43 +77,33 @@ public class HomeController : Controller
         {
             configuration = await ResolveConfigAsync(config, _configStore);
         }
-        else if (!string.IsNullOrEmpty((string)ViewBag.ConfigUid))
+        else if (!string.IsNullOrEmpty(configUid))
         {
-            var (f1, f2, f3, _) = await _configStore.GetFlagsAsync((string)ViewBag.ConfigUid);
+            var (f1, f2, f3, _) = await _configStore.GetFlagsAsync(configUid);
             configuration = new Configuration();
             ApplyBinaryFlags(configuration, f1, f2, f3);
         }
 
-        if (configuration != null)
-        {
-            ViewBag.ShowCurrent = configuration.showCurrent;
-            ViewBag.ShowCompleted = configuration.showCompleted;
-            ViewBag.ShowTrending = configuration.showTrending;
-            ViewBag.ShowSeasonal = configuration.showSeasonal;
-            ViewBag.ShowPlanning = configuration.showPlanning;
-            ViewBag.ShowPaused = configuration.showPaused;
-            ViewBag.ShowDropped = configuration.showDropped;
-            ViewBag.ShowRepeating = configuration.showRepeating;
-            ViewBag.ShowAiring = configuration.showAiring;
-            ViewBag.DiscoverOnlyCurrent = configuration.discoverOnlyCurrent;
-            ViewBag.DiscoverOnlyCompleted = configuration.discoverOnlyCompleted;
-            ViewBag.DiscoverOnlyTrending = configuration.discoverOnlyTrending;
-            ViewBag.DiscoverOnlySeasonal = configuration.discoverOnlySeasonal;
-            ViewBag.DiscoverOnlyPlanning = configuration.discoverOnlyPlanning;
-            ViewBag.DiscoverOnlyPaused = configuration.discoverOnlyPaused;
-            ViewBag.DiscoverOnlyDropped = configuration.discoverOnlyDropped;
-            ViewBag.DiscoverOnlyRepeating = configuration.discoverOnlyRepeating;
-            ViewBag.DiscoverOnlyAiring = configuration.discoverOnlyAiring;
-            ViewBag.ShowExternalStreams = configuration.showExternalStreams;
-            // Inverse-sense flags: stored as "hide/disable" so default-zero rows mean
-            // "show / enabled" — the UI toggles, however, are positive ("Manage Entry",
-            // "Auto-track progress") so flip the bool here.
-            ViewBag.ShowManageEntry = configuration.hideManageEntry != true;
-            ViewBag.AutoTrackProgress = configuration.disableAutoTrack != true;
-            ViewBag.GroupSeasons = configuration.disableSeasonGrouping != true;
-        }
+        var anonymousUser = tokenData?.anonymousUser ?? false;
 
-        return View();
+        // Anonymous users without a path-encoded config see a fresh page; pre-check the
+        // catalogs that make sense without a connected list (Trending + Seasonal). Logged-in
+        // users always have a configuration loaded (possibly all-zero) so this fallback only
+        // really fires for the anonymous-fresh-install branch.
+        configuration ??= anonymousUser
+            ? new Configuration { showTrending = true, showSeasonal = true, discoverOnlySeasonal = true }
+            : new Configuration();
+
+        return View(new ConfigureViewModel
+        {
+            TokenData = encodedTokenData,
+            ConfigUid = configUid,
+            ConfigRevision = configRevision,
+            AnimeService = tokenData?.anime_service ?? AnimeService.Kitsu,
+            AnonymousUser = anonymousUser,
+            LinkedTokens = linkedTokens,
+            Configuration = configuration,
+        });
     }
 
     /// <summary>

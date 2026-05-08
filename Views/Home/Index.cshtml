@@ -1,69 +1,31 @@
+@model ConfigureViewModel
 @{
-    var tokenDataStr = (string)ViewBag.TokenData;
-    var configUid = (string)ViewBag.ConfigUid;
-    var configRevision = (long?)ViewBag.ConfigRevision ?? 0L;
-    var animeService = (AnimeService?)ViewBag.AnimeService;
-    // ConfigUid is set for authenticated v5 users, TokenData for anonymous v3 users —
-    // either one means "logged in and we can render the install link".
-    var isLoggedIn = !string.IsNullOrEmpty(tokenDataStr) || !string.IsNullOrEmpty(configUid);
-    var isAnilist = animeService == AnimeService.Anilist;
-    var isMal = animeService == AnimeService.MyAnimeList;
-    var isKitsu = !isAnilist && !isMal;
-    // Numeric service id used by the JS picker (matches the AnimeService enum order).
-    var serviceIndex = isAnilist ? 1 : isMal ? 2 : 0;
-    var serviceDisplay = isAnilist ? "AniList" : isMal ? "MyAnimeList" : "Kitsu";
     var stremioStr = "https://web.stremio.com/#/addons?addon=";
-    bool anonymousUser = ViewBag.AnonymousUser == true;
-
-    bool showCurrent = ViewBag.ShowCurrent ?? !anonymousUser;
-    bool showCompleted = ViewBag.ShowCompleted ?? false;
-    bool showTrending = ViewBag.ShowTrending ?? anonymousUser;
-    bool showSeasonal = ViewBag.ShowSeasonal ?? true;
-    bool showPlanning = ViewBag.ShowPlanning ?? false;
-    bool showPaused = ViewBag.ShowPaused ?? false;
-    bool showDropped = ViewBag.ShowDropped ?? false;
-    bool showRepeating = ViewBag.ShowRepeating ?? false;
-    bool showAiring = ViewBag.ShowAiring ?? false;
-    bool discoverOnlyCurrent = ViewBag.DiscoverOnlyCurrent ?? false;
-    bool discoverOnlyCompleted = ViewBag.DiscoverOnlyCompleted ?? false;
-    bool discoverOnlyTrending = ViewBag.DiscoverOnlyTrending ?? false;
-    bool discoverOnlySeasonal = ViewBag.DiscoverOnlySeasonal ?? true;
-    bool discoverOnlyPlanning = ViewBag.DiscoverOnlyPlanning ?? false;
-    bool discoverOnlyPaused = ViewBag.DiscoverOnlyPaused ?? false;
-    bool discoverOnlyDropped = ViewBag.DiscoverOnlyDropped ?? false;
-    bool discoverOnlyRepeating = ViewBag.DiscoverOnlyRepeating ?? false;
-    bool discoverOnlyAiring = ViewBag.DiscoverOnlyAiring ?? false;
-    bool showExternalStreams = ViewBag.ShowExternalStreams ?? false;
-    bool showManageEntry = ViewBag.ShowManageEntry ?? true;
-    bool autoTrackProgress = ViewBag.AutoTrackProgress ?? true;
-    bool groupSeasons = ViewBag.GroupSeasons ?? true;
-
-    // Linked secondary providers (multi-provider sync). Defined here so both the service
-    // picker (which lights up linked pills as click-to-promote-to-primary buttons) and
-    // the Linked Accounts card below can consume the same data.
-    var linkedTokens = (List<AnimeList.Models.LinkedToken>)ViewBag.LinkedTokens ?? new();
-    var linkedByService = linkedTokens.ToDictionary(t => t.Service, t => t);
-    var hasSwappableLinks = linkedTokens.Any(t => !t.NeedsReauth);
+    // Two thin shortcuts. cfg keeps the toggle markup terse; linkedByService is recomputed
+    // on every Model.LinkedByService access, so cache it once here for the picker + the
+    // Linked Accounts loop to share.
+    var cfg = Model.Configuration;
+    var linkedByService = Model.LinkedByService;
 }
 
 <h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
 <p class="app-subtitle">Track your anime progress on Stremio</p>
 
-@if (!anonymousUser)
+@if (!Model.AnonymousUser)
 {
     @* Pre-login the picker shows all three providers — the user picks one to authenticate.
        Post-login it shrinks to "primary + healthy linked accounts" so unlinked providers
        don't tease as tappable. The HTML stays identical between states; the only thing
        that changes is which pills render. *@
-    var kitsuLinked   = isLoggedIn && linkedByService.TryGetValue(AnimeService.Kitsu,        out var kl) && !kl.NeedsReauth;
-    var anilistLinked = isLoggedIn && linkedByService.TryGetValue(AnimeService.Anilist,      out var al) && !al.NeedsReauth;
-    var malLinked     = isLoggedIn && linkedByService.TryGetValue(AnimeService.MyAnimeList, out var ml) && !ml.NeedsReauth;
+    var kitsuLinked   = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.Kitsu,        out var kl) && !kl.NeedsReauth;
+    var anilistLinked = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.Anilist,      out var al) && !al.NeedsReauth;
+    var malLinked     = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.MyAnimeList, out var ml) && !ml.NeedsReauth;
 
-    var showKitsu   = !isLoggedIn || isKitsu   || kitsuLinked;
-    var showAnilist = !isLoggedIn || isAnilist || anilistLinked;
-    var showMal     = !isLoggedIn || isMal     || malLinked;
+    var showKitsu   = !Model.IsLoggedIn || Model.IsKitsu   || kitsuLinked;
+    var showAnilist = !Model.IsLoggedIn || Model.IsAnilist || anilistLinked;
+    var showMal     = !Model.IsLoggedIn || Model.IsMal     || malLinked;
 
-    if (hasSwappableLinks)
+    if (Model.HasSwappableLinks)
     {
         <p class="service-toggle-hint">Tap another account below to make it your primary.</p>
     }
@@ -71,27 +33,27 @@
     <div class="service-toggle" id="serviceToggle">
         @if (showKitsu)
         {
-            <span class="label @(isKitsu ? "active" : "")" id="labelKitsu" data-service="0" data-service-name="Kitsu">Kitsu</span>
+            <span class="label @(Model.IsKitsu ? "active" : "")" id="labelKitsu" data-service="0" data-service-name="Kitsu">Kitsu</span>
         }
         @if (showAnilist)
         {
-            <span class="label @(isAnilist ? "active" : "")" id="labelAnilist" data-service="1" data-service-name="Anilist">AniList</span>
+            <span class="label @(Model.IsAnilist ? "active" : "")" id="labelAnilist" data-service="1" data-service-name="Anilist">AniList</span>
         }
         @if (showMal)
         {
-            <span class="label @(isMal ? "active" : "")" id="labelMal" data-service="2" data-service-name="MyAnimeList">MyAnimeList</span>
+            <span class="label @(Model.IsMal ? "active" : "")" id="labelMal" data-service="2" data-service-name="MyAnimeList">MyAnimeList</span>
         }
     </div>
 }
 
-@if (isLoggedIn)
+@if (Model.IsLoggedIn)
 {
     <span class="success-badge">
-        @(!anonymousUser ? $"✓ Connected to {animeService}" : "Connected without Account")
+        @(!Model.AnonymousUser ? $"✓ Connected to {Model.AnimeService}" : "Connected without Account")
         <button id="disconnectBtn" class="success-badge-action" title="Disconnect">✗</button>
     </span>
 
-    @if (!anonymousUser)
+    @if (!Model.AnonymousUser)
     {
         // linkedTokens / linkedByService come from the page-top @{} block. Promotion to
         // primary lives in the service picker pills above; this section just lists
@@ -111,7 +73,7 @@
                 @foreach (var svc in allServices)
                 {
                     var label = svc == AnimeService.MyAnimeList ? "MyAnimeList" : svc.ToString();
-                    var isPrimary = svc == animeService;
+                    var isPrimary = svc == Model.AnimeService;
                     var linked = linkedByService.GetValueOrDefault(svc);
                     <div class="linked-account-row" data-service="@((int)svc)" data-service-name="@svc">
                         <div class="linked-account-name">@label</div>
@@ -170,12 +132,12 @@
             @* Manual full-sync block — opens the modal that drives the client-side
                batch loop. Only visible when at least one healthy linked account exists,
                since there's nothing to sync to otherwise. *@
-            @if (hasSwappableLinks)
+            @if (Model.HasSwappableLinks)
             {
                 <div class="full-sync-row">
                     <div class="full-sync-text">
                         <strong>Backfill linked accounts</strong>
-                        <span>Push every entry from your @serviceDisplay library to your linked accounts in one go. Useful right after first linking.</span>
+                        <span>Push every entry from your @Model.ServiceDisplay library to your linked accounts in one go. Useful right after first linking.</span>
                     </div>
                     <button type="button" id="syncNowBtn" class="btn-ghost btn-ghost-sm">Sync from primary</button>
                 </div>
@@ -208,74 +170,74 @@
             </label>
             <hr class="option-sep" />
 
-            @if (!anonymousUser)
+            @if (!Model.AnonymousUser)
             {
                 <span class="option-name">Currently watching</span>
                 <label class="switch">
-                    <input type="checkbox" id="showCurrent" class="catalogCheck" @(showCurrent ? "checked" : "") />
+                    <input type="checkbox" id="showCurrent" class="catalogCheck" @(cfg.showCurrent ? "checked" : "") />
                     <span class="slider"></span>
                 </label>
-                <label class="switch @(!showCurrent ? "switch-disabled" : "")">
-                    <input type="checkbox" id="discoverOnlyCurrent" class="discoverCheck" @(discoverOnlyCurrent ? "checked" : "") @(!showCurrent ? "disabled" : "") />
+                <label class="switch @(!cfg.showCurrent ? "switch-disabled" : "")">
+                    <input type="checkbox" id="discoverOnlyCurrent" class="discoverCheck" @(cfg.discoverOnlyCurrent ? "checked" : "") @(!cfg.showCurrent ? "disabled" : "") />
                     <span class="slider"></span>
                 </label>
                 <hr class="option-sep" />
 
                 <span class="option-name">Completed</span>
                 <label class="switch">
-                    <input type="checkbox" id="showCompleted" class="catalogCheck" @(showCompleted ? "checked" : "") />
+                    <input type="checkbox" id="showCompleted" class="catalogCheck" @(cfg.showCompleted ? "checked" : "") />
                     <span class="slider"></span>
                 </label>
-                <label class="switch @(!showCompleted ? "switch-disabled" : "")">
-                    <input type="checkbox" id="discoverOnlyCompleted" class="discoverCheck" @(discoverOnlyCompleted ? "checked" : "") @(!showCompleted ? "disabled" : "") />
+                <label class="switch @(!cfg.showCompleted ? "switch-disabled" : "")">
+                    <input type="checkbox" id="discoverOnlyCompleted" class="discoverCheck" @(cfg.discoverOnlyCompleted ? "checked" : "") @(!cfg.showCompleted ? "disabled" : "") />
                     <span class="slider"></span>
                 </label>
                 <hr class="option-sep" />
 
                 <span class="option-name">Plan to Watch</span>
                 <label class="switch">
-                    <input type="checkbox" id="showPlanning" class="catalogCheck" @(showPlanning ? "checked" : "") />
+                    <input type="checkbox" id="showPlanning" class="catalogCheck" @(cfg.showPlanning ? "checked" : "") />
                     <span class="slider"></span>
                 </label>
-                <label class="switch @(!showPlanning ? "switch-disabled" : "")">
-                    <input type="checkbox" id="discoverOnlyPlanning" class="discoverCheck" @(discoverOnlyPlanning ? "checked" : "") @(!showPlanning ? "disabled" : "") />
+                <label class="switch @(!cfg.showPlanning ? "switch-disabled" : "")">
+                    <input type="checkbox" id="discoverOnlyPlanning" class="discoverCheck" @(cfg.discoverOnlyPlanning ? "checked" : "") @(!cfg.showPlanning ? "disabled" : "") />
                     <span class="slider"></span>
                 </label>
                 <hr class="option-sep" />
 
                 <span class="option-name">On Hold</span>
                 <label class="switch">
-                    <input type="checkbox" id="showPaused" class="catalogCheck" @(showPaused ? "checked" : "") />
+                    <input type="checkbox" id="showPaused" class="catalogCheck" @(cfg.showPaused ? "checked" : "") />
                     <span class="slider"></span>
                 </label>
-                <label class="switch @(!showPaused ? "switch-disabled" : "")">
-                    <input type="checkbox" id="discoverOnlyPaused" class="discoverCheck" @(discoverOnlyPaused ? "checked" : "") @(!showPaused ? "disabled" : "") />
+                <label class="switch @(!cfg.showPaused ? "switch-disabled" : "")">
+                    <input type="checkbox" id="discoverOnlyPaused" class="discoverCheck" @(cfg.discoverOnlyPaused ? "checked" : "") @(!cfg.showPaused ? "disabled" : "") />
                     <span class="slider"></span>
                 </label>
                 <hr class="option-sep" />
 
                 <span class="option-name">Dropped</span>
                 <label class="switch">
-                    <input type="checkbox" id="showDropped" class="catalogCheck" @(showDropped ? "checked" : "") />
+                    <input type="checkbox" id="showDropped" class="catalogCheck" @(cfg.showDropped ? "checked" : "") />
                     <span class="slider"></span>
                 </label>
-                <label class="switch @(!showDropped ? "switch-disabled" : "")">
-                    <input type="checkbox" id="discoverOnlyDropped" class="discoverCheck" @(discoverOnlyDropped ? "checked" : "") @(!showDropped ? "disabled" : "") />
+                <label class="switch @(!cfg.showDropped ? "switch-disabled" : "")">
+                    <input type="checkbox" id="discoverOnlyDropped" class="discoverCheck" @(cfg.discoverOnlyDropped ? "checked" : "") @(!cfg.showDropped ? "disabled" : "") />
                     <span class="slider"></span>
                 </label>
                 <hr class="option-sep" />
 
                 @* AniList exposes REPEATING as a real status; MAL has an is_rewatching flag the *@
                 @* MalService surfaces as a synthetic Rewatching list. Kitsu has no equivalent. *@
-                @if (isAnilist || isMal)
+                @if (Model.IsAnilist || Model.IsMal)
                 {
                     <span class="option-name">Rewatching</span>
                     <label class="switch">
-                        <input type="checkbox" id="showRepeating" class="catalogCheck" @(showRepeating ? "checked" : "") />
+                        <input type="checkbox" id="showRepeating" class="catalogCheck" @(cfg.showRepeating ? "checked" : "") />
                         <span class="slider"></span>
                     </label>
-                    <label class="switch @(!showRepeating ? "switch-disabled" : "")">
-                        <input type="checkbox" id="discoverOnlyRepeating" class="discoverCheck" @(discoverOnlyRepeating ? "checked" : "") @(!showRepeating ? "disabled" : "") />
+                    <label class="switch @(!cfg.showRepeating ? "switch-disabled" : "")">
+                        <input type="checkbox" id="discoverOnlyRepeating" class="discoverCheck" @(cfg.discoverOnlyRepeating ? "checked" : "") @(!cfg.showRepeating ? "disabled" : "") />
                         <span class="slider"></span>
                     </label>
                     <hr class="option-sep" />
@@ -284,33 +246,33 @@
 
             <span class="option-name">Trending now</span>
             <label class="switch">
-                <input type="checkbox" id="showTrending" class="catalogCheck" @(showTrending ? "checked" : "") />
+                <input type="checkbox" id="showTrending" class="catalogCheck" @(cfg.showTrending ? "checked" : "") />
                 <span class="slider"></span>
             </label>
-            <label class="switch @(!showTrending ? "switch-disabled" : "")">
-                <input type="checkbox" id="discoverOnlyTrending" class="discoverCheck" @(discoverOnlyTrending ? "checked" : "") @(!showTrending ? "disabled" : "") />
+            <label class="switch @(!cfg.showTrending ? "switch-disabled" : "")">
+                <input type="checkbox" id="discoverOnlyTrending" class="discoverCheck" @(cfg.discoverOnlyTrending ? "checked" : "") @(!cfg.showTrending ? "disabled" : "") />
                 <span class="slider"></span>
             </label>
             <hr class="option-sep" />
 
             <span class="option-name">Seasonal Anime</span>
             <label class="switch">
-                <input type="checkbox" id="showSeasonal" class="catalogCheck" @(showSeasonal ? "checked" : "") />
+                <input type="checkbox" id="showSeasonal" class="catalogCheck" @(cfg.showSeasonal ? "checked" : "") />
                 <span class="slider"></span>
             </label>
-            <label class="switch @(!showSeasonal ? "switch-disabled" : "")">
-                <input type="checkbox" id="discoverOnlySeasonal" class="discoverCheck" @(discoverOnlySeasonal ? "checked" : "") @(!showSeasonal ? "disabled" : "") />
+            <label class="switch @(!cfg.showSeasonal ? "switch-disabled" : "")">
+                <input type="checkbox" id="discoverOnlySeasonal" class="discoverCheck" @(cfg.discoverOnlySeasonal ? "checked" : "") @(!cfg.showSeasonal ? "disabled" : "") />
                 <span class="slider"></span>
             </label>
             <hr class="option-sep" />
 
             <span class="option-name">Airing This Week</span>
             <label class="switch">
-                <input type="checkbox" id="showAiring" class="catalogCheck" @(showAiring ? "checked" : "") />
+                <input type="checkbox" id="showAiring" class="catalogCheck" @(cfg.showAiring ? "checked" : "") />
                 <span class="slider"></span>
             </label>
-            <label class="switch @(!showAiring ? "switch-disabled" : "")">
-                <input type="checkbox" id="discoverOnlyAiring" class="discoverCheck" @(discoverOnlyAiring ? "checked" : "") @(!showAiring ? "disabled" : "") />
+            <label class="switch @(!cfg.showAiring ? "switch-disabled" : "")">
+                <input type="checkbox" id="discoverOnlyAiring" class="discoverCheck" @(cfg.discoverOnlyAiring ? "checked" : "") @(!cfg.showAiring ? "disabled" : "") />
                 <span class="slider"></span>
             </label>
         </div>
@@ -325,7 +287,7 @@
                     <span class="option-name-sub">Collapse multi-cour franchises into a single catalog card. Off shows every cour separately.</span>
                 </div>
                 <label class="switch">
-                    <input type="checkbox" id="groupSeasons" @(groupSeasons ? "checked" : "") />
+                    <input type="checkbox" id="groupSeasons" @(Model.GroupSeasons ? "checked" : "") />
                     <span class="slider"></span>
                 </label>
             </div>
@@ -340,7 +302,7 @@
         <div class="streams-grid">
             @* Manage Entry and Auto-track touch the user's list, so they only make sense *@
             @* when there's an account behind the install. *@
-            @if (!anonymousUser)
+            @if (!Model.AnonymousUser)
             {
                 <div class="stream-option">
                     <div class="option-name-wrap">
@@ -348,7 +310,7 @@
                         <span class="option-name-sub">Quick-edit progress, score and notes from Stremio.</span>
                     </div>
                     <label class="switch">
-                        <input type="checkbox" id="showManageEntry" @(showManageEntry ? "checked" : "") />
+                        <input type="checkbox" id="showManageEntry" @(Model.ShowManageEntry ? "checked" : "") />
                         <span class="slider"></span>
                     </label>
                 </div>
@@ -359,7 +321,7 @@
                         <span class="option-name-sub">Update your list when you start an episode in Stremio.</span>
                     </div>
                     <label class="switch">
-                        <input type="checkbox" id="autoTrackProgress" @(autoTrackProgress ? "checked" : "") />
+                        <input type="checkbox" id="autoTrackProgress" @(Model.AutoTrackProgress ? "checked" : "") />
                         <span class="slider"></span>
                     </label>
                 </div>
@@ -371,7 +333,7 @@
                     <span class="option-name-sub">Crunchyroll, Netflix, HiDive, …</span>
                 </div>
                 <label class="switch">
-                    <input type="checkbox" id="showExternalStreams" @(showExternalStreams ? "checked" : "") />
+                    <input type="checkbox" id="showExternalStreams" @(cfg.showExternalStreams ? "checked" : "") />
                     <span class="slider"></span>
                 </label>
             </div>
@@ -475,7 +437,7 @@ else
 {
     <!-- Login -->
     <div class="card-section" id="loginCard">
-        <div id="kitsuCreds" style="display:@(isKitsu ? "block" : "none")">
+        <div id="kitsuCreds" style="display:@(Model.IsKitsu ? "block" : "none")">
             <div class="cred-group">
                 <label for="username" class="required">Username</label>
                 <input type="text" id="username" />
@@ -485,8 +447,8 @@ else
                 <input type="password" id="password" />
             </div>
         </div>
-        <a id="loginUrl" class="btn-primary-action btn-login" href='@Url.Action("Login", "Auth", new { animeService })'>
-            Login with <span id="loginServiceName">@serviceDisplay</span>
+        <a id="loginUrl" class="btn-primary-action btn-login" href='@Url.Action("Login", "Auth", new { animeService = Model.AnimeService })'>
+            Login with <span id="loginServiceName">@Model.ServiceDisplay</span>
         </a>
     </div>
 
@@ -500,10 +462,10 @@ else
 <script>
     // Numeric service selector: 0 = Kitsu, 1 = AniList, 2 = MyAnimeList. Mirrors the
     // AnimeService enum on the server.
-    var selectedService = @serviceIndex;
+    var selectedService = @Model.ServiceIndex;
     // Post-login the picker only shows the primary + healthy linked accounts, so any
     // non-active pill click is unambiguously a swap-primary intent.
-    var isLoggedInState = @(isLoggedIn ? "true" : "false");
+    var isLoggedInState = @(Model.IsLoggedIn ? "true" : "false");
     var loginBaseUrl = '@Url.Action("Login", "Auth")';
     // Origin (scheme://host) of the addon — used to build the manifest URL and the
     // stremio:// deep-link. These never include flags; flags live in the URL path bytes.
@@ -513,12 +475,12 @@ else
     // Authenticated users have a 16-byte UID (base64url) pointing at a row in the
     // server-side config store; anonymous users still embed their (tiny) token data inline.
     // Exactly one of the two strings is non-empty per request.
-    var configUid = '@(configUid ?? "")';
-    var tokenDataStr = '@(tokenDataStr ?? "")';
+    var configUid = '@(Model.ConfigUid ?? "")';
+    var tokenDataStr = '@(Model.TokenData ?? "")';
     // Revision counter, appended to the install URL as 4 trailing bytes so the URL changes
     // after every Save. Stremio caches manifests aggressively (even past force-restart) and
     // a stable URL means it never refetches; bumping the URL forces a fresh install.
-    var configRevision = @configRevision;
+    var configRevision = @Model.ConfigRevision;
 
     function base64UrlToBytes(str) {
         if (!str) return new Uint8Array(0);
