@@ -606,5 +606,61 @@ namespace AnimeList
             // weights up/down if one ranking signal proves more useful in practice.
             return 0.5 * containment + 0.5 * jaccard;
         }
+        /// <summary>
+        /// Equal-weighted blend of containment and Jaccard. See <see cref="ScoreMatch"/>
+        /// for the semantics — containment dominates for "is the query a subset of this
+        /// title", Jaccard breaks ties by penalising bloat.
+        /// </summary>
+
+        /// <summary>
+        /// Rewrites every <see cref="Video.id"/> so it shares a prefix with the parent
+        /// <see cref="Meta.id"/>. Stremio renders a blank meta page when the prefixes
+        /// disagree, so this is essential after a Kitsu cross-service fallback in MAL /
+        /// AniList that leaves <c>kitsu:N</c> ids in place. Defaults missing season /
+        /// episode to 1 so the resulting id is always a valid 3- or 4-segment shape
+        /// depending on whether the meta is grouped.
+        /// </summary>
+        /// <param name="videos">List to mutate in place.</param>
+        /// <param name="externalId">The parent meta's id space — typically
+        /// <c>tt12345</c> / <c>tmdb:N</c> when grouped, or <c>kitsu:N</c> /
+        /// <c>anilist:N</c> / <c>mal:N</c> when not.</param>
+        /// <param name="hasGroupId">True for grouped meta (id format
+        /// <c>{externalId}:{season}:{episode}</c>); false for native single-cour ids
+        /// (<c>{externalId}:{episode}</c>).</param>
+        public static void NormalizeVideoIds(List<Video> videos, string externalId, bool hasGroupId)
+        {
+            if (videos == null) return;
+            foreach (var v in videos)
+            {
+                var season = v.season > 0 ? v.season : 1;
+                var episode = v.episode > 0 ? v.episode : 1;
+                v.id = hasGroupId ? $"{externalId}:{season}:{episode}" : $"{externalId}:{episode}";
+                v.season = season;
+                v.episode = episode;
+            }
+        }
+
+        /// <summary>
+        /// Lenient date parser used by per-provider list-entry hydration where the
+        /// upstream returns either a full ISO timestamp or just <c>yyyy-MM-dd</c>.
+        /// Returns null on empty / unparseable input rather than throwing — list
+        /// metadata is best-effort and a missing date shouldn't fail a save.
+        /// </summary>
+        public static DateTime? ParseProviderDate(string raw) =>
+            DateTime.TryParse(raw, out var dt) ? dt : null;
+
+        /// <summary>
+        /// Sets the <c>Authorization: Bearer &lt;token&gt;</c> header on a request
+        /// when the supplied <see cref="TokenData"/> has a non-empty access token.
+        /// No-op when the token is missing — matches the per-service convention of
+        /// "fall through to anonymous client-id auth" for endpoints that allow it.
+        /// </summary>
+        public static void ApplyBearerAuth(HttpRequestMessage request, TokenData tokenData)
+        {
+            if (request == null) return;
+            if (string.IsNullOrWhiteSpace(tokenData?.access_token)) return;
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
+                "Bearer", tokenData.access_token);
+        }
     }
 }

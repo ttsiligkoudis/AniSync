@@ -2,7 +2,6 @@ using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
 using System.Net;
-using System.Net.Http.Headers;
 using System.Text;
 
 namespace AnimeList.Services
@@ -127,8 +126,7 @@ namespace AnimeList.Services
         private async Task<JObject> FetchKitsuPageAsync(string url, TokenData tokenData)
         {
             var request = new HttpRequestMessage(HttpMethod.Get, url);
-            if (!string.IsNullOrWhiteSpace(tokenData?.access_token))
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            ApplyBearerAuth(request, tokenData);
 
             var response = await _clientFactory.CreateClient().SendAsync(request);
             if (!response.IsSuccessStatusCode) return null;
@@ -252,10 +250,6 @@ namespace AnimeList.Services
             // way AniList and MAL do.
             var url = $"{_kitsuApi}/anime/{resolvedAnimeId}?include=categories,episodes,animeProductions.producer";
             var request = new HttpRequestMessage(HttpMethod.Get, url);
-            if (!string.IsNullOrWhiteSpace(tokenData?.access_token))
-            {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
-            }
 
             var client = _clientFactory.CreateClient();
             var response = await client.SendAsync(request);
@@ -473,7 +467,7 @@ namespace AnimeList.Services
                 + "&include=anime&fields[anime]=episodeCount";
 
             var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            ApplyBearerAuth(request, tokenData);
 
             var response = await _clientFactory.CreateClient().SendAsync(request);
             if (!response.IsSuccessStatusCode)
@@ -495,8 +489,8 @@ namespace AnimeList.Services
                 entry.Score = ratingTwenty.HasValue ? ratingTwenty.Value / 2.0 : null;
                 entry.Notes = (string)attrs?["notes"];
                 entry.RewatchCount = (int?)attrs?["reconsumeCount"] ?? 0;
-                entry.StartedAt = ParseKitsuDate((string)attrs?["startedAt"]);
-                entry.FinishedAt = ParseKitsuDate((string)attrs?["finishedAt"]);
+                entry.StartedAt = ParseProviderDate((string)attrs?["startedAt"]);
+                entry.FinishedAt = ParseProviderDate((string)attrs?["finishedAt"]);
             }
 
             entry.TotalEpisodes = (int?)((json["included"] as JArray)?
@@ -591,7 +585,7 @@ namespace AnimeList.Services
                 };
             }
 
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            ApplyBearerAuth(request, tokenData);
             Console.Error.WriteLine($"[Kitsu] {(existing?.EntryId != null ? "PATCH" : "POST")} library-entries id={resolvedKitsuId} status={status} progress={progress}.");
             var saveResponse = await _clientFactory.CreateClient().SendAsync(request);
             await ThrowIfApiCallFailed(saveResponse, "save");
@@ -626,8 +620,7 @@ namespace AnimeList.Services
 
             var url = $"{_kitsuApi}/anime/{resolvedKitsuId}?include=streamingLinks.streamer&fields[anime]=id&fields[streamingLinks]=url,streamer&fields[streamers]=siteName";
             var request = new HttpRequestMessage(HttpMethod.Get, url);
-            if (!string.IsNullOrEmpty(tokenData?.access_token))
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            ApplyBearerAuth(request, tokenData);
 
             var response = await _clientFactory.CreateClient().SendAsync(request);
             if (!response.IsSuccessStatusCode) return [];
@@ -678,7 +671,7 @@ namespace AnimeList.Services
             if (string.IsNullOrEmpty(existing?.EntryId)) return;
 
             var request = new HttpRequestMessage(HttpMethod.Delete, $"{_kitsuApi}/library-entries/{existing.EntryId}");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            ApplyBearerAuth(request, tokenData);
 
             var deleteResponse = await _clientFactory.CreateClient().SendAsync(request);
             await ThrowIfApiCallFailed(deleteResponse, "delete");
@@ -806,25 +799,16 @@ namespace AnimeList.Services
                     Score = (ratingTwenty.HasValue && ratingTwenty.Value > 0) ? ratingTwenty.Value / 2.0 : null,
                     Notes = (string)attrs?["notes"],
                     RewatchCount = (int?)attrs?["reconsumeCount"] ?? 0,
-                    StartedAt = ParseKitsuDate((string)attrs?["startedAt"]),
-                    FinishedAt = ParseKitsuDate((string)attrs?["finishedAt"]),
+                    StartedAt = ParseProviderDate((string)attrs?["startedAt"]),
+                    FinishedAt = ParseProviderDate((string)attrs?["finishedAt"]),
                 });
             }
         }
 
-        private static DateTime? ParseKitsuDate(string raw)
-        {
-            return DateTime.TryParse(raw, out var dt) ? dt : null;
-        }
-
-        private async Task<int?> GetTotalEpisodesAsync(TokenData tokenData, string resolvedKitsuId)
+private async Task<int?> GetTotalEpisodesAsync(TokenData tokenData, string resolvedKitsuId)
         {
             var url = $"{_kitsuApi}/anime/{resolvedKitsuId}?fields[anime]=episodeCount";
             var request = new HttpRequestMessage(HttpMethod.Get, url);
-            if (!string.IsNullOrWhiteSpace(tokenData?.access_token))
-            {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
-            }
 
             var client = _clientFactory.CreateClient();
             var response = await client.SendAsync(request);
@@ -896,17 +880,6 @@ namespace AnimeList.Services
                 ?? SafeGet<string>(anime, "attributes", "canonicalTitle");
         }
 
-        private static void NormalizeVideoIds(List<Video> videos, string externalId, bool hasGroupId)
-        {
-            if (videos == null) return;
-            foreach (var v in videos)
-            {
-                var season = v.season > 0 ? v.season : 1;
-                var episode = v.episode > 0 ? v.episode : 1;
-                v.id = hasGroupId ? $"{externalId}:{season}:{episode}" : $"{externalId}:{episode}";
-                v.season = season;
-                v.episode = episode;
-            }
-        }
+        // NormalizeVideoIds lives in Utils.cs — shared with AniList and MAL.
     }
 }

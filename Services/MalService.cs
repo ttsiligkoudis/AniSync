@@ -2,7 +2,6 @@ using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
 using System.Net;
-using System.Net.Http.Headers;
 
 namespace AnimeList.Services
 {
@@ -391,8 +390,8 @@ namespace AnimeList.Services
                 entry.Score = (rawScore.HasValue && rawScore.Value > 0) ? rawScore : null;
                 entry.Notes = (string)mls["comments"];
                 entry.RewatchCount = (int?)mls["num_times_rewatched"] ?? 0;
-                entry.StartedAt = ParseMalDate((string)mls["start_date"]);
-                entry.FinishedAt = ParseMalDate((string)mls["finish_date"]);
+                entry.StartedAt = ParseProviderDate((string)mls["start_date"]);
+                entry.FinishedAt = ParseProviderDate((string)mls["finish_date"]);
             }
 
             return entry;
@@ -643,7 +642,7 @@ namespace AnimeList.Services
         {
             if (!string.IsNullOrEmpty(tokenData?.access_token))
             {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+                ApplyBearerAuth(request, tokenData);
                 return;
             }
 
@@ -716,8 +715,8 @@ namespace AnimeList.Services
                         Score = (rawScore.HasValue && rawScore.Value > 0) ? rawScore : null,
                         Notes = (string)listStatus["comments"],
                         RewatchCount = (int?)listStatus["num_times_rewatched"] ?? 0,
-                        StartedAt = ParseMalDate((string)listStatus["start_date"]),
-                        FinishedAt = ParseMalDate((string)listStatus["finish_date"]),
+                        StartedAt = ParseProviderDate((string)listStatus["start_date"]),
+                        FinishedAt = ParseProviderDate((string)listStatus["finish_date"]),
                     });
                 }
 
@@ -728,26 +727,10 @@ namespace AnimeList.Services
             return entries;
         }
 
-        private static DateTime? ParseMalDate(string raw)
-        {
-            return DateTime.TryParse(raw, out var dt) ? dt : null;
-        }
-
-        // Stremio rejects (renders blank) when video.id doesn't share a prefix with meta.id.
+// Stremio rejects (renders blank) when video.id doesn't share a prefix with meta.id.
         // The Kitsu cross-service fallback leaves kitsu:N-prefixed ids in place, so rewrite
         // every video id to the calling service's external id space.
-        private static void NormalizeVideoIds(List<Video> videos, string externalId, bool hasGroupId)
-        {
-            if (videos == null) return;
-            foreach (var v in videos)
-            {
-                var season = v.season > 0 ? v.season : 1;
-                var episode = v.episode > 0 ? v.episode : 1;
-                v.id = hasGroupId ? $"{externalId}:{season}:{episode}" : $"{externalId}:{episode}";
-                v.season = season;
-                v.episode = episode;
-            }
-        }
+        // NormalizeVideoIds lives in Utils.cs — shared with AniList and Kitsu.
 
         /// <summary>
         /// Pulls the YouTube video id out of MAL's <c>videos</c> array. The field is sparsely

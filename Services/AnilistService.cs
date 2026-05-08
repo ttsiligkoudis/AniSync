@@ -2,7 +2,6 @@
 using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
 using System.Net;
-using System.Net.Http.Headers;
 
 namespace AnimeList.Services
 {
@@ -206,10 +205,7 @@ namespace AnimeList.Services
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json"),
             };
 
-            if (!string.IsNullOrEmpty(tokenData?.access_token))
-            {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
-            }
+            ApplyBearerAuth(request, tokenData);
 
             var client = _clientFactory.CreateClient();
             var response = await client.SendAsync(request);
@@ -400,10 +396,7 @@ namespace AnimeList.Services
                 Content = new StringContent(ser, System.Text.Encoding.UTF8, "application/json")
             };
 
-            if (!string.IsNullOrEmpty(tokenData?.access_token))
-            {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
-            }
+            ApplyBearerAuth(request, tokenData);
 
             var client = _clientFactory.CreateClient();
             var response = await client.SendAsync(request);
@@ -587,18 +580,8 @@ namespace AnimeList.Services
             return anime;
         }
 
-        private static void NormalizeVideoIds(List<Video> videos, string externalId, bool hasGroupId)
-        {
-            if (videos == null) return;
-            foreach (var v in videos)
-            {
-                var season = v.season > 0 ? v.season : 1;
-                var episode = v.episode > 0 ? v.episode : 1;
-                v.id = hasGroupId ? $"{externalId}:{season}:{episode}" : $"{externalId}:{episode}";
-                v.season = season;
-                v.episode = episode;
-            }
-        }
+        // NormalizeVideoIds lives in Utils.cs (globally usable via the existing
+        // `using static AnimeList.Utils` import) — shared with Kitsu and MAL.
 
         private int GetSeasonNumber(dynamic relations, int animeId)
         {
@@ -663,7 +646,7 @@ namespace AnimeList.Services
             {
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
             };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData?.access_token);
+            ApplyBearerAuth(request, tokenData);
 
             var client = _clientFactory.CreateClient();
             var response = await client.SendAsync(request);
@@ -761,7 +744,7 @@ namespace AnimeList.Services
             {
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
             };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            ApplyBearerAuth(request, tokenData);
 
             var client = _clientFactory.CreateClient();
             var saveResponse = await client.SendAsync(request);
@@ -791,7 +774,7 @@ namespace AnimeList.Services
             {
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json"),
             };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            ApplyBearerAuth(request, tokenData);
 
             var deleteResponse = await _clientFactory.CreateClient().SendAsync(request);
             ThrowIfApiCallFailed(deleteResponse, "delete");
@@ -866,8 +849,7 @@ namespace AnimeList.Services
             {
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
             };
-            if (!string.IsNullOrEmpty(tokenData?.access_token))
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            ApplyBearerAuth(request, tokenData);
 
             var client = _clientFactory.CreateClient();
             var response = await client.SendAsync(request);
@@ -934,7 +916,7 @@ namespace AnimeList.Services
             {
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
             };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            ApplyBearerAuth(request, tokenData);
 
             var response = await _clientFactory.CreateClient().SendAsync(request);
             if (!response.IsSuccessStatusCode) return [];
