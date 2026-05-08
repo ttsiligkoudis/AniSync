@@ -1,7 +1,6 @@
 ﻿using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
-using System.Net;
 
 namespace AnimeList.Services
 {
@@ -580,9 +579,6 @@ namespace AnimeList.Services
             return anime;
         }
 
-        // NormalizeVideoIds lives in Utils.cs (globally usable via the existing
-        // `using static AnimeList.Utils` import) — shared with Kitsu and MAL.
-
         private int GetSeasonNumber(dynamic relations, int animeId)
         {
             int season = 1;
@@ -748,7 +744,7 @@ namespace AnimeList.Services
 
             var client = _clientFactory.CreateClient();
             var saveResponse = await client.SendAsync(request);
-            ThrowIfApiCallFailed(saveResponse, "save");
+            await EnsureSuccessOrThrow(saveResponse, "AniList", "save");
         }
 
         public async Task DeleteAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)
@@ -777,20 +773,7 @@ namespace AnimeList.Services
             ApplyBearerAuth(request, tokenData);
 
             var deleteResponse = await _clientFactory.CreateClient().SendAsync(request);
-            ThrowIfApiCallFailed(deleteResponse, "delete");
-        }
-
-        // GraphQL mutations always come back 200 even when they error out at the field level
-        // — but the transport layer can still 401 when the bearer is rotated. Catch both
-        // so SyncService can flag NeedsReauth on a stale linked AniList token instead of
-        // silently dropping the user's save.
-        private static void ThrowIfApiCallFailed(HttpResponseMessage response, string op)
-        {
-            if (response.IsSuccessStatusCode) return;
-            if (response.StatusCode == HttpStatusCode.Unauthorized
-                || response.StatusCode == HttpStatusCode.Forbidden)
-                throw new UnauthorizedAccessException($"AniList {op} returned {(int)response.StatusCode}");
-            throw new HttpRequestException($"AniList {op} returned {(int)response.StatusCode}");
+            await EnsureSuccessOrThrow(deleteResponse, "AniList", "delete");
         }
 
         public async Task<(string? name, int? episodeCount)> GetAnimeSummaryAsync(string id)

@@ -1,7 +1,6 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
-using System.Net;
 using System.Text;
 
 namespace AnimeList.Services
@@ -250,6 +249,7 @@ namespace AnimeList.Services
             // way AniList and MAL do.
             var url = $"{_kitsuApi}/anime/{resolvedAnimeId}?include=categories,episodes,animeProductions.producer";
             var request = new HttpRequestMessage(HttpMethod.Get, url);
+            ApplyBearerAuth(request, tokenData);
 
             var client = _clientFactory.CreateClient();
             var response = await client.SendAsync(request);
@@ -588,7 +588,7 @@ namespace AnimeList.Services
             ApplyBearerAuth(request, tokenData);
             Console.Error.WriteLine($"[Kitsu] {(existing?.EntryId != null ? "PATCH" : "POST")} library-entries id={resolvedKitsuId} status={status} progress={progress}.");
             var saveResponse = await _clientFactory.CreateClient().SendAsync(request);
-            await ThrowIfApiCallFailed(saveResponse, "save");
+            await EnsureSuccessOrThrow(saveResponse, "Kitsu", "save", includeBody: true);
         }
 
         public async Task<(string? name, int? episodeCount)> GetAnimeSummaryAsync(string id)
@@ -674,30 +674,8 @@ namespace AnimeList.Services
             ApplyBearerAuth(request, tokenData);
 
             var deleteResponse = await _clientFactory.CreateClient().SendAsync(request);
-            await ThrowIfApiCallFailed(deleteResponse, "delete");
+            await EnsureSuccessOrThrow(deleteResponse, "Kitsu", "delete", includeBody: true);
         }
-
-        // Save / delete used to be fire-and-forget — a 401 from a stale linked token would
-        // disappear into the void and the user would think the sync had worked. Surface
-        // those failures so SyncService can flag NeedsReauth on the linked account row.
-        // Body is included on validation failures (Kitsu's 422 carries `errors[].detail`)
-        // so we can diagnose specifically which attribute Kitsu rejected.
-        private static async Task ThrowIfApiCallFailed(HttpResponseMessage response, string op)
-        {
-            if (response.IsSuccessStatusCode) return;
-            if (response.StatusCode == HttpStatusCode.Unauthorized
-                || response.StatusCode == HttpStatusCode.Forbidden)
-                throw new UnauthorizedAccessException($"Kitsu {op} returned {(int)response.StatusCode}");
-
-            string body = null;
-            try { body = await response.Content.ReadAsStringAsync(); }
-            catch { /* best-effort */ }
-            var detail = string.IsNullOrEmpty(body) ? "" : $" — body: {Truncate(body, 600)}";
-            throw new HttpRequestException($"Kitsu {op} returned {(int)response.StatusCode}{detail}");
-        }
-
-        private static string Truncate(string s, int max)
-            => s.Length <= max ? s : s[..max] + "…";
 
         public async Task<List<AnimeEntry>> GetUserListEntriesAsync(TokenData tokenData)
         {
@@ -805,10 +783,11 @@ namespace AnimeList.Services
             }
         }
 
-private async Task<int?> GetTotalEpisodesAsync(TokenData tokenData, string resolvedKitsuId)
+        private async Task<int?> GetTotalEpisodesAsync(TokenData tokenData, string resolvedKitsuId)
         {
             var url = $"{_kitsuApi}/anime/{resolvedKitsuId}?fields[anime]=episodeCount";
             var request = new HttpRequestMessage(HttpMethod.Get, url);
+            ApplyBearerAuth(request, tokenData);
 
             var client = _clientFactory.CreateClient();
             var response = await client.SendAsync(request);
@@ -879,7 +858,5 @@ private async Task<int?> GetTotalEpisodesAsync(TokenData tokenData, string resol
                 ?? SafeGet<string>(anime, "attributes", "titles", "en_jp")
                 ?? SafeGet<string>(anime, "attributes", "canonicalTitle");
         }
-
-        // NormalizeVideoIds lives in Utils.cs — shared with AniList and MAL.
     }
 }

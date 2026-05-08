@@ -1,7 +1,6 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
-using System.Net;
 
 namespace AnimeList.Services
 {
@@ -466,7 +465,7 @@ namespace AnimeList.Services
             ApplyAuth(request, tokenData);
 
             var saveResponse = await _clientFactory.CreateClient().SendAsync(request);
-            ThrowIfApiCallFailed(saveResponse, "save");
+            await EnsureSuccessOrThrow(saveResponse, "MyAnimeList", "save");
         }
 
         public async Task DeleteAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)
@@ -479,18 +478,7 @@ namespace AnimeList.Services
             var request = new HttpRequestMessage(HttpMethod.Delete, $"{MalApi}/anime/{resolvedMalId}/my_list_status");
             ApplyAuth(request, tokenData);
             var deleteResponse = await _clientFactory.CreateClient().SendAsync(request);
-            ThrowIfApiCallFailed(deleteResponse, "delete");
-        }
-
-        // MAL silently dropped 401s before — letting them bubble up gives SyncService a
-        // chance to flag NeedsReauth on a linked-account row whose token has been revoked.
-        private static void ThrowIfApiCallFailed(HttpResponseMessage response, string op)
-        {
-            if (response.IsSuccessStatusCode) return;
-            if (response.StatusCode == HttpStatusCode.Unauthorized
-                || response.StatusCode == HttpStatusCode.Forbidden)
-                throw new UnauthorizedAccessException($"MyAnimeList {op} returned {(int)response.StatusCode}");
-            throw new HttpRequestException($"MyAnimeList {op} returned {(int)response.StatusCode}");
+            await EnsureSuccessOrThrow(deleteResponse, "MyAnimeList", "delete");
         }
 
         private async Task<Meta> BuildMetaAsync(JObject node, JObject listStatus, bool groupSeasons = true)
@@ -726,11 +714,6 @@ namespace AnimeList.Services
 
             return entries;
         }
-
-// Stremio rejects (renders blank) when video.id doesn't share a prefix with meta.id.
-        // The Kitsu cross-service fallback leaves kitsu:N-prefixed ids in place, so rewrite
-        // every video id to the calling service's external id space.
-        // NormalizeVideoIds lives in Utils.cs — shared with AniList and Kitsu.
 
         /// <summary>
         /// Pulls the YouTube video id out of MAL's <c>videos</c> array. The field is sparsely

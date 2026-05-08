@@ -606,11 +606,6 @@ namespace AnimeList
             // weights up/down if one ranking signal proves more useful in practice.
             return 0.5 * containment + 0.5 * jaccard;
         }
-        /// <summary>
-        /// Equal-weighted blend of containment and Jaccard. See <see cref="ScoreMatch"/>
-        /// for the semantics — containment dominates for "is the query a subset of this
-        /// title", Jaccard breaks ties by penalising bloat.
-        /// </summary>
 
         /// <summary>
         /// Rewrites every <see cref="Video.id"/> so it shares a prefix with the parent
@@ -629,7 +624,6 @@ namespace AnimeList
         /// (<c>{externalId}:{episode}</c>).</param>
         public static void NormalizeVideoIds(List<Video> videos, string externalId, bool hasGroupId)
         {
-            if (videos == null) return;
             foreach (var v in videos)
             {
                 var season = v.season > 0 ? v.season : 1;
@@ -657,10 +651,36 @@ namespace AnimeList
         /// </summary>
         public static void ApplyBearerAuth(HttpRequestMessage request, TokenData tokenData)
         {
-            if (request == null) return;
             if (string.IsNullOrWhiteSpace(tokenData?.access_token)) return;
             request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
                 "Bearer", tokenData.access_token);
+        }
+
+        /// <summary>
+        /// Translates a non-success <see cref="HttpResponseMessage"/> into the right
+        /// exception shape for SyncService: <see cref="UnauthorizedAccessException"/>
+        /// for 401/403 (so a stale linked-account token can be flagged NeedsReauth),
+        /// <see cref="HttpRequestException"/> for everything else. Pass
+        /// <paramref name="includeBody"/>=true on Kitsu writes so the 422 validation
+        /// payload (<c>errors[].detail</c>) makes it into the message.
+        /// </summary>
+        public static async Task EnsureSuccessOrThrow(HttpResponseMessage response, string serviceName, string op, bool includeBody = false)
+        {
+            if (response.IsSuccessStatusCode) return;
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+                || response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                throw new UnauthorizedAccessException($"{serviceName} {op} returned {(int)response.StatusCode}");
+
+            var detail = "";
+            if (includeBody)
+            {
+                string body = null;
+                try { body = await response.Content.ReadAsStringAsync(); }
+                catch { /* best-effort */ }
+                if (!string.IsNullOrEmpty(body))
+                    detail = $" — body: {(body.Length <= 600 ? body : body[..600] + "…")}";
+            }
+            throw new HttpRequestException($"{serviceName} {op} returned {(int)response.StatusCode}{detail}");
         }
     }
 }
