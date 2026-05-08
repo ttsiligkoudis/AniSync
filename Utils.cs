@@ -571,10 +571,20 @@ namespace AnimeList
         }
 
         /// <summary>
-        /// Jaccard similarity between the normalised tokens of a query and a candidate
-        /// title. 1.0 = identical sets, 0 = disjoint. Cheap and deterministic — we
-        /// don't need Levenshtein because both inputs come from canonical sources
-        /// (provider catalogs, streaming-site DOM), not user typing.
+        /// Title-similarity score between a query and a candidate. Blends two
+        /// metrics:
+        /// <list type="bullet">
+        /// <item><b>Containment</b> (<c>intersect / |query|</c>) — how much of the
+        /// query is covered by the candidate. Rewards specific titles that
+        /// contain every query token, so a query like "Naruto Shippuden movie 2"
+        /// scores "Naruto Shippuden the Movie 2: Bonds" higher than
+        /// "Naruto Shippuden the Movie" (the latter is missing the "2").</item>
+        /// <item><b>Jaccard</b> (<c>intersect / union</c>) — penalises candidates
+        /// for extra noise. Breaks ties when multiple candidates contain every
+        /// query token, e.g. "Naruto" beats "Boruto: Naruto Next Generations"
+        /// for the query "Naruto" even though both score 1.0 on containment.</item>
+        /// </list>
+        /// Returns 1.0 on identical normalised strings and 0 on disjoint sets.
         /// </summary>
         public static double ScoreMatch(string normalisedQuery, string candidate)
         {
@@ -587,8 +597,14 @@ namespace AnimeList
             var qSet = new HashSet<string>(qTokens);
             var cSet = new HashSet<string>(cTokens);
             var intersect = qSet.Intersect(cSet).Count();
+            if (intersect == 0) return 0;
             var union = qSet.Union(cSet).Count();
-            return union > 0 ? (double)intersect / union : 0;
+            var containment = (double)intersect / qSet.Count;
+            var jaccard = (double)intersect / union;
+            // Equal-weighted blend. Containment dominates for "is the query a subset
+            // of this title", Jaccard breaks ties by penalising bloat. Tune the
+            // weights up/down if one ranking signal proves more useful in practice.
+            return 0.5 * containment + 0.5 * jaccard;
         }
     }
 }
