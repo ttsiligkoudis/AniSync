@@ -207,11 +207,8 @@ namespace AnimeList.Services
                 // cours of a franchise collapse to one card via the dedup step below. When the
                 // user disables grouping, every cour gets its own native id and dedup is a
                 // no-op since native ids don't collide.
-                var externalId = groupSeasons
-                    ? (!string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                       !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
-                       $"{kitsuPrefix}{animeKitsuId}")
-                    : $"{kitsuPrefix}{animeKitsuId}";
+                var (externalId, _, _) = ResolveGroupedId(
+                    mapping, $"{kitsuPrefix}{animeKitsuId}", groupSeasons, allowKitsuFallback: false);
 
                 var subtype = SafeGet<string>(anime, "attributes", "subtype");
                 var isMovie = IsMovieFormat(subtype);
@@ -266,21 +263,8 @@ namespace AnimeList.Services
             // so meta.id matches what the user clicked from a grouped catalog. When off, keep
             // the response in this service's native id space.
             // videoId will still use the groupId since it is better source for streams.
-            var groupId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                   !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" : null;
-
-            var hasGroupId = !string.IsNullOrEmpty(groupId);
-
-            // fallback to the kitsu id (if available) when no groupId is available.
-            // in that case the videoId must not have the :season inside since kitsuIds are not seasonal.
-            if (!hasGroupId)
-            {
-                groupId = $"{kitsuPrefix}{(string)entry["id"]}";
-            }
-
-            var externalId = groupSeasons
-                ? groupId
-                : $"{kitsuPrefix}{(string)entry["id"]}";
+            var (externalId, groupId, hasGroupId) = ResolveGroupedId(
+                mapping, $"{kitsuPrefix}{(string)entry["id"]}", groupSeasons, allowKitsuFallback: false);
 
             var subtype = SafeGet<string>(entry, "attributes", "subtype");
             var isMovie = IsMovieFormat(subtype);
@@ -451,7 +435,11 @@ namespace AnimeList.Services
         {
             var resolvedKitsuId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu, season);
             if (string.IsNullOrEmpty(resolvedKitsuId)) return null;
+            return await GetAnimeEntryByResolvedIdAsync(tokenData, resolvedKitsuId);
+        }
 
+        private async Task<AnimeEntry> GetAnimeEntryByResolvedIdAsync(TokenData tokenData, string resolvedKitsuId)
+        {
             var entry = new AnimeEntry { MediaId = resolvedKitsuId };
 
             // Without auth we still want totalEpisodes so the UI can show a progress max
@@ -519,7 +507,7 @@ namespace AnimeList.Services
                 return;
             }
 
-            var existing = await GetAnimeEntryAsync(tokenData, $"{kitsuPrefix}{resolvedKitsuId}", season);
+            var existing = await GetAnimeEntryByResolvedIdAsync(tokenData, resolvedKitsuId);
 
             if (string.IsNullOrEmpty(status)) status = existing?.Status;
             // Kitsu requires a status when creating; default new entries to current
@@ -667,7 +655,7 @@ namespace AnimeList.Services
 
             // Need the library-entry id, not the anime id, for the DELETE. Fetch via the
             // user's list; if the entry doesn't exist there's nothing to remove.
-            var existing = await GetAnimeEntryAsync(tokenData, $"{kitsuPrefix}{resolvedKitsuId}", season);
+            var existing = await GetAnimeEntryByResolvedIdAsync(tokenData, resolvedKitsuId);
             if (string.IsNullOrEmpty(existing?.EntryId)) return;
 
             var request = new HttpRequestMessage(HttpMethod.Delete, $"{_kitsuApi}/library-entries/{existing.EntryId}");

@@ -184,21 +184,8 @@ namespace AnimeList.Services
             // so meta.id matches what the user clicked from a grouped catalog. When off, keep
             // the response in this service's native id space.
             // videoId will still use the groupId since it is better source for streams.
-            var groupId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                   !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" : null;
-
-            var hasGroupId = !string.IsNullOrEmpty(groupId);
-
-            // fallback to the kitsu id (if available) when no groupId is available.
-            // in that case the videoId must not have the :season inside since kitsuIds are not seasonal.
-            if (!hasGroupId)
-            {
-                groupId = mapping.KitsuId.HasValue ? $"{kitsuPrefix}{mapping.KitsuId}" : $"{malPrefix}{(string)json["id"]}";
-            }
-
-            var externalId = groupSeasons
-                ? groupId
-                : $"{malPrefix}{(string)json["id"]}";
+            var (externalId, groupId, hasGroupId) = ResolveGroupedId(
+                mapping, $"{malPrefix}{(string)json["id"]}", groupSeasons, allowKitsuFallback: true);
 
             var mediaType = (string)json["media_type"];
             var isMovie = IsMovieFormat(mediaType);
@@ -385,8 +372,7 @@ namespace AnimeList.Services
                 // MAL returns 0 for "no rating set" instead of null. Treat it as null so the
                 // Manage Entry input renders empty (and doesn't propagate a 0 through the
                 // sync fan-out — Kitsu's ratingTwenty has a hard minimum of 2 and 422s on 0).
-                var rawScore = (double?)mls["score"];
-                entry.Score = (rawScore.HasValue && rawScore.Value > 0) ? rawScore : null;
+                entry.Score = NullableScore((double?)mls["score"]);
                 entry.Notes = (string)mls["comments"];
                 entry.RewatchCount = (int?)mls["num_times_rewatched"] ?? 0;
                 entry.StartedAt = ParseProviderDate((string)mls["start_date"]);
@@ -493,11 +479,8 @@ namespace AnimeList.Services
             // multiple cours of a franchise collapse to one card via the dedup step in the
             // caller. When the user disables grouping, every cour gets its own native id and
             // dedup is a no-op since native ids don't collide.
-            var externalId = groupSeasons
-                ? (!string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                    !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
-                    $"{malPrefix}{malIdStr}")
-                : $"{malPrefix}{malIdStr}";
+            var (externalId, _, _) = ResolveGroupedId(
+                mapping, $"{malPrefix}{malIdStr}", groupSeasons, allowKitsuFallback: false);
 
             var mediaType = (string)node["media_type"];
             var isMovie = IsMovieFormat(mediaType);
@@ -687,7 +670,6 @@ namespace AnimeList.Services
 
                     var rawStatus = (string)listStatus["status"];
                     var isRewatching = (bool?)listStatus["is_rewatching"] ?? false;
-                    var rawScore = (double?)listStatus["score"];
 
                     entries.Add(new AnimeEntry
                     {
@@ -700,7 +682,7 @@ namespace AnimeList.Services
                         Status = isRewatching ? "rewatching" : rawStatus,
                         Progress = (int?)listStatus["num_episodes_watched"] ?? 0,
                         TotalEpisodes = (int?)node["num_episodes"],
-                        Score = (rawScore.HasValue && rawScore.Value > 0) ? rawScore : null,
+                        Score = NullableScore((double?)listStatus["score"]),
                         Notes = (string)listStatus["comments"],
                         RewatchCount = (int?)listStatus["num_times_rewatched"] ?? 0,
                         StartedAt = ParseProviderDate((string)listStatus["start_date"]),

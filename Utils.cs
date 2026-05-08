@@ -657,6 +657,45 @@ namespace AnimeList
         }
 
         /// <summary>
+        /// Picks the meta id and (separate) group id for a per-service GetAnimeByIdAsync
+        /// response. Falls through IMDb → tmdb:N → optional kitsu:N → native id, in that
+        /// order. The pair lets callers display a grouped meta (id == groupId) while still
+        /// stamping non-grouped video ids with the native prefix when needed.
+        /// </summary>
+        /// <param name="mapping">Cross-service mapping row, may be null.</param>
+        /// <param name="nativeId">Already-prefixed native id for the calling service
+        /// (e.g. <c>"anilist:12345"</c>).</param>
+        /// <param name="groupSeasons">When true, externalId == groupId so multiple cours
+        /// of a franchise collapse to one card. When false, externalId stays in the native
+        /// id space.</param>
+        /// <param name="allowKitsuFallback">AniList/MAL set this to true so they can
+        /// inherit a Kitsu id from the mapping when no IMDb/TMDB cross-mapping exists.
+        /// Kitsu sets it to false — its native id IS a kitsu id, so the fallback is a no-op.</param>
+        public static (string externalId, string groupId, bool hasGroupId) ResolveGroupedId(
+            AnimeIdMapping mapping, string nativeId, bool groupSeasons, bool allowKitsuFallback)
+        {
+            var groupId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                          !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" : null;
+
+            var hasGroupId = !string.IsNullOrEmpty(groupId);
+
+            if (!hasGroupId)
+                groupId = (allowKitsuFallback && mapping?.KitsuId.HasValue == true)
+                    ? $"{kitsuPrefix}{mapping.KitsuId}"
+                    : nativeId;
+
+            var externalId = groupSeasons ? groupId : nativeId;
+            return (externalId, groupId, hasGroupId);
+        }
+
+        /// <summary>
+        /// Coalesces a 0-or-null score sentinel to null. AniList and MAL both treat
+        /// score == 0 as "no rating", so a sparse hydration shouldn't carry it through.
+        /// </summary>
+        public static double? NullableScore(double? raw) =>
+            (raw.HasValue && raw.Value > 0) ? raw : null;
+
+        /// <summary>
         /// Translates a non-success <see cref="HttpResponseMessage"/> into the right
         /// exception shape for SyncService: <see cref="UnauthorizedAccessException"/>
         /// for 401/403 (so a stale linked-account token can be flagged NeedsReauth),
