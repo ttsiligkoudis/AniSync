@@ -388,14 +388,14 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(tokenData?.access_token))
             {
-                Console.Error.WriteLine($"[MAL] Save skipped — token has no access_token (animeId={animeId}).");
+                _logger.LogWarning("MAL save skipped — token has no access_token (animeId={AnimeId}).", animeId);
                 return;
             }
 
             var resolvedMalId = await _mappingService.GetIdByService(animeId, AnimeService.MyAnimeList, season);
             if (string.IsNullOrEmpty(resolvedMalId))
             {
-                Console.Error.WriteLine($"[MAL] Save skipped — no MAL mapping for animeId={animeId} season={season}.");
+                _logger.LogWarning("MAL save skipped — no MAL mapping for animeId={AnimeId} season={Season}.", animeId, season);
                 return;
             }
 

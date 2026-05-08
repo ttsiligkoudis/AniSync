@@ -357,13 +357,7 @@ namespace AnimeList.Controllers
                     continue;
                 }
 
-                var prefix = l.Service switch
-                {
-                    AnimeService.Anilist => anilistPrefix,
-                    AnimeService.Kitsu => kitsuPrefix,
-                    AnimeService.MyAnimeList => malPrefix,
-                    _ => string.Empty,
-                };
+                var prefix = GetServicePrefix(l.Service);
 
                 var byId = secondary
                     .Where(e => !string.IsNullOrEmpty(e.MediaId))
@@ -441,7 +435,7 @@ namespace AnimeList.Controllers
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"[SyncBatch] entry {entry.MediaId} failed: {ex.Message}");
+                    _logger.LogError(ex, "SyncBatch entry {MediaId} failed.", entry.MediaId);
                     failed++;
                 }
             }

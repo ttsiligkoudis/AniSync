@@ -14,6 +14,19 @@ namespace AnimeList
         public static readonly string tmdbPrefix = "tmdb:";
         public static readonly string malPrefix = "mal:";
 
+        /// <summary>
+        /// Maps an <see cref="AnimeService"/> to its catalog id prefix. Used by
+        /// controllers / fallback services that need to stamp an id with the
+        /// caller's prefix when bridging across services.
+        /// </summary>
+        public static string GetServicePrefix(AnimeService service) => service switch
+        {
+            AnimeService.Anilist => anilistPrefix,
+            AnimeService.Kitsu => kitsuPrefix,
+            AnimeService.MyAnimeList => malPrefix,
+            _ => throw new ArgumentOutOfRangeException(nameof(service)),
+        };
+
         public static readonly string DefaultOption = "None";
         public const string SeasonCurrent = "This Season";
         public const string SeasonNext = "Next Season";
