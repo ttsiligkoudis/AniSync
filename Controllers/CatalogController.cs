@@ -81,13 +81,20 @@ namespace AnimeList.Controllers
                 }
 
                 // Re-rank Search results by the shared Utils.ScoreMatch — same
-                // helper /api/v1/match uses, no threshold, no extra filter, so the
-                // ordering matches /match exactly within each type row.
-                if (listType == ListType.Search && !string.IsNullOrWhiteSpace(search) && metas.Count > 1)
+                // helper /api/v1/match uses. A relevance threshold trims the long
+                // tail of low-overlap matches that the user finds noisy in the
+                // search row; /match keeps everything because its callers want a
+                // ranked list, while Stremio's row is small (~10 visible cards) so
+                // a strict cutoff reads better.
+                if (listType == ListType.Search && !string.IsNullOrWhiteSpace(search) && metas.Count > 0)
                 {
                     var normalisedQuery = NormalizeTitle(search);
+                    const double minScore = 0.4;
                     metas = metas
-                        .OrderByDescending(m => ScoreMatch(normalisedQuery, m.name))
+                        .Select(m => (meta: m, score: ScoreMatch(normalisedQuery, m.name)))
+                        .Where(x => x.score >= minScore)
+                        .OrderByDescending(x => x.score)
+                        .Select(x => x.meta)
                         .ToList();
                 }
 
