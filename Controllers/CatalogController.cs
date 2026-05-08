@@ -55,11 +55,19 @@ namespace AnimeList.Controllers
                 var configuration = await ResolveConfigAsync(config, _configStore);
                 var groupSeasons = configuration?.disableSeasonGrouping != true;
 
+                // Search always runs with groupSeasons=false so the per-service dedup
+                // doesn't rewrite a movie's name to the shortest among entries that
+                // share an IMDb id. Mirrors /api/v1/match exactly — same upstream
+                // call, same scoring, same ordering. The user's groupSeasons toggle
+                // still applies to every other catalog (user lists / Trending /
+                // Seasonal / Airing).
+                var groupSeasonsForCall = listType == ListType.Search ? false : groupSeasons;
+
                 var metas = animeService switch
                 {
-                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasons),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasons),
-                    _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasons),
+                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall),
+                    _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall),
                 };
 
                 // Search splits into separate series + movie catalogs in the manifest
@@ -72,27 +80,14 @@ namespace AnimeList.Controllers
                     metas = metas.Where(m => m.type == typeName).ToList();
                 }
 
-                // Re-rank Search results by Jaccard similarity against the normalised
-                // query so the most likely show floats to the top — same scoring the
-                // public /api/v1/match endpoint uses. Only applies to Search; other
-                // catalogs (Trending / Seasonal / user lists) keep their intrinsic
-                // ordering. OrderByDescending is stable so ties keep upstream order.
-                //
-                // Drop results below the relevance threshold afterwards. Stremio's
-                // search row is small (5-10 visible cards), so dragging in titles
-                // that share only one token ("Boruto: Naruto Next Generations" for a
-                // "Naruto Shippuden" query) is worse than returning fewer results.
-                // 0.3 keeps "Naruto" (0.5) and "Naruto: The Last" (0.33) while
-                // cutting "Boruto" (0.25) and unrelated noise (0).
-                if (listType == ListType.Search && !string.IsNullOrWhiteSpace(search) && metas.Count > 0)
+                // Re-rank Search results by the shared Utils.ScoreMatch — same
+                // helper /api/v1/match uses, no threshold, no extra filter, so the
+                // ordering matches /match exactly within each type row.
+                if (listType == ListType.Search && !string.IsNullOrWhiteSpace(search) && metas.Count > 1)
                 {
                     var normalisedQuery = NormalizeTitle(search);
-                    const double minScore = 0.2;
                     metas = metas
-                        .Select(m => (meta: m, score: ScoreMatch(normalisedQuery, m.name)))
-                        .Where(x => x.score >= minScore)
-                        .OrderByDescending(x => x.score)
-                        .Select(x => x.meta)
+                        .OrderByDescending(m => ScoreMatch(normalisedQuery, m.name))
                         .ToList();
                 }
 
