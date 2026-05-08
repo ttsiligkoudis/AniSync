@@ -190,7 +190,10 @@ namespace AnimeList.Controllers
             {
                 type = MetaType.movie.ToString(),
                 id = ListType.Search.ToString(),
-                name = "Anime Movies",
+                // Same catalog name as the series row above so Stremio's "<name> - <type>"
+                // label format renders as "Anime - Series" / "Anime - Movie" — symmetrical
+                // prefix, type suffix supplied by Stremio.
+                name = "Anime",
                 extra = [new("search") { isRequired = true }, new("skip")],
             });
 
