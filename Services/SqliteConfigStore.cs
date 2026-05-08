@@ -135,8 +135,8 @@ namespace AnimeList.Services
             var newUid = GenerateUid();
             using var insert = conn.CreateCommand();
             insert.CommandText = """
-                INSERT INTO configs (uid, service, user_key, token_json, created_at, updated_at)
-                VALUES ($uid, $s, $k, $j, $c, $u)
+                INSERT INTO configs (uid, service, user_key, token_json, created_at, updated_at, flags)
+                VALUES ($uid, $s, $k, $j, $c, $u, $f)
                 """;
             insert.Parameters.AddWithValue("$uid", newUid);
             insert.Parameters.AddWithValue("$s", serviceInt);
@@ -144,9 +144,18 @@ namespace AnimeList.Services
             insert.Parameters.AddWithValue("$j", json);
             insert.Parameters.AddWithValue("$c", now);
             insert.Parameters.AddWithValue("$u", now);
+            insert.Parameters.AddWithValue("$f", DefaultFlagsPacked);
             await insert.ExecuteNonQueryAsync();
             return newUid;
         }
+
+        // Default packed flags for a freshly-linked account. flags1 byte enables
+        // Currently Watching (0x01), Seasonal Anime (0x08), and the Discover-Only
+        // bit for Seasonal (0x80). flags2 and flags3 stay zero — every other
+        // catalog / stream toggle defaults off until the user explicitly turns it
+        // on in the configure page. Encoded as the same packed integer
+        // SetFlagsAsync writes: bits 16-23 = flags1, 8-15 = flags2, 0-7 = flags3.
+        private const long DefaultFlagsPacked = ((long)(0x01 | 0x08 | 0x80)) << 16;
 
         public async Task<TokenData> GetAsync(string uid)
         {
