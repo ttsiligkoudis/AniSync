@@ -131,13 +131,7 @@ namespace AnimeList.Services
                 AnimeService.MyAnimeList => m.MalId,
                 _ => null,
             };
-            var prefix = service switch
-            {
-                AnimeService.Anilist => anilistPrefix,
-                AnimeService.Kitsu => kitsuPrefix,
-                AnimeService.MyAnimeList => malPrefix,
-                _ => string.Empty,
-            };
+            var prefix = GetServicePrefix(service);
 
             var mappings = (await _animeMapping.GetImdbMapping(imdbId))
                 .OrderBy(m => m.Season ?? int.MaxValue)

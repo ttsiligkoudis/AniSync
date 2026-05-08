@@ -11,6 +11,7 @@ namespace AnimeList.Services
         private readonly IAnimeMappingService _mappingService;
         private readonly IAnilistFallback _anilistFallback;
         private readonly ICinemetaService _cinemetaService;
+        private readonly ILogger<KitsuService> _logger;
         private readonly string _kitsuApi = "https://kitsu.io/api/edge";
         private static readonly HashSet<ListType> _userLists =
         [
@@ -22,12 +23,13 @@ namespace AnimeList.Services
         // Kitsu enforces a maximum of 20 items per page
         private const int CatalogPageSize = 20;
 
-        public KitsuService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IAnilistFallback anilistFallback, ICinemetaService cinemetaService)
+        public KitsuService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IAnilistFallback anilistFallback, ICinemetaService cinemetaService, ILogger<KitsuService> logger)
         {
             _clientFactory = clientFactory;
             _mappingService = mappingService;
             _anilistFallback = anilistFallback;
             _cinemetaService = cinemetaService;
+            _logger = logger;
         }
 
         public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true)
@@ -498,12 +500,12 @@ namespace AnimeList.Services
             var resolvedKitsuId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu, season);
             if (string.IsNullOrEmpty(resolvedKitsuId))
             {
-                Console.Error.WriteLine($"[Kitsu] Save skipped — no Kitsu mapping for animeId={animeId} season={season}.");
+                _logger.LogWarning("Kitsu save skipped — no Kitsu mapping for animeId={AnimeId} season={Season}.", animeId, season);
                 return;
             }
             if (string.IsNullOrEmpty(tokenData?.access_token) || string.IsNullOrEmpty(tokenData?.user_id))
             {
-                Console.Error.WriteLine($"[Kitsu] Save skipped — token has no access_token/user_id (id={resolvedKitsuId}).");
+                _logger.LogWarning("Kitsu save skipped — token has no access_token/user_id (id={ResolvedKitsuId}).", resolvedKitsuId);
                 return;
             }
 
@@ -574,7 +576,8 @@ namespace AnimeList.Services
             }
 
             ApplyBearerAuth(request, tokenData);
-            Console.Error.WriteLine($"[Kitsu] {(existing?.EntryId != null ? "PATCH" : "POST")} library-entries id={resolvedKitsuId} status={status} progress={progress}.");
+            _logger.LogInformation("Kitsu {Method} library-entries id={ResolvedKitsuId} status={Status} progress={Progress}.",
+                existing?.EntryId != null ? "PATCH" : "POST", resolvedKitsuId, status, progress);
             var saveResponse = await _clientFactory.CreateClient().SendAsync(request);
             await EnsureSuccessOrThrow(saveResponse, "Kitsu", "save", includeBody: true);
         }

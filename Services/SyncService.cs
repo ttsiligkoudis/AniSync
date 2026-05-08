@@ -10,15 +10,18 @@ namespace AnimeList.Services
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
         private readonly ITokenService _tokenService;
+        private readonly ILogger<SyncService> _logger;
 
         public SyncService(IConfigStore configStore, IAnilistService anilistService,
-            IKitsuService kitsuService, IMalService malService, ITokenService tokenService)
+            IKitsuService kitsuService, IMalService malService, ITokenService tokenService,
+            ILogger<SyncService> logger)
         {
             _configStore = configStore;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
             _tokenService = tokenService;
+            _logger = logger;
         }
 
         public async Task FanOutSaveAsync(TokenData primary, string animeId, int? season, int progress,
@@ -154,7 +157,7 @@ namespace AnimeList.Services
                 // Server-side revocation — the token's date said valid but the API rejected
                 // it. Try one immediate refresh; if that also fails, flag NeedsReauth so the
                 // UI surfaces it and future fan-outs skip the link.
-                Console.Error.WriteLine($"[Sync] {target.Service} save 401: {ex.Message} — flagging for re-auth.");
+                _logger.LogWarning(ex, "Sync {Service} save 401 — flagging for re-auth.", target.Service);
                 await TryRefreshAsync(uid, target);
             }
             catch (Exception ex)
@@ -162,7 +165,7 @@ namespace AnimeList.Services
                 // Best-effort sync. Log so a deploy log diagnoses why a particular target's
                 // save fell over (mapping gap, transient 5xx, etc.) without failing the
                 // primary save the user is actually waiting on.
-                Console.Error.WriteLine($"[Sync] {target.Service} save failed: {ex.Message}");
+                _logger.LogError(ex, "Sync {Service} save failed.", target.Service);
             }
         }
 
@@ -185,12 +188,12 @@ namespace AnimeList.Services
             }
             catch (UnauthorizedAccessException ex)
             {
-                Console.Error.WriteLine($"[Sync] {target.Service} delete 401: {ex.Message} — flagging for re-auth.");
+                _logger.LogWarning(ex, "Sync {Service} delete 401 — flagging for re-auth.", target.Service);
                 await TryRefreshAsync(uid, target);
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[Sync] {target.Service} delete failed: {ex.Message}");
+                _logger.LogError(ex, "Sync {Service} delete failed.", target.Service);
             }
         }
 

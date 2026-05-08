@@ -11,6 +11,7 @@ namespace AnimeList.Services
         private readonly IKitsuService _kitsuService;
         private readonly IAnilistFallback _anilistFallback;
         private readonly ICinemetaService _cinemetaService;
+        private readonly ILogger<AnilistService> _logger;
         private readonly string _anilistApi = "https://graphql.anilist.co";
         private static readonly HashSet<ListType> _userLists =
         [
@@ -18,16 +19,47 @@ namespace AnimeList.Services
             ListType.Planning, ListType.Paused, ListType.Dropped, ListType.Repeating,
         ];
 
-        public AnilistService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IKitsuService kitsuService, IAnilistFallback anilistFallback, ICinemetaService cinemetaService)
+        public AnilistService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IKitsuService kitsuService, IAnilistFallback anilistFallback, ICinemetaService cinemetaService, ILogger<AnilistService> logger)
         {
             _clientFactory = clientFactory;
             _mappingService = mappingService;
             _kitsuService = kitsuService;
             _anilistFallback = anilistFallback;
             _cinemetaService = cinemetaService;
+            _logger = logger;
         }
 
         private const int CatalogPageSize = 50;
+
+        // Posts a serialised GraphQL body and returns the dynamic `data` payload, or
+        // null on transport failure. Bearer auth is applied when tokenData carries
+        // an access_token; reads with no token (e.g. anonymous summary lookups) pass
+        // null.
+        private async Task<dynamic> PostGraphQLAsync(string requestBody, TokenData tokenData = null)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
+            {
+                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
+            };
+            ApplyBearerAuth(request, tokenData);
+            var response = await _clientFactory.CreateClient().SendAsync(request);
+            if (!response.IsSuccessStatusCode) return null;
+            var content = await response.Content.ReadAsStringAsync();
+            return DeserializeObject<dynamic>(content)?.data;
+        }
+
+        // Posts a GraphQL mutation and surfaces non-success responses via
+        // EnsureSuccessOrThrow so SyncService can flag NeedsReauth on a stale token.
+        private async Task PostGraphQLMutationAsync(string requestBody, TokenData tokenData, string op)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
+            {
+                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
+            };
+            ApplyBearerAuth(request, tokenData);
+            var response = await _clientFactory.CreateClient().SendAsync(request);
+            await EnsureSuccessOrThrow(response, "AniList", op);
+        }
 
         private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null, string search = null, string sort = null)
         {
@@ -199,21 +231,10 @@ namespace AnimeList.Services
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
             var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, search, sort);
 
-            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
-            {
-                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json"),
-            };
+            var data = await PostGraphQLAsync(requestBody, tokenData);
+            if (data == null) return [];
 
-            ApplyBearerAuth(request, tokenData);
-
-            var client = _clientFactory.CreateClient();
-            var response = await client.SendAsync(request);
-
-            if (!response.IsSuccessStatusCode) return [];
-
-            var content = await response.Content.ReadAsStringAsync();
             IEnumerable<dynamic> result;
-            var data = DeserializeObject<dynamic>(content).data;
 
             bool isUserList = !list.HasValue || _userLists.Contains(list.Value);
 
@@ -382,27 +403,9 @@ namespace AnimeList.Services
                 }
             ";
 
-            var variables = new { id = resolvedAnimeId };
-
-            var ser = SerializeObject(new { query, variables });
-
-            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
-            {
-                Content = new StringContent(ser, System.Text.Encoding.UTF8, "application/json")
-            };
-
-            ApplyBearerAuth(request, tokenData);
-
-            var client = _clientFactory.CreateClient();
-            var response = await client.SendAsync(request);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                return null;
-            }
-
-            var content = await response.Content.ReadAsStringAsync();
-            var result = DeserializeObject<dynamic>(content).data.Media;
+            var data = await PostGraphQLAsync(SerializeObject(new { query, variables = new { id = resolvedAnimeId } }), tokenData);
+            if (data == null) return null;
+            var result = data.Media;
 
             var isMovie = IsMovieFormat((string)result.format);
 
@@ -624,19 +627,8 @@ namespace AnimeList.Services
                 variables = new { userId = tokenData?.user_id, mediaId = resolvedAnimeId }
             });
 
-            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
-            {
-                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
-            };
-            ApplyBearerAuth(request, tokenData);
-
-            var client = _clientFactory.CreateClient();
-            var response = await client.SendAsync(request);
-
-            if (!response.IsSuccessStatusCode) return null;
-
-            var content = await response.Content.ReadAsStringAsync();
-            var data = DeserializeObject<dynamic>(content)?.data;
+            var data = await PostGraphQLAsync(requestBody, tokenData);
+            if (data == null) return null;
 
             var entry = new AnimeEntry
             {
@@ -671,7 +663,7 @@ namespace AnimeList.Services
 
             if (string.IsNullOrEmpty(resolvedAnimeId))
             {
-                Console.Error.WriteLine($"[AniList] Save skipped — no AniList mapping for animeId={animeId} season={season}.");
+                _logger.LogWarning("AniList save skipped — no AniList mapping for animeId={AnimeId} season={Season}.", animeId, season);
                 return;
             }
 
@@ -719,17 +711,7 @@ namespace AnimeList.Services
                     SaveMediaListEntry({string.Join(", ", argParts)}) {{ id }}
                 }}";
 
-            var requestBody = SerializeObject(new { query, variables });
-
-            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
-            {
-                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
-            };
-            ApplyBearerAuth(request, tokenData);
-
-            var client = _clientFactory.CreateClient();
-            var saveResponse = await client.SendAsync(request);
-            await EnsureSuccessOrThrow(saveResponse, "AniList", "save");
+            await PostGraphQLMutationAsync(SerializeObject(new { query, variables }), tokenData, "save");
         }
 
         public async Task DeleteAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)
@@ -751,14 +733,7 @@ namespace AnimeList.Services
                 variables = new { id = listId },
             });
 
-            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
-            {
-                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json"),
-            };
-            ApplyBearerAuth(request, tokenData);
-
-            var deleteResponse = await _clientFactory.CreateClient().SendAsync(request);
-            await EnsureSuccessOrThrow(deleteResponse, "AniList", "delete");
+            await PostGraphQLMutationAsync(requestBody, tokenData, "delete");
         }
 
         public async Task<(string? name, int? episodeCount)> GetAnimeSummaryAsync(string id)
@@ -778,17 +753,8 @@ namespace AnimeList.Services
                 variables = new { id = resolvedAnimeId },
             });
 
-            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
-            {
-                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json"),
-            };
-
-            var client = _clientFactory.CreateClient();
-            var response = await client.SendAsync(request);
-            if (!response.IsSuccessStatusCode) return (null, null);
-
-            var content = await response.Content.ReadAsStringAsync();
-            var media = DeserializeObject<dynamic>(content)?.data?.Media;
+            var data = await PostGraphQLAsync(requestBody);
+            var media = data?.Media;
             if (media == null) return (null, null);
 
             var name = string.IsNullOrEmpty((string)media.title?.english)
@@ -813,18 +779,8 @@ namespace AnimeList.Services
                 variables = new { id = resolvedAnimeId }
             });
 
-            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
-            {
-                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
-            };
-            ApplyBearerAuth(request, tokenData);
-
-            var client = _clientFactory.CreateClient();
-            var response = await client.SendAsync(request);
-            if (!response.IsSuccessStatusCode) return [];
-
-            var content = await response.Content.ReadAsStringAsync();
-            var media = DeserializeObject<dynamic>(content)?.data?.Media;
+            var data = await PostGraphQLAsync(requestBody, tokenData);
+            var media = data?.Media;
             if (media?.externalLinks == null) return [];
 
             var result = new List<StreamingLink>();
@@ -880,17 +836,7 @@ namespace AnimeList.Services
                 variables = new { userId = tokenData.user_id }
             });
 
-            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
-            {
-                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
-            };
-            ApplyBearerAuth(request, tokenData);
-
-            var response = await _clientFactory.CreateClient().SendAsync(request);
-            if (!response.IsSuccessStatusCode) return [];
-
-            var content = await response.Content.ReadAsStringAsync();
-            var data = DeserializeObject<dynamic>(content)?.data;
+            var data = await PostGraphQLAsync(requestBody, tokenData);
             if (data?.MediaListCollection?.lists == null) return [];
 
             var result = new List<AnimeEntry>();
