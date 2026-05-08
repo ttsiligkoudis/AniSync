@@ -1,8 +1,6 @@
 ﻿using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
-using System.Net;
-using System.Net.Http.Headers;
 
 namespace AnimeList.Services
 {
@@ -206,10 +204,7 @@ namespace AnimeList.Services
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json"),
             };
 
-            if (!string.IsNullOrEmpty(tokenData?.access_token))
-            {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
-            }
+            ApplyBearerAuth(request, tokenData);
 
             var client = _clientFactory.CreateClient();
             var response = await client.SendAsync(request);
@@ -272,12 +267,8 @@ namespace AnimeList.Services
                 // AniList id so multiple cours of a franchise collapse to one card via the
                 // dedup step below. When the user disables grouping, every cour gets its own
                 // native id and dedup is a no-op since native ids don't collide.
-                var externalId = groupSeasons
-                    ? (!string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                        !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
-                        mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" :
-                        $"{anilistPrefix}{media.id}")
-                    : $"{anilistPrefix}{media.id}";
+                var (externalId, _, _) = ResolveGroupedId(
+                    mapping, $"{anilistPrefix}{media.id}", groupSeasons, allowKitsuFallback: true);
 
                 var isMovie = IsMovieFormat((string)media.format);
 
@@ -400,10 +391,7 @@ namespace AnimeList.Services
                 Content = new StringContent(ser, System.Text.Encoding.UTF8, "application/json")
             };
 
-            if (!string.IsNullOrEmpty(tokenData?.access_token))
-            {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
-            }
+            ApplyBearerAuth(request, tokenData);
 
             var client = _clientFactory.CreateClient();
             var response = await client.SendAsync(request);
@@ -424,21 +412,8 @@ namespace AnimeList.Services
             // so meta.id matches what the user clicked from a grouped catalog. When off, keep
             // the response in this service's native id space.
             // videoId will still use the groupId since it is better source for streams.
-            var groupId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" : null;
-
-            var hasGroupId = !string.IsNullOrEmpty(groupId);
-
-            // fallback to the kitsu id (if available) when no groupId is available.
-            // in that case the videoId must not have the :season inside since kitsuIds are not seasonal.
-            if (!hasGroupId)
-            {
-                groupId = mapping.KitsuId.HasValue ? $"{kitsuPrefix}{mapping.KitsuId}" : $"{anilistPrefix}{result.id}";
-            }
-
-            var externalId = groupSeasons
-                ? groupId
-                : $"{anilistPrefix}{result.id}";
+            var (externalId, groupId, hasGroupId) = ResolveGroupedId(
+                mapping, $"{anilistPrefix}{result.id}", groupSeasons, allowKitsuFallback: true);
 
             var anime = new Meta(result.description)
             {
@@ -587,19 +562,6 @@ namespace AnimeList.Services
             return anime;
         }
 
-        private static void NormalizeVideoIds(List<Video> videos, string externalId, bool hasGroupId)
-        {
-            if (videos == null) return;
-            foreach (var v in videos)
-            {
-                var season = v.season > 0 ? v.season : 1;
-                var episode = v.episode > 0 ? v.episode : 1;
-                v.id = hasGroupId ? $"{externalId}:{season}:{episode}" : $"{externalId}:{episode}";
-                v.season = season;
-                v.episode = episode;
-            }
-        }
-
         private int GetSeasonNumber(dynamic relations, int animeId)
         {
             int season = 1;
@@ -635,9 +597,12 @@ namespace AnimeList.Services
         public async Task<AnimeEntry> GetAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)
         {
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist, season);
-
             if (string.IsNullOrEmpty(resolvedAnimeId)) return null;
+            return await GetAnimeEntryByResolvedIdAsync(tokenData, resolvedAnimeId);
+        }
 
+        private async Task<AnimeEntry> GetAnimeEntryByResolvedIdAsync(TokenData tokenData, string resolvedAnimeId)
+        {
             var requestBody = SerializeObject(new
             {
                 query = @"
@@ -663,7 +628,7 @@ namespace AnimeList.Services
             {
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
             };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData?.access_token);
+            ApplyBearerAuth(request, tokenData);
 
             var client = _clientFactory.CreateClient();
             var response = await client.SendAsync(request);
@@ -688,8 +653,7 @@ namespace AnimeList.Services
                 // AniList returns 0 for "no score" (instead of null). Coalesce so the
                 // Manage Entry form shows an empty input and the sync fan-out doesn't
                 // propagate a 0 that Kitsu would 422 on (ratingTwenty min is 2).
-                var rawScore = (double?)ml.score;
-                entry.Score = (rawScore.HasValue && rawScore > 0) ? rawScore : null;
+                entry.Score = NullableScore((double?)ml.score);
                 entry.Notes = (string)ml.notes;
                 entry.RewatchCount = (int?)ml.repeat ?? 0;
                 entry.StartedAt = FuzzyDateToDateTime(ml.startedAt);
@@ -713,8 +677,8 @@ namespace AnimeList.Services
 
             if (string.IsNullOrEmpty(status))
             {
-                var meta = (await GetAnimeListAsync(tokenData, animeId: $"{anilistPrefix}{resolvedAnimeId}")).FirstOrDefault();
-                status = meta?.entryStatus;
+                var existing = await GetAnimeEntryByResolvedIdAsync(tokenData, resolvedAnimeId);
+                status = existing?.Status;
             }
 
             // Build the variables dict so we can omit fields the caller didn't set.
@@ -761,11 +725,11 @@ namespace AnimeList.Services
             {
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
             };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            ApplyBearerAuth(request, tokenData);
 
             var client = _clientFactory.CreateClient();
             var saveResponse = await client.SendAsync(request);
-            ThrowIfApiCallFailed(saveResponse, "save");
+            await EnsureSuccessOrThrow(saveResponse, "AniList", "save");
         }
 
         public async Task DeleteAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)
@@ -791,23 +755,10 @@ namespace AnimeList.Services
             {
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json"),
             };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            ApplyBearerAuth(request, tokenData);
 
             var deleteResponse = await _clientFactory.CreateClient().SendAsync(request);
-            ThrowIfApiCallFailed(deleteResponse, "delete");
-        }
-
-        // GraphQL mutations always come back 200 even when they error out at the field level
-        // — but the transport layer can still 401 when the bearer is rotated. Catch both
-        // so SyncService can flag NeedsReauth on a stale linked AniList token instead of
-        // silently dropping the user's save.
-        private static void ThrowIfApiCallFailed(HttpResponseMessage response, string op)
-        {
-            if (response.IsSuccessStatusCode) return;
-            if (response.StatusCode == HttpStatusCode.Unauthorized
-                || response.StatusCode == HttpStatusCode.Forbidden)
-                throw new UnauthorizedAccessException($"AniList {op} returned {(int)response.StatusCode}");
-            throw new HttpRequestException($"AniList {op} returned {(int)response.StatusCode}");
+            await EnsureSuccessOrThrow(deleteResponse, "AniList", "delete");
         }
 
         public async Task<(string? name, int? episodeCount)> GetAnimeSummaryAsync(string id)
@@ -866,8 +817,7 @@ namespace AnimeList.Services
             {
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
             };
-            if (!string.IsNullOrEmpty(tokenData?.access_token))
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            ApplyBearerAuth(request, tokenData);
 
             var client = _clientFactory.CreateClient();
             var response = await client.SendAsync(request);
@@ -934,7 +884,7 @@ namespace AnimeList.Services
             {
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
             };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+            ApplyBearerAuth(request, tokenData);
 
             var response = await _clientFactory.CreateClient().SendAsync(request);
             if (!response.IsSuccessStatusCode) return [];
@@ -952,7 +902,6 @@ namespace AnimeList.Services
                     var mediaId = (string)ml.media?.id?.ToString();
                     if (string.IsNullOrEmpty(mediaId)) continue;
 
-                    var rawScore = (double?)ml.score;
                     result.Add(new AnimeEntry
                     {
                         EntryId = (string)ml.id?.ToString(),
@@ -962,7 +911,7 @@ namespace AnimeList.Services
                         Status = (string)ml.status,
                         Progress = (int?)ml.progress ?? 0,
                         TotalEpisodes = (int?)ml.media?.episodes,
-                        Score = (rawScore.HasValue && rawScore > 0) ? rawScore : null,
+                        Score = NullableScore((double?)ml.score),
                         Notes = (string)ml.notes,
                         RewatchCount = (int?)ml.repeat ?? 0,
                         StartedAt = FuzzyDateToDateTime(ml.startedAt),

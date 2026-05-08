@@ -1,8 +1,6 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
-using System.Net;
-using System.Net.Http.Headers;
 
 namespace AnimeList.Services
 {
@@ -186,21 +184,8 @@ namespace AnimeList.Services
             // so meta.id matches what the user clicked from a grouped catalog. When off, keep
             // the response in this service's native id space.
             // videoId will still use the groupId since it is better source for streams.
-            var groupId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                   !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" : null;
-
-            var hasGroupId = !string.IsNullOrEmpty(groupId);
-
-            // fallback to the kitsu id (if available) when no groupId is available.
-            // in that case the videoId must not have the :season inside since kitsuIds are not seasonal.
-            if (!hasGroupId)
-            {
-                groupId = mapping.KitsuId.HasValue ? $"{kitsuPrefix}{mapping.KitsuId}" : $"{malPrefix}{(string)json["id"]}";
-            }
-
-            var externalId = groupSeasons
-                ? groupId
-                : $"{malPrefix}{(string)json["id"]}";
+            var (externalId, groupId, hasGroupId) = ResolveGroupedId(
+                mapping, $"{malPrefix}{(string)json["id"]}", groupSeasons, allowKitsuFallback: true);
 
             var mediaType = (string)json["media_type"];
             var isMovie = IsMovieFormat(mediaType);
@@ -387,12 +372,11 @@ namespace AnimeList.Services
                 // MAL returns 0 for "no rating set" instead of null. Treat it as null so the
                 // Manage Entry input renders empty (and doesn't propagate a 0 through the
                 // sync fan-out — Kitsu's ratingTwenty has a hard minimum of 2 and 422s on 0).
-                var rawScore = (double?)mls["score"];
-                entry.Score = (rawScore.HasValue && rawScore.Value > 0) ? rawScore : null;
+                entry.Score = NullableScore((double?)mls["score"]);
                 entry.Notes = (string)mls["comments"];
                 entry.RewatchCount = (int?)mls["num_times_rewatched"] ?? 0;
-                entry.StartedAt = ParseMalDate((string)mls["start_date"]);
-                entry.FinishedAt = ParseMalDate((string)mls["finish_date"]);
+                entry.StartedAt = ParseProviderDate((string)mls["start_date"]);
+                entry.FinishedAt = ParseProviderDate((string)mls["finish_date"]);
             }
 
             return entry;
@@ -467,7 +451,7 @@ namespace AnimeList.Services
             ApplyAuth(request, tokenData);
 
             var saveResponse = await _clientFactory.CreateClient().SendAsync(request);
-            ThrowIfApiCallFailed(saveResponse, "save");
+            await EnsureSuccessOrThrow(saveResponse, "MyAnimeList", "save");
         }
 
         public async Task DeleteAnimeEntryAsync(TokenData tokenData, string animeId, int? season = null)
@@ -480,18 +464,7 @@ namespace AnimeList.Services
             var request = new HttpRequestMessage(HttpMethod.Delete, $"{MalApi}/anime/{resolvedMalId}/my_list_status");
             ApplyAuth(request, tokenData);
             var deleteResponse = await _clientFactory.CreateClient().SendAsync(request);
-            ThrowIfApiCallFailed(deleteResponse, "delete");
-        }
-
-        // MAL silently dropped 401s before — letting them bubble up gives SyncService a
-        // chance to flag NeedsReauth on a linked-account row whose token has been revoked.
-        private static void ThrowIfApiCallFailed(HttpResponseMessage response, string op)
-        {
-            if (response.IsSuccessStatusCode) return;
-            if (response.StatusCode == HttpStatusCode.Unauthorized
-                || response.StatusCode == HttpStatusCode.Forbidden)
-                throw new UnauthorizedAccessException($"MyAnimeList {op} returned {(int)response.StatusCode}");
-            throw new HttpRequestException($"MyAnimeList {op} returned {(int)response.StatusCode}");
+            await EnsureSuccessOrThrow(deleteResponse, "MyAnimeList", "delete");
         }
 
         private async Task<Meta> BuildMetaAsync(JObject node, JObject listStatus, bool groupSeasons = true)
@@ -506,11 +479,8 @@ namespace AnimeList.Services
             // multiple cours of a franchise collapse to one card via the dedup step in the
             // caller. When the user disables grouping, every cour gets its own native id and
             // dedup is a no-op since native ids don't collide.
-            var externalId = groupSeasons
-                ? (!string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
-                    !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" :
-                    $"{malPrefix}{malIdStr}")
-                : $"{malPrefix}{malIdStr}";
+            var (externalId, _, _) = ResolveGroupedId(
+                mapping, $"{malPrefix}{malIdStr}", groupSeasons, allowKitsuFallback: false);
 
             var mediaType = (string)node["media_type"];
             var isMovie = IsMovieFormat(mediaType);
@@ -643,7 +613,7 @@ namespace AnimeList.Services
         {
             if (!string.IsNullOrEmpty(tokenData?.access_token))
             {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.access_token);
+                ApplyBearerAuth(request, tokenData);
                 return;
             }
 
@@ -700,7 +670,6 @@ namespace AnimeList.Services
 
                     var rawStatus = (string)listStatus["status"];
                     var isRewatching = (bool?)listStatus["is_rewatching"] ?? false;
-                    var rawScore = (double?)listStatus["score"];
 
                     entries.Add(new AnimeEntry
                     {
@@ -713,11 +682,11 @@ namespace AnimeList.Services
                         Status = isRewatching ? "rewatching" : rawStatus,
                         Progress = (int?)listStatus["num_episodes_watched"] ?? 0,
                         TotalEpisodes = (int?)node["num_episodes"],
-                        Score = (rawScore.HasValue && rawScore.Value > 0) ? rawScore : null,
+                        Score = NullableScore((double?)listStatus["score"]),
                         Notes = (string)listStatus["comments"],
                         RewatchCount = (int?)listStatus["num_times_rewatched"] ?? 0,
-                        StartedAt = ParseMalDate((string)listStatus["start_date"]),
-                        FinishedAt = ParseMalDate((string)listStatus["finish_date"]),
+                        StartedAt = ParseProviderDate((string)listStatus["start_date"]),
+                        FinishedAt = ParseProviderDate((string)listStatus["finish_date"]),
                     });
                 }
 
@@ -726,27 +695,6 @@ namespace AnimeList.Services
             }
 
             return entries;
-        }
-
-        private static DateTime? ParseMalDate(string raw)
-        {
-            return DateTime.TryParse(raw, out var dt) ? dt : null;
-        }
-
-        // Stremio rejects (renders blank) when video.id doesn't share a prefix with meta.id.
-        // The Kitsu cross-service fallback leaves kitsu:N-prefixed ids in place, so rewrite
-        // every video id to the calling service's external id space.
-        private static void NormalizeVideoIds(List<Video> videos, string externalId, bool hasGroupId)
-        {
-            if (videos == null) return;
-            foreach (var v in videos)
-            {
-                var season = v.season > 0 ? v.season : 1;
-                var episode = v.episode > 0 ? v.episode : 1;
-                v.id = hasGroupId ? $"{externalId}:{season}:{episode}" : $"{externalId}:{episode}";
-                v.season = season;
-                v.episode = episode;
-            }
         }
 
         /// <summary>

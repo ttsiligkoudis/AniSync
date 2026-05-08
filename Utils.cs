@@ -606,5 +606,120 @@ namespace AnimeList
             // weights up/down if one ranking signal proves more useful in practice.
             return 0.5 * containment + 0.5 * jaccard;
         }
+
+        /// <summary>
+        /// Rewrites every <see cref="Video.id"/> so it shares a prefix with the parent
+        /// <see cref="Meta.id"/>. Stremio renders a blank meta page when the prefixes
+        /// disagree, so this is essential after a Kitsu cross-service fallback in MAL /
+        /// AniList that leaves <c>kitsu:N</c> ids in place. Defaults missing season /
+        /// episode to 1 so the resulting id is always a valid 3- or 4-segment shape
+        /// depending on whether the meta is grouped.
+        /// </summary>
+        /// <param name="videos">List to mutate in place.</param>
+        /// <param name="externalId">The parent meta's id space — typically
+        /// <c>tt12345</c> / <c>tmdb:N</c> when grouped, or <c>kitsu:N</c> /
+        /// <c>anilist:N</c> / <c>mal:N</c> when not.</param>
+        /// <param name="hasGroupId">True for grouped meta (id format
+        /// <c>{externalId}:{season}:{episode}</c>); false for native single-cour ids
+        /// (<c>{externalId}:{episode}</c>).</param>
+        public static void NormalizeVideoIds(List<Video> videos, string externalId, bool hasGroupId)
+        {
+            foreach (var v in videos)
+            {
+                var season = v.season > 0 ? v.season : 1;
+                var episode = v.episode > 0 ? v.episode : 1;
+                v.id = hasGroupId ? $"{externalId}:{season}:{episode}" : $"{externalId}:{episode}";
+                v.season = season;
+                v.episode = episode;
+            }
+        }
+
+        /// <summary>
+        /// Lenient date parser used by per-provider list-entry hydration where the
+        /// upstream returns either a full ISO timestamp or just <c>yyyy-MM-dd</c>.
+        /// Returns null on empty / unparseable input rather than throwing — list
+        /// metadata is best-effort and a missing date shouldn't fail a save.
+        /// </summary>
+        public static DateTime? ParseProviderDate(string raw) =>
+            DateTime.TryParse(raw, out var dt) ? dt : null;
+
+        /// <summary>
+        /// Sets the <c>Authorization: Bearer &lt;token&gt;</c> header on a request
+        /// when the supplied <see cref="TokenData"/> has a non-empty access token.
+        /// No-op when the token is missing — matches the per-service convention of
+        /// "fall through to anonymous client-id auth" for endpoints that allow it.
+        /// </summary>
+        public static void ApplyBearerAuth(HttpRequestMessage request, TokenData tokenData)
+        {
+            if (string.IsNullOrWhiteSpace(tokenData?.access_token)) return;
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
+                "Bearer", tokenData.access_token);
+        }
+
+        /// <summary>
+        /// Picks the meta id and (separate) group id for a per-service GetAnimeByIdAsync
+        /// response. Falls through IMDb → tmdb:N → optional kitsu:N → native id, in that
+        /// order. The pair lets callers display a grouped meta (id == groupId) while still
+        /// stamping non-grouped video ids with the native prefix when needed.
+        /// </summary>
+        /// <param name="mapping">Cross-service mapping row, may be null.</param>
+        /// <param name="nativeId">Already-prefixed native id for the calling service
+        /// (e.g. <c>"anilist:12345"</c>).</param>
+        /// <param name="groupSeasons">When true, externalId == groupId so multiple cours
+        /// of a franchise collapse to one card. When false, externalId stays in the native
+        /// id space.</param>
+        /// <param name="allowKitsuFallback">AniList/MAL set this to true so they can
+        /// inherit a Kitsu id from the mapping when no IMDb/TMDB cross-mapping exists.
+        /// Kitsu sets it to false — its native id IS a kitsu id, so the fallback is a no-op.</param>
+        public static (string externalId, string groupId, bool hasGroupId) ResolveGroupedId(
+            AnimeIdMapping mapping, string nativeId, bool groupSeasons, bool allowKitsuFallback)
+        {
+            var groupId = !string.IsNullOrEmpty(mapping?.ImdbId) ? mapping.ImdbId :
+                          !string.IsNullOrEmpty(mapping?.TmdbId) ? $"{tmdbPrefix}{mapping.TmdbId}" : null;
+
+            var hasGroupId = !string.IsNullOrEmpty(groupId);
+
+            if (!hasGroupId)
+                groupId = (allowKitsuFallback && mapping?.KitsuId.HasValue == true)
+                    ? $"{kitsuPrefix}{mapping.KitsuId}"
+                    : nativeId;
+
+            var externalId = groupSeasons ? groupId : nativeId;
+            return (externalId, groupId, hasGroupId);
+        }
+
+        /// <summary>
+        /// Coalesces a 0-or-null score sentinel to null. AniList and MAL both treat
+        /// score == 0 as "no rating", so a sparse hydration shouldn't carry it through.
+        /// </summary>
+        public static double? NullableScore(double? raw) =>
+            (raw.HasValue && raw.Value > 0) ? raw : null;
+
+        /// <summary>
+        /// Translates a non-success <see cref="HttpResponseMessage"/> into the right
+        /// exception shape for SyncService: <see cref="UnauthorizedAccessException"/>
+        /// for 401/403 (so a stale linked-account token can be flagged NeedsReauth),
+        /// <see cref="HttpRequestException"/> for everything else. Pass
+        /// <paramref name="includeBody"/>=true on Kitsu writes so the 422 validation
+        /// payload (<c>errors[].detail</c>) makes it into the message.
+        /// </summary>
+        public static async Task EnsureSuccessOrThrow(HttpResponseMessage response, string serviceName, string op, bool includeBody = false)
+        {
+            if (response.IsSuccessStatusCode) return;
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+                || response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                throw new UnauthorizedAccessException($"{serviceName} {op} returned {(int)response.StatusCode}");
+
+            var detail = "";
+            if (includeBody)
+            {
+                string body = null;
+                try { body = await response.Content.ReadAsStringAsync(); }
+                catch { /* best-effort */ }
+                if (!string.IsNullOrEmpty(body))
+                    detail = $" — body: {(body.Length <= 600 ? body : body[..600] + "…")}";
+            }
+            throw new HttpRequestException($"{serviceName} {op} returned {(int)response.StatusCode}{detail}");
+        }
     }
 }
