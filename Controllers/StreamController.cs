@@ -53,6 +53,16 @@ namespace AnimeList.Controllers
             if (!TryParseAnimeId(id, out var animeId, out var season, out var episode))
                 return empty;
 
+            var animeService = tokenData?.anime_service ?? AnimeService.Kitsu;
+            var resolvedAnimeId = await _mappingService.GetIdByService(animeId, animeService);
+
+            var streams = new List<object>();
+
+            if (string.IsNullOrEmpty(resolvedAnimeId))
+            {
+                return new JsonResult(new { streams });
+            }
+
             // AniSkip lookup once per request — every emitted stream gets the same
             // skipIntro / skipOutro hints, so there's no point fetching per-stream.
             // Returns null when there's no episode, no MAL mapping, or no markers
@@ -60,7 +70,6 @@ namespace AnimeList.Controllers
             // object.
             var skipHints = await BuildSkipHintsAsync(animeId, season, episode);
 
-            var streams = new List<object>();
 
             // Manage Entry stream — shown by default for authenticated, non-anonymous users.
             // The configure page's "Manage Entry" toggle stores the negative bit (hideManageEntry)
@@ -85,8 +94,6 @@ namespace AnimeList.Controllers
             // External streaming destinations (Crunchyroll, Netflix, …) are opt-in via config
             if (configuration?.showExternalStreams == true)
             {
-                var animeService = tokenData?.anime_service ?? AnimeService.Kitsu;
-                var resolvedAnimeId = await _mappingService.GetIdByService(animeId, animeService);
                 if (!string.IsNullOrEmpty(resolvedAnimeId))
                 {
                     var externalLinks = animeService switch

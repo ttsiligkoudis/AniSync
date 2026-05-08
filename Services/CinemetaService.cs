@@ -25,6 +25,12 @@ namespace AnimeList.Services
             {
                 var mapping = await _animeMapping.GetImdbMapping(id);
 
+                if (mapping?.Any() != true) 
+                {
+                    await Task.Delay(3000);
+                    return null;
+                }
+
                 var cinemetaType = !mapping.Any() || mapping.Any(w => w.Season.HasValue) ? "series" : "movie";
                 var tokenData = await _tokenService.GetAccessTokenAsync(config);
 
