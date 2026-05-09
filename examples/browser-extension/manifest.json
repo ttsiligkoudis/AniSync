@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AniSync Auto-Tracker",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Watches anime episodes on any streaming site and auto-updates your AniSync list (AniList / Kitsu / MAL).",
   "permissions": ["storage"],
   "host_permissions": ["<all_urls>"],

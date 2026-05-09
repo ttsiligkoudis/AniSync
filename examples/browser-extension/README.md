@@ -5,25 +5,39 @@ streaming site and auto-updates progress on your linked AniList / Kitsu /
 MyAnimeList accounts via the AniSync public API.
 
 This is **not** a published extension — it's a minimal demonstration of how
-the API surface composes. Around 300 lines total, no build step.
+the API surface composes. Around 500 lines total, no build step.
 
 ## How it works
 
-1. The content script runs on every page and watches for a `<video>`
-   element. Pages without one are silent no-ops.
-2. When a video is found, a chain of heuristics tries to extract
-   `{ title, episode }` from the page:
-   - **JSON-LD** (`<script type="application/ld+json">` with `@type: TVEpisode`
-     — Schema.org, lots of streaming sites publish this for SEO).
-   - **OpenGraph meta** (`og:video:series` + `og:video:episode`).
-   - **`document.title`** parsed against common shapes
-     (`Show — Episode 5`, `Show S1E5`, `Show | Episode 5`).
-   - **DOM h1 + page title** as a last resort.
-3. A small floating **Track** button appears bottom-right. Click it to see
-   what was detected and confirm or correct the title + episode before saving.
-4. If the heuristic detection succeeded, the save also fires automatically
-   once playback crosses 80%.
-5. The background worker hits
+1. The content script runs on every page. The detection pipeline is:
+   - **Per-site adapter** (first match wins). Adapters live in
+     `content.js` under `ADAPTERS = [...]`; each declares the hostnames
+     it owns and an `extract()` that returns `{ title, episode }` or null.
+     Adapters return null on non-watch pages so navigation around a
+     site's home/settings doesn't fire spurious detections.
+   - **Universal heuristic chain** (fallback). Runs whenever no adapter
+     matches the host or the matched adapter returned null:
+     - **JSON-LD** (`<script type="application/ld+json">` with
+       `@type: TVEpisode` — Schema.org, lots of streaming sites publish
+       this for SEO).
+     - **URL slug** (`/show-name-episode-7/`, `/watch/slug/7`, …).
+     - **OpenGraph meta** (`og:video:series` + `og:video:episode`).
+     - **`document.title`** parsed against common shapes
+       (`Show — Episode 5`, `Show S1E5`, `Show | Episode 5`).
+     - **DOM h1 + page title** as a last resort.
+2. A small floating **Track** button appears bottom-right whenever the
+   page looks like an episode page. Click it to see what was detected
+   and confirm or correct the title + episode before saving.
+3. If detection succeeded, the save also fires automatically once
+   playback crosses 80%.
+4. SPA route changes (Crunchyroll, HiAnime, Aniwave, …) re-run detection
+   without a full page reload — the script patches `history.pushState` /
+   `replaceState` and listens to `popstate`, then resets the auto-fire
+   flag if the new (title, episode) differs.
+5. A `MutationObserver` watches for `<video>` elements being added or
+   for `loadedmetadata` events on a single element whose `src` swaps
+   between episodes (common SPA player pattern).
+6. The background worker hits
    [`GET /api/v1/match`](https://anisync.fly.dev/api/docs) to resolve the
    title into a concrete anime id, then writes progress via
    [`POST /api/v1/me/entries/{id}`](https://anisync.fly.dev/api/docs) with
@@ -32,6 +46,19 @@ the API surface composes. Around 300 lines total, no build step.
 
 AniSync's existing fan-out then mirrors that write to every linked secondary —
 no extension-side multi-provider logic needed.
+
+## Built-in site adapters
+
+| Adapter | Hostnames | What the adapter does that the universal chain doesn't |
+| --- | --- | --- |
+| **Crunchyroll** | `*.crunchyroll.com` | Locale-prefixed watch URL gating; document.title fallback when JSON-LD is delayed-loaded by the SPA. |
+| **HiAnime / Zoro / aniwatch** | `hianime.{to,tv,nz,bz}`, `aniwatch{,tv}.to`, `zoro.{to,in}` | Episode number lives only in the sidebar (URL has opaque `?ep=12345`). Adapter pulls it from the active item's `.ssli-order` or `data-number`. |
+| **Aniwave** (formerly 9anime) | `aniwave.{to,li,bz,cx,se}` | Same shape as HiAnime — sidebar `ul.episodes` with `.active` marker. |
+
+Adding a new adapter is ~20 lines: append an entry to the `ADAPTERS`
+array in `content.js` with the host(s) it matches and an `extract()` that
+returns `{ title, episode, source }`. Look at the HiAnime adapter as a
+template for sidebar-DOM patterns.
 
 ## Files
 
@@ -74,16 +101,14 @@ a new domain. More code, friendlier permission story — left as an exercise.
 
 ## Detection coverage
 
-The heuristic chain works out-of-the-box on most sites that publish proper
-metadata for SEO or social previews. Concretely:
-
-- **Crunchyroll** — JSON-LD `TVEpisode` with `partOfSeries` and
-  `episodeNumber` populated; auto-fires reliably.
-- **HiDive** — OG meta and document title; usually auto-fires.
-- **Netflix** — no clean show + episode markers in the DOM. Heuristics
-  return nothing; use the floating Track button to fill in manually.
-- **Random fansub site** — varies wildly. The floating Track button is
-  always there as a fallback even when nothing's detected.
+| Site | Path | Notes |
+| --- | --- | --- |
+| **Crunchyroll** | dedicated adapter + JSON-LD | SPA navigation handled — auto-fires reliably across consecutive episodes without a reload. |
+| **HiAnime / Zoro / aniwatch** | dedicated adapter | Sidebar-DOM extraction. URL has no episode number, so the universal chain alone wouldn't work. |
+| **Aniwave** | dedicated adapter | Similar to HiAnime; verify selectors after major site updates. |
+| **HiDive** | universal (OG meta + title) | Usually auto-fires. |
+| **Netflix** | universal misses | DOM has no clean show + episode markers; use the floating Track button. |
+| **Random fansub site** | universal (URL slug) | Varies wildly. Floating Track button always available as fallback. |
 
 When the heuristics miss, click the floating button → fix the inputs →
 **Save**. The button stays usable on every page that has a `<video>`
@@ -101,4 +126,12 @@ element, regardless of whether auto-detect found anything.
   verify the resolved id once via the Track button before relying on it.
 - **iframed players** aren't traversed (the manifest sets
   `all_frames: false`). If your favourite site embeds the player in a
-  cross-origin iframe, the script can't see it.
+  cross-origin iframe, the script can't see it. Manual save via the
+  floating button still works because it triggers off the URL / DOM,
+  not the `<video>` element.
+- **Adapter selectors will rot.** Streaming sites occasionally rename
+  classes or restructure their sidebar DOM. When a site adapter stops
+  finding the active episode, open DevTools on the watch page, locate
+  the active sidebar item, and update the relevant adapter in
+  `content.js`. The universal chain should keep auto-fire working in
+  the meantime via the URL slug or document.title fallbacks.
