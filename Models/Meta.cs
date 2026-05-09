@@ -25,6 +25,14 @@ namespace AnimeList.Models
         public string id { get; set; }
         public string name { get; set; }
         public string poster { get; set; }
+        // Stremio's catalog-card aspect-ratio hint. Default ("regular", 2:3 portrait) on
+        // Stremio Android Mobile renders cards with no title label underneath. "landscape"
+        // (16:9) renders a wider card that, on some clients, includes a title overlay —
+        // this is currently set per-catalog in CatalogController as an experiment to find
+        // out whether Mobile shows titles for landscape cards. If yes, we'll wire up
+        // actual banner-art fetching per service; if no, revert this and burn the title
+        // onto the poster server-side instead.
+        public string posterShape { get; set; }
         public string description { get; }
         public List<string> genres { get; set; }
         public string background { get; set; }
