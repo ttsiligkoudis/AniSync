@@ -65,13 +65,6 @@ namespace AnimeList.Services.Interfaces
         Task DeleteAsync(string uid);
 
         /// <summary>
-        /// Removes the row matching the user identity carried in <paramref name="tokenData"/>.
-        /// No-op if the token has no user_key (anonymous) or no matching row exists. Used by
-        /// the Disconnect / Logout flow so a sign-out also clears the persisted install.
-        /// </summary>
-        Task DeleteByUserAsync(TokenData tokenData);
-
-        /// <summary>
         /// Reads the additional (non-primary) provider tokens linked to a UID. Empty list if
         /// the UID is unknown or has no links. Used by the multi-provider sync feature.
         /// </summary>

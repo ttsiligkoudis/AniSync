@@ -416,25 +416,6 @@ namespace AnimeList.Services
             await cmd.ExecuteNonQueryAsync();
         }
 
-        public async Task DeleteByUserAsync(TokenData tokenData)
-        {
-            if (tokenData == null) return;
-            var userKey = GetUserKey(tokenData);
-            var identityCol = IdentityColumnFor(tokenData.anime_service);
-            if (string.IsNullOrEmpty(userKey) || identityCol == null) return;
-
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
-            // Primary-only delete (mirrors UpdateByUserAsync's primary-only semantics) —
-            // sign-out for the active session shouldn't nuke a row where the user is
-            // merely a linked secondary.
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = $"DELETE FROM configs WHERE service = $s AND {identityCol} = $k";
-            cmd.Parameters.AddWithValue("$s", (int)tokenData.anime_service);
-            cmd.Parameters.AddWithValue("$k", userKey);
-            await cmd.ExecuteNonQueryAsync();
-        }
-
         public async Task<List<LinkedToken>> GetLinkedTokensAsync(string uid)
         {
             if (string.IsNullOrEmpty(uid)) return [];
