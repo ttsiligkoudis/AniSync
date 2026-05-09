@@ -1131,6 +1131,17 @@ body.library-page main {
     color: inherit;
 }
 
+/* Inert variant for anonymous Discover — same look, no hover lift / cursor
+   change, since clicking does nothing without a UID for Manage Entry. */
+.library-card-inert {
+    cursor: default;
+}
+
+.library-card-inert:hover {
+    transform: none;
+    box-shadow: none;
+}
+
 .library-card-poster {
     width: 100%;
     aspect-ratio: 2 / 3;

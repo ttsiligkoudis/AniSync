@@ -1,0 +1,49 @@
+@model AnimeList.Models.PosterGridViewModel
+
+@* Shared poster-grid renderer for the web-app pages (Library, Discover, future
+   list-type tabs, future search). Cards link to the existing config-scoped
+   Manage Entry page when ConfigUid is set; otherwise (anonymous Discover) the
+   cards render as inert non-anchor divs so a click doesn't dead-end at /. *@
+@if (Model.Items?.Count > 0)
+{
+    <div class="library-grid">
+        @foreach (var meta in Model.Items)
+        {
+            var manageHref = !string.IsNullOrEmpty(Model.ConfigUid)
+                ? $"/{Model.ConfigUid}/Meta/ManageEntry/{meta.id}"
+                : null;
+            if (manageHref != null)
+            {
+                <a class="library-card" href="@manageHref" title="@meta.name">
+                    @if (!string.IsNullOrEmpty(meta.poster))
+                    {
+                        <img class="library-card-poster" src="@meta.poster" alt="@meta.name" loading="lazy" />
+                    }
+                    else
+                    {
+                        <div class="library-card-poster library-card-poster-placeholder"></div>
+                    }
+                    <span class="library-card-title">@meta.name</span>
+                </a>
+            }
+            else
+            {
+                <div class="library-card library-card-inert" title="@meta.name">
+                    @if (!string.IsNullOrEmpty(meta.poster))
+                    {
+                        <img class="library-card-poster" src="@meta.poster" alt="@meta.name" loading="lazy" />
+                    }
+                    else
+                    {
+                        <div class="library-card-poster library-card-poster-placeholder"></div>
+                    }
+                    <span class="library-card-title">@meta.name</span>
+                </div>
+            }
+        }
+    </div>
+}
+else if (!string.IsNullOrEmpty(Model.EmptyMessage))
+{
+    <p class="library-empty">@Model.EmptyMessage</p>
+}

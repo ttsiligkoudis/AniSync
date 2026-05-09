@@ -1,0 +1,25 @@
+@model AnimeList.Controllers.DiscoverViewModel
+@{
+    ViewData["BodyClass"] = "library-page";
+}
+
+<h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
+<p class="app-subtitle">
+    Trending anime
+    @if (!Model.AnonymousUser)
+    {
+        <text>· via @Model.AnimeService</text>
+    }
+    <span class="library-back">·
+        <a href="@Url.Action("Index", "Home")">back to dashboard</a>
+    </span>
+</p>
+
+@await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+{
+    Items = Model.Trending,
+    @* Anonymous users have no UID, so the partial renders inert cards. Logged-in
+       users get the same Manage Entry hand-off as the library page. *@
+    ConfigUid = Model.ConfigUid,
+    EmptyMessage = "Couldn't load trending anime — try again later.",
+})
