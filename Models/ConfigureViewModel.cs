@@ -34,6 +34,20 @@ namespace AnimeList.Models
         public List<LinkedToken> LinkedTokens { get; init; } = new();
 
         /// <summary>
+        /// Per-user webhook bearer for Plex/Jellyfin/Emby scrobble ingestion. Lazily generated
+        /// the first time the user opens the configure page — null only for not-logged-in /
+        /// anonymous installs (where home-server sync doesn't apply anyway).
+        /// </summary>
+        public string ScrobbleToken { get; init; }
+
+        /// <summary>
+        /// Optional Plex Home username. When set, scrobble events from Plex whose
+        /// <c>Account.title</c> doesn't match are silently dropped — handles the shared-server
+        /// case where roommates' viewing should not scrobble onto this user's trackers.
+        /// </summary>
+        public string PlexUsername { get; init; }
+
+        /// <summary>
         /// Persisted toggle flags. Always non-null — the controller hands the view a
         /// default-initialised instance when nothing is loaded yet.
         /// </summary>

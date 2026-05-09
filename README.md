@@ -111,6 +111,18 @@ The headline feature. Link more than one tracker and AniSync keeps them aligned.
 - **One-click full sync.** Backfill your entire library from primary into every linked secondary, with a progress modal, real cancel, and a worker pool that respects each provider's rate limit.
 - **Lazy re-auth.** When a refresh token fails, that provider's pill shows a **Needs reauth** badge so you can fix it without losing the rest of your config.
 
+### 🏠 Home Server Sync (Plex / Jellyfin / Emby)
+
+Multi-provider fan-out, but for files you watch outside Stremio. Paste one webhook URL into your Plex / Jellyfin / Emby server and every finished episode scrobbles onto AniList, Kitsu, *and* MyAnimeList simultaneously.
+
+- **One URL, all three servers.** The endpoint content-type-sniffs the payload — Plex sends multipart, Jellyfin and Emby send JSON. Same URL works for whichever you run.
+- **External-id resolution.** Plex's default agent emits TVDB IDs, HAMA emits AniDB, Jellyfin's Skyhook plugin emits AniDB, and most setups have IMDB or TMDB on top — AniSync resolves any of them to your tracker primary id via the bundled cross-mapping data.
+- **Plex Home filtering.** Optional username field — events from other Plex Home users are dropped so your roommate's playback doesn't scrobble onto your account.
+- **Idempotent.** A 60-second dedup window per (anime, season, episode) shrugs off retries and resumed-session re-deliveries.
+- **Token-revocable.** A "Rotate token" button on the configure page invalidates the old URL instantly without touching your tracker auth.
+
+Setup: open the configure page → **Home Server Sync** → copy the URL → paste it into your media server's webhook settings. See [`Tests/fixtures/scrobble/README.md`](Tests/fixtures/scrobble/README.md) for curl-based smoke tests.
+
 ### 🔐 Accounts
 
 Each provider uses its own native auth flow — no AniSync intermediary, no password storage we don't need:

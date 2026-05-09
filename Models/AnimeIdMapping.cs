@@ -20,6 +20,12 @@ namespace AnimeList.Models
         [JsonProperty("themoviedb_id")]
         public string TmdbId { get; set; }
 
+        [JsonProperty("thetvdb_id")]
+        public int? TvdbId { get; set; }
+
+        [JsonProperty("anidb_id")]
+        public int? AnidbId { get; set; }
+
         [JsonProperty("season")]
         private JObject SeasonRaw { get; set; }
 

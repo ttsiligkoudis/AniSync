@@ -1,0 +1,26 @@
+{
+  "Title": "alice has stopped playback of Frieren - S01E01 - The Journey Begins",
+  "Date": "2024-12-20T20:30:00Z",
+  "Event": "playback.stop",
+  "User": {
+    "Name": "alice",
+    "Id": "abcdef"
+  },
+  "Item": {
+    "Type": "Episode",
+    "Name": "The Journey Begins",
+    "SeriesName": "Frieren",
+    "ParentIndexNumber": 1,
+    "IndexNumber": 1,
+    "ProviderIds": {
+      "Imdb": "tt22248376",
+      "Tvdb": "10434739",
+      "Tmdb": "5051088"
+    }
+  },
+  "Server": {
+    "Name": "tower",
+    "Id": "abc1234567890",
+    "Version": "4.8.0.0"
+  }
+}
