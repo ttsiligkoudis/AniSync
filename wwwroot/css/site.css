@@ -1114,6 +1114,72 @@ main {
     text-decoration: underline;
 }
 
+/* Muted variant of the section-header accessory link — used for "via <service>"
+   in the stats header where the label is informational, not clickable. */
+.dashboard-section-link-muted {
+    font-size: 0.8rem;
+    color: #777;
+}
+
+/* Stats strip — two big-number cells side by side. The dashboard's main column
+   is 520px wide so two cells fit comfortably; if v1 adds Hours / Score we'll
+   wrap to two rows on narrow viewports rather than fighting the layout. */
+.stats-strip {
+    display: flex;
+    gap: 0.75rem;
+    width: 100%;
+}
+
+.stats-cell {
+    flex: 1;
+    padding: 0.85rem 1rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.65rem;
+    text-align: center;
+}
+
+.stats-number {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.1;
+}
+
+.stats-label {
+    font-size: 0.78rem;
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 0.2rem;
+}
+
+/* Genre chip strip below the numbers. Same wrap-on-narrow behaviour as the
+   library tabs so all five chips remain visible at any viewport width. */
+.genre-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+
+.genre-chips-label {
+    font-size: 0.8rem;
+    color: #777;
+    margin-right: 0.2rem;
+}
+
+.genre-chip {
+    padding: 0.25rem 0.65rem;
+    background: rgba(123, 91, 245, 0.15);
+    border: 1px solid rgba(123, 91, 245, 0.3);
+    border-radius: 1rem;
+    color: #c4b8ff;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
 /* ── Library page (Library/Index) ── */
 /* Widen `main` for the grid; default 520px is too narrow for poster cards. */
 body.library-page main {

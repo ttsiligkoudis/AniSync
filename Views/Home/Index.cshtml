@@ -24,6 +24,42 @@ else
     </p>
 }
 
+@* Stats strip: two big counts (Watching / Completed) plus a top-genres chip
+   row. Only renders for logged-in non-anonymous users with at least one
+   completed entry — without that, the genre breakdown would be empty and
+   the strip would feel like a placeholder. v1 will add Hours Watched + Mean
+   Score once the per-service queries surface episode counts and per-entry
+   scores; v0 sticks to what's already in the existing list-catalog response. *@
+@if (isLoggedIn && !anonymousUser && Model.CompletedTotal > 0)
+{
+    <section class="dashboard-section stats-section">
+        <div class="dashboard-section-header">
+            <h2 class="dashboard-section-title">Your stats</h2>
+            <span class="dashboard-section-link-muted">via @serviceLabel</span>
+        </div>
+        <div class="stats-strip">
+            <div class="stats-cell">
+                <div class="stats-number">@Model.WatchingTotal</div>
+                <div class="stats-label">Watching</div>
+            </div>
+            <div class="stats-cell">
+                <div class="stats-number">@Model.CompletedTotal</div>
+                <div class="stats-label">Completed</div>
+            </div>
+        </div>
+        @if (Model.TopGenres.Count > 0)
+        {
+            <div class="genre-chips">
+                <span class="genre-chips-label">Top genres:</span>
+                @foreach (var (genre, _) in Model.TopGenres)
+                {
+                    <span class="genre-chip">@genre</span>
+                }
+            </div>
+        }
+    </section>
+}
+
 @* Continue Watching: a small slice of the user's Currently Watching list
    surfaced on the dashboard so the front door does something useful for
    returning users instead of just showing three nav tiles. Only renders for

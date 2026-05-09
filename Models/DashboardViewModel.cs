@@ -12,5 +12,13 @@ namespace AnimeList.Models
         public TokenData TokenData { get; set; }
         public string ConfigUid { get; set; }
         public List<Meta> ContinueWatching { get; set; } = [];
+
+        // Compact stats panel. Watching/Completed totals come straight from the
+        // list-fetch lengths; TopGenres is the top 5 genre buckets across the
+        // user's Completed list, which is the best sample of long-run taste
+        // (Currently Watching skews to whatever airing season is in flight).
+        public int WatchingTotal { get; set; }
+        public int CompletedTotal { get; set; }
+        public List<(string genre, int count)> TopGenres { get; set; } = [];
     }
 }

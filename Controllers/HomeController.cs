@@ -54,28 +54,47 @@ public class HomeController : Controller
 
         string uid = null;
         List<Meta> continueWatching = [];
+        int watchingTotal = 0;
+        int completedTotal = 0;
+        List<(string genre, int count)> topGenres = [];
 
-        // Continue-watching surface only fires for non-anonymous logged-in users.
-        // Anonymous and not-logged-in visitors get the plain three-tile dashboard;
-        // they have nothing to "continue."
+        // Continue-watching + stats surfaces only fire for non-anonymous logged-in
+        // users. Anonymous and not-logged-in visitors get the plain three-tile
+        // dashboard; they have nothing to "continue" and no list to compute stats
+        // from.
         if (tokenData != null && !tokenData.anonymousUser)
         {
             var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
             uid = resolved;
 
-            // Fetch via the same per-service dispatch the library page uses, then
-            // slice to the first N. The full list is loaded — services don't expose
-            // a "first N only" param — but Currently Watching tends to be small
-            // (few tens at most) so the over-fetch is cheap. If a power user with
-            // hundreds of in-progress shows reports slowness, prefetch a smaller
-            // window upstream.
-            var fullList = tokenData.anime_service switch
-            {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, ListType.Current),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Current),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Current),
-            };
-            continueWatching = (fullList ?? []).Take(ContinueWatchingMaxItems).ToList();
+            // Fetch Currently Watching (drives the Continue Watching grid + watching
+            // count) and Completed (drives the completed count + top-genres taste
+            // profile) in parallel. Two upstream calls per dashboard render — the
+            // lists tend to be small enough that this is cheap. Cache later if it
+            // shows up in profiles.
+            var watchingTask = FetchListAsync(tokenData, ListType.Current);
+            var completedTask = FetchListAsync(tokenData, ListType.Completed);
+            await Task.WhenAll(watchingTask, completedTask);
+
+            var watching = watchingTask.Result;
+            var completed = completedTask.Result;
+
+            watchingTotal = watching.Count;
+            completedTotal = completed.Count;
+            continueWatching = watching.Take(ContinueWatchingMaxItems).ToList();
+
+            // Top genres from Completed only — Completed is the most representative
+            // sample of the user's taste (Currently Watching skews recency-biased
+            // toward whatever airing season they're in). Bucket-and-rank in memory
+            // since lists are small.
+            topGenres = completed
+                .SelectMany(m => m.genres ?? Enumerable.Empty<string>())
+                .Where(g => !string.IsNullOrWhiteSpace(g))
+                .GroupBy(g => g, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(g => g.Count())
+                .Take(5)
+                .Select(g => (g.Key, g.Count()))
+                .ToList();
         }
 
         return View(new DashboardViewModel
@@ -83,7 +102,24 @@ public class HomeController : Controller
             TokenData = tokenData,
             ConfigUid = uid,
             ContinueWatching = continueWatching,
+            WatchingTotal = watchingTotal,
+            CompletedTotal = completedTotal,
+            TopGenres = topGenres,
         });
+    }
+
+    // Per-service GetAnimeListAsync dispatch — the same shape Library / Discover /
+    // Catalog all use, factored here so Index can fetch two list types in parallel
+    // without three nested switch expressions.
+    private async Task<List<Meta>> FetchListAsync(TokenData tokenData, ListType listType)
+    {
+        var metas = tokenData.anime_service switch
+        {
+            AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listType),
+            AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType),
+            _                        => await _kitsuService.GetAnimeListAsync(tokenData, listType),
+        };
+        return metas ?? [];
     }
 
     [Route("/configure")]
