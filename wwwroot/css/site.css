@@ -1467,6 +1467,85 @@ body.drawer-open .drawer-backdrop {
     transform: none;
 }
 
+/* ── Browse By tiles (dashboard) ── */
+/* 2-column grid of secondary discovery shortcuts (Seasons / Genres / Studios
+   / Platforms). Matches the StreamD "Browse By" surface — icon in a soft-
+   coloured circle on the left, title + 1-line description on the right. */
+.browse-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    width: 100%;
+}
+
+.browse-tile {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 1rem;
+    color: inherit;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.browse-tile:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: inherit;
+    text-decoration: none;
+    transform: translateY(-1px);
+}
+
+.browse-tile-disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.browse-tile-disabled:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+    transform: none;
+}
+
+.browse-tile-icon {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+}
+
+/* Soft icon-tile colours — matches StreamD's per-category accent treatment.
+   Background is a 12% tint, icon stroke is the same hue at full saturation. */
+.browse-tile-icon-blue   { background: rgba(59, 130, 246, 0.15);  color: #60a5fa; }
+.browse-tile-icon-green  { background: rgba(16, 185, 129, 0.15);  color: #34d399; }
+.browse-tile-icon-amber  { background: rgba(245, 158, 11, 0.15);  color: #fbbf24; }
+.browse-tile-icon-purple { background: rgba(139, 92, 246, 0.15);  color: #a78bfa; }
+
+.browse-tile-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.browse-tile-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #fff;
+    margin: 0 0 0.15rem;
+}
+
+.browse-tile-text {
+    font-size: 0.78rem;
+    color: #999;
+    margin: 0;
+    line-height: 1.3;
+}
+
 /* Section wrapper for "Continue watching" (and future dashboard surfaces like
    stats / airing soon). Uses the same .library-grid inside, but the dashboard's
    narrow main column means it renders 2-3 cards per row rather than the wider
