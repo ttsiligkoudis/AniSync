@@ -34,18 +34,31 @@ namespace AnimeList.Controllers
             _configStore = configStore;
         }
 
+        // The three discover catalogs. Order is the tab strip rendering order;
+        // Trending leads because it's the most-viewed catalog in the addon's
+        // existing manifest analytics.
+        private static readonly ListType[] DiscoverListTypes =
+        [
+            ListType.Trending_Desc,
+            ListType.Seasonal,
+            ListType.Airing,
+        ];
+
         [Route("/discover")]
-        public async Task<IActionResult> Index()
+        public async Task<IActionResult> Index(string list = null, string search = null)
         {
             // Anonymous fresh-visit: GetAccessTokenAsync returns null. Synthesise an
             // anonymous TokenData with the Kitsu default so the per-service dispatch
-            // below has something to switch on. ListType.Trending_Desc doesn't need a
-            // user identity — the underlying GraphQL/REST calls run unauthenticated.
-            // anonymousUser is a computed property (empty username on Kitsu / empty
-            // access_token on the OAuth services) so leaving the identity fields blank
-            // here makes it return true on its own — no need to set it explicitly.
+            // below has something to switch on. The trending / seasonal / airing
+            // catalogs don't need a user identity — the underlying GraphQL/REST calls
+            // run unauthenticated. anonymousUser is a computed property (empty
+            // username on Kitsu / empty access_token on the OAuth services) so
+            // leaving the identity fields blank here makes it return true on its own.
             var tokenData = await _tokenService.GetAccessTokenAsync()
                 ?? new TokenData { anime_service = AnimeService.Kitsu };
+
+            var hasSearch = !string.IsNullOrWhiteSpace(search);
+            var activeList = ParseListType(list);
 
             // Resolve the row's UID for logged-in users so per-card Manage Entry links
             // hit the existing config-scoped flow. Anonymous users get null and the
@@ -57,31 +70,74 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
+            // Search runs as ListType.Search; the active tab is ignored while a query
+            // is present. groupSeasons=false during search matches the addon's Stremio-
+            // side behaviour — collapsing seasons rewrites titles to the shortest
+            // variant which fights the "find this specific anime" intent.
+            var listForCall = hasSearch ? ListType.Search : activeList;
+            var groupSeasonsForCall = !hasSearch;
             var metas = tokenData.anime_service switch
             {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, ListType.Trending_Desc),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Trending_Desc),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Trending_Desc),
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
             };
+
+            // Same 0.4-threshold relevance re-rank CatalogController applies on the
+            // Stremio side — keeps web-app search behaviour consistent with the addon.
+            if (hasSearch && metas?.Count > 0)
+            {
+                var normalisedQuery = NormalizeTitle(search);
+                const double minScore = 0.4;
+                metas = metas
+                    .Select(m => (meta: m, score: ScoreMatch(normalisedQuery, m.name)))
+                    .Where(x => x.score >= minScore)
+                    .OrderByDescending(x => x.score)
+                    .Select(x => x.meta)
+                    .ToList();
+            }
 
             return View(new DiscoverViewModel
             {
                 ConfigUid = uid,
                 AnimeService = tokenData.anime_service,
                 AnonymousUser = tokenData.anonymousUser,
-                Trending = metas ?? [],
+                ActiveList = activeList,
+                Tabs = DiscoverListTypes,
+                Search = hasSearch ? search.Trim() : null,
+                Items = metas ?? [],
             });
+        }
+
+        private static ListType ParseListType(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return ListType.Trending_Desc;
+            if (Enum.TryParse<ListType>(raw, ignoreCase: true, out var parsed)
+                && Array.IndexOf(DiscoverListTypes, parsed) >= 0)
+                return parsed;
+            // Allow ?list=trending as the URL-friendly synonym for Trending_Desc — the
+            // underscore in the enum name is a code-side artifact users shouldn't have
+            // to know about.
+            if (string.Equals(raw, "trending", StringComparison.OrdinalIgnoreCase))
+                return ListType.Trending_Desc;
+            return ListType.Trending_Desc;
         }
     }
 
     /// <summary>
-    /// View model for the discover page (Views/Discover/Index.cshtml).
+    /// View model for the discover page (Views/Discover/Index.cshtml). Mirrors
+    /// LibraryViewModel's shape so the shared partial + tab strip work identically.
     /// </summary>
     public class DiscoverViewModel
     {
         public string ConfigUid { get; set; }
         public AnimeService AnimeService { get; set; }
         public bool AnonymousUser { get; set; }
-        public List<Meta> Trending { get; set; } = [];
+        public ListType ActiveList { get; set; }
+        public IReadOnlyList<ListType> Tabs { get; set; } = [];
+        // The active search term, or null when the page is in tab-list mode. The
+        // view renders a search-results header (and hides the tabs) when this is set.
+        public string Search { get; set; }
+        public List<Meta> Items { get; set; } = [];
     }
 }

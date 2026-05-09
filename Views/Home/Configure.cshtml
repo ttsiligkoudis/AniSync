@@ -1,5 +1,6 @@
 @model ConfigureViewModel
 @{
+    ViewData["ActiveNav"] = "configure";
     var stremioStr = "https://web.stremio.com/#/addons?addon=";
     // Two thin shortcuts. cfg keeps the toggle markup terse; linkedByService is recomputed
     // on every Model.LinkedByService access, so cache it once here for the picker + the
@@ -8,8 +9,7 @@
     var linkedByService = Model.LinkedByService;
 }
 
-<h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
-<p class="app-subtitle">Track your anime progress on Stremio</p>
+<p class="page-subtitle">Track your anime progress on Stremio</p>
 
 @if (!Model.AnonymousUser)
 {

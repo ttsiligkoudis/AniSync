@@ -1,43 +1,88 @@
 @model AnimeList.Models.PosterGridViewModel
+@{
+    // "scroll" → horizontal-overflow row used on the dashboard's Continue
+    // Watching shelf; default → CSS-grid layout used by /library and /discover.
+    var wrapperClass = Model.Variant == "scroll" ? "poster-scroll-row" : "library-grid";
+}
 
 @* Shared poster-grid renderer for the web-app pages (Library, Discover, future
    list-type tabs, future search). Cards link to the existing config-scoped
    Manage Entry page when ConfigUid is set; otherwise (anonymous Discover) the
-   cards render as inert non-anchor divs so a click doesn't dead-end at /. *@
+   cards render as inert non-anchor divs so a click doesn't dead-end at /.
+
+   StreamD-style card chrome:
+     - Score badge overlay (★ N.N) on the poster top-right when score > 0.
+     - Title under the poster (clamped to 2 lines).
+     - Info row "format · X eps · year" underneath the title, joining whichever
+       of the three fields the per-service catalog query populated. Each chunk
+       is independently optional. *@
 @if (Model.Items?.Count > 0)
 {
-    <div class="library-grid">
+    <div class="@wrapperClass">
         @foreach (var meta in Model.Items)
         {
             var manageHref = !string.IsNullOrEmpty(Model.ConfigUid)
                 ? $"/{Model.ConfigUid}/Meta/ManageEntry/{meta.id}"
                 : null;
+
+            // Build the format · eps · year info row from whichever bits the
+            // service surfaced. Joined with a middle-dot separator to match the
+            // StreamD cards' visual rhythm.
+            var infoBits = new List<string>();
+            if (!string.IsNullOrEmpty(meta.format)) infoBits.Add(meta.format);
+            if (meta.episodes is int eps && eps > 0) infoBits.Add($"{eps} ep{(eps > 1 ? "s" : "")}");
+            if (meta.year is int yr && yr > 0) infoBits.Add(yr.ToString());
+            var infoLine = string.Join(" · ", infoBits);
+
+            var hasScore = meta.score.HasValue && meta.score.Value > 0;
+            var cardClass = manageHref != null ? "library-card" : "library-card library-card-inert";
+
             if (manageHref != null)
             {
-                <a class="library-card" href="@manageHref" title="@meta.name">
-                    @if (!string.IsNullOrEmpty(meta.poster))
-                    {
-                        <img class="library-card-poster" src="@meta.poster" alt="@meta.name" loading="lazy" />
-                    }
-                    else
-                    {
-                        <div class="library-card-poster library-card-poster-placeholder"></div>
-                    }
+                <a class="@cardClass" href="@manageHref" title="@meta.name">
+                    <div class="library-card-poster-wrap">
+                        @if (!string.IsNullOrEmpty(meta.poster))
+                        {
+                            <img class="library-card-poster" src="@meta.poster" alt="@meta.name" loading="lazy" />
+                        }
+                        else
+                        {
+                            <div class="library-card-poster library-card-poster-placeholder"></div>
+                        }
+                        @if (hasScore)
+                        {
+                            <span class="library-card-score">★ @meta.score.Value.ToString("0.0")</span>
+                        }
+                    </div>
                     <span class="library-card-title">@meta.name</span>
+                    @if (infoBits.Count > 0)
+                    {
+                        <span class="library-card-meta">@infoLine</span>
+                    }
                 </a>
             }
             else
             {
-                <div class="library-card library-card-inert" title="@meta.name">
-                    @if (!string.IsNullOrEmpty(meta.poster))
-                    {
-                        <img class="library-card-poster" src="@meta.poster" alt="@meta.name" loading="lazy" />
-                    }
-                    else
-                    {
-                        <div class="library-card-poster library-card-poster-placeholder"></div>
-                    }
+                <div class="@cardClass" title="@meta.name">
+                    <div class="library-card-poster-wrap">
+                        @if (!string.IsNullOrEmpty(meta.poster))
+                        {
+                            <img class="library-card-poster" src="@meta.poster" alt="@meta.name" loading="lazy" />
+                        }
+                        else
+                        {
+                            <div class="library-card-poster library-card-poster-placeholder"></div>
+                        }
+                        @if (hasScore)
+                        {
+                            <span class="library-card-score">★ @meta.score.Value.ToString("0.0")</span>
+                        }
+                    </div>
                     <span class="library-card-title">@meta.name</span>
+                    @if (infoBits.Count > 0)
+                    {
+                        <span class="library-card-meta">@infoLine</span>
+                    }
                 </div>
             }
         }

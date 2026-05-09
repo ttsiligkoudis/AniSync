@@ -1,11 +1,35 @@
 @model AnimeList.Controllers.DiscoverViewModel
 @{
     ViewData["BodyClass"] = "library-page";
+    ViewData["ActiveNav"] = "discover";
+
+    var labels = new Dictionary<ListType, string>
+    {
+        [ListType.Trending_Desc] = "Trending",
+        [ListType.Seasonal]      = "Seasonal",
+        [ListType.Airing]        = "Airing",
+    };
+
+    var slugs = new Dictionary<ListType, string>
+    {
+        [ListType.Trending_Desc] = "trending",
+        [ListType.Seasonal]      = "seasonal",
+        [ListType.Airing]        = "airing",
+    };
+
+    var hasSearch = !string.IsNullOrEmpty(Model.Search);
+    var activeLabel = labels[Model.ActiveList];
 }
 
-<h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
-<p class="app-subtitle">
-    Trending anime
+<p class="page-subtitle">
+    @if (hasSearch)
+    {
+        <text>Search results</text>
+    }
+    else
+    {
+        <text>@activeLabel anime</text>
+    }
     @if (!Model.AnonymousUser)
     {
         <text>· via @Model.AnimeService</text>
@@ -15,11 +39,41 @@
     </span>
 </p>
 
+@* Same search-form pattern as /library — server-rendered, navigates on submit. *@
+<form method="get" action="@Url.Action("Index", "Discover")" class="library-search">
+    <input type="search"
+           name="search"
+           value="@Model.Search"
+           placeholder="Search anime…"
+           class="library-search-input"
+           autocomplete="off" />
+    @if (hasSearch)
+    {
+        <a class="library-search-clear" href="@Url.Action("Index", "Discover")">Clear</a>
+    }
+</form>
+
+@if (!hasSearch)
+{
+    <nav class="library-tabs" role="tablist">
+        @foreach (var t in Model.Tabs)
+        {
+            var isActive = t == Model.ActiveList;
+            <a class="library-tab @(isActive ? "library-tab-active" : "")"
+               href="@Url.Action("Index", "Discover", new { list = slugs[t] })"
+               role="tab"
+               aria-selected="@(isActive ? "true" : "false")">
+                @labels[t]
+            </a>
+        }
+    </nav>
+}
+
 @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
 {
-    Items = Model.Trending,
-    @* Anonymous users have no UID, so the partial renders inert cards. Logged-in
-       users get the same Manage Entry hand-off as the library page. *@
+    Items = Model.Items,
     ConfigUid = Model.ConfigUid,
-    EmptyMessage = "Couldn't load trending anime — try again later.",
+    EmptyMessage = hasSearch
+        ? $"No matches for \"{Model.Search}\"."
+        : $"Couldn't load {activeLabel.ToLower()} anime — try again later.",
 })

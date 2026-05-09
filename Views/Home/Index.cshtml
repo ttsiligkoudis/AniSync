@@ -1,63 +1,177 @@
-@model TokenData
+@model AnimeList.Models.DashboardViewModel
 @{
-    // The Index action passes the deserialised session token (or null for anonymous).
-    // The view branches purely on its presence — no DB hits, no token refreshes —
-    // because the dashboard is just a navigation hub. Anything that needs fresh server
-    // state lives behind the tile links (Library, Discover, Configure), each of which
-    // is its own controller action.
-    var isLoggedIn = Model != null;
-    var anonymousUser = Model?.anonymousUser ?? false;
-    var serviceLabel = Model?.anime_service.ToString();
+    ViewData["ActiveNav"] = "home";
+    var tokenData = Model.TokenData;
+    var isLoggedIn = tokenData != null;
+    var anonymousUser = tokenData?.anonymousUser ?? false;
+    var serviceLabel = tokenData?.anime_service.ToString();
+    var hasContinueWatching = Model.ContinueWatching?.Count > 0;
 }
 
-<h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
-<p class="app-subtitle">Track your anime progress on Stremio</p>
-
-@if (isLoggedIn && !anonymousUser)
-{
-    <span class="success-badge">
-        ✓ Connected to @serviceLabel
-        <a class="success-badge-action" href="@Url.Action("Logout", "Auth")" title="Disconnect">✗</a>
-    </span>
-}
-else
-{
-    <p class="text-center text-muted mb-4">
-        Log in to see your library, or browse public catalogues anonymously.
-    </p>
-}
-
-@* Stacked navigation tiles. Library is gated behind a logged-in primary so anonymous
-   users get a "log in to enable" hint rather than a confusing dead click. Discover
-   works for everyone (Trending / Seasonal / Airing don't require auth). Configure
-   addon is always reachable — anonymous users still need it for the install URL.
-   Stacked rather than side-by-side because main's max-width is 520px and three
-   horizontal cards would be too narrow to read comfortably. *@
-<div class="dashboard-tiles">
+@* Hero card — StreamD-style pill badge + two-tone heading + dual CTAs. Copy
+   branches on login state: anonymous visitors get the pitch + "Get started"
+   hand-off to /configure (where the Stremio install URL and provider picker
+   live), logged-in users get a welcome-back nudge + entry points into the
+   library and discover surfaces. *@
+<section class="hero-card">
     @if (isLoggedIn && !anonymousUser)
     {
-        <a class="dashboard-tile" href="/library">
-            <h3 class="dashboard-tile-title">My Library</h3>
-            <p class="dashboard-tile-text">Currently watching, completed, planning — across every linked provider.</p>
-        </a>
+        <span class="hero-badge">✓ Synced with @serviceLabel</span>
+        <h2 class="hero-title">
+            Continue your <span class="hero-title-accent">anime journey</span>
+        </h2>
+        <p class="hero-tagline">Pick up where you left off, or surface what to watch next.</p>
+        <div class="hero-ctas">
+            <a class="hero-cta hero-cta-primary" href="/library">Open library →</a>
+            <a class="hero-cta hero-cta-secondary" href="/discover">Discover trending</a>
+        </div>
     }
     else
     {
-        <div class="dashboard-tile dashboard-tile-disabled">
-            <h3 class="dashboard-tile-title">My Library</h3>
-            <p class="dashboard-tile-text">Log in to see your AniList / MAL / Kitsu lists in one place.</p>
+        <span class="hero-badge">Track on Stremio</span>
+        <h2 class="hero-title">
+            Your anime, <span class="hero-title-accent">synced everywhere</span>
+        </h2>
+        <p class="hero-tagline">Track progress across AniList, MyAnimeList, and Kitsu — and watch on Stremio.</p>
+        <div class="hero-ctas">
+            <a class="hero-cta hero-cta-primary" href="@Url.Action("Configure", "Home")">Get started →</a>
+            <a class="hero-cta hero-cta-secondary" href="/discover">Browse trending</a>
         </div>
     }
+</section>
 
-    <a class="dashboard-tile" href="/discover">
-        <h3 class="dashboard-tile-title">Discover</h3>
-        <p class="dashboard-tile-text">Trending, seasonal, and currently airing anime.</p>
-    </a>
+@* Stats strip: two big counts (Watching / Completed) plus a top-genres chip
+   row. Only renders for logged-in non-anonymous users with at least one
+   completed entry — without that, the genre breakdown would be empty and
+   the strip would feel like a placeholder. v1 will add Hours Watched + Mean
+   Score once the per-service queries surface episode counts and per-entry
+   scores; v0 sticks to what's already in the existing list-catalog response. *@
+@if (isLoggedIn && !anonymousUser && Model.CompletedTotal > 0)
+{
+    <section class="dashboard-section stats-section">
+        <div class="dashboard-section-header">
+            <h2 class="dashboard-section-title">Your stats</h2>
+            <span class="dashboard-section-link-muted">via @serviceLabel</span>
+        </div>
+        <div class="stats-strip">
+            <div class="stats-cell">
+                <div class="stats-number">@Model.WatchingTotal</div>
+                <div class="stats-label">Watching</div>
+            </div>
+            <div class="stats-cell">
+                <div class="stats-number">@Model.CompletedTotal</div>
+                <div class="stats-label">Completed</div>
+            </div>
+        </div>
+        @if (Model.TopGenres.Count > 0)
+        {
+            <div class="genre-chips">
+                <span class="genre-chips-label">Top genres:</span>
+                @foreach (var (genre, _) in Model.TopGenres)
+                {
+                    <span class="genre-chip">@genre</span>
+                }
+            </div>
+        }
+    </section>
+}
 
-    <a class="dashboard-tile" href="@Url.Action("Configure", "Home")">
-        <h3 class="dashboard-tile-title">Configure addon</h3>
-        <p class="dashboard-tile-text">
-            @(isLoggedIn ? "Manage linked accounts, install URL, and integrations." : "Get the Stremio install URL and pick your tracker.")
-        </p>
-    </a>
-</div>
+@* Continue Watching: a small slice of the user's Currently Watching list
+   surfaced on the dashboard so the front door does something useful for
+   returning users instead of just showing three nav tiles. Only renders for
+   logged-in non-anonymous users with at least one item; falls back to the
+   plain dashboard otherwise. The grid uses the existing _PosterGrid partial
+   for visual consistency with /library and /discover. *@
+@if (hasContinueWatching)
+{
+    <section class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h2 class="dashboard-section-title">Continue watching</h2>
+            <a class="dashboard-section-link" href="/library">View all →</a>
+        </div>
+        @* Horizontal-scroll variant rather than the wrapping grid — matches the
+           StreamD "shelf" pattern where the dashboard surfaces multiple short
+           rows rather than a few full grids. *@
+        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+        {
+            Items = Model.ContinueWatching,
+            ConfigUid = Model.ConfigUid,
+            Variant = "scroll",
+        })
+    </section>
+}
+
+@* Browse By: secondary discovery surfaces. Replaces the previous three nav
+   tiles now that the layout's bottom-nav + hamburger drawer cover primary
+   navigation (Home / Library / Discover / Configure) — keeping nav tiles
+   here too would just duplicate. The four browse paths match the StreamD
+   reference: Seasons + Genres are functional today; Studios and Platforms
+   are coming-soon stubs because the catalog dispatchers don't support them
+   yet. *@
+<section class="dashboard-section">
+    <div class="dashboard-section-header">
+        <h2 class="dashboard-section-title">Browse By</h2>
+        <span class="dashboard-section-link-muted">Find your next favourite</span>
+    </div>
+    <div class="browse-grid">
+        <a class="browse-tile" href="/discover?list=seasonal">
+            <span class="browse-tile-icon browse-tile-icon-blue">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+            </span>
+            <div class="browse-tile-body">
+                <h3 class="browse-tile-title">Seasons</h3>
+                <p class="browse-tile-text">Browse by release season</p>
+            </div>
+        </a>
+
+        <a class="browse-tile" href="/discover">
+            <span class="browse-tile-icon browse-tile-icon-green">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
+                </svg>
+            </span>
+            <div class="browse-tile-body">
+                <h3 class="browse-tile-title">Genres</h3>
+                <p class="browse-tile-text">Find anime by genre</p>
+            </div>
+        </a>
+
+        <div class="browse-tile browse-tile-disabled">
+            <span class="browse-tile-icon browse-tile-icon-amber">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="4" y="3" width="16" height="18" rx="1"></rect>
+                    <line x1="9" y1="8" x2="9" y2="8.01"></line>
+                    <line x1="15" y1="8" x2="15" y2="8.01"></line>
+                    <line x1="9" y1="12" x2="9" y2="12.01"></line>
+                    <line x1="15" y1="12" x2="15" y2="12.01"></line>
+                    <line x1="9" y1="16" x2="9" y2="16.01"></line>
+                    <line x1="15" y1="16" x2="15" y2="16.01"></line>
+                </svg>
+            </span>
+            <div class="browse-tile-body">
+                <h3 class="browse-tile-title">Studios</h3>
+                <p class="browse-tile-text">Coming soon</p>
+            </div>
+        </div>
+
+        <div class="browse-tile browse-tile-disabled">
+            <span class="browse-tile-icon browse-tile-icon-purple">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="4" width="20" height="14" rx="2"></rect>
+                    <line x1="8" y1="22" x2="16" y2="22"></line>
+                    <line x1="12" y1="18" x2="12" y2="22"></line>
+                </svg>
+            </span>
+            <div class="browse-tile-body">
+                <h3 class="browse-tile-title">Platforms</h3>
+                <p class="browse-tile-text">Coming soon</p>
+            </div>
+        </div>
+    </div>
+</section>
