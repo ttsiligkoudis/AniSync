@@ -3,10 +3,10 @@
 // Receives "watched" messages from content scripts, resolves the title to a
 // concrete anime id via /api/v1/match, then writes progress to AniSync
 // (which fans out to every linked provider). Also handles the per-site
-// opt-in flow: toolbar click injects content.js via activeTab, content
-// script's "Always allow" button triggers chrome.permissions.request, on
-// grant the site is registered as a dynamic content script so it
-// auto-injects on future visits.
+// opt-in flow: the toolbar popup (popup.html / popup.js) calls
+// chrome.permissions.request directly — popup is the only context that works
+// for this on both Chrome and Firefox — and on grant messages us to register
+// a dynamic content script so the site auto-injects on future visits.
 
 const DEFAULT_API_BASE = 'https://anisync.fly.dev';
 // Minimum match score below which we don't auto-write. 0.5 is generous enough
@@ -80,27 +80,13 @@ async function processWatched(msg) {
 
 // ── Per-site opt-in flow ────────────────────────────────────────────────
 //
-// Two surfaces:
-//   1. Toolbar click on a non-pre-baked site — uses activeTab to inject
-//      content.js into the current tab so the user gets a one-shot tracking
-//      session. Doesn't grant any persistent permission.
-//   2. "Always allow" button in the floating UI — content script messages
-//      us; we call chrome.permissions.request from inside this handler so
-//      the user gesture is still live (Chrome's permission dialog requires
-//      that). On grant, register the origin as a dynamic content script so
-//      future visits auto-inject without the toolbar dance.
-
-function originFromUrl(rawUrl) {
-  try {
-    const u = new URL(rawUrl);
-    // Build a match pattern compatible with both
-    // chrome.permissions.request and chrome.scripting.registerContentScripts.
-    // Use *:// so http and https both work — anime sites mix the two.
-    return `*://${u.hostname}/*`;
-  } catch {
-    return null;
-  }
-}
+// User clicks AniSync toolbar icon → popup.html opens → popup calls
+// chrome.permissions.request itself (popups are the only UI surface where
+// this reliably works in both Chrome and Firefox) → on grant, popup also
+// injects content.js into the active tab AND messages us with
+// 'anisync:register-site' so we can register a persistent dynamic content
+// script for the origin. We rehydrate the dynamic registry on every extension
+// startup because Chrome wipes it across updates.
 
 function scriptIdForPattern(pattern) {
   return SCRIPT_ID_PREFIX + pattern.replace(/[^a-z0-9]/gi, '_');
@@ -155,24 +141,6 @@ async function syncDynamicScripts() {
 chrome.runtime.onStartup.addListener(syncDynamicScripts);
 chrome.runtime.onInstalled.addListener(syncDynamicScripts);
 
-// Toolbar button click: inject content.js into the current tab via activeTab.
-// activeTab is a transient permission Chrome grants per-click, so this works
-// even on sites we haven't been granted host permissions for. The injection
-// is one-shot — closing the tab loses it. The "Always allow" CTA in the
-// floating UI is what makes it permanent.
-chrome.action.onClicked.addListener(async (tab) => {
-  if (!tab?.id) return;
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ['content.js'],
-    });
-  } catch (e) {
-    // Restricted pages (chrome://, edge://, the Web Store) refuse injection.
-    console.warn('[AniSync] injection refused on this page:', e.message);
-  }
-});
-
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg?.type) return false;
 
@@ -193,33 +161,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  if (msg.type === 'anisync:check-permission') {
-    // Content script asks: "do I have a persistent permission on this host?"
-    // Affects whether the floating UI shows the Always-allow CTA. Pre-baked
-    // hosts (manifest static content_scripts) always return true.
-    const url = sender.tab?.url || sender.url;
-    const pattern = originFromUrl(url);
-    if (!pattern) { sendResponse({ persistent: false }); return false; }
-    chrome.permissions.contains({ origins: [pattern] }, (has) => {
-      sendResponse({ persistent: has, pattern });
-    });
-    return true;
-  }
+  if (msg.type === 'anisync:register-site') {
+    // Popup has just been granted a host permission and wants us to make
+    // the injection persistent. We DON'T call permissions.request here —
+    // the popup already did, and only the popup's frame has the user gesture
+    // Firefox needs. We just register the dynamic script and remember it.
+    const pattern = msg.pattern;
+    if (!pattern) { sendResponse({ ok: false, error: 'no pattern' }); return false; }
 
-  if (msg.type === 'anisync:request-permission') {
-    // The floating UI's "Always allow" button. The user gesture from that
-    // click propagates here through the message chain — Chrome will surface
-    // its native permission dialog as long as we call permissions.request
-    // synchronously inside this handler.
-    const pattern = msg.pattern || originFromUrl(sender.tab?.url);
-    if (!pattern) { sendResponse({ ok: false, error: 'no origin' }); return false; }
-
-    chrome.permissions.request({ origins: [pattern] }, async (granted) => {
-      if (!granted) {
-        sendResponse({ ok: false, error: 'permission denied' });
-        return;
-      }
+    (async () => {
       try {
+        // Defensive: confirm we still hold the permission. If the user denied
+        // and somehow this message arrived anyway, abort cleanly.
+        const has = await chrome.permissions.contains({ origins: [pattern] });
+        if (!has) {
+          sendResponse({ ok: false, error: 'permission not granted' });
+          return;
+        }
         await registerDynamicScript(pattern);
         await recordOptedIn(pattern);
         sendResponse({ ok: true, pattern });
@@ -227,7 +185,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         console.error('[AniSync] register failed:', e);
         sendResponse({ ok: false, error: e.message ?? String(e) });
       }
-    });
+    })();
     return true;
   }
 

@@ -26,19 +26,6 @@
   let uiPaint = null;        // set by injectUi so onSpaNavigate can re-paint
   let attachedVideo = null;  // the <video> the timeupdate listener is on
 
-  // Whether the script is running under a persistent (manifest-declared or
-  // user-opted-in) host permission, vs an activeTab one-shot injection. Set
-  // asynchronously after a round-trip to background — until then the floating
-  // UI shows nothing about persistence so we don't flicker the CTA.
-  let permissionState = { persistent: null, pattern: null };
-  let uiUpdatePermission = null;  // hoisted so the round-trip can re-paint
-
-  chrome.runtime.sendMessage({ type: 'anisync:check-permission' }, (resp) => {
-    if (chrome.runtime.lastError) return;
-    permissionState = resp || { persistent: false, pattern: null };
-    if (uiUpdatePermission) uiUpdatePermission(permissionState);
-  });
-
   // ── Site adapter registry ─────────────────────────────────────────────
   // Adapter shape: { hostnames: (string|RegExp)[], extract(): {title, episode, source}|null }.
   // Order matters — the first matching adapter wins. Adapters live below
@@ -381,21 +368,6 @@
     .anisync-fab-close { background: #2a2a31; color: #ccc; }
     .anisync-fab-status { margin-top: 8px; font-size: 11px; opacity: 0.8; min-height: 14px; }
     .anisync-fab-source { font-size: 10px; opacity: 0.5; margin-top: 4px; }
-    .anisync-fab-allow {
-      display: none;
-      background: rgba(123, 91, 245, 0.12);
-      border: 1px solid rgba(123, 91, 245, 0.4);
-      border-radius: 8px; padding: 10px;
-      margin: 0 0 10px;
-    }
-    .anisync-fab-allow strong { display: block; font-size: 12px; margin-bottom: 4px; }
-    .anisync-fab-allow span { display: block; font-size: 11px; opacity: 0.75; margin-bottom: 8px; }
-    .anisync-fab-allow button {
-      width: 100%; padding: 7px; border: none; border-radius: 6px;
-      background: #7B5BF5; color: #fff; font-size: 12px; font-weight: 600;
-      cursor: pointer;
-    }
-    .anisync-fab-allow button:disabled { opacity: 0.6; cursor: default; }
   `;
 
   function injectUi(detection) {
@@ -412,11 +384,6 @@
       <button class="anisync-fab-pill" type="button">📺 Track</button>
       <div class="anisync-fab-card" hidden>
         <h3>Track this episode</h3>
-        <div class="anisync-fab-allow">
-          <strong>Tracking is one-shot on this site</strong>
-          <span>Allow AniSync on <span class="anisync-fab-allow-host"></span> to auto-track future episodes without clicking the toolbar each time.</span>
-          <button class="anisync-fab-allow-btn" type="button">Always allow on this site</button>
-        </div>
         <label>Show title</label>
         <input class="anisync-fab-title" />
         <label>Episode</label>
@@ -439,9 +406,6 @@
     const $status = root.querySelector('.anisync-fab-status');
     const $save = root.querySelector('.anisync-fab-save');
     const $close = root.querySelector('.anisync-fab-close');
-    const $allow = root.querySelector('.anisync-fab-allow');
-    const $allowHost = root.querySelector('.anisync-fab-allow-host');
-    const $allowBtn = root.querySelector('.anisync-fab-allow-btn');
 
     function paint(d) {
       $title.value = d?.title ?? '';
@@ -452,44 +416,6 @@
     }
     paint(detection);
     uiPaint = paint;  // exposed so onSpaNavigate can re-paint after a route change
-
-    // Permission CTA — visible only when running under a transient activeTab
-    // injection on a host the user hasn't opted into. Hidden once the host
-    // gets a persistent permission so a refresh of the page or future visits
-    // are silent.
-    function paintPermission(state) {
-      if (state?.persistent) {
-        $allow.style.display = 'none';
-      } else {
-        $allow.style.display = 'block';
-        $allowHost.textContent = location.hostname;
-      }
-    }
-    paintPermission(permissionState);
-    uiUpdatePermission = paintPermission;
-
-    $allowBtn.addEventListener('click', () => {
-      // The click here is the user gesture that lets the background worker
-      // call chrome.permissions.request — Chrome's permission dialog is gated
-      // on a fresh user gesture and the message chain preserves it within a
-      // few-second window.
-      $allowBtn.disabled = true;
-      $allowBtn.textContent = 'Waiting for Chrome…';
-      chrome.runtime.sendMessage({
-        type: 'anisync:request-permission',
-        pattern: permissionState?.pattern,  // background falls back to sender.tab.url if missing
-      }, (resp) => {
-        if (chrome.runtime.lastError || !resp?.ok) {
-          $allowBtn.disabled = false;
-          $allowBtn.textContent = 'Always allow on this site';
-          $status.textContent = 'Permission ' + (resp?.error || chrome.runtime.lastError?.message || 'denied');
-          return;
-        }
-        permissionState = { persistent: true, pattern: resp.pattern };
-        paintPermission(permissionState);
-        $status.textContent = 'AniSync now auto-tracks ' + location.hostname + '.';
-      });
-    });
 
     $pill.addEventListener('click', () => {
       $card.hidden = !$card.hidden;

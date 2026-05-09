@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>AniSync</title>
+  <style>
+    :root { color-scheme: light dark; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      width: 280px;
+      font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: #1c1d22;
+      color: #e6e6e8;
+      padding: 14px;
+    }
+    h1 {
+      margin: 0 0 4px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .host {
+      margin: 0 0 14px;
+      font-size: 12px;
+      opacity: 0.7;
+      word-break: break-all;
+    }
+    button {
+      display: block;
+      width: 100%;
+      margin: 0 0 8px;
+      padding: 9px 10px;
+      border: none;
+      border-radius: 7px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: left;
+    }
+    button:disabled { opacity: 0.55; cursor: default; }
+    .primary { background: #7B5BF5; color: #fff; }
+    .secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: #e6e6e8;
+      font-weight: 500;
+    }
+    .desc {
+      margin: -4px 0 10px;
+      padding: 0 2px;
+      font-size: 11px;
+      opacity: 0.6;
+    }
+    .status {
+      min-height: 16px;
+      margin-top: 6px;
+      font-size: 11px;
+      opacity: 0.85;
+    }
+    .status.error { color: #ff8a8a; }
+    .status.ok { color: #8df09f; }
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(141, 240, 159, 0.2);
+      color: #8df09f;
+      font-size: 10px;
+      font-weight: 600;
+      margin-left: 6px;
+    }
+    a {
+      color: #b39bff;
+      font-size: 11px;
+    }
+    .footer {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <h1>AniSync <span id="granted-badge" class="badge" hidden>allowed</span></h1>
+  <p class="host" id="host">…</p>
+
+  <button id="track-once" class="primary" type="button">Track this episode</button>
+  <p class="desc" id="track-desc">Inject the tracker into this page once.</p>
+
+  <button id="always-allow" class="primary" type="button">Always allow on this site</button>
+  <p class="desc">Auto-track every visit without opening this popup. Triggers your browser's native permission dialog.</p>
+
+  <p class="status" id="status"></p>
+
+  <div class="footer">
+    <a href="#" id="open-options">Options</a>
+    <span id="version"></span>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

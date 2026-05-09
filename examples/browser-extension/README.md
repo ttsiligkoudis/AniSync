@@ -1,13 +1,15 @@
 # AniSync Auto-Tracker (browser extension reference)
 
-Reference Chrome / Edge extension that watches anime episodes on **any**
-streaming site and auto-updates progress on your linked AniList / Kitsu /
-MyAnimeList accounts via the AniSync public API.
+Reference cross-browser extension (Chrome / Edge / Firefox / Brave) that
+watches anime episodes on **any** streaming site and auto-updates progress
+on your linked AniList / Kitsu / MyAnimeList accounts via the AniSync
+public API.
 
 This is a **reference implementation** — a clean starting point for a
-publishable extension that follows Chrome Web Store-friendly patterns
-(curated install-time hosts + opt-in via `chrome.permissions.request`).
-Around 750 lines total, no build step.
+publishable extension that follows Chrome Web Store + Mozilla Add-ons
+review patterns (curated install-time hosts + opt-in via
+`permissions.request` from a toolbar popup). Single MV3 manifest, no build
+step.
 
 ## How it works
 
@@ -66,24 +68,34 @@ template for sidebar-DOM patterns.
 
 | File | What it does |
 | --- | --- |
-| `manifest.json` | MV3 manifest. Declares the curated host allowlist for known adapters + `optional_host_permissions: ["<all_urls>"]` so users can extend reach per-site. |
-| `content.js` | Site adapters, universal heuristic extractors, floating confirm UI, video watcher, "Always allow on this site" CTA. |
-| `background.js` | `/match` + `/entries/{id}` calls, toolbar action handler (`activeTab` injection), `chrome.permissions.request` flow, dynamic content-script registration on grant. |
+| `manifest.json` | Cross-browser MV3 manifest. Curated host allowlist for known adapters + `optional_host_permissions: ["<all_urls>"]` for opt-in extension. Declares both `background.scripts` (Firefox event page) and `background.service_worker` (Chrome) so one file works on both browsers. `browser_specific_settings.gecko` provides the Firefox add-on ID. |
+| `content.js` | Site adapters, universal heuristic extractors, floating confirm UI, video watcher. |
+| `background.js` | `/match` + `/entries/{id}` calls, dynamic content-script registration on grant, restart-time rehydration of opt-in registry. |
+| `popup.html` / `popup.js` | Toolbar popup — the cross-browser permission gateway. Calls `permissions.request` directly from a click handler so it works identically on Chrome and Firefox. |
 | `options.html` / `options.js` | API base URL + config UID setup page. |
 
 ## Install (unpacked)
 
 1. Drop a 128×128 transparent PNG named `icon.png` into this folder (or remove
    the `icons` block from `manifest.json` to skip).
-2. Chrome / Edge → `chrome://extensions` → enable **Developer mode** → click
-   **Load unpacked** → select this folder.
+2. Load the extension:
+   - **Chrome / Edge / Brave**: open `chrome://extensions` → enable
+     **Developer mode** → click **Load unpacked** → select this folder.
+   - **Firefox**: open `about:debugging#/runtime/this-firefox` → click
+     **Load Temporary Add-on…** → select `manifest.json`. (Temporary
+     installs are wiped at browser restart; for persistence, either
+     submit to AMO for signing or run Developer Edition / Nightly with
+     `xpinstall.signatures.required = false`.)
 3. Open the extension's **Options** page, paste your AniSync **Config UID**
    (the long base64url segment in your install URL between the slashes).
-4. Visit Crunchyroll / HiAnime / Aniwave to see auto-tracking work out of the
-   box. For other sites, click the AniSync icon in the toolbar — the floating
-   Track button appears on the page, and the **Always allow on this site**
-   button promotes the one-shot session to a permanent opt-in via Chrome's
-   native permission dialog.
+4. Visit Crunchyroll / HiAnime / Aniwave to see auto-tracking work out of
+   the box. For other sites, click the AniSync icon in the toolbar — a
+   small popup appears with two buttons:
+   - **Track this episode** — injects the tracker into the current tab
+     for this session only (`activeTab` permission, no host grant).
+   - **Always allow on this site** — triggers the browser's native
+     permission dialog and, on grant, registers a persistent dynamic
+     content script so future visits auto-inject without the popup.
 
 ## Privacy notes
 
@@ -96,60 +108,104 @@ template for sidebar-DOM patterns.
 
 ## Permission model
 
-Designed to clear the Chrome Web Store review process — no broad permissions
-default, every grant is user-initiated.
+Designed to clear both Chrome Web Store and Mozilla Add-ons review — no
+broad permissions by default, every grant is user-initiated, single code
+path on both browsers.
 
-**Default (install-time) permissions.** Three function-only permissions plus
-a curated host allowlist:
+**Default (install-time) permissions.** Three function-only permissions
+plus a curated host allowlist:
 
 - `storage` — saves your Config UID and the list of opted-in sites.
-- `activeTab` — when you click the toolbar icon, lets the background worker
-  inject `content.js` into *that one tab* until you navigate away. Standard
-  reviewer-friendly pattern.
-- `scripting` — needed by `chrome.scripting.executeScript` (the activeTab
-  injection above) and `chrome.scripting.registerContentScripts` (persistent
-  registration after an opt-in grant).
+- `activeTab` — when the popup is open, lets `chrome.scripting.executeScript`
+  inject `content.js` into the active tab one-shot. Standard reviewer-
+  friendly pattern.
+- `scripting` — needed by `chrome.scripting.executeScript` (one-shot
+  injection from the popup) and `chrome.scripting.registerContentScripts`
+  (persistent registration after an opt-in grant).
 - Host allowlist (the three adapter sites): Crunchyroll, HiAnime/Zoro/
   aniwatch (8 hostnames), Aniwave (5 hostnames), and `anisync.fly.dev` for
   the API. Each is explicitly justified by an in-extension adapter.
 
 **Optional permissions.** `optional_host_permissions: ["<all_urls>"]` is
 declared but not granted. It's *available to grant* per-host through
-`chrome.permissions.request`, but a user installing the extension never
-sees the "read all your data" warning at install time — only when they
-explicitly opt into a new site, and only via Chrome's native permission
-dialog (not ours).
+`permissions.request`, but a user installing the extension never sees the
+"read all your data" warning at install time — only when they explicitly
+opt into a new site, and only via the browser's native permission dialog
+(not ours).
 
 **Opt-in flow on a non-pre-baked site:**
 
 1. User visits a streaming site we don't yet have a permission for.
 2. Nothing happens automatically — the extension is dormant on that host.
-3. User clicks the AniSync toolbar icon.
-4. Background worker uses `activeTab` to inject `content.js` into the current
-   tab. Detection runs; the floating Track button appears.
-5. The floating UI shows a banner: "Tracking is one-shot on this site. Allow
-   AniSync on `example.com` to auto-track future episodes without clicking
-   the toolbar each time." with an **Always allow on this site** button.
-6. Clicking it sends a message to the background worker, which calls
-   `chrome.permissions.request({origins: ['*://example.com/*']})`. Chrome's
-   native permission dialog appears — this is the *only* time the user is
-   asked to grant a new permission, and it's clearly tied to the site
-   they're on.
-7. On grant, the background worker calls
-   `chrome.scripting.registerContentScripts` to make the injection
-   persistent. Future visits to that site auto-inject without the toolbar
-   dance.
-8. The opted-in origin is recorded in `chrome.storage.local`. On extension
-   updates (which wipe the dynamic-script registry) the background worker
-   re-registers all opted-in origins on `runtime.onInstalled` /
-   `runtime.onStartup`.
+3. User clicks the AniSync toolbar icon → `popup.html` opens.
+4. The popup queries `chrome.permissions.contains` for the active tab's
+   origin and shows two buttons:
+   - **Track this episode** — calls `chrome.scripting.executeScript` to
+     inject `content.js` into the active tab using the `activeTab`
+     permission the popup click just granted. One-shot, this tab only,
+     gone on navigation.
+   - **Always allow on this site** — calls `chrome.permissions.request({
+     origins: ['*://example.com/*'] })` directly. The browser's native
+     permission dialog appears.
+5. On grant, the popup messages `background.js` with `anisync:register-site`.
+   The background worker calls `chrome.scripting.registerContentScripts` to
+   make the injection persistent and records the origin in
+   `chrome.storage.local`. The popup then injects `content.js` for the
+   current session so the user gets immediate value without a refresh.
+6. On extension updates (which wipe the dynamic-script registry) the
+   background worker re-registers all opted-in origins on
+   `runtime.onInstalled` / `runtime.onStartup`, filtered against
+   `chrome.permissions.getAll()` so revoked permissions don't get
+   resurrected.
 
-**Revoking access.** Chrome's `chrome://extensions` page shows every host
-the extension currently has access to under "Site access" — users can flip
-any individual site to "On click" or remove it entirely. The background
-worker reconciles its dynamic-script registry against
-`chrome.permissions.getAll()` on startup so revocations take effect on the
-next browser launch.
+**Why the popup, not an in-page button?** `permissions.request` requires a
+live user-input gesture in the same JS frame as the call. Chrome propagates
+gestures through `runtime.sendMessage` chains so a content-script click can
+reach into the background worker; **Firefox does not**. A popup is the
+smallest cross-browser surface where the gesture and the API call live in
+the same frame, so a single code path works on both.
+
+**Revoking access.** The browser's extensions page shows every host the
+extension has access to under "Site access" — users can flip any
+individual site off or remove it entirely. The background worker
+reconciles its dynamic-script registry against `chrome.permissions.getAll()`
+on startup so revocations take effect on the next browser launch.
+
+## Cross-browser notes
+
+**Manifest portability.** The `background` block declares both
+`scripts: ["background.js"]` (Firefox event page) and
+`service_worker: "background.js"` (Chrome). Chrome ignores the `scripts`
+key in MV3; Firefox ignores `service_worker` on versions that don't
+support it. One file, one manifest, two browsers. Targeted at
+`strict_min_version: "115.0"` (the first Firefox MV3 release) — the
+script intentionally avoids any service-worker-only API.
+
+**API namespace.** Code uses the `chrome.*` namespace throughout. Firefox
+exposes both `chrome.*` and `browser.*` to MV3 extensions, with `chrome.*`
+matching Chrome's callback signature. No webextension-polyfill is needed
+because we don't rely on promise-style returns from listener-shaped APIs.
+
+**`browser_specific_settings.gecko`.** Required by AMO for signing.
+`anisync@anisync.dev` is the placeholder add-on ID — change it before
+submitting to your own AMO listing.
+
+**`permissions.request` semantics.** Both browsers refuse the call unless
+it's inside a user-input handler. Both return a boolean (Chrome via
+callback, Firefox via promise — `chrome.*` polyfills the callback shape on
+Firefox so the same code works). The popup's click handler is the only
+context that satisfies this on both browsers.
+
+**Match-pattern shape.** We use `*://${hostname}/*` so http and https both
+work — anime sites mix the two, and registering only one scheme would
+silently miss the other. Both browsers accept this pattern in
+`permissions.request` and `scripting.registerContentScripts`.
+
+**Privileged URLs.** Both browsers refuse content-script injection on
+internal pages: Chrome blocks `chrome://`, `edge://`, the Web Store, and
+`view-source:`; Firefox blocks `about:`, `moz-extension://`, and
+`addons.mozilla.org`. The popup's `isInjectableUrl` check disables both
+buttons with an explanatory message on those pages.
 
 ## Detection coverage
 
