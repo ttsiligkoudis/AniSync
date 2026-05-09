@@ -426,19 +426,31 @@
     }
 
     <!-- ─── BACKUPS ─────────────────────────────────────────────────── -->
+    @* Export is gated on a config row existing — HomeController.ExportConfig
+       returns 400 for anonymous sessions. Import is left visible because it's
+       the canonical "restore on a fresh browser" path: an anonymous (no-session)
+       user imports a backup to recover their tokens + flags, which then bumps
+       them into the non-anonymous flow on next render. *@
     <section class="section-card">
         <span class="section-title">Backups</span>
-        <p class="section-description">Export your configuration to a file or restore from one.</p>
+        <p class="section-description">
+            @(Model.AnonymousUser
+                ? "Restore your configuration from a previously exported file."
+                : "Export your configuration to a file or restore from one.")
+        </p>
 
         <div class="btn-action-row">
-            <a id="exportConfigBtn" class="btn-ghost" href="/Home/ExportConfig" download>
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="17 8 12 3 7 8"></polyline>
-                    <line x1="12" y1="3" x2="12" y2="15"></line>
-                </svg>
-                Export
-            </a>
+            @if (!Model.AnonymousUser)
+            {
+                <a id="exportConfigBtn" class="btn-ghost" href="/Home/ExportConfig" download>
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    Export
+                </a>
+            }
             <button id="importConfigBtn" class="btn-ghost" type="button">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
