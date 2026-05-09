@@ -4,19 +4,51 @@
     // form-shaped pages (configure, dashboard) but too narrow for a poster grid.
     // Read in _Layout.cshtml as a body-level class hook.
     ViewData["BodyClass"] = "library-page";
+
+    // Display labels for the six user-list types. ListType is a code-side enum so
+    // the underscore in Trending_Desc and the title-case names aren't user-friendly
+    // out of the box; this dictionary hand-curates the labels we want to show.
+    var labels = new Dictionary<ListType, string>
+    {
+        [ListType.Current]    = "Watching",
+        [ListType.Completed]  = "Completed",
+        [ListType.Planning]   = "Planning",
+        [ListType.Paused]     = "Paused",
+        [ListType.Dropped]    = "Dropped",
+        [ListType.Repeating]  = "Rewatching",
+    };
+
+    var activeLabel = labels[Model.ActiveList];
 }
 
 <h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
 <p class="app-subtitle">
-    Currently watching on @Model.AnimeService
+    @activeLabel on @Model.AnimeService
     <span class="library-back">·
         <a href="@Url.Action("Index", "Home")">back to dashboard</a>
     </span>
 </p>
 
+@* Tab strip across the six user-list types. Server-side links rather than JS-
+   driven tabs — full page load per click is fine here because the lists are
+   small (~tens to low hundreds of items typically) and we get free shareable
+   URLs (?list=completed) and back-button correctness for free. *@
+<nav class="library-tabs" role="tablist">
+    @foreach (var t in Model.Tabs)
+    {
+        var isActive = t == Model.ActiveList;
+        <a class="library-tab @(isActive ? "library-tab-active" : "")"
+           href="@Url.Action("Index", "Library", new { list = t.ToString().ToLower() })"
+           role="tab"
+           aria-selected="@(isActive ? "true" : "false")">
+            @labels[t]
+        </a>
+    }
+</nav>
+
 @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
 {
-    Items = Model.CurrentlyWatching,
+    Items = Model.Items,
     ConfigUid = Model.ConfigUid,
-    EmptyMessage = $"Nothing currently watching on your {Model.AnimeService} list.",
+    EmptyMessage = $"Nothing in your {activeLabel} list on {Model.AnimeService}.",
 })
