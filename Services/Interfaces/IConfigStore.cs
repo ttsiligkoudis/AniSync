@@ -16,23 +16,18 @@ namespace AnimeList.Services.Interfaces
         Task<string> UpsertAsync(TokenData tokenData);
 
         /// <summary>
-        /// Read-only sibling of <see cref="UpsertAsync"/>: returns the UID whose primary
-        /// identity matches <paramref name="candidate"/>, or null if no row exists. Lets the
-        /// login flow distinguish "this user already has a primary row" from "this identity
-        /// is linked elsewhere" before deciding whether to insert a fresh row.
+        /// Single indexed lookup that finds the row owning <paramref name="candidate"/>'s
+        /// identity, regardless of whether the candidate is the row's primary provider or
+        /// one of its linked secondaries. Returns <c>(uid, isPrimaryMatch)</c> where
+        /// <c>isPrimaryMatch == true</c> means the matched slot is the row's primary
+        /// (caller should refresh primary tokens) and <c>false</c> means the candidate is
+        /// currently a linked secondary on this row (caller should refresh the linked entry
+        /// and route the session to the row's existing primary). Returns <c>(null, false)</c>
+        /// when no row owns the identity. Backed by the per-service unique partial indexes,
+        /// so it's an O(log n) B-tree probe — used by HomeController on every authenticated
+        /// page render.
         /// </summary>
-        Task<string> FindUidByPrimaryIdentityAsync(TokenData candidate);
-
-        /// <summary>
-        /// Returns the UID whose linked-tokens array contains an entry matching the identity
-        /// of <paramref name="candidate"/>, or null when no row matches. Used by the login
-        /// flow so that signing in with a service that's currently a linked secondary on an
-        /// existing row restores that row instead of creating a duplicate. Always called
-        /// AFTER <see cref="FindUidByPrimaryIdentityAsync"/> — primary ownership wins over a
-        /// secondary link if both happen to match, which can occur when a user has two
-        /// independent AniSync configs with overlapping identities.
-        /// </summary>
-        Task<string> FindUidByLinkedIdentityAsync(TokenData candidate);
+        Task<(string uid, bool isPrimaryMatch)> FindUidByIdentityAsync(TokenData candidate);
 
         /// <summary>Looks up token data by UID. Returns null if the UID is unknown.</summary>
         Task<TokenData> GetAsync(string uid);

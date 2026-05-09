@@ -39,116 +39,72 @@ namespace AnimeList.Services
             using var conn = new SqliteConnection(_connectionString);
             conn.Open();
 
+            // Single canonical schema — pre-launch, so we don't carry an ALTER ladder for
+            // existing DBs. If a dev has an older anisync.db lying around they should
+            // delete it. Identity is denormalised into one column per provider so the
+            // login-flow lookup ("which row owns this AniList/MAL/Kitsu identity?") is a
+            // single indexed B-tree probe regardless of whether the identity is the row's
+            // primary or one of its linked secondaries — replaces the json_each scan that
+            // the earlier two-lookup design needed.
             using var create = conn.CreateCommand();
             create.CommandText = """
                 CREATE TABLE IF NOT EXISTS configs (
-                    uid         TEXT PRIMARY KEY,
-                    service     INTEGER NOT NULL,
-                    user_key    TEXT,
-                    token_json  TEXT NOT NULL,
-                    created_at  INTEGER NOT NULL,
-                    updated_at  INTEGER NOT NULL
+                    uid               TEXT PRIMARY KEY,
+                    service           INTEGER NOT NULL,                     -- which provider is the primary
+                    token_json        TEXT NOT NULL,                        -- primary's TokenData JSON
+                    linked_tokens     TEXT,                                 -- non-primary TokenDatas as JSON array
+
+                    -- One slot per provider. Holds the same identifier GetUserKey extracts
+                    -- (user_id for AniList/MAL, username for Kitsu) regardless of whether
+                    -- the slot is the row's primary or a linked secondary. Each gets its
+                    -- own unique partial index so login-flow lookups are O(log n).
+                    anilist_user_key  TEXT,
+                    kitsu_user_key    TEXT,
+                    mal_user_key      TEXT,
+
+                    flags             INTEGER NOT NULL DEFAULT 0,
+                    revision          INTEGER NOT NULL DEFAULT 0,
+                    scrobble_token    TEXT,
+                    plex_username     TEXT,
+                    created_at        INTEGER NOT NULL,
+                    updated_at        INTEGER NOT NULL
                 );
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_configs_user
-                    ON configs(service, user_key)
-                    WHERE user_key IS NOT NULL;
+
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_configs_anilist
+                    ON configs(anilist_user_key) WHERE anilist_user_key IS NOT NULL;
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_configs_kitsu
+                    ON configs(kitsu_user_key)   WHERE kitsu_user_key   IS NOT NULL;
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_configs_mal
+                    ON configs(mal_user_key)     WHERE mal_user_key     IS NOT NULL;
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_configs_scrobble_token
+                    ON configs(scrobble_token)   WHERE scrobble_token   IS NOT NULL;
                 """;
             create.ExecuteNonQuery();
-
-            // Idempotent migration: add `flags` column on existing DBs that pre-date the
-            // "configuration in DB" change. Stores the three flag bytes packed into a single
-            // INTEGER (bits 16-23 = flags1, 8-15 = flags2, 0-7 = flags3).
-            if (!ColumnExists(conn, "configs", "flags"))
-            {
-                using var alter = conn.CreateCommand();
-                alter.CommandText = "ALTER TABLE configs ADD COLUMN flags INTEGER NOT NULL DEFAULT 0";
-                alter.ExecuteNonQuery();
-            }
-
-            // Idempotent migration: add `revision` column. The revision counter bumps on every
-            // SetFlagsAsync call and is appended to the install URL so Stremio's cache treats
-            // each save as a new addon URL — Stremio doesn't refetch the manifest for an
-            // already-installed URL even after force-restart, so we have to make the URL
-            // visibly different to force a refresh.
-            if (!ColumnExists(conn, "configs", "revision"))
-            {
-                using var alter = conn.CreateCommand();
-                alter.CommandText = "ALTER TABLE configs ADD COLUMN revision INTEGER NOT NULL DEFAULT 0";
-                alter.ExecuteNonQuery();
-            }
-
-            // Idempotent migration: add `linked_tokens` for the multi-provider sync feature.
-            // Holds a JSON array of LinkedToken objects so writes (Manage Entry save/delete,
-            // auto-track) can fan out from the primary provider to additional linked accounts.
-            // Stored as JSON rather than a sibling table because there are at most two rows
-            // per user (the other two providers) and no query patterns benefit from a join.
-            if (!ColumnExists(conn, "configs", "linked_tokens"))
-            {
-                using var alter = conn.CreateCommand();
-                alter.CommandText = "ALTER TABLE configs ADD COLUMN linked_tokens TEXT";
-                alter.ExecuteNonQuery();
-            }
-
-            // Idempotent migration: add `scrobble_token` (per-user webhook bearer) and
-            // `plex_username` (optional Plex Home filter). Both are nullable — populated on
-            // demand when the user pastes a URL into Plex/Jellyfin via the configure page.
-            // The unique index on scrobble_token gates the reverse lookup the webhook
-            // controller does on every inbound event.
-            if (!ColumnExists(conn, "configs", "scrobble_token"))
-            {
-                using var alter = conn.CreateCommand();
-                alter.CommandText = "ALTER TABLE configs ADD COLUMN scrobble_token TEXT";
-                alter.ExecuteNonQuery();
-            }
-            if (!ColumnExists(conn, "configs", "plex_username"))
-            {
-                using var alter = conn.CreateCommand();
-                alter.CommandText = "ALTER TABLE configs ADD COLUMN plex_username TEXT";
-                alter.ExecuteNonQuery();
-            }
-            using (var idx = conn.CreateCommand())
-            {
-                idx.CommandText = """
-                    CREATE UNIQUE INDEX IF NOT EXISTS idx_configs_scrobble_token
-                        ON configs(scrobble_token)
-                        WHERE scrobble_token IS NOT NULL
-                    """;
-                idx.ExecuteNonQuery();
-            }
-        }
-
-        private static bool ColumnExists(SqliteConnection conn, string table, string column)
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = $"PRAGMA table_info({table})";
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
-            {
-                if (reader.GetString(1).Equals(column, StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-            return false;
         }
 
         public async Task<string> UpsertAsync(TokenData tokenData)
         {
             var serviceInt = (int)tokenData.anime_service;
             var userKey = GetUserKey(tokenData);
+            var identityCol = IdentityColumnFor(tokenData.anime_service);
             var json = SerializeObject(tokenData);
             var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
             using var conn = new SqliteConnection(_connectionString);
             await conn.OpenAsync();
 
-            // Try to update an existing row keyed on identity. Anonymous (no user_key) always
-            // creates a new row — they're rare and we don't try to deduplicate.
-            if (!string.IsNullOrEmpty(userKey))
+            // Try to update an existing row that already lists this identity in its primary
+            // slot. Gated on `service = $s` so an identity that's currently a *linked*
+            // secondary on some row stays primary-vs-linked-distinct: HomeController routes
+            // those through FindUidByIdentityAsync + the linked-merge path instead.
+            // Anonymous (no user_key) always creates a new row — rare, no dedup.
+            if (!string.IsNullOrEmpty(userKey) && identityCol != null)
             {
                 using var update = conn.CreateCommand();
-                update.CommandText = """
+                update.CommandText = $"""
                     UPDATE configs
                        SET token_json = $j, updated_at = $u
-                     WHERE service = $s AND user_key = $k
+                     WHERE service = $s AND {identityCol} = $k
                     RETURNING uid
                     """;
                 update.Parameters.AddWithValue("$j", json);
@@ -161,13 +117,28 @@ namespace AnimeList.Services
 
             var newUid = GenerateUid();
             using var insert = conn.CreateCommand();
-            insert.CommandText = """
-                INSERT INTO configs (uid, service, user_key, token_json, created_at, updated_at, flags)
-                VALUES ($uid, $s, $k, $j, $c, $u, $f)
-                """;
+            // Anonymous rows leave all three identity columns NULL; authenticated rows fill
+            // exactly the one matching their service. The UNIQUE partial indexes mean an
+            // INSERT here will throw if another row already owns this identity — that's
+            // a real conflict (two different UIDs both claiming the same AniList account),
+            // not a silent overwrite, and bubbles to the caller.
+            if (string.IsNullOrEmpty(userKey) || identityCol == null)
+            {
+                insert.CommandText = """
+                    INSERT INTO configs (uid, service, token_json, created_at, updated_at, flags)
+                    VALUES ($uid, $s, $j, $c, $u, $f)
+                    """;
+            }
+            else
+            {
+                insert.CommandText = $"""
+                    INSERT INTO configs (uid, service, {identityCol}, token_json, created_at, updated_at, flags)
+                    VALUES ($uid, $s, $k, $j, $c, $u, $f)
+                    """;
+                insert.Parameters.AddWithValue("$k", userKey);
+            }
             insert.Parameters.AddWithValue("$uid", newUid);
             insert.Parameters.AddWithValue("$s", serviceInt);
-            insert.Parameters.AddWithValue("$k", (object)userKey ?? DBNull.Value);
             insert.Parameters.AddWithValue("$j", json);
             insert.Parameters.AddWithValue("$c", now);
             insert.Parameters.AddWithValue("$u", now);
@@ -184,51 +155,30 @@ namespace AnimeList.Services
         // SetFlagsAsync writes: bits 16-23 = flags1, 8-15 = flags2, 0-7 = flags3.
         private const long DefaultFlagsPacked = ((long)(0x01 | 0x08 | 0x80)) << 16;
 
-        public async Task<string> FindUidByPrimaryIdentityAsync(TokenData candidate)
+        public async Task<(string uid, bool isPrimaryMatch)> FindUidByIdentityAsync(TokenData candidate)
         {
-            if (candidate == null) return null;
+            if (candidate == null) return (null, false);
             var userKey = GetUserKey(candidate);
-            if (string.IsNullOrEmpty(userKey)) return null;
+            var identityCol = IdentityColumnFor(candidate.anime_service);
+            if (string.IsNullOrEmpty(userKey) || identityCol == null) return (null, false);
 
+            // Single indexed lookup against the candidate's per-service identity column.
+            // The column is populated for both primary and linked slots, so one B-tree
+            // probe finds either flavour of match. The row's `service` column tells us
+            // which flavour it is — equal to candidate.anime_service means the slot we
+            // matched is the row's primary; otherwise the candidate is currently a
+            // linked secondary on this row and the caller should route through the
+            // linked-merge path instead of the refresh-primary path.
             using var conn = new SqliteConnection(_connectionString);
             await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT uid FROM configs WHERE service = $s AND user_key = $k LIMIT 1";
-            cmd.Parameters.AddWithValue("$s", (int)candidate.anime_service);
+            cmd.CommandText = $"SELECT uid, service FROM configs WHERE {identityCol} = $k LIMIT 1";
             cmd.Parameters.AddWithValue("$k", userKey);
-            return await cmd.ExecuteScalarAsync() as string;
-        }
-
-        public async Task<string> FindUidByLinkedIdentityAsync(TokenData candidate)
-        {
-            if (candidate == null) return null;
-            var userKey = GetUserKey(candidate);
-            if (string.IsNullOrEmpty(userKey)) return null;
-
-            // LinkedToken serialises with default Newtonsoft naming (PascalCase outer,
-            // snake_case inner — matches the field declarations). Identity field inside
-            // TokenData differs by service: user_id for AniList/MAL, username for Kitsu —
-            // same convention as GetUserKey above. Path is interpolated from a closed
-            // enum, never user input, so no SQL injection surface.
-            var identityPath = candidate.anime_service == AnimeService.Kitsu
-                ? "$.TokenData.username"
-                : "$.TokenData.user_id";
-
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = $"""
-                SELECT c.uid
-                  FROM configs c, json_each(c.linked_tokens) j
-                 WHERE c.linked_tokens IS NOT NULL
-                   AND json_extract(j.value, '$.Service') = $s
-                   AND json_extract(j.value, '{identityPath}') = $k
-                 ORDER BY c.updated_at DESC
-                 LIMIT 1
-                """;
-            cmd.Parameters.AddWithValue("$s", (int)candidate.anime_service);
-            cmd.Parameters.AddWithValue("$k", userKey);
-            return await cmd.ExecuteScalarAsync() as string;
+            using var reader = await cmd.ExecuteReaderAsync();
+            if (!await reader.ReadAsync()) return (null, false);
+            var uid = reader.GetString(0);
+            var primaryService = (AnimeService)reader.GetInt32(1);
+            return (uid, primaryService == candidate.anime_service);
         }
 
         public async Task<TokenData> GetAsync(string uid)
@@ -250,16 +200,21 @@ namespace AnimeList.Services
         public async Task UpdateByUserAsync(TokenData tokenData)
         {
             var userKey = GetUserKey(tokenData);
-            if (string.IsNullOrEmpty(userKey)) return; // can't locate an anonymous row by identity
+            var identityCol = IdentityColumnFor(tokenData.anime_service);
+            if (string.IsNullOrEmpty(userKey) || identityCol == null) return; // anonymous: can't locate by identity
 
             using var conn = new SqliteConnection(_connectionString);
             await conn.OpenAsync();
 
+            // Primary-only update — gated on `service = $s` so a token refresh for an
+            // identity that's currently a *linked* secondary doesn't accidentally
+            // overwrite some other user's primary. The linked-token-refresh path goes
+            // through SetLinkedTokenAsync, which takes a uid argument explicitly.
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
+            cmd.CommandText = $"""
                 UPDATE configs
                    SET token_json = $j, updated_at = $u
-                 WHERE service = $s AND user_key = $k
+                 WHERE service = $s AND {identityCol} = $k
                 """;
             cmd.Parameters.AddWithValue("$j", SerializeObject(tokenData));
             cmd.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
@@ -465,12 +420,16 @@ namespace AnimeList.Services
         {
             if (tokenData == null) return;
             var userKey = GetUserKey(tokenData);
-            if (string.IsNullOrEmpty(userKey)) return;
+            var identityCol = IdentityColumnFor(tokenData.anime_service);
+            if (string.IsNullOrEmpty(userKey) || identityCol == null) return;
 
             using var conn = new SqliteConnection(_connectionString);
             await conn.OpenAsync();
+            // Primary-only delete (mirrors UpdateByUserAsync's primary-only semantics) —
+            // sign-out for the active session shouldn't nuke a row where the user is
+            // merely a linked secondary.
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = "DELETE FROM configs WHERE service = $s AND user_key = $k";
+            cmd.CommandText = $"DELETE FROM configs WHERE service = $s AND {identityCol} = $k";
             cmd.Parameters.AddWithValue("$s", (int)tokenData.anime_service);
             cmd.Parameters.AddWithValue("$k", userKey);
             await cmd.ExecuteNonQueryAsync();
@@ -501,7 +460,13 @@ namespace AnimeList.Services
             if (idx >= 0) existing[idx] = linked;
             else existing.Add(linked);
 
-            await WriteLinkedTokensAsync(uid, existing);
+            // The linked entry's identity goes into its own per-service column too so the
+            // login-flow lookup picks it up via FindUidByIdentityAsync's indexed probe
+            // without parsing the JSON. NULL-safe: if the linked TokenData has no usable
+            // identity (shouldn't happen in practice, every provider returns one), the
+            // column stays at whatever it was — JSON is the source of truth and the index
+            // is a denormalised helper.
+            await WriteLinkedTokensAsync(uid, existing, linked.Service, GetUserKey(linked.TokenData));
         }
 
         public async Task RemoveLinkedTokenAsync(string uid, AnimeService service)
@@ -512,7 +477,10 @@ namespace AnimeList.Services
             var removed = existing.RemoveAll(t => t.Service == service);
             if (removed == 0) return;
 
-            await WriteLinkedTokensAsync(uid, existing);
+            // Clear the per-service identity column alongside the JSON rewrite so the
+            // user can immediately re-link the same provider with a different account
+            // without tripping the unique partial index.
+            await WriteLinkedTokensAsync(uid, existing, service, null);
         }
 
         public async Task<(TokenData newPrimary, string reason)> SwapPrimaryAsync(string uid, AnimeService newPrimaryService, bool resolveCollision = false)
@@ -561,21 +529,27 @@ namespace AnimeList.Services
             var newPrimary = chosen.TokenData;
             var newServiceInt = (int)newPrimary.anime_service;
             var newUserKey = GetUserKey(newPrimary);
+            var newIdentityCol = IdentityColumnFor(newPrimary.anime_service);
             var newPrimaryJson = SerializeObject(newPrimary);
             var newLinkedJson = linked.Count == 0 ? (object)DBNull.Value : SerializeObject(linked);
 
-            // Helper closure — repeats the UPDATE for the resolveCollision retry path below.
+            // The per-service identity columns don't change in a swap — both the old and
+            // new primaries' identities are still attached to this row, just with the
+            // primary slot pointing to a different one. So the UPDATE only rewrites
+            // `service`, `token_json`, and `linked_tokens`. No identity-column writes
+            // means no risk of tripping the unique partial index from the swap itself;
+            // the only collision surface is on a *different* row that already owns the
+            // same identity in its own slot, which is the case the catch below handles.
             async Task<int> RunUpdate()
             {
                 using var update = conn.CreateCommand();
                 update.CommandText = """
                     UPDATE configs
-                       SET service = $s, user_key = $k, token_json = $j,
+                       SET service = $s, token_json = $j,
                            linked_tokens = $l, updated_at = $u
                      WHERE uid = $uid
                     """;
                 update.Parameters.AddWithValue("$s", newServiceInt);
-                update.Parameters.AddWithValue("$k", (object)newUserKey ?? DBNull.Value);
                 update.Parameters.AddWithValue("$j", newPrimaryJson);
                 update.Parameters.AddWithValue("$l", newLinkedJson);
                 update.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
@@ -583,48 +557,65 @@ namespace AnimeList.Services
                 return await update.ExecuteNonQueryAsync();
             }
 
-            try
+            // Collision check still happens — but pre-flight rather than via SqliteException,
+            // because the UPDATE itself doesn't touch any UNIQUE column anymore. A different
+            // row owning the new primary's identity (in any slot — primary OR linked) means
+            // promoting here would orphan that other install's view of the same account.
+            async Task<bool> NewPrimaryClashesElsewhereAsync()
             {
-                await RunUpdate();
-            }
-            catch (SqliteException) when (resolveCollision)
-            {
-                // Force path: delete the colliding row first, then retry the swap. The
-                // colliding row keeps its own UID, flags, and linked_tokens — caller must
-                // have warned the user that other-install state is lost.
-                using (var del = conn.CreateCommand())
-                {
-                    del.CommandText = "DELETE FROM configs WHERE service = $s AND user_key = $k AND uid <> $uid";
-                    del.Parameters.AddWithValue("$s", newServiceInt);
-                    del.Parameters.AddWithValue("$k", (object)newUserKey ?? DBNull.Value);
-                    del.Parameters.AddWithValue("$uid", uid);
-                    await del.ExecuteNonQueryAsync();
-                }
-
-                try { await RunUpdate(); }
-                catch (SqliteException) { return (null, "collision"); }
-            }
-            catch (SqliteException)
-            {
-                // Unique (service, user_key) collision — another configs row already owns
-                // this identity, e.g. the user has a separate install elsewhere with the
-                // linked account as primary. The caller surfaces a friendly error.
-                return (null, "collision");
+                if (string.IsNullOrEmpty(newUserKey) || newIdentityCol == null) return false;
+                using var probe = conn.CreateCommand();
+                probe.CommandText = $"SELECT 1 FROM configs WHERE {newIdentityCol} = $k AND uid <> $uid LIMIT 1";
+                probe.Parameters.AddWithValue("$k", newUserKey);
+                probe.Parameters.AddWithValue("$uid", uid);
+                return await probe.ExecuteScalarAsync() != null;
             }
 
+            if (await NewPrimaryClashesElsewhereAsync())
+            {
+                if (!resolveCollision) return (null, "collision");
+                // Force path: delete the colliding row first, then proceed with the swap.
+                // The colliding row keeps its own UID, flags, and linked_tokens — caller
+                // must have warned the user that other-install state is lost.
+                using var del = conn.CreateCommand();
+                del.CommandText = $"DELETE FROM configs WHERE {newIdentityCol} = $k AND uid <> $uid";
+                del.Parameters.AddWithValue("$k", newUserKey);
+                del.Parameters.AddWithValue("$uid", uid);
+                await del.ExecuteNonQueryAsync();
+            }
+
+            await RunUpdate();
             return (newPrimary, null);
         }
 
-        private async Task WriteLinkedTokensAsync(string uid, List<LinkedToken> tokens)
+        private async Task WriteLinkedTokensAsync(string uid, List<LinkedToken> tokens, AnimeService changedService, string changedUserKey)
         {
+            var identityCol = IdentityColumnFor(changedService);
+
             using var conn = new SqliteConnection(_connectionString);
             await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                UPDATE configs
-                   SET linked_tokens = $j, updated_at = $u
-                 WHERE uid = $uid
-                """;
+            // One UPDATE writes both the JSON array and the affected per-service identity
+            // column so the index never disagrees with the JSON. NULL'ing the column when
+            // changedUserKey is null doubles as the unlink path. If the service didn't
+            // map to a column (anonymous / unknown enum) we just skip the column write.
+            if (identityCol == null)
+            {
+                cmd.CommandText = """
+                    UPDATE configs
+                       SET linked_tokens = $j, updated_at = $u
+                     WHERE uid = $uid
+                    """;
+            }
+            else
+            {
+                cmd.CommandText = $"""
+                    UPDATE configs
+                       SET linked_tokens = $j, {identityCol} = $k, updated_at = $u
+                     WHERE uid = $uid
+                    """;
+                cmd.Parameters.AddWithValue("$k", (object)changedUserKey ?? DBNull.Value);
+            }
             // Drop the column to NULL when the list is empty so we don't keep "[]" around
             // forever after the user unlinks their last provider.
             cmd.Parameters.AddWithValue("$j", tokens.Count == 0 ? (object)DBNull.Value : SerializeObject(tokens));
@@ -641,7 +632,7 @@ namespace AnimeList.Services
         }
 
         /// <summary>
-        /// Identity column for the unique index. user_id for AniList (from the JWT) and MAL
+        /// Identity value for the unique index. user_id for AniList (from the JWT) and MAL
         /// (from /users/@me), username for Kitsu (the credentials the user typed). Anonymous
         /// installs have neither.
         /// </summary>
@@ -650,6 +641,19 @@ namespace AnimeList.Services
             AnimeService.Anilist => td.user_id,
             AnimeService.MyAnimeList => td.user_id,
             AnimeService.Kitsu => td.username,
+            _ => null,
+        };
+
+        /// <summary>
+        /// Identity column name for the given service. Closed enum, so the result is a
+        /// known constant — safe to interpolate into SQL. Returns null for unknown enum
+        /// values (defensive — every defined service maps to a column).
+        /// </summary>
+        private static string IdentityColumnFor(AnimeService service) => service switch
+        {
+            AnimeService.Anilist     => "anilist_user_key",
+            AnimeService.MyAnimeList => "mal_user_key",
+            AnimeService.Kitsu       => "kitsu_user_key",
             _ => null,
         };
 
