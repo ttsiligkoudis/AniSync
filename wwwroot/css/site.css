@@ -1588,37 +1588,56 @@ body.drawer-open .drawer-backdrop {
     color: #777;
 }
 
-/* Stats strip — two big-number cells side by side. The dashboard's main column
-   is 520px wide so two cells fit comfortably; if v1 adds Hours / Score we'll
-   wrap to two rows on narrow viewports rather than fighting the layout. */
+/* Stats strip — flex-wrap row of 2-4 cells (Watching / Completed always; Hours
+   / Mean Score conditional on data availability). On the dashboard's 520px-wide
+   main column, two cells fit per row at min-width 130px, so 4 cells wrap to
+   2x2 on mobile and stay 4-across only on wider viewports. */
 .stats-strip {
     display: flex;
-    gap: 0.75rem;
+    flex-wrap: wrap;
+    gap: 0.65rem;
     width: 100%;
 }
 
 .stats-cell {
-    flex: 1;
-    padding: 0.85rem 1rem;
+    flex: 1 1 130px;
+    padding: 0.75rem 0.85rem;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 1rem;
-    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.05rem;
 }
 
+.stats-icon {
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    margin-bottom: 0.35rem;
+}
+
+.stats-icon-blue   { background: rgba(59, 130, 246, 0.15);  color: #60a5fa; }
+.stats-icon-green  { background: rgba(16, 185, 129, 0.15);  color: #34d399; }
+.stats-icon-amber  { background: rgba(245, 158, 11, 0.15);  color: #fbbf24; }
+.stats-icon-purple { background: rgba(139, 92, 246, 0.15);  color: #a78bfa; }
+
 .stats-number {
-    font-size: 1.6rem;
+    font-size: 1.4rem;
     font-weight: 700;
     color: #fff;
     line-height: 1.1;
 }
 
 .stats-label {
-    font-size: 0.78rem;
+    font-size: 0.72rem;
     color: #999;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    margin-top: 0.2rem;
 }
 
 /* Genre chip strip below the numbers. Same wrap-on-narrow behaviour as the
