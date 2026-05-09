@@ -41,8 +41,11 @@ namespace AnimeList.Controllers
             // anonymous TokenData with the Kitsu default so the per-service dispatch
             // below has something to switch on. ListType.Trending_Desc doesn't need a
             // user identity — the underlying GraphQL/REST calls run unauthenticated.
+            // anonymousUser is a computed property (empty username on Kitsu / empty
+            // access_token on the OAuth services) so leaving the identity fields blank
+            // here makes it return true on its own — no need to set it explicitly.
             var tokenData = await _tokenService.GetAccessTokenAsync()
-                ?? new TokenData { anime_service = AnimeService.Kitsu, anonymousUser = true };
+                ?? new TokenData { anime_service = AnimeService.Kitsu };
 
             // Resolve the row's UID for logged-in users so per-card Manage Entry links
             // hit the existing config-scoped flow. Anonymous users get null and the
