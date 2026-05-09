@@ -1,4 +1,9 @@
 @model AnimeList.Models.PosterGridViewModel
+@{
+    // "scroll" → horizontal-overflow row used on the dashboard's Continue
+    // Watching shelf; default → CSS-grid layout used by /library and /discover.
+    var wrapperClass = Model.Variant == "scroll" ? "poster-scroll-row" : "library-grid";
+}
 
 @* Shared poster-grid renderer for the web-app pages (Library, Discover, future
    list-type tabs, future search). Cards link to the existing config-scoped
@@ -6,7 +11,7 @@
    cards render as inert non-anchor divs so a click doesn't dead-end at /. *@
 @if (Model.Items?.Count > 0)
 {
-    <div class="library-grid">
+    <div class="@wrapperClass">
         @foreach (var meta in Model.Items)
         {
             var manageHref = !string.IsNullOrEmpty(Model.ConfigUid)

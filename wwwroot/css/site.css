@@ -1451,6 +1451,44 @@ body.library-page main {
     width: 100%;
 }
 
+/* Horizontal-scroll variant of .library-grid — used on the dashboard's
+   Continue Watching shelf and (eventually) other StreamD-style row surfaces.
+   Cards inside get a fixed min-width so the row scrolls rather than shrinking
+   them. scroll-snap-type makes paging feel deliberate rather than mushy. */
+.poster-scroll-row {
+    display: flex;
+    gap: 0.85rem;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    /* Bleed past main's left/right padding so the row appears to extend to
+       the viewport edges — matches the StreamD shelves that scroll edge-to-
+       edge while the rest of the page stays inset. */
+    padding-bottom: 0.4rem;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.poster-scroll-row::-webkit-scrollbar {
+    height: 6px;
+}
+
+.poster-scroll-row::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.poster-scroll-row::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+}
+
+.poster-scroll-row .library-card {
+    flex: 0 0 130px;
+    scroll-snap-align: start;
+}
+
 .library-card {
     display: flex;
     flex-direction: column;

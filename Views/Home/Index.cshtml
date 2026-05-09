@@ -102,10 +102,14 @@
             <h2 class="dashboard-section-title">Continue watching</h2>
             <a class="dashboard-section-link" href="/library">View all →</a>
         </div>
+        @* Horizontal-scroll variant rather than the wrapping grid — matches the
+           StreamD "shelf" pattern where the dashboard surfaces multiple short
+           rows rather than a few full grids. *@
         @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
         {
             Items = Model.ContinueWatching,
             ConfigUid = Model.ConfigUid,
+            Variant = "scroll",
         })
     </section>
 }
