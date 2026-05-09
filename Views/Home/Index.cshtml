@@ -1,25 +1,12 @@
 @model AnimeList.Models.DashboardViewModel
 @{
+    ViewData["ActiveNav"] = "home";
     var tokenData = Model.TokenData;
     var isLoggedIn = tokenData != null;
     var anonymousUser = tokenData?.anonymousUser ?? false;
     var serviceLabel = tokenData?.anime_service.ToString();
     var hasContinueWatching = Model.ContinueWatching?.Count > 0;
 }
-
-@* Compact site header — small wordmark on the left, login state on the right.
-   Phase 4 of the refactor will fold a hamburger drawer + mobile bottom nav in
-   here; for now the header is just identity + connection state. *@
-<header class="site-header">
-    <h1 class="site-logo">Ani<span class="accent">Sync</span></h1>
-    @if (isLoggedIn && !anonymousUser)
-    {
-        <span class="site-header-badge">
-            ✓ @serviceLabel
-            <a class="site-header-badge-action" href="@Url.Action("Logout", "Auth")" title="Disconnect">✗</a>
-        </span>
-    }
-</header>
 
 @* Hero card — StreamD-style pill badge + two-tone heading + dual CTAs. Copy
    branches on login state: anonymous visitors get the pitch + "Get started"

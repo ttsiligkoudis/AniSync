@@ -1,4 +1,20 @@
-﻿<!DOCTYPE html>
+@{
+    // Session-derived identity used by the site-header pill + the drawer's
+    // sign-in / disconnect CTA. Reading directly here keeps every page's
+    // chrome consistent without each controller having to populate a
+    // ViewData hint. Try/catch defends against malformed session payloads
+    // — bad cookie shouldn't 500 every page.
+    AnimeList.Models.TokenData layoutToken = null;
+    var layoutSessionStr = Context.Session.GetString("AccessToken");
+    if (!string.IsNullOrEmpty(layoutSessionStr))
+    {
+        try { layoutToken = JsonConvert.DeserializeObject<AnimeList.Models.TokenData>(layoutSessionStr); }
+        catch { /* unparseable — render as anonymous */ }
+    }
+    var layoutLoggedIn = layoutToken != null && !layoutToken.anonymousUser;
+    var activeNav = ViewData["ActiveNav"]?.ToString();
+}
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
@@ -16,11 +32,87 @@
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
 </head>
 <body class="@ViewData["BodyClass"]">
+    @* Persistent site chrome: slide-in drawer + mobile bottom-nav are lifted
+       out of per-page views so every page gets the same shell. The site-
+       header is rendered inside `main` (just below) so it inherits main's
+       centered max-width — keeps the logo and hamburger aligned with the
+       rest of the page content rather than floating against the viewport
+       edges. The drawer toggle is a single-class flip on body — no
+       framework, no jQuery dep, just a class on document.body. *@
+    <aside class="nav-drawer" aria-label="Site navigation">
+        <div class="nav-drawer-header">
+            <span class="site-logo">Ani<span class="accent">Sync</span></span>
+            <button class="drawer-close" aria-label="Close menu"
+                    onclick="document.body.classList.remove('drawer-open')">×</button>
+        </div>
+        <nav class="nav-drawer-nav">
+            <a href="/" class="@(activeNav == "home" ? "active" : "")">Home</a>
+            <a href="/library" class="@(activeNav == "library" ? "active" : "")">My Library</a>
+            <a href="/discover" class="@(activeNav == "discover" ? "active" : "")">Discover</a>
+            <a href="@Url.Action("Configure", "Home")" class="@(activeNav == "configure" ? "active" : "")">Configure addon</a>
+        </nav>
+        <div class="nav-drawer-footer">
+            @if (layoutLoggedIn)
+            {
+                <span class="nav-drawer-status">✓ Connected to @layoutToken.anime_service</span>
+                <a class="nav-drawer-cta nav-drawer-cta-secondary" href="@Url.Action("Logout", "Auth")">Disconnect</a>
+            }
+            else
+            {
+                <a class="nav-drawer-cta nav-drawer-cta-primary" href="@Url.Action("Configure", "Home")">Sign in</a>
+            }
+        </div>
+    </aside>
+    <div class="drawer-backdrop"
+         onclick="document.body.classList.remove('drawer-open')"></div>
+
     <div class="container">
         <main role="main" class="p-3" style="min-height: 100vh;">
+            <header class="site-header">
+                <a class="site-logo" href="/">Ani<span class="accent">Sync</span></a>
+                <button class="hamburger-btn" aria-label="Open menu"
+                        onclick="document.body.classList.toggle('drawer-open')">
+                    <span></span><span></span><span></span>
+                </button>
+            </header>
             @RenderBody()
         </main>
     </div>
+
+    @* Mobile-first bottom nav. Always 4 primary destinations matching the
+       drawer's first four items so users have a quick-access bar without
+       opening the drawer. Hidden on wider viewports via media query in
+       site.css — desktop users rely on the hamburger drawer instead. *@
+    <nav class="bottom-nav" aria-label="Primary">
+        <a href="/" class="bottom-nav-item @(activeNav == "home" ? "active" : "")" aria-label="Home">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12L12 3l9 9"></path>
+                <path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path>
+            </svg>
+            <span class="bottom-nav-label">Home</span>
+        </a>
+        <a href="/library" class="bottom-nav-item @(activeNav == "library" ? "active" : "")" aria-label="Library">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span class="bottom-nav-label">Library</span>
+        </a>
+        <a href="/discover" class="bottom-nav-item @(activeNav == "discover" ? "active" : "")" aria-label="Discover">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <span class="bottom-nav-label">Discover</span>
+        </a>
+        <a href="@Url.Action("Configure", "Home")" class="bottom-nav-item @(activeNav == "configure" ? "active" : "")" aria-label="Settings">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+            <span class="bottom-nav-label">Settings</span>
+        </a>
+    </nav>
+
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>

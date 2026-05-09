@@ -1,6 +1,7 @@
 @model AnimeList.Controllers.DiscoverViewModel
 @{
     ViewData["BodyClass"] = "library-page";
+    ViewData["ActiveNav"] = "discover";
 
     var labels = new Dictionary<ListType, string>
     {
@@ -20,8 +21,7 @@
     var activeLabel = labels[Model.ActiveList];
 }
 
-<h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
-<p class="app-subtitle">
+<p class="page-subtitle">
     @if (hasSearch)
     {
         <text>Search results</text>

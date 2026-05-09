@@ -1,6 +1,7 @@
 @model AnimeList.Controllers.LibraryViewModel
 @{
     ViewData["BodyClass"] = "library-page";
+    ViewData["ActiveNav"] = "library";
 
     var labels = new Dictionary<ListType, string>
     {
@@ -16,8 +17,7 @@
     var activeLabel = labels[Model.ActiveList];
 }
 
-<h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
-<p class="app-subtitle">
+<p class="page-subtitle">
     @if (hasSearch)
     {
         <text>Search results · @Model.AnimeService</text>

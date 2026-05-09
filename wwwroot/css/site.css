@@ -33,13 +33,242 @@ body {
 
 main {
     margin: 0 auto;
-    padding: 2rem 1.5rem 3rem;
+    /* Bottom padding clears the fixed bottom-nav (~64px tall + safe-area) so
+       the last row of content isn't covered. Desktop drops the bottom-nav
+       via media query and reduces this to the original 3rem. */
+    padding: 1.5rem 1.25rem 6rem;
     display: flex;
     height: 100%;
     align-items: center;
     flex-direction: column;
     max-width: 520px;
-    gap: 1.75rem;
+    gap: 1.5rem;
+}
+
+@media (min-width: 768px) {
+    main {
+        padding: 2rem 1.5rem 3rem;
+    }
+}
+
+/* Subtitle paragraph used at the top of Library / Discover / Configure
+   for page context. Replaces .app-subtitle, which was the centred-logo
+   variant — now that the logo lives in the layout's site-header, the
+   per-page subtitle just needs to read as standalone descriptive text. */
+.page-subtitle {
+    font-size: 0.85rem;
+    color: #999;
+    margin: 0 0 0.4rem;
+    text-align: center;
+}
+
+/* ── Hamburger trigger (in site-header) ── */
+.hamburger-btn {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    width: 22px;
+    height: 16px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.hamburger-btn span {
+    display: block;
+    height: 2px;
+    width: 100%;
+    background: #fff;
+    border-radius: 1px;
+    transition: transform 0.2s, opacity 0.2s;
+}
+
+/* ── Slide-in drawer (right side) ── */
+.nav-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(85vw, 320px);
+    background: #0A0A0A;
+    border-left: 1px solid rgba(255, 255, 255, 0.06);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 1.1rem 1.4rem;
+    transform: translateX(100%);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow-y: auto;
+}
+
+body.drawer-open .nav-drawer {
+    transform: translateX(0);
+}
+
+.drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 99;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s;
+}
+
+body.drawer-open .drawer-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.nav-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.drawer-close {
+    background: transparent;
+    border: 0;
+    color: #999;
+    font-size: 1.6rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 0.4rem;
+    transition: color 0.15s;
+}
+
+.drawer-close:hover {
+    color: #fff;
+}
+
+.nav-drawer-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    flex: 1;
+}
+
+.nav-drawer-nav a {
+    padding: 0.85rem 0.5rem;
+    color: #ccc;
+    text-decoration: none;
+    font-size: 1rem;
+    font-weight: 500;
+    border-radius: 0.5rem;
+    transition: background 0.15s, color 0.15s;
+}
+
+.nav-drawer-nav a:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+    text-decoration: none;
+}
+
+.nav-drawer-nav a.active {
+    color: #3B82F6;
+}
+
+.nav-drawer-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    margin-top: 1rem;
+}
+
+.nav-drawer-status {
+    font-size: 0.8rem;
+    color: #93c5fd;
+    text-align: center;
+}
+
+.nav-drawer-cta {
+    padding: 0.75rem 1rem;
+    text-align: center;
+    border-radius: 999px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.nav-drawer-cta:hover {
+    text-decoration: none;
+}
+
+.nav-drawer-cta-primary {
+    background: #3B82F6;
+    color: #fff;
+}
+
+.nav-drawer-cta-primary:hover {
+    background: #2563eb;
+    color: #fff;
+}
+
+.nav-drawer-cta-secondary {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #ccc;
+}
+
+.nav-drawer-cta-secondary:hover {
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #fff;
+}
+
+/* ── Bottom nav (mobile) ── */
+.bottom-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    background: #0A0A0A;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 0.4rem 0 calc(0.4rem + env(safe-area-inset-bottom, 0));
+    z-index: 50;
+}
+
+.bottom-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.4rem 0.2rem;
+    color: #777;
+    text-decoration: none;
+    font-size: 0.7rem;
+    transition: color 0.15s;
+}
+
+.bottom-nav-item:hover,
+.bottom-nav-item:focus {
+    color: #ccc;
+    text-decoration: none;
+}
+
+.bottom-nav-item.active {
+    color: #3B82F6;
+}
+
+.bottom-nav-label {
+    font-size: 0.68rem;
+    font-weight: 500;
+    line-height: 1;
+}
+
+@media (min-width: 768px) {
+    .bottom-nav {
+        display: none;
+    }
 }
 
 /* ── Logo ── */
