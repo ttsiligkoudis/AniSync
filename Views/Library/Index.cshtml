@@ -1,0 +1,58 @@
+@model AnimeList.Controllers.LibraryViewModel
+@{
+    // Widen `main` for the grid — the default 520px from site.css is right for
+    // form-shaped pages (configure, dashboard) but too narrow for a poster grid.
+    // Read in _Layout.cshtml as a body-level class hook.
+    ViewData["BodyClass"] = "library-page";
+    var hasEntries = Model.CurrentlyWatching?.Count > 0;
+}
+
+<h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
+<p class="app-subtitle">
+    Currently watching on @Model.AnimeService
+    <span class="library-back">·
+        <a href="@Url.Action("Index", "Home")">back to dashboard</a>
+    </span>
+</p>
+
+@if (!hasEntries)
+{
+    <p class="library-empty">
+        Nothing currently watching on your @Model.AnimeService list.
+        @* Future: when /library covers all six list types, the empty state per-list
+           reads less abrupt because there's still other content visible in adjacent
+           tabs. v0 only renders Current, so the page has nothing else to show. *@
+    </p>
+}
+else
+{
+    @* Grid of poster cards. Bootstrap-grid-free — a custom CSS grid using
+       auto-fill + minmax() so the layout adapts to whatever main width the
+       _Layout sets, without us having to think about responsive breakpoints.
+       Titles are explicitly visible under each poster (the Stremio Mobile
+       rendering politics that drove this whole web-app direction). *@
+    <div class="library-grid">
+        @foreach (var meta in Model.CurrentlyWatching)
+        {
+            // The Manage Entry route is config-scoped because that's how Stremio invokes
+            // it; we synthesise the same URL here using the resolved UID so the existing
+            // page works without us having to clone it for the web app yet. v1 of the
+            // library will wire up an inline modal that talks to /api/library/* endpoints
+            // and skips the config-in-URL pattern entirely.
+            var manageHref = !string.IsNullOrEmpty(Model.ConfigUid)
+                ? $"/{Model.ConfigUid}/Meta/ManageEntry/{meta.id}"
+                : "#";
+            <a class="library-card" href="@manageHref" title="@meta.name">
+                @if (!string.IsNullOrEmpty(meta.poster))
+                {
+                    <img class="library-card-poster" src="@meta.poster" alt="@meta.name" loading="lazy" />
+                }
+                else
+                {
+                    <div class="library-card-poster library-card-poster-placeholder"></div>
+                }
+                <span class="library-card-title">@meta.name</span>
+            </a>
+        }
+    </div>
+}
