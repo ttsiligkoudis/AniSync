@@ -1,21 +1,61 @@
 {
   "manifest_version": 3,
   "name": "AniSync Auto-Tracker",
-  "version": "0.3.0",
-  "description": "Watches anime episodes on any streaming site and auto-updates your AniSync list (AniList / Kitsu / MAL).",
-  "permissions": ["storage"],
-  "host_permissions": ["<all_urls>"],
+  "version": "0.4.0",
+  "description": "Watches anime episodes on your favourite streaming site and auto-updates your AniSync list (AniList / Kitsu / MAL).",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": [
+    "*://*.crunchyroll.com/*",
+    "*://hianime.to/*",
+    "*://hianime.tv/*",
+    "*://hianime.nz/*",
+    "*://hianime.bz/*",
+    "*://aniwatch.to/*",
+    "*://aniwatchtv.to/*",
+    "*://zoro.to/*",
+    "*://zoro.in/*",
+    "*://aniwave.to/*",
+    "*://aniwave.li/*",
+    "*://aniwave.bz/*",
+    "*://aniwave.cx/*",
+    "*://aniwave.se/*",
+    "*://anisync.fly.dev/*"
+  ],
+  "optional_host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "*://*.crunchyroll.com/*",
+        "*://hianime.to/*",
+        "*://hianime.tv/*",
+        "*://hianime.nz/*",
+        "*://hianime.bz/*",
+        "*://aniwatch.to/*",
+        "*://aniwatchtv.to/*",
+        "*://zoro.to/*",
+        "*://zoro.in/*",
+        "*://aniwave.to/*",
+        "*://aniwave.li/*",
+        "*://aniwave.bz/*",
+        "*://aniwave.cx/*",
+        "*://aniwave.se/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle",
       "all_frames": false
     }
   ],
+  "action": {
+    "default_title": "Track this page with AniSync",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
+  },
   "options_page": "options.html",
   "icons": {
     "16": "icon.png",
