@@ -187,8 +187,8 @@ namespace AnimeList.Controllers
             {
                 Source = "plex",
                 IsScrobble = p.Event == "media.scrobble",
-                IsEpisode = string.Equals(p.Metadata?.type, "episode", StringComparison.OrdinalIgnoreCase),
-                Username = p.Account?.title,
+                IsEpisode = string.Equals(p.Metadata?.Type, "episode", StringComparison.OrdinalIgnoreCase),
+                Username = p.Account?.Title,
                 SeriesTitle = p.Metadata?.GrandparentTitle,
                 Season = p.Metadata?.ParentIndex,
                 Episode = p.Metadata?.Index,
