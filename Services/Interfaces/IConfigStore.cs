@@ -15,6 +15,25 @@ namespace AnimeList.Services.Interfaces
         /// </summary>
         Task<string> UpsertAsync(TokenData tokenData);
 
+        /// <summary>
+        /// Read-only sibling of <see cref="UpsertAsync"/>: returns the UID whose primary
+        /// identity matches <paramref name="candidate"/>, or null if no row exists. Lets the
+        /// login flow distinguish "this user already has a primary row" from "this identity
+        /// is linked elsewhere" before deciding whether to insert a fresh row.
+        /// </summary>
+        Task<string> FindUidByPrimaryIdentityAsync(TokenData candidate);
+
+        /// <summary>
+        /// Returns the UID whose linked-tokens array contains an entry matching the identity
+        /// of <paramref name="candidate"/>, or null when no row matches. Used by the login
+        /// flow so that signing in with a service that's currently a linked secondary on an
+        /// existing row restores that row instead of creating a duplicate. Always called
+        /// AFTER <see cref="FindUidByPrimaryIdentityAsync"/> — primary ownership wins over a
+        /// secondary link if both happen to match, which can occur when a user has two
+        /// independent AniSync configs with overlapping identities.
+        /// </summary>
+        Task<string> FindUidByLinkedIdentityAsync(TokenData candidate);
+
         /// <summary>Looks up token data by UID. Returns null if the UID is unknown.</summary>
         Task<TokenData> GetAsync(string uid);
 

@@ -184,6 +184,53 @@ namespace AnimeList.Services
         // SetFlagsAsync writes: bits 16-23 = flags1, 8-15 = flags2, 0-7 = flags3.
         private const long DefaultFlagsPacked = ((long)(0x01 | 0x08 | 0x80)) << 16;
 
+        public async Task<string> FindUidByPrimaryIdentityAsync(TokenData candidate)
+        {
+            if (candidate == null) return null;
+            var userKey = GetUserKey(candidate);
+            if (string.IsNullOrEmpty(userKey)) return null;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT uid FROM configs WHERE service = $s AND user_key = $k LIMIT 1";
+            cmd.Parameters.AddWithValue("$s", (int)candidate.anime_service);
+            cmd.Parameters.AddWithValue("$k", userKey);
+            return await cmd.ExecuteScalarAsync() as string;
+        }
+
+        public async Task<string> FindUidByLinkedIdentityAsync(TokenData candidate)
+        {
+            if (candidate == null) return null;
+            var userKey = GetUserKey(candidate);
+            if (string.IsNullOrEmpty(userKey)) return null;
+
+            // LinkedToken serialises with default Newtonsoft naming (PascalCase outer,
+            // snake_case inner — matches the field declarations). Identity field inside
+            // TokenData differs by service: user_id for AniList/MAL, username for Kitsu —
+            // same convention as GetUserKey above. Path is interpolated from a closed
+            // enum, never user input, so no SQL injection surface.
+            var identityPath = candidate.anime_service == AnimeService.Kitsu
+                ? "$.TokenData.username"
+                : "$.TokenData.user_id";
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"""
+                SELECT c.uid
+                  FROM configs c, json_each(c.linked_tokens) j
+                 WHERE c.linked_tokens IS NOT NULL
+                   AND json_extract(j.value, '$.Service') = $s
+                   AND json_extract(j.value, '{identityPath}') = $k
+                 ORDER BY c.updated_at DESC
+                 LIMIT 1
+                """;
+            cmd.Parameters.AddWithValue("$s", (int)candidate.anime_service);
+            cmd.Parameters.AddWithValue("$k", userKey);
+            return await cmd.ExecuteScalarAsync() as string;
+        }
+
         public async Task<TokenData> GetAsync(string uid)
         {
             if (string.IsNullOrEmpty(uid)) return null;
