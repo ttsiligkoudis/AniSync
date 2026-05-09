@@ -4,8 +4,10 @@ Reference Chrome / Edge extension that watches anime episodes on **any**
 streaming site and auto-updates progress on your linked AniList / Kitsu /
 MyAnimeList accounts via the AniSync public API.
 
-This is **not** a published extension — it's a minimal demonstration of how
-the API surface composes. Around 500 lines total, no build step.
+This is a **reference implementation** — a clean starting point for a
+publishable extension that follows Chrome Web Store-friendly patterns
+(curated install-time hosts + opt-in via `chrome.permissions.request`).
+Around 750 lines total, no build step.
 
 ## How it works
 
@@ -64,9 +66,9 @@ template for sidebar-DOM patterns.
 
 | File | What it does |
 | --- | --- |
-| `manifest.json` | MV3 manifest. Declares `<all_urls>` host + content-script match. |
-| `content.js` | Heuristic extractors, floating confirm UI, video watcher. |
-| `background.js` | Receives messages, calls `/match` and `/entries/{id}`. |
+| `manifest.json` | MV3 manifest. Declares the curated host allowlist for known adapters + `optional_host_permissions: ["<all_urls>"]` so users can extend reach per-site. |
+| `content.js` | Site adapters, universal heuristic extractors, floating confirm UI, video watcher, "Always allow on this site" CTA. |
+| `background.js` | `/match` + `/entries/{id}` calls, toolbar action handler (`activeTab` injection), `chrome.permissions.request` flow, dynamic content-script registration on grant. |
 | `options.html` / `options.js` | API base URL + config UID setup page. |
 
 ## Install (unpacked)
@@ -77,6 +79,11 @@ template for sidebar-DOM patterns.
    **Load unpacked** → select this folder.
 3. Open the extension's **Options** page, paste your AniSync **Config UID**
    (the long base64url segment in your install URL between the slashes).
+4. Visit Crunchyroll / HiAnime / Aniwave to see auto-tracking work out of the
+   box. For other sites, click the AniSync icon in the toolbar — the floating
+   Track button appears on the page, and the **Always allow on this site**
+   button promotes the one-shot session to a permanent opt-in via Chrome's
+   native permission dialog.
 
 ## Privacy notes
 
@@ -87,17 +94,62 @@ template for sidebar-DOM patterns.
 - AniSync doesn't store any per-watch telemetry — `/match` is stateless and
   `/entries/{id}` writes go straight to your tracker accounts.
 
-## The `<all_urls>` permission
+## Permission model
 
-Chrome shows a stark "this extension can read all your data on every site"
-warning at install time. The reason: the universal heuristics need to inspect
-the page's DOM / meta / JSON-LD, which means injecting a content script
-broadly. The script is a no-op on pages without a `<video>`, but Chrome can't
-verify that statically.
+Designed to clear the Chrome Web Store review process — no broad permissions
+default, every grant is user-initiated.
 
-If that's too broad for your taste, switch the manifest to
-`optional_host_permissions` and prompt-on-demand the first time the user hits
-a new domain. More code, friendlier permission story — left as an exercise.
+**Default (install-time) permissions.** Three function-only permissions plus
+a curated host allowlist:
+
+- `storage` — saves your Config UID and the list of opted-in sites.
+- `activeTab` — when you click the toolbar icon, lets the background worker
+  inject `content.js` into *that one tab* until you navigate away. Standard
+  reviewer-friendly pattern.
+- `scripting` — needed by `chrome.scripting.executeScript` (the activeTab
+  injection above) and `chrome.scripting.registerContentScripts` (persistent
+  registration after an opt-in grant).
+- Host allowlist (the three adapter sites): Crunchyroll, HiAnime/Zoro/
+  aniwatch (8 hostnames), Aniwave (5 hostnames), and `anisync.fly.dev` for
+  the API. Each is explicitly justified by an in-extension adapter.
+
+**Optional permissions.** `optional_host_permissions: ["<all_urls>"]` is
+declared but not granted. It's *available to grant* per-host through
+`chrome.permissions.request`, but a user installing the extension never
+sees the "read all your data" warning at install time — only when they
+explicitly opt into a new site, and only via Chrome's native permission
+dialog (not ours).
+
+**Opt-in flow on a non-pre-baked site:**
+
+1. User visits a streaming site we don't yet have a permission for.
+2. Nothing happens automatically — the extension is dormant on that host.
+3. User clicks the AniSync toolbar icon.
+4. Background worker uses `activeTab` to inject `content.js` into the current
+   tab. Detection runs; the floating Track button appears.
+5. The floating UI shows a banner: "Tracking is one-shot on this site. Allow
+   AniSync on `example.com` to auto-track future episodes without clicking
+   the toolbar each time." with an **Always allow on this site** button.
+6. Clicking it sends a message to the background worker, which calls
+   `chrome.permissions.request({origins: ['*://example.com/*']})`. Chrome's
+   native permission dialog appears — this is the *only* time the user is
+   asked to grant a new permission, and it's clearly tied to the site
+   they're on.
+7. On grant, the background worker calls
+   `chrome.scripting.registerContentScripts` to make the injection
+   persistent. Future visits to that site auto-inject without the toolbar
+   dance.
+8. The opted-in origin is recorded in `chrome.storage.local`. On extension
+   updates (which wipe the dynamic-script registry) the background worker
+   re-registers all opted-in origins on `runtime.onInstalled` /
+   `runtime.onStartup`.
+
+**Revoking access.** Chrome's `chrome://extensions` page shows every host
+the extension currently has access to under "Site access" — users can flip
+any individual site to "On click" or remove it entirely. The background
+worker reconciles its dynamic-script registry against
+`chrome.permissions.getAll()` on startup so revocations take effect on the
+next browser launch.
 
 ## Detection coverage
 
