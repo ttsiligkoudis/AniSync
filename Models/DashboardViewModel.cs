@@ -13,12 +13,20 @@ namespace AnimeList.Models
         public string ConfigUid { get; set; }
         public List<Meta> ContinueWatching { get; set; } = [];
 
-        // Compact stats panel. Watching/Completed totals come straight from the
-        // list-fetch lengths; TopGenres is the top 5 genre buckets across the
-        // user's Completed list, which is the best sample of long-run taste
-        // (Currently Watching skews to whatever airing season is in flight).
+        // Stats panel. Watching/Completed totals come from list-fetch lengths;
+        // TotalHoursWatched is sum(Completed episodes) × 24 min (the typical
+        // TV-anime ep length); MeanScore averages user-rated Completed entries
+        // (skipping unscored ones so the average isn't dragged down by zeros).
+        // Phase 5 of the StreamD refactor surfaces the per-entry score +
+        // episode count from each service's catalog query, which makes hours
+        // and mean computable here without an extra round-trip per entry.
+        // TopGenres is the top 5 genre buckets across Completed — the best
+        // sample of long-run taste (Currently Watching skews to whatever
+        // airing season is in flight).
         public int WatchingTotal { get; set; }
         public int CompletedTotal { get; set; }
+        public int TotalHoursWatched { get; set; }
+        public double? MeanScore { get; set; }
         public List<(string genre, int count)> TopGenres { get; set; } = [];
     }
 }

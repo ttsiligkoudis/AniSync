@@ -18,6 +18,7 @@
     };
 
     var hasSearch = !string.IsNullOrEmpty(Model.Search);
+    var hasGenre = !string.IsNullOrEmpty(Model.Genre);
     var activeLabel = labels[Model.ActiveList];
 }
 
@@ -25,6 +26,10 @@
     @if (hasSearch)
     {
         <text>Search results</text>
+    }
+    else if (hasGenre)
+    {
+        <text>@Model.Genre anime</text>
     }
     else
     {
@@ -39,7 +44,10 @@
     </span>
 </p>
 
-@* Same search-form pattern as /library — server-rendered, navigates on submit. *@
+@* Same search-form pattern as /library — server-rendered, navigates on submit.
+   The genre filter is preserved through search submission via a hidden input
+   so the user can search WITHIN a genre. The list tab is dropped because
+   search is mutually exclusive with the tab navigation. *@
 <form method="get" action="@Url.Action("Index", "Discover")" class="library-search">
     <input type="search"
            name="search"
@@ -47,11 +55,40 @@
            placeholder="Search anime…"
            class="library-search-input"
            autocomplete="off" />
+    @if (hasGenre)
+    {
+        <input type="hidden" name="genre" value="@Model.Genre" />
+    }
     @if (hasSearch)
     {
-        <a class="library-search-clear" href="@Url.Action("Index", "Discover")">Clear</a>
+        <a class="library-search-clear" href="@(hasGenre ? Url.Action("Index", "Discover", new { genre = Model.Genre }) : Url.Action("Index", "Discover"))">Clear</a>
     }
 </form>
+
+@* Genre picker — native <select> with a JS-free auto-submit via onchange.
+   Hidden during search because search results already span all genres and
+   the picker would be confusingly orthogonal there. The current list type
+   is preserved across genre changes so the user can browse e.g. "Trending
+   Action" or "Seasonal Romance" — the controller passes both ?list= and
+   ?genre= through to the per-service catalog query. *@
+@if (!hasSearch)
+{
+    <form method="get" action="@Url.Action("Index", "Discover")" class="genre-picker">
+        <input type="hidden" name="list" value="@slugs[Model.ActiveList]" />
+        <select name="genre" onchange="this.form.submit()" class="genre-picker-select" aria-label="Genre">
+            <option value="">All genres</option>
+            @foreach (var g in Model.AvailableGenres)
+            {
+                <option value="@g" selected="@(Model.Genre == g)">@g</option>
+            }
+        </select>
+        @if (hasGenre)
+        {
+            <a class="library-search-clear"
+               href="@Url.Action("Index", "Discover", new { list = slugs[Model.ActiveList] })">Clear genre</a>
+        }
+    </form>
+}
 
 @if (!hasSearch)
 {
@@ -59,8 +96,14 @@
         @foreach (var t in Model.Tabs)
         {
             var isActive = t == Model.ActiveList;
+            // Preserve the active genre across tab clicks so switching from
+            // Trending → Seasonal keeps the genre filter applied rather than
+            // dropping back to all genres.
+            var tabRouteValues = hasGenre
+                ? (object)new { list = slugs[t], genre = Model.Genre }
+                : new { list = slugs[t] };
             <a class="library-tab @(isActive ? "library-tab-active" : "")"
-               href="@Url.Action("Index", "Discover", new { list = slugs[t] })"
+               href="@Url.Action("Index", "Discover", tabRouteValues)"
                role="tab"
                aria-selected="@(isActive ? "true" : "false")">
                 @labels[t]
@@ -75,5 +118,7 @@
     ConfigUid = Model.ConfigUid,
     EmptyMessage = hasSearch
         ? $"No matches for \"{Model.Search}\"."
-        : $"Couldn't load {activeLabel.ToLower()} anime — try again later.",
+        : hasGenre
+            ? $"No {Model.Genre.ToLower()} anime in {activeLabel.ToLower()} right now."
+            : $"Couldn't load {activeLabel.ToLower()} anime — try again later.",
 })

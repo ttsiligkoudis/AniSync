@@ -56,6 +56,8 @@ public class HomeController : Controller
         List<Meta> continueWatching = [];
         int watchingTotal = 0;
         int completedTotal = 0;
+        int totalHoursWatched = 0;
+        double? meanScore = null;
         List<(string genre, int count)> topGenres = [];
 
         // Continue-watching + stats surfaces only fire for non-anonymous logged-in
@@ -69,9 +71,9 @@ public class HomeController : Controller
 
             // Fetch Currently Watching (drives the Continue Watching grid + watching
             // count) and Completed (drives the completed count + top-genres taste
-            // profile) in parallel. Two upstream calls per dashboard render — the
-            // lists tend to be small enough that this is cheap. Cache later if it
-            // shows up in profiles.
+            // profile + hours-watched + mean-score) in parallel. Two upstream calls
+            // per dashboard render — the lists tend to be small enough that this is
+            // cheap. Cache later if it shows up in profiles.
             var watchingTask = FetchListAsync(tokenData, ListType.Current);
             var completedTask = FetchListAsync(tokenData, ListType.Completed);
             await Task.WhenAll(watchingTask, completedTask);
@@ -82,6 +84,28 @@ public class HomeController : Controller
             watchingTotal = watching.Count;
             completedTotal = completed.Count;
             continueWatching = watching.Take(ContinueWatchingMaxItems).ToList();
+
+            // Hours watched: sum of episodes across Completed entries × 24 minutes
+            // (the typical TV-anime episode length — not exact for movies/specials
+            // but the mode for the long-tail dataset). Phase 5 of the StreamD
+            // refactor populates Meta.episodes from each per-service catalog
+            // query, so this works for AniList/MAL/Kitsu users uniformly.
+            const int AvgEpisodeMinutes = 24;
+            var totalMinutes = completed
+                .Where(m => m.episodes is int eps && eps > 0)
+                .Sum(m => m.episodes!.Value * AvgEpisodeMinutes);
+            totalHoursWatched = totalMinutes / 60;
+
+            // Mean score across rated Completed entries. score is normalised
+            // to 0-10 by each service's catalog Meta builder. Skip entries
+            // without a score (user hasn't rated them) — averaging in zeros
+            // would punish unrated entries, which isn't the intent.
+            var scores = completed
+                .Where(m => m.score is double s && s > 0)
+                .Select(m => m.score!.Value)
+                .ToList();
+            if (scores.Count > 0)
+                meanScore = Math.Round(scores.Average(), 1);
 
             // Top genres from Completed only — Completed is the most representative
             // sample of the user's taste (Currently Watching skews recency-biased
@@ -104,6 +128,8 @@ public class HomeController : Controller
             ContinueWatching = continueWatching,
             WatchingTotal = watchingTotal,
             CompletedTotal = completedTotal,
+            TotalHoursWatched = totalHoursWatched,
+            MeanScore = meanScore,
             TopGenres = topGenres,
         });
     }

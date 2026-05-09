@@ -53,15 +53,58 @@
             <h2 class="dashboard-section-title">Your stats</h2>
             <span class="dashboard-section-link-muted">via @serviceLabel</span>
         </div>
+        @* 4-cell stats strip: Watching · Completed · Hours · Mean Score. Wraps
+           to 2x2 on narrow viewports via flex-wrap. Per-cell soft-coloured icon
+           tiles match the StreamD reference's Currently Airing / This Season /
+           Total stats row. Hours is computed from Completed × 24 min so it'll
+           be approximate for movie-heavy libraries; mean score is averaged
+           only over user-rated entries (unscored ones skip rather than zero). *@
         <div class="stats-strip">
             <div class="stats-cell">
+                <span class="stats-icon stats-icon-blue">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect>
+                        <polyline points="17 2 12 7 7 2"></polyline>
+                    </svg>
+                </span>
                 <div class="stats-number">@Model.WatchingTotal</div>
                 <div class="stats-label">Watching</div>
             </div>
             <div class="stats-cell">
+                <span class="stats-icon stats-icon-green">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                </span>
                 <div class="stats-number">@Model.CompletedTotal</div>
                 <div class="stats-label">Completed</div>
             </div>
+            @if (Model.TotalHoursWatched > 0)
+            {
+                <div class="stats-cell">
+                    <span class="stats-icon stats-icon-amber">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                    </span>
+                    <div class="stats-number">@Model.TotalHoursWatched.ToString("N0")</div>
+                    <div class="stats-label">Hours</div>
+                </div>
+            }
+            @if (Model.MeanScore.HasValue)
+            {
+                <div class="stats-cell">
+                    <span class="stats-icon stats-icon-purple">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                        </svg>
+                    </span>
+                    <div class="stats-number">@Model.MeanScore.Value.ToString("0.0")</div>
+                    <div class="stats-label">Mean</div>
+                </div>
+            }
         </div>
         @if (Model.TopGenres.Count > 0)
         {

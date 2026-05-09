@@ -44,8 +44,19 @@ namespace AnimeList.Controllers
             ListType.Airing,
         ];
 
+        // Common anime genres surfaced in the picker. Hand-curated rather than
+        // fetched from the AniList genre endpoint — gives consistent UI across
+        // services (MAL/Kitsu use slightly different genre names) and avoids an
+        // extra upstream call per dashboard render. Order is rough popularity.
+        private static readonly string[] PopularGenres =
+        [
+            "Action", "Adventure", "Comedy", "Drama", "Slice of Life",
+            "Romance", "Fantasy", "Sci-Fi", "Mystery", "Psychological",
+            "Sports", "Supernatural", "Music", "Horror", "Thriller",
+        ];
+
         [Route("/discover")]
-        public async Task<IActionResult> Index(string list = null, string search = null)
+        public async Task<IActionResult> Index(string list = null, string search = null, string genre = null)
         {
             // Anonymous fresh-visit: GetAccessTokenAsync returns null. Synthesise an
             // anonymous TokenData with the Kitsu default so the per-service dispatch
@@ -58,6 +69,7 @@ namespace AnimeList.Controllers
                 ?? new TokenData { anime_service = AnimeService.Kitsu };
 
             var hasSearch = !string.IsNullOrWhiteSpace(search);
+            var hasGenre = !string.IsNullOrWhiteSpace(genre);
             var activeList = ParseListType(list);
 
             // Resolve the row's UID for logged-in users so per-card Manage Entry links
@@ -78,9 +90,9 @@ namespace AnimeList.Controllers
             var groupSeasonsForCall = !hasSearch;
             var metas = tokenData.anime_service switch
             {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
             };
 
             // Same 0.4-threshold relevance re-rank CatalogController applies on the
@@ -105,6 +117,8 @@ namespace AnimeList.Controllers
                 ActiveList = activeList,
                 Tabs = DiscoverListTypes,
                 Search = hasSearch ? search.Trim() : null,
+                Genre = hasGenre ? genre.Trim() : null,
+                AvailableGenres = PopularGenres,
                 Items = metas ?? [],
             });
         }
@@ -138,6 +152,10 @@ namespace AnimeList.Controllers
         // The active search term, or null when the page is in tab-list mode. The
         // view renders a search-results header (and hides the tabs) when this is set.
         public string Search { get; set; }
+        // Active genre filter (e.g. "Action"), or null when all genres show. The
+        // view renders an "× clear" pill alongside the genre dropdown when set.
+        public string Genre { get; set; }
+        public IReadOnlyList<string> AvailableGenres { get; set; } = [];
         public List<Meta> Items { get; set; } = [];
     }
 }
