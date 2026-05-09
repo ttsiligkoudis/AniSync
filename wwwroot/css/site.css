@@ -18,10 +18,16 @@ html {
 }
 
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    /* StreamD-inspired type stack — system fonts cascade so we don't pull a
+       webfont over the wire on first paint. Reads as San Francisco on iOS /
+       macOS, Roboto on Android, Segoe UI Variable on Windows 11, and Inter on
+       any browser that has it installed locally. */
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     margin: 0;
     height: 100vh;
-    background-color: #0d0d0d;
+    background-color: #0A0A0A;
     color: #e0e0e0;
 }
 
@@ -46,7 +52,7 @@ main {
 }
 
 .app-logo .accent {
-    color: #7b5bf5;
+    color: #3B82F6;
 }
 
 .app-subtitle {
@@ -237,7 +243,7 @@ main {
 }
 
 .cred-group input:focus {
-    border-color: #7b5bf5;
+    border-color: #3B82F6;
 }
 
 /* ── Catalog toggles ── */
@@ -346,7 +352,7 @@ main {
 }
 
 .switch input:checked + .slider {
-    background: #7b5bf5;
+    background: #3B82F6;
 }
 
 .switch input:checked + .slider::before {
@@ -384,11 +390,11 @@ main {
 }
 
 .btn-login {
-    background: linear-gradient(135deg, #7b5bf5, #6341d4);
+    background: linear-gradient(135deg, #3B82F6, #6341d4);
 }
 
 .btn-install {
-    background: linear-gradient(135deg, #7b5bf5, #6341d4);
+    background: linear-gradient(135deg, #3B82F6, #6341d4);
 }
 
 /* Outline / secondary button — same shape as primary but transparent so the primary CTA
@@ -491,7 +497,7 @@ main {
 .btn-icon-copy {
     width: 42px;
     flex-shrink: 0;
-    background: linear-gradient(135deg, #7b5bf5, #6341d4);
+    background: linear-gradient(135deg, #3B82F6, #6341d4);
     border: none;
     border-radius: 8px;
     color: #fff;
@@ -711,7 +717,7 @@ main {
 .sync-modal-bar-fill {
     height: 100%;
     width: 0%;
-    background: linear-gradient(90deg, #7b5bf5, #6341d4);
+    background: linear-gradient(90deg, #3B82F6, #6341d4);
     transition: width 0.25s ease-out;
 }
 
@@ -801,7 +807,7 @@ main {
 }
 
 .hint-text a {
-    color: #7b5bf5;
+    color: #3B82F6;
     text-decoration: underline;
 }
 
@@ -815,8 +821,8 @@ main {
 
 .hint-copy-btn {
     background: transparent;
-    color: #7b5bf5;
-    border: 1px solid rgba(123, 91, 245, 0.5);
+    color: #3B82F6;
+    border: 1px solid rgba(59, 130, 246, 0.5);
     border-radius: 999px;
     padding: 0.15rem 0.55rem;
     font-size: 0.72rem;
@@ -824,7 +830,7 @@ main {
 }
 
 .hint-copy-btn:hover {
-    background: rgba(123, 91, 245, 0.12);
+    background: rgba(59, 130, 246, 0.12);
 }
 
 .disabled {
@@ -913,7 +919,7 @@ main {
 .manage-entry-label {
     display: block;
     font-size: 0.78rem;
-    color: #7b5bf5;
+    color: #3B82F6;
     margin-bottom: 0.35rem;
     font-weight: 600;
 }
@@ -943,7 +949,7 @@ main {
 
 .manage-entry-select:focus,
 .manage-entry-input:focus {
-    border-color: #7b5bf5;
+    border-color: #3B82F6;
 }
 
 .manage-entry-select option {
@@ -968,7 +974,7 @@ main {
 }
 
 .btn-save {
-    background: linear-gradient(135deg, #7b5bf5, #6341d4);
+    background: linear-gradient(135deg, #3B82F6, #6341d4);
     margin-top: 0.5rem;
 }
 
@@ -1016,7 +1022,7 @@ main {
     width: 52px;
     height: 52px;
     border: 4px solid rgba(255, 255, 255, 0.12);
-    border-top-color: #7b5bf5;
+    border-top-color: #3B82F6;
     border-radius: 50%;
     animation: loader-spin 0.8s linear infinite;
 }
@@ -1038,7 +1044,7 @@ main {
     padding: 1.25rem 1.5rem;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 0.75rem;
+    border-radius: 1rem;
     color: inherit;
     text-decoration: none;
     transition: background 0.15s, border-color 0.15s, transform 0.1s;
@@ -1046,7 +1052,7 @@ main {
 
 .dashboard-tile:hover {
     background: rgba(255, 255, 255, 0.08);
-    border-color: #7b5bf5;
+    border-color: #3B82F6;
     color: inherit;
     text-decoration: none;
     transform: translateY(-1px);
@@ -1106,7 +1112,7 @@ main {
 
 .dashboard-section-link {
     font-size: 0.85rem;
-    color: #7b5bf5;
+    color: #3B82F6;
     text-decoration: none;
 }
 
@@ -1135,7 +1141,7 @@ main {
     padding: 0.85rem 1rem;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 0.65rem;
+    border-radius: 1rem;
     text-align: center;
 }
 
@@ -1172,8 +1178,8 @@ main {
 
 .genre-chip {
     padding: 0.25rem 0.65rem;
-    background: rgba(123, 91, 245, 0.15);
-    border: 1px solid rgba(123, 91, 245, 0.3);
+    background: rgba(59, 130, 246, 0.15);
+    border: 1px solid rgba(59, 130, 246, 0.3);
     border-radius: 1rem;
     color: #c4b8ff;
     font-size: 0.8rem;
@@ -1193,7 +1199,7 @@ body.library-page main {
 }
 
 .library-back a {
-    color: #7b5bf5;
+    color: #3B82F6;
     text-decoration: none;
 }
 
@@ -1238,7 +1244,7 @@ body.library-page main {
 
 .library-tab-active,
 .library-tab-active:hover {
-    background: #7b5bf5;
+    background: #3B82F6;
     color: #fff;
 }
 
@@ -1269,7 +1275,7 @@ body.library-page main {
 }
 
 .library-search-input:focus {
-    border-color: #7b5bf5;
+    border-color: #3B82F6;
     background: rgba(255, 255, 255, 0.08);
 }
 
@@ -1297,7 +1303,7 @@ body.library-page main {
     flex-direction: column;
     text-decoration: none;
     color: inherit;
-    border-radius: 0.5rem;
+    border-radius: 0.85rem;
     overflow: hidden;
     transition: transform 0.1s, box-shadow 0.15s;
 }
