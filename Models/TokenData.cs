@@ -15,8 +15,6 @@ namespace AnimeList.Models
 
         public string username { get; set; }
 
-        public string password { get; set; }
-
         public AnimeService anime_service { get; set; }
 
         // Kitsu uses a password grant (so we treat "no username" as anonymous); the OAuth-based
@@ -36,7 +34,6 @@ namespace AnimeList.Models
                 expiration_date = this.expiration_date,
                 user_id = this.user_id,
                 username = this.username,
-                password = this.password,
                 anime_service = this.anime_service
             };
         }
