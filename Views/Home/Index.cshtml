@@ -123,6 +123,10 @@
                                 <input type="text" name="username" placeholder="Kitsu username" required />
                                 <input type="password" name="password" placeholder="Kitsu password" required />
                                 <button type="submit" class="btn-primary-action btn-login">Link Kitsu</button>
+                                <p class="option-name-sub" style="margin: 0;">
+                                    Used only to obtain an OAuth token from Kitsu — your password
+                                    is not stored in the configuration.
+                                </p>
                             </form>
                         }
                     </div>
@@ -509,6 +513,11 @@ else
                 <label for="password" class="required">Password</label>
                 <input type="password" id="password" />
             </div>
+            <p class="option-name-sub" style="margin-top: 0.5rem;">
+                AniSync uses your password only for the initial sign-in to Kitsu — it is not stored
+                in the configuration. After login we keep just the OAuth tokens Kitsu issues, and
+                refresh them automatically when they expire.
+            </p>
         </div>
         <a id="loginUrl" class="btn-primary-action btn-login" href='@Url.Action("Login", "Auth", new { animeService = Model.AnimeService })'>
             Login with <span id="loginServiceName">@Model.ServiceDisplay</span>

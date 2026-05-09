@@ -125,7 +125,11 @@ namespace AnimeList.Services
                 }
                 else
                 {
-                    var refreshed = await GetAccessTokenByCredsAsync(tokenData.username, tokenData.password, false, tokenData.user_id);
+                    // Kitsu refresh now uses the refresh_token Kitsu issued during the
+                    // initial password grant, not a re-run of the password grant. Returns
+                    // null when the refresh_token is missing or has been revoked, which
+                    // bubbles up to the caller as a needs-reauth signal.
+                    var refreshed = await RefreshKitsuAccessToken(tokenData.refresh_token, tokenData.username, tokenData.user_id);
                     if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
                     {
                         _kitsuTokenCache[cacheKey] = refreshed;
@@ -218,44 +222,78 @@ namespace AnimeList.Services
         public async Task<TokenData> GetAccessTokenByCredsAsync(string username, string password, bool setContext = false, string userId = null)
         {
             var context = _httpContextAccessor.HttpContext;
-            TokenData tokenData = null;
 
-            if (!string.IsNullOrEmpty(username))
+            if (string.IsNullOrEmpty(username))
+                return null;
+
+            var requestBody = new Dictionary<string, string>
             {
-                var requestBody = new Dictionary<string, string>
-                {
-                    { "grant_type", "password" },
-                    { "username", username },
-                    { "password", password }
-                };
+                { "grant_type", "password" },
+                { "username", username },
+                { "password", password }
+            };
 
-                var request = new HttpRequestMessage(HttpMethod.Post, "https://kitsu.io/api/oauth/token")
-                {
-                    Content = new FormUrlEncodedContent(requestBody)
-                };
+            var request = new HttpRequestMessage(HttpMethod.Post, "https://kitsu.io/api/oauth/token")
+            {
+                Content = new FormUrlEncodedContent(requestBody)
+            };
 
-                var response = await _clientFactory.CreateClient().SendAsync(request);
-                if (!response.IsSuccessStatusCode)
-                {
-                    return null;
-                }
+            var response = await _clientFactory.CreateClient().SendAsync(request);
+            // The password is intentionally never written into TokenData. Refreshes are
+            // driven by the refresh_token Kitsu hands back here (RefreshKitsuAccessToken
+            // below); the password we just used for the password grant is dropped from
+            // memory as soon as this method returns.
+            return await ParseKitsuTokenResponseAsync(response, username, userId, setContext);
+        }
 
-                var content = await response.Content.ReadAsStringAsync();
-                tokenData = DeserializeObject<TokenData>(content);
-                if (!string.IsNullOrEmpty(tokenData?.access_token))
-                {
-                    tokenData.anime_service = AnimeService.Kitsu;
-                    tokenData.expiration_date = DateTime.UtcNow.AddSeconds(tokenData.expires_in ?? 0);
-                    tokenData.username = username;
-                    tokenData.password = password;
-                    tokenData.user_id = !string.IsNullOrEmpty(userId)
-                        ? userId
-                        : await GetUserIdAsync(tokenData.access_token);
-                    if (setContext)
-                    {
-                        context.Session.SetString("AccessToken", SerializeObject(tokenData));
-                    }
-                }
+        /// <summary>
+        /// Mirrors <see cref="RefreshAccessToken"/> for Kitsu. Kitsu's OAuth (Doorkeeper)
+        /// returns a refresh_token alongside every password-grant response and accepts the
+        /// standard <c>grant_type=refresh_token</c> exchange. We use that here so the user's
+        /// plaintext password never has to be persisted just to keep the access_token alive.
+        /// </summary>
+        private async Task<TokenData> RefreshKitsuAccessToken(string refreshToken, string username, string userId)
+        {
+            if (string.IsNullOrEmpty(refreshToken)) return null;
+
+            var requestBody = new Dictionary<string, string>
+            {
+                { "grant_type", "refresh_token" },
+                { "refresh_token", refreshToken }
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "https://kitsu.io/api/oauth/token")
+            {
+                Content = new FormUrlEncodedContent(requestBody)
+            };
+
+            var response = await _clientFactory.CreateClient().SendAsync(request);
+            // Refresh path: never touches the session — that's reserved for the initial
+            // login response, same convention as the AniList/MAL refresh helpers.
+            return await ParseKitsuTokenResponseAsync(response, username, userId, setContext: false);
+        }
+
+        private async Task<TokenData> ParseKitsuTokenResponseAsync(HttpResponseMessage response, string username, string userId, bool setContext)
+        {
+            if (!response.IsSuccessStatusCode) return null;
+
+            var content = await response.Content.ReadAsStringAsync();
+            var tokenData = DeserializeObject<TokenData>(content);
+            if (string.IsNullOrEmpty(tokenData?.access_token)) return null;
+
+            tokenData.anime_service = AnimeService.Kitsu;
+            tokenData.expiration_date = DateTime.UtcNow.AddSeconds(tokenData.expires_in ?? 0);
+            tokenData.username = username;
+            // The refresh response doesn't echo identity back, so preserve the caller's
+            // user_id when we have one — same pattern as MAL's refresh helper. On the
+            // initial password grant userId is null so we resolve it via /users?self.
+            tokenData.user_id = !string.IsNullOrEmpty(userId)
+                ? userId
+                : await GetUserIdAsync(tokenData.access_token);
+
+            if (setContext)
+            {
+                _httpContextAccessor.HttpContext?.Session.SetString("AccessToken", SerializeObject(tokenData));
             }
 
             return tokenData;
@@ -366,13 +404,14 @@ namespace AnimeList.Services
                     return refreshed;
 
                 case AnimeService.Kitsu:
-                    // Kitsu has no refresh token — re-issue via the stored creds. The link
-                    // flow only ever stores live (username, password) pairs, so a missing
-                    // password means the linked token was anonymous and can't be refreshed.
-                    if (string.IsNullOrEmpty(token.username) || string.IsNullOrEmpty(token.password))
-                        return null;
-                    return await GetAccessTokenByCredsAsync(token.username, token.password,
-                        setContext: false, userId: token.user_id);
+                    // Kitsu's password grant returns a refresh_token (Doorkeeper); we now
+                    // exchange that for a fresh access_token instead of replaying the
+                    // user's password. A missing refresh_token means either a legacy
+                    // pre-refresh-token row or an anonymous linked token; either way,
+                    // there's nothing we can do without sending the user back through
+                    // the Kitsu login form, so return null to surface needs-reauth.
+                    if (string.IsNullOrEmpty(token.refresh_token)) return null;
+                    return await RefreshKitsuAccessToken(token.refresh_token, token.username, token.user_id);
 
                 default:
                     return null;
