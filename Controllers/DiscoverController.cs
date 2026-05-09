@@ -45,7 +45,7 @@ namespace AnimeList.Controllers
         ];
 
         [Route("/discover")]
-        public async Task<IActionResult> Index(string list = null)
+        public async Task<IActionResult> Index(string list = null, string search = null)
         {
             // Anonymous fresh-visit: GetAccessTokenAsync returns null. Synthesise an
             // anonymous TokenData with the Kitsu default so the per-service dispatch
@@ -57,6 +57,7 @@ namespace AnimeList.Controllers
             var tokenData = await _tokenService.GetAccessTokenAsync()
                 ?? new TokenData { anime_service = AnimeService.Kitsu };
 
+            var hasSearch = !string.IsNullOrWhiteSpace(search);
             var activeList = ParseListType(list);
 
             // Resolve the row's UID for logged-in users so per-card Manage Entry links
@@ -69,12 +70,32 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
+            // Search runs as ListType.Search; the active tab is ignored while a query
+            // is present. groupSeasons=false during search matches the addon's Stremio-
+            // side behaviour — collapsing seasons rewrites titles to the shortest
+            // variant which fights the "find this specific anime" intent.
+            var listForCall = hasSearch ? ListType.Search : activeList;
+            var groupSeasonsForCall = !hasSearch;
             var metas = tokenData.anime_service switch
             {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, activeList),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, activeList),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, activeList),
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
             };
+
+            // Same 0.4-threshold relevance re-rank CatalogController applies on the
+            // Stremio side — keeps web-app search behaviour consistent with the addon.
+            if (hasSearch && metas?.Count > 0)
+            {
+                var normalisedQuery = NormalizeTitle(search);
+                const double minScore = 0.4;
+                metas = metas
+                    .Select(m => (meta: m, score: ScoreMatch(normalisedQuery, m.name)))
+                    .Where(x => x.score >= minScore)
+                    .OrderByDescending(x => x.score)
+                    .Select(x => x.meta)
+                    .ToList();
+            }
 
             return View(new DiscoverViewModel
             {
@@ -83,6 +104,7 @@ namespace AnimeList.Controllers
                 AnonymousUser = tokenData.anonymousUser,
                 ActiveList = activeList,
                 Tabs = DiscoverListTypes,
+                Search = hasSearch ? search.Trim() : null,
                 Items = metas ?? [],
             });
         }
@@ -113,6 +135,9 @@ namespace AnimeList.Controllers
         public bool AnonymousUser { get; set; }
         public ListType ActiveList { get; set; }
         public IReadOnlyList<ListType> Tabs { get; set; } = [];
+        // The active search term, or null when the page is in tab-list mode. The
+        // view renders a search-results header (and hides the tabs) when this is set.
+        public string Search { get; set; }
         public List<Meta> Items { get; set; } = [];
     }
 }

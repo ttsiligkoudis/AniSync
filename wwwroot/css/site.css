@@ -1141,6 +1141,49 @@ body.library-page main {
     color: #fff;
 }
 
+/* Search bar above the tabs / grid. Submits via GET to the same page so the
+   server-side branch in LibraryController / DiscoverController takes over. */
+.library-search {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    margin-bottom: 0.4rem;
+}
+
+.library-search-input {
+    flex: 1;
+    padding: 0.55rem 0.95rem;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1.5rem;
+    color: #e0e0e0;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.library-search-input::placeholder {
+    color: #777;
+}
+
+.library-search-input:focus {
+    border-color: #7b5bf5;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.library-search-clear {
+    color: #999;
+    font-size: 0.85rem;
+    text-decoration: none;
+    flex-shrink: 0;
+}
+
+.library-search-clear:hover {
+    color: #fff;
+    text-decoration: underline;
+}
+
 .library-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

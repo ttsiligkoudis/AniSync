@@ -48,7 +48,7 @@ namespace AnimeList.Controllers
         ];
 
         [Route("/library")]
-        public async Task<IActionResult> Index(string list = null)
+        public async Task<IActionResult> Index(string list = null, string search = null)
         {
             // Session-based identity. /library has no path-config — it's pure web app.
             // Anonymous visitors and not-logged-in sessions get bounced to the dashboard
@@ -57,6 +57,8 @@ namespace AnimeList.Controllers
             var tokenData = await _tokenService.GetAccessTokenAsync();
             if (tokenData == null || tokenData.anonymousUser)
                 return RedirectToAction("Index", "Home");
+
+            var hasSearch = !string.IsNullOrWhiteSpace(search);
 
             // Parse the ?list= query param; default to Current and silently coerce
             // unknown / non-user-list values rather than 400'ing — keeps shareable URLs
@@ -69,15 +71,35 @@ namespace AnimeList.Controllers
             // detail of the link href.
             var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
 
-            // Same dispatch table CatalogController uses — keeps the data layer single-
-            // sourced. groupSeasons=true matches the addon default; the user's per-config
-            // disableSeasonGrouping toggle is a Stremio-side concern, not relevant here.
+            // Search runs as ListType.Search across the full anime database (mirrors
+            // the addon's /catalog/.../Search behaviour); the active tab is ignored
+            // while a search query is present. groupSeasons=false here too, matching
+            // CatalogController's search branch — collapsing seasons in search rewrites
+            // titles to the shortest variant which is wrong for "find this specific
+            // anime" intent. Same dispatch table either way.
+            var listForCall = hasSearch ? ListType.Search : activeList;
+            var groupSeasonsForCall = !hasSearch;
             var metas = tokenData.anime_service switch
             {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, activeList),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, activeList),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, activeList),
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
             };
+
+            // Re-rank search results by Utils.ScoreMatch with the same 0.4 threshold
+            // CatalogController applies — keeps the relevance ordering consistent
+            // between the Stremio-side and web-app search experiences.
+            if (hasSearch && metas?.Count > 0)
+            {
+                var normalisedQuery = NormalizeTitle(search);
+                const double minScore = 0.4;
+                metas = metas
+                    .Select(m => (meta: m, score: ScoreMatch(normalisedQuery, m.name)))
+                    .Where(x => x.score >= minScore)
+                    .OrderByDescending(x => x.score)
+                    .Select(x => x.meta)
+                    .ToList();
+            }
 
             return View(new LibraryViewModel
             {
@@ -85,6 +107,7 @@ namespace AnimeList.Controllers
                 AnimeService = tokenData.anime_service,
                 ActiveList = activeList,
                 Tabs = UserListTypes,
+                Search = hasSearch ? search.Trim() : null,
                 Items = metas ?? [],
             });
         }
@@ -110,6 +133,9 @@ namespace AnimeList.Controllers
         public AnimeService AnimeService { get; set; }
         public ListType ActiveList { get; set; }
         public IReadOnlyList<ListType> Tabs { get; set; } = [];
+        // The active search term, or null when the page is in tab-list mode. The
+        // view renders a search-results header (and hides the tabs) when this is set.
+        public string Search { get; set; }
         public List<Meta> Items { get; set; } = [];
     }
 }

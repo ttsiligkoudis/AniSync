@@ -1,13 +1,7 @@
 @model AnimeList.Controllers.LibraryViewModel
 @{
-    // Widen `main` for the grid — the default 520px from site.css is right for
-    // form-shaped pages (configure, dashboard) but too narrow for a poster grid.
-    // Read in _Layout.cshtml as a body-level class hook.
     ViewData["BodyClass"] = "library-page";
 
-    // Display labels for the six user-list types. ListType is a code-side enum so
-    // the underscore in Trending_Desc and the title-case names aren't user-friendly
-    // out of the box; this dictionary hand-curates the labels we want to show.
     var labels = new Dictionary<ListType, string>
     {
         [ListType.Current]    = "Watching",
@@ -18,37 +12,66 @@
         [ListType.Repeating]  = "Rewatching",
     };
 
+    var hasSearch = !string.IsNullOrEmpty(Model.Search);
     var activeLabel = labels[Model.ActiveList];
 }
 
 <h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
 <p class="app-subtitle">
-    @activeLabel on @Model.AnimeService
+    @if (hasSearch)
+    {
+        <text>Search results · @Model.AnimeService</text>
+    }
+    else
+    {
+        <text>@activeLabel on @Model.AnimeService</text>
+    }
     <span class="library-back">·
         <a href="@Url.Action("Index", "Home")">back to dashboard</a>
     </span>
 </p>
 
-@* Tab strip across the six user-list types. Server-side links rather than JS-
-   driven tabs — full page load per click is fine here because the lists are
-   small (~tens to low hundreds of items typically) and we get free shareable
-   URLs (?list=completed) and back-button correctness for free. *@
-<nav class="library-tabs" role="tablist">
-    @foreach (var t in Model.Tabs)
+@* Search input. Server-rendered <form> targeting the same page — submitting
+   navigates to /library?search=... and the controller branches into search mode.
+   Empty submit clears the search. The active list tab isn't preserved across
+   search because the two are mutually exclusive in the controller; clearing
+   search returns to the default tab (Watching). *@
+<form method="get" action="@Url.Action("Index", "Library")" class="library-search">
+    <input type="search"
+           name="search"
+           value="@Model.Search"
+           placeholder="Search anime…"
+           class="library-search-input"
+           autocomplete="off" />
+    @if (hasSearch)
     {
-        var isActive = t == Model.ActiveList;
-        <a class="library-tab @(isActive ? "library-tab-active" : "")"
-           href="@Url.Action("Index", "Library", new { list = t.ToString().ToLower() })"
-           role="tab"
-           aria-selected="@(isActive ? "true" : "false")">
-            @labels[t]
-        </a>
+        <a class="library-search-clear" href="@Url.Action("Index", "Library")">Clear</a>
     }
-</nav>
+</form>
+
+@* Tab strip — hidden during search since search results span every list type
+   and the visual cue would be misleading. *@
+@if (!hasSearch)
+{
+    <nav class="library-tabs" role="tablist">
+        @foreach (var t in Model.Tabs)
+        {
+            var isActive = t == Model.ActiveList;
+            <a class="library-tab @(isActive ? "library-tab-active" : "")"
+               href="@Url.Action("Index", "Library", new { list = t.ToString().ToLower() })"
+               role="tab"
+               aria-selected="@(isActive ? "true" : "false")">
+                @labels[t]
+            </a>
+        }
+    </nav>
+}
 
 @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
 {
     Items = Model.Items,
     ConfigUid = Model.ConfigUid,
-    EmptyMessage = $"Nothing in your {activeLabel} list on {Model.AnimeService}.",
+    EmptyMessage = hasSearch
+        ? $"No matches for \"{Model.Search}\"."
+        : $"Nothing in your {activeLabel} list on {Model.AnimeService}.",
 })
