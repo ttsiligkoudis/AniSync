@@ -1771,6 +1771,49 @@ body.library-page main {
     text-decoration: underline;
 }
 
+/* Genre picker — sits between the search bar and the list tabs on /discover.
+   Native <select> styled to match the search input (dark pill, blue focus
+   ring) so the page looks coherent. onchange auto-submits the form so the
+   user doesn't need a separate submit button. */
+.genre-picker {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    margin-bottom: 0.4rem;
+}
+
+.genre-picker-select {
+    flex: 1;
+    padding: 0.5rem 0.95rem;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1.5rem;
+    color: #e0e0e0;
+    font-size: 0.9rem;
+    font-family: inherit;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    /* Inline SVG chevron-down so we don't depend on an icon font. */
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%23999' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='1,1 6,7 11,1'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    padding-right: 2.5rem;
+    cursor: pointer;
+    transition: border-color 0.15s, background-color 0.15s;
+}
+
+.genre-picker-select:focus {
+    border-color: #3B82F6;
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.genre-picker-select option {
+    background: #0A0A0A;
+    color: #e0e0e0;
+}
+
 .library-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
