@@ -9,7 +9,16 @@
     var linkedByService = Model.LinkedByService;
 }
 
-<p class="page-subtitle">Track your anime progress on Stremio</p>
+@* Page-level header. The site-header (logo + hamburger) above is layout chrome
+   that's identical across pages; this header gives the page its own identity
+   so users land somewhere obviously named after they click "Configure addon"
+   on the dashboard. The legacy success-badge below this block stays for the
+   anonymous "Connected without Account" copy, which the layout's drawer pill
+   doesn't surface (drawer shows a Sign in CTA for anonymous instead). *@
+<header class="page-header">
+    <h1 class="page-title">Configure</h1>
+    <p class="page-subtitle">Stremio install URL · linked accounts · backups · scrobble webhook</p>
+</header>
 
 @if (!Model.AnonymousUser)
 {

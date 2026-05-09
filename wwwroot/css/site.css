@@ -51,6 +51,25 @@ main {
     }
 }
 
+/* Page-level header — pairs an h1 page title with a subtitle so each
+   web-app page has clear identity under the layout's site-header chrome.
+   Library / Discover use just .page-subtitle directly because their
+   subtitle is dynamic ("Watching on AniList", "Trending anime") and
+   already names the page; Configure uses the full header structure. */
+.page-header {
+    width: 100%;
+    text-align: center;
+    margin-bottom: 0.4rem;
+}
+
+.page-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #fff;
+    margin: 0 0 0.2rem;
+    letter-spacing: -0.01em;
+}
+
 /* Subtitle paragraph used at the top of Library / Discover / Configure
    for page context. Replaces .app-subtitle, which was the centred-logo
    variant — now that the logo lives in the layout's site-header, the
@@ -60,6 +79,10 @@ main {
     color: #999;
     margin: 0 0 0.4rem;
     text-align: center;
+}
+
+.page-header .page-subtitle {
+    margin: 0;
 }
 
 /* ── Hamburger trigger (in site-header) ── */
@@ -659,7 +682,7 @@ body.modal-open {
 
 .service-toggle .label.active {
     color: #fff;
-    background: rgba(255,255,255,0.12);
+    background: #3B82F6;
 }
 
 /* Short hint that surfaces just above the pill row when the user has at least
