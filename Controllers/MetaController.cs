@@ -583,6 +583,115 @@ namespace AnimeList.Controllers
 
         private static DateTime? ParseDate(string s) =>
             DateTime.TryParse(s, out var dt) ? dt : null;
+
+        // Session-based variants of GetEntry / SaveEntry used by the web-app's
+        // inline Manage Entry modal. Identical body to the config-scoped routes
+        // above — just resolve the user from the session cookie instead of the
+        // path-segment config UID. The modal renders on /library / /discover /
+        // dashboard, none of which carry a config in their URL, so a session-
+        // auth variant is the natural fit. The existing config-scoped routes
+        // stay intact for the standalone Manage Entry page that Stremio's
+        // addon flow links to.
+
+        [HttpGet("/api/library/entry")]
+        public async Task<JsonResult> GetEntryByApi(string id, int? season)
+        {
+            try
+            {
+                var tokenData = await _tokenService.GetAccessTokenAsync();
+                if (tokenData == null || tokenData.anonymousUser ||
+                    string.IsNullOrWhiteSpace(tokenData.access_token))
+                    return new JsonResult(new { success = false, error = "not-authenticated" });
+
+                var entry = tokenData.anime_service switch
+                {
+                    AnimeService.Anilist     => await _anilistService.GetAnimeEntryAsync(tokenData, id, season),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, id, season),
+                    _                        => await _kitsuService.GetAnimeEntryAsync(tokenData, id, season),
+                };
+
+                return new JsonResult(new
+                {
+                    success = true,
+                    // Service is included so the modal's status dropdown can pick the
+                    // right per-provider option set (AniList/MAL/Kitsu use different
+                    // status enum values). Sent as the integer enum value so client-
+                    // side switch statements stay compact.
+                    service = (int)tokenData.anime_service,
+                    status = entry?.Status,
+                    progress = entry?.Progress ?? 0,
+                    totalEpisodes = entry?.TotalEpisodes,
+                    score = entry?.Score,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetEntryByApi failed (id={Id}, season={Season}).", id, season);
+                return new JsonResult(new { success = false, error = "exception" });
+            }
+        }
+
+        [HttpPost("/api/library/entry/save")]
+        public async Task<JsonResult> SaveEntryByApi([FromBody] SaveEntryRequest request)
+        {
+            try
+            {
+                var tokenData = await _tokenService.GetAccessTokenAsync();
+                if (tokenData == null || tokenData.anonymousUser ||
+                    string.IsNullOrWhiteSpace(tokenData.access_token))
+                    return new JsonResult(new { success = false, error = "not-authenticated" });
+
+                // Empty status = "remove from list" — same semantics as the page version.
+                if (string.IsNullOrEmpty(request.Status))
+                {
+                    switch (tokenData.anime_service)
+                    {
+                        case AnimeService.Anilist:
+                            await _anilistService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                            break;
+                        case AnimeService.MyAnimeList:
+                            await _malService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                            break;
+                        default:
+                            await _kitsuService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                            break;
+                    }
+                    await _syncService.FanOutDeleteAsync(tokenData, request.Id, request.Season);
+                    return new JsonResult(new { success = true });
+                }
+
+                var startedAt = ParseDate(request.StartedAt);
+                var finishedAt = ParseDate(request.FinishedAt);
+
+                switch (tokenData.anime_service)
+                {
+                    case AnimeService.Anilist:
+                        await _anilistService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                        break;
+                    case AnimeService.MyAnimeList:
+                        await _malService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                        break;
+                    default:
+                        await _kitsuService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                        break;
+                }
+
+                // Same fan-out to linked secondary providers as the config-scoped path.
+                await _syncService.FanOutSaveAsync(tokenData, request.Id, request.Season, request.Progress,
+                    request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+
+                return new JsonResult(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "SaveEntryByApi failed (id={Id}, season={Season}, status={Status}).",
+                    request?.Id, request?.Season, request?.Status);
+                return new JsonResult(new { success = false, error = "exception" });
+            }
+        }
     }
 
     public class SaveEntryRequest

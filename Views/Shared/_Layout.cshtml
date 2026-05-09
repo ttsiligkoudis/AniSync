@@ -113,6 +113,49 @@
         </a>
     </nav>
 
+    @* Inline Manage Entry modal — single instance, hidden by default. The web-app
+       pages (Library / Discover / Dashboard) intercept clicks on poster cards
+       and open this modal instead of navigating to the standalone Manage Entry
+       page; only logged-in non-anonymous users get the modal experience, since
+       anonymous cards don't carry a data-meta-id attribute. The standalone page
+       remains the fallback for non-JS browsers. *@
+    @if (layoutLoggedIn)
+    {
+        <div class="entry-modal-backdrop" hidden></div>
+        <div class="entry-modal" hidden role="dialog" aria-modal="true" aria-labelledby="entry-modal-title">
+            <header class="entry-modal-header">
+                <h3 class="entry-modal-title" id="entry-modal-title">Loading…</h3>
+                <button class="entry-modal-close" type="button" aria-label="Close">×</button>
+            </header>
+            <div class="entry-modal-body">
+                <div class="entry-modal-loading">Loading…</div>
+                <form class="entry-modal-form" hidden>
+                    <div class="entry-modal-field">
+                        <label class="entry-modal-label" for="entry-modal-status">Status</label>
+                        <select id="entry-modal-status" name="status" class="entry-modal-select"></select>
+                    </div>
+                    <div class="entry-modal-field">
+                        <label class="entry-modal-label" for="entry-modal-progress">Episodes Watched</label>
+                        <div class="entry-modal-progress-row">
+                            <input id="entry-modal-progress" type="number" name="progress" min="0" class="entry-modal-input" />
+                            <span class="entry-modal-total" hidden></span>
+                        </div>
+                    </div>
+                    <div class="entry-modal-field">
+                        <label class="entry-modal-label" for="entry-modal-score">Score</label>
+                        <input id="entry-modal-score" type="number" name="score" min="0" max="10" step="0.1" class="entry-modal-input" placeholder="0–10" />
+                    </div>
+                    <div class="entry-modal-error" hidden></div>
+                    <div class="entry-modal-actions">
+                        <button type="button" class="entry-modal-cancel">Cancel</button>
+                        <button type="submit" class="entry-modal-save">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <script src="~/js/manage-entry-modal.js" asp-append-version="true" defer></script>
+    }
+
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>
