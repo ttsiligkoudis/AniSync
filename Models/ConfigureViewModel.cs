@@ -1,7 +1,7 @@
 namespace AnimeList.Models
 {
     /// <summary>
-    /// Strongly-typed payload for the configure page (Views/Home/Index.cshtml). Wraps the
+    /// Strongly-typed payload for the configure page (Views/Home/Configure.cshtml). Wraps the
     /// persisted <see cref="Configuration"/> alongside the per-request identity bits the
     /// view needs to render the correct UI mode (login vs. configure, primary vs. linked
     /// pills, install URL bytes, etc.). Everything here used to live as ViewBag entries —

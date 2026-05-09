@@ -21,7 +21,25 @@ public class HomeController : Controller
         return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
     }
 
-    public async Task<IActionResult> Index(string config = null)
+    public IActionResult Index()
+    {
+        // The dashboard is the new front door for the web app: anonymous visitors see
+        // login CTAs, signed-in users see navigation tiles for Library / Discover /
+        // Configure. Read session state so the view can branch — no DB hits, no token
+        // refreshes, no linked-merge logic. The configure page (which still does all
+        // that) lives at /configure and remains where Stremio's manifest points its
+        // "Configure" deep-link.
+        var sessionStr = HttpContext.Session.GetString("AccessToken");
+        TokenData tokenData = null;
+        if (!string.IsNullOrEmpty(sessionStr))
+            tokenData = DeserializeObject<TokenData>(sessionStr);
+
+        return View(tokenData);
+    }
+
+    [Route("/configure")]
+    [Route("{config}/configure")]
+    public async Task<IActionResult> Configure(string config = null)
     {
         var tokenData = await _tokenService.GetAccessTokenAsync(config);
 
@@ -86,7 +104,7 @@ public class HomeController : Controller
                 {
                     configUid = await _configStore.UpsertAsync(tokenData);
                 }
-                // Used as cache-busting bytes in the install URL — see Index.cshtml's JS.
+                // Used as cache-busting bytes in the install URL — see Configure.cshtml's JS.
                 configRevision = await _configStore.GetRevisionAsync(configUid);
                 // Linked secondary accounts the multi-provider sync will fan writes out to.
                 // The view renders a per-service Link / Unlink row from this list.
@@ -118,8 +136,8 @@ public class HomeController : Controller
 
         // Hydrate the toggle flags. The URL-config path covers Stremio's manifest deep-link
         // (v3/v4/v5 bytes in the path); the UID fallback covers everything else — direct
-        // visits to /Home, redirects after primary swap, login-completion landings — so the
-        // page always reflects the user's saved state instead of falling back to defaults.
+        // visits to /configure, redirects after primary swap, login-completion landings — so
+        // the page always reflects the user's saved state instead of falling back to defaults.
         Configuration configuration = null;
         if (!string.IsNullOrEmpty(config))
         {
@@ -282,8 +300,6 @@ public class HomeController : Controller
         return new JsonResult(new { success = true });
     }
 
-    [Route("{config}/configure")]
-    public IActionResult Configure(string config) => RedirectToAction("Index", new { config });
 }
 
 public class SaveConfigRequest

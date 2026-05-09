@@ -228,8 +228,8 @@ app.UseCors("AllowAllOrigins");
 app.UseSession();
 app.UseAuthorization();
 
-// Swagger UI lives at /api/docs so the addon's /Home/Index landing page isn't
-// shadowed. The raw spec is at /api/swagger/v1/swagger.json.
+// Swagger UI lives at /api/docs so the addon's dashboard at / and configure
+// page at /configure aren't shadowed. The raw spec is at /api/swagger/v1/swagger.json.
 //
 // HeadContent injects a strict referrer policy so users clicking links from
 // the Swagger page (e.g. typing a UID into "Try it out" then following a link
