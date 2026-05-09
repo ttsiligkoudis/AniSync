@@ -39,7 +39,14 @@
 
             if (manageHref != null)
             {
-                <a class="@cardClass" href="@manageHref" title="@meta.name">
+                @* data-meta-id + data-meta-name let the inline Manage Entry
+                   modal (wwwroot/js/manage-entry-modal.js) intercept the
+                   click and edit inline rather than navigating to the
+                   standalone Manage Entry page. The href stays as the
+                   non-JS fallback so progressive enhancement works
+                   correctly — JS off / load failure → page navigation. *@
+                <a class="@cardClass" href="@manageHref" title="@meta.name"
+                   data-meta-id="@meta.id" data-meta-name="@meta.name">
                     <div class="library-card-poster-wrap">
                         @if (!string.IsNullOrEmpty(meta.poster))
                         {
