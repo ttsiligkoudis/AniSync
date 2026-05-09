@@ -34,18 +34,30 @@ namespace AnimeList.Controllers
             _configStore = configStore;
         }
 
+        // The three discover catalogs. Order is the tab strip rendering order;
+        // Trending leads because it's the most-viewed catalog in the addon's
+        // existing manifest analytics.
+        private static readonly ListType[] DiscoverListTypes =
+        [
+            ListType.Trending_Desc,
+            ListType.Seasonal,
+            ListType.Airing,
+        ];
+
         [Route("/discover")]
-        public async Task<IActionResult> Index()
+        public async Task<IActionResult> Index(string list = null)
         {
             // Anonymous fresh-visit: GetAccessTokenAsync returns null. Synthesise an
             // anonymous TokenData with the Kitsu default so the per-service dispatch
-            // below has something to switch on. ListType.Trending_Desc doesn't need a
-            // user identity — the underlying GraphQL/REST calls run unauthenticated.
-            // anonymousUser is a computed property (empty username on Kitsu / empty
-            // access_token on the OAuth services) so leaving the identity fields blank
-            // here makes it return true on its own — no need to set it explicitly.
+            // below has something to switch on. The trending / seasonal / airing
+            // catalogs don't need a user identity — the underlying GraphQL/REST calls
+            // run unauthenticated. anonymousUser is a computed property (empty
+            // username on Kitsu / empty access_token on the OAuth services) so
+            // leaving the identity fields blank here makes it return true on its own.
             var tokenData = await _tokenService.GetAccessTokenAsync()
                 ?? new TokenData { anime_service = AnimeService.Kitsu };
+
+            var activeList = ParseListType(list);
 
             // Resolve the row's UID for logged-in users so per-card Manage Entry links
             // hit the existing config-scoped flow. Anonymous users get null and the
@@ -59,9 +71,9 @@ namespace AnimeList.Controllers
 
             var metas = tokenData.anime_service switch
             {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, ListType.Trending_Desc),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Trending_Desc),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Trending_Desc),
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, activeList),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, activeList),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, activeList),
             };
 
             return View(new DiscoverViewModel
@@ -69,19 +81,38 @@ namespace AnimeList.Controllers
                 ConfigUid = uid,
                 AnimeService = tokenData.anime_service,
                 AnonymousUser = tokenData.anonymousUser,
-                Trending = metas ?? [],
+                ActiveList = activeList,
+                Tabs = DiscoverListTypes,
+                Items = metas ?? [],
             });
+        }
+
+        private static ListType ParseListType(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return ListType.Trending_Desc;
+            if (Enum.TryParse<ListType>(raw, ignoreCase: true, out var parsed)
+                && Array.IndexOf(DiscoverListTypes, parsed) >= 0)
+                return parsed;
+            // Allow ?list=trending as the URL-friendly synonym for Trending_Desc — the
+            // underscore in the enum name is a code-side artifact users shouldn't have
+            // to know about.
+            if (string.Equals(raw, "trending", StringComparison.OrdinalIgnoreCase))
+                return ListType.Trending_Desc;
+            return ListType.Trending_Desc;
         }
     }
 
     /// <summary>
-    /// View model for the discover page (Views/Discover/Index.cshtml).
+    /// View model for the discover page (Views/Discover/Index.cshtml). Mirrors
+    /// LibraryViewModel's shape so the shared partial + tab strip work identically.
     /// </summary>
     public class DiscoverViewModel
     {
         public string ConfigUid { get; set; }
         public AnimeService AnimeService { get; set; }
         public bool AnonymousUser { get; set; }
-        public List<Meta> Trending { get; set; } = [];
+        public ListType ActiveList { get; set; }
+        public IReadOnlyList<ListType> Tabs { get; set; } = [];
+        public List<Meta> Items { get; set; } = [];
     }
 }
