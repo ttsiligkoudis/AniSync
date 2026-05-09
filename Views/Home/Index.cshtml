@@ -7,22 +7,51 @@
     var hasContinueWatching = Model.ContinueWatching?.Count > 0;
 }
 
-<h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
-<p class="app-subtitle">Track your anime progress on Stremio</p>
+@* Compact site header — small wordmark on the left, login state on the right.
+   Phase 4 of the refactor will fold a hamburger drawer + mobile bottom nav in
+   here; for now the header is just identity + connection state. *@
+<header class="site-header">
+    <h1 class="site-logo">Ani<span class="accent">Sync</span></h1>
+    @if (isLoggedIn && !anonymousUser)
+    {
+        <span class="site-header-badge">
+            ✓ @serviceLabel
+            <a class="site-header-badge-action" href="@Url.Action("Logout", "Auth")" title="Disconnect">✗</a>
+        </span>
+    }
+</header>
 
-@if (isLoggedIn && !anonymousUser)
-{
-    <span class="success-badge">
-        ✓ Connected to @serviceLabel
-        <a class="success-badge-action" href="@Url.Action("Logout", "Auth")" title="Disconnect">✗</a>
-    </span>
-}
-else
-{
-    <p class="text-center text-muted mb-4">
-        Log in to see your library, or browse public catalogues anonymously.
-    </p>
-}
+@* Hero card — StreamD-style pill badge + two-tone heading + dual CTAs. Copy
+   branches on login state: anonymous visitors get the pitch + "Get started"
+   hand-off to /configure (where the Stremio install URL and provider picker
+   live), logged-in users get a welcome-back nudge + entry points into the
+   library and discover surfaces. *@
+<section class="hero-card">
+    @if (isLoggedIn && !anonymousUser)
+    {
+        <span class="hero-badge">✓ Synced with @serviceLabel</span>
+        <h2 class="hero-title">
+            Continue your <span class="hero-title-accent">anime journey</span>
+        </h2>
+        <p class="hero-tagline">Pick up where you left off, or surface what to watch next.</p>
+        <div class="hero-ctas">
+            <a class="hero-cta hero-cta-primary" href="/library">Open library →</a>
+            <a class="hero-cta hero-cta-secondary" href="/discover">Discover trending</a>
+        </div>
+    }
+    else
+    {
+        <span class="hero-badge">Track on Stremio</span>
+        <h2 class="hero-title">
+            Your anime, <span class="hero-title-accent">synced everywhere</span>
+        </h2>
+        <p class="hero-tagline">Track progress across AniList, MyAnimeList, and Kitsu — and watch on Stremio.</p>
+        <div class="hero-ctas">
+            <a class="hero-cta hero-cta-primary" href="@Url.Action("Configure", "Home")">Get started →</a>
+            <a class="hero-cta hero-cta-secondary" href="/discover">Browse trending</a>
+        </div>
+    }
+</section>
 
 @* Stats strip: two big counts (Watching / Completed) plus a top-genres chip
    row. Only renders for logged-in non-anonymous users with at least one

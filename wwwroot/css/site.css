@@ -61,6 +61,159 @@ main {
     margin-top: 0.2rem;
 }
 
+/* ── Site header (used on the dashboard above the hero) ── */
+/* Compact wordmark + login state, replacing the centred big-logo block.
+   Phase 4 of the StreamD refactor adds a hamburger drawer trigger here. */
+.site-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    width: 100%;
+    margin-bottom: 0.5rem;
+}
+
+.site-logo {
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #fff;
+    margin: 0;
+    text-transform: uppercase;
+}
+
+.site-logo .accent {
+    color: #3B82F6;
+}
+
+.site-header-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.7rem;
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 999px;
+    color: #93c5fd;
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.site-header-badge-action {
+    color: #93c5fd;
+    text-decoration: none;
+    font-size: 0.85rem;
+    line-height: 1;
+    margin-left: 0.1rem;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+}
+
+.site-header-badge-action:hover {
+    color: #fff;
+    opacity: 1;
+    text-decoration: none;
+}
+
+/* ── Hero card (dashboard) ── */
+/* StreamD-style hero block — pill badge, two-tone heading, dual CTAs.
+   Background uses a soft radial-gradient sheen so it reads as a card
+   without needing a heavy border or texture asset. */
+.hero-card {
+    width: 100%;
+    padding: 1.5rem 1.4rem 1.6rem;
+    background:
+        radial-gradient(circle at top right, rgba(59, 130, 246, 0.08), transparent 60%),
+        rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.hero-badge {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.75rem;
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 999px;
+    color: #93c5fd;
+    font-size: 0.78rem;
+    font-weight: 500;
+    margin-bottom: 0.15rem;
+}
+
+.hero-title {
+    font-size: 1.65rem;
+    font-weight: 700;
+    line-height: 1.15;
+    color: #fff;
+    margin: 0;
+    letter-spacing: -0.01em;
+}
+
+.hero-title-accent {
+    color: #3B82F6;
+}
+
+.hero-tagline {
+    color: #9ca3af;
+    font-size: 0.9rem;
+    line-height: 1.45;
+    margin: 0 0 0.2rem;
+}
+
+.hero-ctas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    margin-top: 0.4rem;
+}
+
+.hero-cta {
+    padding: 0.65rem 1.15rem;
+    border-radius: 999px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    white-space: nowrap;
+}
+
+.hero-cta:hover {
+    text-decoration: none;
+    transform: translateY(-1px);
+}
+
+.hero-cta-primary {
+    background: #3B82F6;
+    color: #fff;
+    border: 1px solid #3B82F6;
+}
+
+.hero-cta-primary:hover {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+}
+
+.hero-cta-secondary {
+    background: transparent;
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.hero-cta-secondary:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #fff;
+}
+
 /* ── Service toggle ── */
 .service-toggle {
     display: flex;
