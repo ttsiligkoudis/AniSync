@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
   "name": "AniSync Auto-Tracker",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Watches anime episodes on your favourite streaming site and auto-updates your AniSync list (AniList / Kitsu / MAL).",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "anisync@anisync.dev",
+      "strict_min_version": "115.0"
+    }
+  },
   "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": [
     "*://*.crunchyroll.com/*",
@@ -23,6 +29,7 @@
   ],
   "optional_host_permissions": ["<all_urls>"],
   "background": {
+    "scripts": ["background.js"],
     "service_worker": "background.js"
   },
   "content_scripts": [
@@ -49,7 +56,8 @@
     }
   ],
   "action": {
-    "default_title": "Track this page with AniSync",
+    "default_title": "AniSync — Track this page",
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icon.png",
       "48": "icon.png",
