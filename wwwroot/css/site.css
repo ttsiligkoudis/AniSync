@@ -1078,3 +1078,82 @@ main {
     border-color: rgba(255, 255, 255, 0.08);
     transform: none;
 }
+
+/* ── Library page (Library/Index) ── */
+/* Widen `main` for the grid; default 520px is too narrow for poster cards. */
+body.library-page main {
+    max-width: 1100px;
+}
+
+.library-back {
+    color: #666;
+    margin-left: 0.4rem;
+    font-size: 0.85rem;
+}
+
+.library-back a {
+    color: #7b5bf5;
+    text-decoration: none;
+}
+
+.library-back a:hover {
+    text-decoration: underline;
+}
+
+.library-empty {
+    color: #999;
+    text-align: center;
+    margin-top: 2rem;
+    font-size: 0.95rem;
+}
+
+.library-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 1rem;
+    width: 100%;
+}
+
+.library-card {
+    display: flex;
+    flex-direction: column;
+    text-decoration: none;
+    color: inherit;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    transition: transform 0.1s, box-shadow 0.15s;
+}
+
+.library-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+    text-decoration: none;
+    color: inherit;
+}
+
+.library-card-poster {
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
+    display: block;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.library-card-poster-placeholder {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+/* Title under the poster — the whole point of building this UI rather than
+   relying on Stremio Mobile's catalog grid, which doesn't render titles. */
+.library-card-title {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    padding: 0.5rem 0.25rem 0;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #e0e0e0;
+    line-height: 1.3;
+    min-height: 2.5em;
+}

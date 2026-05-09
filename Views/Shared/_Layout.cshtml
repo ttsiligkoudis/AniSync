@@ -15,7 +15,7 @@
     <link rel="stylesheet" href="~/AniSync.styles.css" asp-append-version="true" />
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
 </head>
-<body>
+<body class="@ViewData["BodyClass"]">
     <div class="container">
         <main role="main" class="p-3" style="min-height: 100vh;">
             @RenderBody()
