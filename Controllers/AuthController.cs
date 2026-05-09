@@ -457,19 +457,13 @@ namespace AnimeList.Controllers
 
         public async Task<IActionResult> Logout()
         {
-            // Read the session token directly so we can identify the user without going
-            // through GetAccessTokenAsync (which would refresh the upstream token and write
-            // back to the row we're about to delete).
-            var sessionStr = HttpContext.Session.GetString("AccessToken");
-            if (!string.IsNullOrEmpty(sessionStr))
-            {
-                var tokenData = DeserializeObject<TokenData>(sessionStr);
-                if (tokenData != null && !tokenData.anonymousUser)
-                    await _configStore.DeleteByUserAsync(tokenData);
-            }
-
+            // Pure disconnect: clears the session cookie + in-memory token cache so the
+            // user lands on the anonymous home page, but leaves the config row in place.
+            // Logging back in with the same identity restores the original install URL,
+            // linked accounts, scrobble token, and flag bits intact — same UID, same row.
+            // The "Delete Configuration" Danger Zone action is the destructive sibling for
+            // users who actually want their data gone.
             await _tokenService.RemoveCachedUser();
-
             return RedirectToAction("Index", "Home");
         }
     }
