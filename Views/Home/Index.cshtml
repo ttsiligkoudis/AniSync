@@ -451,16 +451,22 @@
         </div>
     </section>
 
-    <!-- ─── DANGER ZONE ─────────────────────────────────────────────── -->
-    <section class="section-card danger-zone-card">
-        <span class="section-title">Danger Zone</span>
-        <p class="section-description">Perform potentially destructive actions that cannot be undone.</p>
+    @* Anonymous users have no DB row (HomeController only Upserts when !anonymousUser),
+       so Reset is a no-op (the JS guards on configUid) and Delete has nothing to delete.
+       Hide the whole card for them rather than render dead buttons. *@
+    @if (!Model.AnonymousUser)
+    {
+        <!-- ─── DANGER ZONE ─────────────────────────────────────────────── -->
+        <section class="section-card danger-zone-card">
+            <span class="section-title">Danger Zone</span>
+            <p class="section-description">Perform potentially destructive actions that cannot be undone.</p>
 
-        <div class="btn-action-row">
-            <button id="resetConfigBtn" class="btn-danger-pill" type="button">Reset Configuration</button>
-            <button id="deleteConfigBtn" class="btn-danger-pill" type="button">Delete Configuration</button>
-        </div>
-    </section>
+            <div class="btn-action-row">
+                <button id="resetConfigBtn" class="btn-danger-pill" type="button">Reset Configuration</button>
+                <button id="deleteConfigBtn" class="btn-danger-pill" type="button">Delete Configuration</button>
+            </div>
+        </section>
+    }
 
     @* Full-sync modal. Driven entirely by the client — the server is stateless. The
        backdrop click and Escape are intentionally not wired to dismiss; the only way
