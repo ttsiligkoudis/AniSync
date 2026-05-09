@@ -176,12 +176,16 @@ namespace AnimeList.Services
                 string entryId = null;
                 string entryStatus = null;
 
+                int? entryProgress = null;
                 if (isUserList)
                 {
                     var animeRefId = SafeGet<string>(entry, "relationships", "anime", "data", "id");
                     if (string.IsNullOrEmpty(animeRefId) || !includedAnime.TryGetValue(animeRefId, out anime)) continue;
                     entryId = (string)entry["id"];
                     entryStatus = SafeGet<string>(entry, "attributes", "status");
+                    // attributes.progress is the user's watched-episode count on
+                    // Kitsu library-entries — same shape as AniList's entry.progress.
+                    entryProgress = SafeGet<int?>(entry, "attributes", "progress");
                 }
                 else
                 {
@@ -246,6 +250,7 @@ namespace AnimeList.Services
                     episodes = episodeCount > 0 ? episodeCount : null,
                     year = releaseYear,
                     format = NormalizeFormat(subtype),
+                    progress = entryProgress,
                 };
 
                 // Multiple Kitsu entries (seasons/OVAs) can share the same IMDb ID;

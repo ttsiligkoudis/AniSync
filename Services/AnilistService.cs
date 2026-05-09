@@ -107,6 +107,7 @@ namespace AnimeList.Services
                             MediaList(userId: $userId, mediaId: $mediaId, type: ANIME{statusArg}) {{
                                 id
                                 status
+                                progress
                                 media {{
                                     id
                                     format
@@ -140,6 +141,9 @@ namespace AnimeList.Services
                             MediaListCollection(userId: $userId, type: ANIME{statusArg}) {{
                                 lists {{
                                     entries {{
+                                        id
+                                        status
+                                        progress
                                         media {{
                                             id
                                             format
@@ -277,12 +281,14 @@ namespace AnimeList.Services
                 dynamic media;
                 string entryId = null;
                 string entryStatus = null;
+                int? entryProgress = null;
 
                 if (isUserList)
                 {
                     media = entry.media;
                     entryId = entry.id;
                     entryStatus = entry.status;
+                    entryProgress = (int?)entry.progress;
                 }
                 else
                 {
@@ -326,6 +332,7 @@ namespace AnimeList.Services
                     episodes = media.episodes,
                     year = media.seasonYear,
                     format = NormalizeFormat((string)media.format),
+                    progress = entryProgress,
                 };
 
                 // Multiple AniList entries (seasons/OVAs) can share the same IMDb ID;

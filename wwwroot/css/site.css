@@ -2145,6 +2145,24 @@ body.library-page main {
     pointer-events: none;
 }
 
+/* Progress badge overlay — top-left, "Ep N / Total" or "Ep N" when total
+   is unknown. Blue tint so it reads as user-state info rather than database
+   metadata (which the amber score badge shows). Only renders for user-list
+   entries that have non-zero progress. */
+.library-card-progress {
+    position: absolute;
+    left: 6px;
+    top: 6px;
+    padding: 0.15rem 0.45rem;
+    background: rgba(59, 130, 246, 0.9);
+    border-radius: 999px;
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1.2;
+    pointer-events: none;
+}
+
 /* Info line under the title — "format · X eps · year". Same muted grey as
    the section subtitles so it reads as secondary context, not a label. */
 .library-card-meta {

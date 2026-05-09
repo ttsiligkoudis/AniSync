@@ -11,7 +11,9 @@
    cards render as inert non-anchor divs so a click doesn't dead-end at /.
 
    StreamD-style card chrome:
-     - Score badge overlay (★ N.N) on the poster top-right when score > 0.
+     - Progress badge overlay (Ep N / Total) top-left when progress > 0 — only
+       populated by user-list catalogs (Watching / Completed / etc.).
+     - Score badge overlay (★ N.N) on the poster bottom-left when score > 0.
      - Title under the poster (clamped to 2 lines).
      - Info row "format · X eps · year" underneath the title, joining whichever
        of the three fields the per-service catalog query populated. Each chunk
@@ -35,6 +37,16 @@
             var infoLine = string.Join(" · ", infoBits);
 
             var hasScore = meta.score.HasValue && meta.score.Value > 0;
+            var hasProgress = meta.progress.HasValue && meta.progress.Value > 0;
+            // Build the progress label: "5 / 12" when total episodes is known,
+            // "Ep 5" when only the user's count is. The ratio reads more useful
+            // when total is available so the user sees "halfway through".
+            var progressLabel = hasProgress
+                ? (meta.episodes is int totalEps && totalEps > 0
+                    ? $"{meta.progress!.Value} / {totalEps}"
+                    : $"Ep {meta.progress!.Value}")
+                : null;
+
             var cardClass = manageHref != null ? "library-card" : "library-card library-card-inert";
 
             if (manageHref != null)
@@ -55,6 +67,10 @@
                         else
                         {
                             <div class="library-card-poster library-card-poster-placeholder"></div>
+                        }
+                        @if (hasProgress)
+                        {
+                            <span class="library-card-progress">@progressLabel</span>
                         }
                         @if (hasScore)
                         {
