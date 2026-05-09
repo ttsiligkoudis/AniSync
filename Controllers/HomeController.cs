@@ -6,13 +6,30 @@ using System.Diagnostics;
 
 public class HomeController : Controller
 {
+    // Maximum number of "Continue watching" tiles surfaced on the dashboard. Six fits
+    // 2-3 rows on the dashboard's narrow main column without scrolling, and matches
+    // the kind of "what you were last watching" shape users expect on home screens —
+    // not a full list, just the most recent few.
+    private const int ContinueWatchingMaxItems = 6;
+
     private readonly ITokenService _tokenService;
     private readonly IConfigStore _configStore;
+    private readonly IAnilistService _anilistService;
+    private readonly IKitsuService _kitsuService;
+    private readonly IMalService _malService;
 
-    public HomeController(ITokenService tokenService, IConfigStore configStore)
+    public HomeController(
+        ITokenService tokenService,
+        IConfigStore configStore,
+        IAnilistService anilistService,
+        IKitsuService kitsuService,
+        IMalService malService)
     {
         _tokenService = tokenService;
         _configStore = configStore;
+        _anilistService = anilistService;
+        _kitsuService = kitsuService;
+        _malService = malService;
     }
 
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
@@ -21,20 +38,52 @@ public class HomeController : Controller
         return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
     }
 
-    public IActionResult Index()
+    public async Task<IActionResult> Index()
     {
-        // The dashboard is the new front door for the web app: anonymous visitors see
-        // login CTAs, signed-in users see navigation tiles for Library / Discover /
-        // Configure. Read session state so the view can branch — no DB hits, no token
-        // refreshes, no linked-merge logic. The configure page (which still does all
-        // that) lives at /configure and remains where Stremio's manifest points its
-        // "Configure" deep-link.
+        // The dashboard is the front door for the web app: anonymous visitors see
+        // login CTAs, signed-in users see navigation tiles plus a small slice of
+        // their Currently Watching list ("Continue watching"). Read session state
+        // first so the view can branch — no DB hits / token refreshes / linked-merge
+        // logic for the dashboard render itself. The configure page (which still
+        // does all that) lives at /configure and remains where Stremio's manifest
+        // points its "Configure" deep-link.
         var sessionStr = HttpContext.Session.GetString("AccessToken");
         TokenData tokenData = null;
         if (!string.IsNullOrEmpty(sessionStr))
             tokenData = DeserializeObject<TokenData>(sessionStr);
 
-        return View(tokenData);
+        string uid = null;
+        List<Meta> continueWatching = [];
+
+        // Continue-watching surface only fires for non-anonymous logged-in users.
+        // Anonymous and not-logged-in visitors get the plain three-tile dashboard;
+        // they have nothing to "continue."
+        if (tokenData != null && !tokenData.anonymousUser)
+        {
+            var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+            uid = resolved;
+
+            // Fetch via the same per-service dispatch the library page uses, then
+            // slice to the first N. The full list is loaded — services don't expose
+            // a "first N only" param — but Currently Watching tends to be small
+            // (few tens at most) so the over-fetch is cheap. If a power user with
+            // hundreds of in-progress shows reports slowness, prefetch a smaller
+            // window upstream.
+            var fullList = tokenData.anime_service switch
+            {
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, ListType.Current),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Current),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Current),
+            };
+            continueWatching = (fullList ?? []).Take(ContinueWatchingMaxItems).ToList();
+        }
+
+        return View(new DashboardViewModel
+        {
+            TokenData = tokenData,
+            ConfigUid = uid,
+            ContinueWatching = continueWatching,
+        });
     }
 
     [Route("/configure")]

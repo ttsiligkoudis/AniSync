@@ -1,13 +1,10 @@
-@model TokenData
+@model AnimeList.Models.DashboardViewModel
 @{
-    // The Index action passes the deserialised session token (or null for anonymous).
-    // The view branches purely on its presence — no DB hits, no token refreshes —
-    // because the dashboard is just a navigation hub. Anything that needs fresh server
-    // state lives behind the tile links (Library, Discover, Configure), each of which
-    // is its own controller action.
-    var isLoggedIn = Model != null;
-    var anonymousUser = Model?.anonymousUser ?? false;
-    var serviceLabel = Model?.anime_service.ToString();
+    var tokenData = Model.TokenData;
+    var isLoggedIn = tokenData != null;
+    var anonymousUser = tokenData?.anonymousUser ?? false;
+    var serviceLabel = tokenData?.anime_service.ToString();
+    var hasContinueWatching = Model.ContinueWatching?.Count > 0;
 }
 
 <h1 class="app-logo">Ani<span class="accent">Sync</span></h1>
@@ -27,7 +24,28 @@ else
     </p>
 }
 
-@* Stacked navigation tiles. Library is gated behind a logged-in primary so anonymous
+@* Continue Watching: a small slice of the user's Currently Watching list
+   surfaced on the dashboard so the front door does something useful for
+   returning users instead of just showing three nav tiles. Only renders for
+   logged-in non-anonymous users with at least one item; falls back to the
+   plain dashboard otherwise. The grid uses the existing _PosterGrid partial
+   for visual consistency with /library and /discover. *@
+@if (hasContinueWatching)
+{
+    <section class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h2 class="dashboard-section-title">Continue watching</h2>
+            <a class="dashboard-section-link" href="/library">View all →</a>
+        </div>
+        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+        {
+            Items = Model.ContinueWatching,
+            ConfigUid = Model.ConfigUid,
+        })
+    </section>
+}
+
+@* Three-tile navigation. Library is gated behind a logged-in primary so anonymous
    users get a "log in to enable" hint rather than a confusing dead click. Discover
    works for everyone (Trending / Seasonal / Airing don't require auth). Configure
    addon is always reachable — anonymous users still need it for the install URL.

@@ -1079,6 +1079,41 @@ main {
     transform: none;
 }
 
+/* Section wrapper for "Continue watching" (and future dashboard surfaces like
+   stats / airing soon). Uses the same .library-grid inside, but the dashboard's
+   narrow main column means it renders 2-3 cards per row rather than the wider
+   library/discover grids. */
+.dashboard-section {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.dashboard-section-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.dashboard-section-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #fff;
+    margin: 0;
+}
+
+.dashboard-section-link {
+    font-size: 0.85rem;
+    color: #7b5bf5;
+    text-decoration: none;
+}
+
+.dashboard-section-link:hover {
+    text-decoration: underline;
+}
+
 /* ── Library page (Library/Index) ── */
 /* Widen `main` for the grid; default 520px is too narrow for poster cards. */
 body.library-page main {
