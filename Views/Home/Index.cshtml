@@ -143,48 +143,6 @@
                 </div>
             }
         </section>
-
-        <!-- ─── HOME SERVER SYNC ────────────────────────────────────────── -->
-        @* Webhook ingestion from Plex / Jellyfin / Emby. The URL below points to a single
-           endpoint that auto-detects which server is calling — users only ever copy one URL. *@
-        <section class="section-card">
-            <span class="section-title">Home Server Sync</span>
-            <p class="section-description">
-                Mirror your watch progress from Plex, Jellyfin, or Emby into your linked anime
-                trackers automatically. Paste the URL below into your media server's webhook
-                settings — same URL for any of the three.
-            </p>
-
-            <p class="manifest-url-label">Webhook URL</p>
-            <div class="manifest-url-row">
-                <input id="scrobbleUrlInput" class="manifest-url-input" readonly type="text" value="" />
-                <button id="copyScrobbleBtn" class="btn-icon-copy" type="button" title="Copy URL" aria-label="Copy URL">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                    </svg>
-                </button>
-            </div>
-            <div class="btn-action-row" style="margin-top: 0.75rem;">
-                <button id="rotateScrobbleBtn" class="btn-ghost btn-ghost-sm" type="button">Rotate token</button>
-                <span class="option-name-sub" style="margin-left: 0.5rem;">
-                    Anyone with this URL can scrobble onto your account. Rotating invalidates the old URL.
-                </span>
-            </div>
-
-            <p class="manifest-url-label" style="margin-top: 1.5rem;">Plex Home username (optional)</p>
-            <div class="manifest-url-row">
-                <input id="plexUsernameInput" class="manifest-url-input" type="text"
-                       placeholder="(accept any Plex username)"
-                       value="@(Model.PlexUsername ?? "")" />
-                <button id="savePlexUsernameBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;">Save</button>
-            </div>
-            <p class="option-name-sub" style="margin-top: 0.5rem;">
-                Set this only if you share your Plex server with others. Plex events from any
-                other username will be ignored. Jellyfin / Emby don't need this — their webhook
-                payloads only fire for the user who started playback.
-            </p>
-        </section>
     }
 
     <!-- ─── CATALOGS ────────────────────────────────────────────────── -->
@@ -421,6 +379,51 @@
             </div>
         </div>
     </section>
+
+    @if (!Model.AnonymousUser)
+    {
+        <!-- ─── HOME SERVER SYNC ────────────────────────────────────────── -->
+        @* Webhook ingestion from Plex / Jellyfin / Emby. The URL below points to a single
+           endpoint that auto-detects which server is calling — users only ever copy one URL. *@
+        <section class="section-card">
+            <span class="section-title">Home Server Sync</span>
+            <p class="section-description">
+                Mirror your watch progress from Plex, Jellyfin, or Emby into your linked anime
+                trackers automatically. Paste the URL below into your media server's webhook
+                settings — same URL for any of the three.
+            </p>
+
+            <p class="manifest-url-label">Webhook URL</p>
+            <div class="manifest-url-row">
+                <input id="scrobbleUrlInput" class="manifest-url-input" readonly type="text" value="" />
+                <button id="copyScrobbleBtn" class="btn-icon-copy" type="button" title="Copy URL" aria-label="Copy URL">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="btn-action-row" style="margin-top: 0.75rem;">
+                <button id="rotateScrobbleBtn" class="btn-ghost btn-ghost-sm" type="button">Rotate token</button>
+                <span class="option-name-sub" style="margin-left: 0.5rem;">
+                    Anyone with this URL can scrobble onto your account. Rotating invalidates the old URL.
+                </span>
+            </div>
+
+            <p class="manifest-url-label" style="margin-top: 1.5rem;">Plex Home username (optional)</p>
+            <div class="manifest-url-row">
+                <input id="plexUsernameInput" class="manifest-url-input" type="text"
+                       placeholder="(accept any Plex username)"
+                       value="@(Model.PlexUsername ?? "")" />
+                <button id="savePlexUsernameBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;">Save</button>
+            </div>
+            <p class="option-name-sub" style="margin-top: 0.5rem;">
+                Set this only if you share your Plex server with others. Plex events from any
+                other username will be ignored. Jellyfin / Emby don't need this — their webhook
+                payloads only fire for the user who started playback.
+            </p>
+        </section>
+    }
 
     <!-- ─── BACKUPS ─────────────────────────────────────────────────── -->
     <section class="section-card">
