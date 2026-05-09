@@ -98,15 +98,6 @@ namespace AnimeList.Controllers
                         .ToList();
                 }
 
-                // Experiment: tag every catalog card as landscape so Stremio renders the
-                // wider 16:9 layout, which on Stremio Android TV (and possibly Mobile)
-                // includes a title overlay that the default 2:3 "regular" shape omits. If
-                // this confirms titles render on Mobile, the next pass swaps the poster
-                // source from coverImage to bannerImage per service; until then, the
-                // existing portrait posters get cropped/stretched into the landscape card —
-                // ugly but disposable, the experiment is about title visibility.
-                foreach (var m in metas) m.posterShape = "landscape";
-
                 return new JsonResult(new { metas });
             }
             catch (Exception ex)
