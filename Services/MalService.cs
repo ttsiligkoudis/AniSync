@@ -40,7 +40,7 @@ namespace AnimeList.Services
         // list-style endpoints. Picked to match what Kitsu/AniList already surface.
         // MAL's `fields` parameter is flat — anime fields come back inside each entry's
         // `node` object automatically, no `node{...}` wrapper.
-        private const string NodeFields = "id,title,main_picture,media_type,status,num_episodes,genres,synopsis,alternative_titles";
+        private const string NodeFields = "id,title,main_picture,media_type,status,num_episodes,mean,start_season,genres,synopsis,alternative_titles";
         // /users/@me/animelist returns the user's list metadata in `list_status`.
         private const string UserListStatusFields = "list_status{status,score,num_episodes_watched,is_rewatching,num_times_rewatched,start_date,finish_date,comments}";
         // /anime/{id} returns the same data in `my_list_status` when authenticated.
@@ -485,6 +485,17 @@ namespace AnimeList.Services
             var mediaType = (string)node["media_type"];
             var isMovie = IsMovieFormat(mediaType);
 
+            // StreamD-style card chrome: score badge + format/eps/year info row.
+            // MAL's mean is already 0-10 (one decimal), num_episodes is direct, and
+            // start_season is a nested object whose year we lift inline. NormalizeFormat
+            // maps "tv"/"movie"/"ova"/etc. to display labels.
+            var meanScore = (double?)node["mean"];
+            var episodeCount = (int?)node["num_episodes"];
+            int? releaseYear = null;
+            var startSeason = node["start_season"];
+            if (startSeason != null && startSeason.Type != JTokenType.Null)
+                releaseYear = (int?)startSeason["year"];
+
             return new Meta((string)node["synopsis"])
             {
                 id = externalId,
@@ -493,6 +504,10 @@ namespace AnimeList.Services
                 poster = SafeGet<string>(node, "main_picture", "large") ?? SafeGet<string>(node, "main_picture", "medium"),
                 entryId = listStatus != null ? malIdStr : null,
                 entryStatus = (string)listStatus?["status"],
+                score = meanScore > 0 ? Math.Round(meanScore.Value, 1) : (double?)null,
+                episodes = episodeCount > 0 ? episodeCount : null,
+                year = releaseYear,
+                format = NormalizeFormat(mediaType),
             };
         }
 

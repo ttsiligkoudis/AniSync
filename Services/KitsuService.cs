@@ -215,6 +215,25 @@ namespace AnimeList.Services
                 var subtype = SafeGet<string>(anime, "attributes", "subtype");
                 var isMovie = IsMovieFormat(subtype);
 
+                // StreamD-style card chrome: score + episodes + year + format. Kitsu's
+                // averageRating is a 0-100 string (e.g. "78.43"), so parse + scale to
+                // 0-10 with one decimal to match the cross-provider format. startDate
+                // is "YYYY-MM-DD" so we slice the year off the front rather than
+                // parsing through DateTime.
+                double? scoreParsed = null;
+                var ratingStr = SafeGet<string>(anime, "attributes", "averageRating");
+                if (!string.IsNullOrEmpty(ratingStr) &&
+                    double.TryParse(ratingStr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ratingNum))
+                    scoreParsed = Math.Round(ratingNum / 10, 1);
+
+                int? releaseYear = null;
+                var startDateStr = SafeGet<string>(anime, "attributes", "startDate");
+                if (!string.IsNullOrEmpty(startDateStr) && startDateStr.Length >= 4 &&
+                    int.TryParse(startDateStr[..4], out var y))
+                    releaseYear = y;
+
+                var episodeCount = SafeGet<int?>(anime, "attributes", "episodeCount");
+
                 var meta = new Meta(SafeGet<string>(anime, "attributes", "description"))
                 {
                     id = externalId,
@@ -223,6 +242,10 @@ namespace AnimeList.Services
                     poster = SafeGet<string>(anime, "attributes", "posterImage", "large"),
                     entryId = entryId,
                     entryStatus = entryStatus,
+                    score = scoreParsed,
+                    episodes = episodeCount > 0 ? episodeCount : null,
+                    year = releaseYear,
+                    format = NormalizeFormat(subtype),
                 };
 
                 // Multiple Kitsu entries (seasons/OVAs) can share the same IMDb ID;

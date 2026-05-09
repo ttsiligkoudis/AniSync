@@ -77,6 +77,9 @@ namespace AnimeList.Services
                             media(search: $search, type: ANIME) {
                                 id
                                 format
+                                episodes
+                                averageScore
+                                seasonYear
                                 title {
                                     english
                                     romaji
@@ -109,6 +112,9 @@ namespace AnimeList.Services
                                     format
                                     status
                                     genres
+                                    episodes
+                                    averageScore
+                                    seasonYear
                                     title {{
                                         english
                                         romaji
@@ -139,6 +145,9 @@ namespace AnimeList.Services
                                             format
                                             status
                                             genres
+                                            episodes
+                                            averageScore
+                                            seasonYear
                                             title {{
                                                 english
                                                 romaji
@@ -170,6 +179,9 @@ namespace AnimeList.Services
                             media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: $sort) {{
                                 id
                                 format
+                                episodes
+                                averageScore
+                                seasonYear
                                 title {{
                                     english
                                     romaji
@@ -202,6 +214,10 @@ namespace AnimeList.Services
                         Page (page: $page, perPage: $perPage) {{
                             media(sort: $sort, type: ANIME{genreArg}) {{
                                 id
+                                format
+                                episodes
+                                averageScore
+                                seasonYear
                                 title {{
                                     english
                                     romaji
@@ -300,7 +316,16 @@ namespace AnimeList.Services
                     name = string.IsNullOrEmpty((string)media.title.english) ? media.title.romaji : media.title.english,
                     poster = media.coverImage.large,
                     entryId = entryId,
-                    entryStatus = entryStatus
+                    entryStatus = entryStatus,
+                    // StreamD-style card chrome: score badge + format/eps/year info row.
+                    // averageScore is 0-100 on AniList; normalise to 0-10 with one decimal
+                    // so the badge format is consistent across providers (MAL is already
+                    // 0-10, Kitsu's averageRating is 0-100). Null values pass through and
+                    // the partial omits the corresponding chunk gracefully.
+                    score = media.averageScore != null ? Math.Round((double)media.averageScore / 10, 1) : (double?)null,
+                    episodes = media.episodes,
+                    year = media.seasonYear,
+                    format = NormalizeFormat((string)media.format),
                 };
 
                 // Multiple AniList entries (seasons/OVAs) can share the same IMDb ID;

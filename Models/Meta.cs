@@ -26,6 +26,18 @@ namespace AnimeList.Models
         public string name { get; set; }
         public string poster { get; set; }
         public string description { get; }
+
+        // Surfaced by the per-service catalog queries for the StreamD-style card
+        // chrome — the score badge overlay on the poster and the "format · eps ·
+        // year" info row under the title. All optional: services that don't have
+        // a value (or fail to populate one) leave them null and the partial omits
+        // the corresponding chunk gracefully. score is normalised to 0-10 with
+        // one decimal so the badge format stays consistent across providers
+        // (AniList/Kitsu return 0-100, MAL returns 0-10 already).
+        public double? score { get; set; }
+        public int? episodes { get; set; }
+        public int? year { get; set; }
+        public string format { get; set; }
         public List<string> genres { get; set; }
         public string background { get; set; }
         public string type { get; set; } = MetaType.series.ToString();

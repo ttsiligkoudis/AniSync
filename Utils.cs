@@ -95,6 +95,28 @@ namespace AnimeList
                                               || format.Equals("MUSIC", StringComparison.OrdinalIgnoreCase));
 
         /// <summary>
+        /// Normalises a per-service format string (AniList "TV"/"MOVIE"/"OVA"/...,
+        /// MAL "tv"/"movie"/..., Kitsu "TV"/"movie"/...) to the user-facing label
+        /// rendered on poster cards. Returns null for empty/unknown input so the
+        /// view can omit the chunk gracefully.
+        /// </summary>
+        public static string NormalizeFormat(string raw) => raw?.ToUpperInvariant() switch
+        {
+            "TV"            => "TV",
+            "TV_SHORT"      => "TV Short",
+            "MOVIE"         => "Movie",
+            "OVA"           => "OVA",
+            "ONA"           => "ONA",
+            "SPECIAL"       => "Special",
+            "MUSIC"         => "Music",
+            "MANGA"         => "Manga",
+            "NOVEL"         => "Novel",
+            "ONE_SHOT"      => "One-shot",
+            null or ""      => null,
+            _               => raw,
+        };
+
+        /// <summary>
         /// Returns the AniList MediaSeason string and year for the given season option.
         /// </summary>
         public static (string Season, int Year) GetSeasonAndYear(string seasonOption)
