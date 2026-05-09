@@ -57,7 +57,7 @@ namespace AnimeList.Controllers
 
                 _httpContextAccessor.HttpContext.Session.SetString("AccessToken", SerializeObject(tokenData));
 
-                return RedirectToAction("Index", "Home");
+                return RedirectToAction("Configure", "Home");
             }
             else if (animeService == AnimeService.Anilist)
             {
@@ -67,13 +67,13 @@ namespace AnimeList.Controllers
             }
             else if (animeService == AnimeService.MyAnimeList)
             {
-                return BeginMalOauth(OauthFlowLogin) ?? RedirectToAction("Index", "Home");
+                return BeginMalOauth(OauthFlowLogin) ?? RedirectToAction("Configure", "Home");
             }
             else
             {
                 await _tokenService.GetAccessTokenByCredsAsync(username, password, true);
 
-                return RedirectToAction("Index", "Home");
+                return RedirectToAction("Configure", "Home");
             }
         }
 
@@ -136,7 +136,7 @@ namespace AnimeList.Controllers
             if (isLink && linkedTokenData != null && !string.IsNullOrEmpty(primarySession))
                 await PersistLinkedTokenAsync(primarySession, linkedTokenData);
 
-            return RedirectToAction("Index", "Home");
+            return RedirectToAction("Configure", "Home");
         }
 
         /// <summary>
@@ -212,7 +212,7 @@ namespace AnimeList.Controllers
                 NeedsReauth = false,
             });
 
-            return RedirectToAction("Index", "Home");
+            return RedirectToAction("Configure", "Home");
         }
 
         /// <summary>
@@ -235,7 +235,7 @@ namespace AnimeList.Controllers
             // Push the new primary into the session so subsequent requests dispatch through
             // its service. The UID stayed the same, so install URLs continue to resolve.
             HttpContext.Session.SetString("AccessToken", SerializeObject(newPrimary));
-            return RedirectToAction("Index", "Home");
+            return RedirectToAction("Configure", "Home");
         }
 
         private static string BuildSwapErrorMessage(string reason, AnimeService service)
@@ -264,7 +264,7 @@ namespace AnimeList.Controllers
 
             var uid = await _configStore.UpsertAsync(primary);
             await _configStore.RemoveLinkedTokenAsync(uid, service);
-            return RedirectToAction("Index", "Home");
+            return RedirectToAction("Configure", "Home");
         }
 
         /// <summary>
@@ -458,11 +458,11 @@ namespace AnimeList.Controllers
         public async Task<IActionResult> Logout()
         {
             // Pure disconnect: clears the session cookie + in-memory token cache so the
-            // user lands on the anonymous home page, but leaves the config row in place.
-            // Logging back in with the same identity restores the original install URL,
-            // linked accounts, scrobble token, and flag bits intact — same UID, same row.
-            // The "Delete Configuration" Danger Zone action is the destructive sibling for
-            // users who actually want their data gone.
+            // user lands on the dashboard as an anonymous visitor, but leaves the config
+            // row in place. Logging back in with the same identity restores the original
+            // install URL, linked accounts, scrobble token, and flag bits intact — same
+            // UID, same row. The "Delete Configuration" Danger Zone action is the
+            // destructive sibling for users who actually want their data gone.
             await _tokenService.RemoveCachedUser();
             return RedirectToAction("Index", "Home");
         }

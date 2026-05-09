@@ -1024,3 +1024,57 @@ main {
 @keyframes loader-spin {
     to { transform: rotate(360deg); }
 }
+
+/* ── Dashboard tiles (Home/Index) ── */
+.dashboard-tiles {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    width: 100%;
+}
+
+.dashboard-tile {
+    display: block;
+    padding: 1.25rem 1.5rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.75rem;
+    color: inherit;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.dashboard-tile:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: #7b5bf5;
+    color: inherit;
+    text-decoration: none;
+    transform: translateY(-1px);
+}
+
+.dashboard-tile-title {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: #fff;
+    margin: 0 0 0.35rem;
+}
+
+.dashboard-tile-text {
+    font-size: 0.9rem;
+    color: #999;
+    margin: 0;
+    line-height: 1.4;
+}
+
+/* Disabled (anonymous-user) variant — visibly inert so the user doesn't
+   click expecting a working link. */
+.dashboard-tile-disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.dashboard-tile-disabled:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+    transform: none;
+}
