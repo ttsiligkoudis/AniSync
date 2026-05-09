@@ -7,14 +7,18 @@ using System.Net.Http.Headers;
 namespace AnimeList.Services
 {
     /// <summary>
-    /// Resolves anime IDs across services (AniList, Kitsu, IMDb, TMDB) using community mapping data.
-    /// Combines Fribb/anime-lists with manami-project/anime-offline-database for broader coverage,
-    /// and enriches entries on demand via the TMDB external_ids API.
+    /// Resolves anime IDs across services (AniList, Kitsu, MAL, IMDb, TMDB, TVDB, AniDB) using
+    /// community mapping data. Combines Fribb/anime-lists with manami-project/anime-offline-database
+    /// for broader coverage, and enriches entries on demand via the TMDB external_ids API.
     /// Registered as a singleton; caches the full mapping in memory for 24 hours.
+    ///
+    /// TVDB and AniDB are populated from Fribb's full mapping file (the mini variant strips them);
+    /// the Plex/Jellyfin webhook ingestion path needs them because Plex's default agent and HAMA
+    /// emit those IDs respectively.
     /// </summary>
     public class AnimeMappingService : IAnimeMappingService
     {
-        private const string FribbMappingUrl = "https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-mini.json";
+        private const string FribbMappingUrl = "https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json";
         private const string OfflineDbUrl = "https://raw.githubusercontent.com/manami-project/anime-offline-database/master/anime-offline-database-minified.json";
         private const string TmdbApiBase = "https://api.themoviedb.org/3";
 
@@ -30,6 +34,8 @@ namespace AnimeList.Services
         private FrozenDictionary<int, AnimeIdMapping> _malMapping;
         private ConcurrentDictionary<string, List<AnimeIdMapping>> _imdbMapping = new();
         private FrozenDictionary<string, List<AnimeIdMapping>> _tmdbMapping;
+        private FrozenDictionary<int, List<AnimeIdMapping>> _tvdbMapping;
+        private FrozenDictionary<int, AnimeIdMapping> _anidbMapping;
         private DateTime _lastLoaded = DateTime.MinValue;
 
         public AnimeMappingService(IHttpClientFactory clientFactory, IConfiguration configuration)
@@ -162,6 +168,20 @@ namespace AnimeList.Services
                     .Where(e => !string.IsNullOrEmpty(e.TmdbId))
                     .GroupBy(e => e.TmdbId)
                     .ToFrozenDictionary(e => e.Key, e => e.ToList());
+
+                // TVDB ids can appear on multiple rows when a TV series has multiple
+                // cours/seasons that map to separate AniList entries — same shape as IMDB.
+                _tvdbMapping = entries
+                    .Where(e => e.TvdbId.HasValue)
+                    .GroupBy(e => e.TvdbId!.Value)
+                    .ToFrozenDictionary(e => e.Key, e => e.ToList());
+
+                // AniDB ids are 1:1 with anime entries — HAMA (Plex) and AniDB metadata
+                // providers (Jellyfin) emit them, so a single-entry index suffices.
+                _anidbMapping = entries
+                    .Where(e => e.AnidbId.HasValue)
+                    .DistinctBy(e => e.AnidbId!.Value)
+                    .ToFrozenDictionary(e => e.AnidbId!.Value, e => e);
 
                 _lastLoaded = DateTime.UtcNow;
             }
@@ -400,8 +420,63 @@ namespace AnimeList.Services
                 var mapping = await GetMalMapping(animeId);
                 return PickServiceId(mapping, service);
             }
+            else if (animeId.StartsWith(tvdbPrefix))
+            {
+                await EnsureMappingsLoadedAsync();
+                if (!int.TryParse(animeId[tvdbPrefix.Length..], out var tvdb)) return null;
+                if (!_tvdbMapping.TryGetValue(tvdb, out var mappings)) return null;
+
+                var mapping = mappings
+                    .Where(m => !season.HasValue || m.Season == season || !m.Season.HasValue)
+                    .FirstOrDefault();
+                return PickServiceId(mapping, service);
+            }
+            else if (animeId.StartsWith(anidbPrefix))
+            {
+                await EnsureMappingsLoadedAsync();
+                if (!int.TryParse(animeId[anidbPrefix.Length..], out var anidb)) return null;
+                if (!_anidbMapping.TryGetValue(anidb, out var mapping)) return null;
+                return PickServiceId(mapping, service);
+            }
 
             return animeId;
+        }
+
+        /// <summary>
+        /// Walks a list of external IDs (e.g. from a Plex/Jellyfin webhook payload) in priority
+        /// order and returns the first one that resolves to <paramref name="service"/>'s id.
+        /// AniDB → IMDB → TMDB → TVDB is the priority because AniDB and IMDB are 1:1 with the
+        /// tracker entry, while TVDB/TMDB sometimes need season disambiguation.
+        ///
+        /// Each tuple is <c>(prefix, raw id)</c> where <c>prefix</c> is one of the existing
+        /// id-prefix constants (<see cref="anidbPrefix"/>, <see cref="imdbPrefix"/>, etc.).
+        /// Callers don't have to pre-filter unknown prefixes — anything <see cref="GetIdByService"/>
+        /// doesn't recognise resolves to null and the loop tries the next id.
+        /// </summary>
+        public async Task<string> ResolveExternalAsync(IEnumerable<(string prefix, string id)> externalIds,
+            AnimeService service, int? season = null)
+        {
+            if (externalIds == null) return null;
+
+            var ranked = externalIds
+                .Where(t => !string.IsNullOrEmpty(t.id))
+                .OrderBy(t => t.prefix switch
+                {
+                    var p when p == anidbPrefix => 0,
+                    var p when p == imdbPrefix => 1,
+                    var p when p == tmdbPrefix => 2,
+                    var p when p == tvdbPrefix => 3,
+                    _ => 99,
+                });
+
+            foreach (var (prefix, id) in ranked)
+            {
+                // imdbPrefix is "tt" so the id already carries it; everything else needs prefixing.
+                var prefixed = prefix == imdbPrefix && id.StartsWith(imdbPrefix) ? id : prefix + id;
+                var resolved = await GetIdByService(prefixed, service, season);
+                if (!string.IsNullOrEmpty(resolved)) return resolved;
+            }
+            return null;
         }
 
         private static string PickServiceId(AnimeIdMapping mapping, AnimeService service) => service switch

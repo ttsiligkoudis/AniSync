@@ -29,6 +29,8 @@ public class HomeController : Controller
         long configRevision = 0;
         List<LinkedToken> linkedTokens = new();
         string encodedTokenData = null;
+        string scrobbleToken = null;
+        string plexUsername = null;
 
         if (tokenData != null)
         {
@@ -47,6 +49,10 @@ public class HomeController : Controller
                 // Linked secondary accounts the multi-provider sync will fan writes out to.
                 // The view renders a per-service Link / Unlink row from this list.
                 linkedTokens = await _configStore.GetLinkedTokensAsync(configUid);
+                // Lazily generated on first configure-page render. The webhook URL the user
+                // pastes into Plex/Jellyfin/Emby is /api/v1/scrobble/{scrobbleToken}.
+                scrobbleToken = await _configStore.EnsureScrobbleTokenAsync(configUid);
+                plexUsername = await _configStore.GetPlexUsernameAsync(configUid);
 
                 // Hydrate the session from the config-URL-derived tokenData when the user
                 // arrives via a v5 install URL (or any path that resolves identity from the
@@ -102,8 +108,41 @@ public class HomeController : Controller
             AnimeService = tokenData?.anime_service ?? AnimeService.Kitsu,
             AnonymousUser = anonymousUser,
             LinkedTokens = linkedTokens,
+            ScrobbleToken = scrobbleToken,
+            PlexUsername = plexUsername,
             Configuration = configuration,
         });
+    }
+
+    /// <summary>
+    /// Generates a fresh scrobble token for the given UID, invalidating any existing webhook
+    /// URLs. Returns the new token so the JS can update the displayed URL without a reload.
+    /// </summary>
+    [HttpPost("Home/RotateScrobbleToken")]
+    public async Task<JsonResult> RotateScrobbleToken([FromBody] UidRequest request)
+    {
+        if (string.IsNullOrEmpty(request?.uid))
+            return new JsonResult(new { success = false, error = "missing uid" });
+
+        var token = await _configStore.RotateScrobbleTokenAsync(request.uid);
+        if (string.IsNullOrEmpty(token))
+            return new JsonResult(new { success = false, error = "unknown uid" });
+
+        return new JsonResult(new { success = true, token });
+    }
+
+    /// <summary>
+    /// Stores the optional Plex Home username filter for shared servers. Empty / whitespace
+    /// clears the filter (events from any username will scrobble).
+    /// </summary>
+    [HttpPost("Home/SetPlexUsername")]
+    public async Task<JsonResult> SetPlexUsername([FromBody] PlexUsernameRequest request)
+    {
+        if (string.IsNullOrEmpty(request?.uid))
+            return new JsonResult(new { success = false, error = "missing uid" });
+
+        await _configStore.SetPlexUsernameAsync(request.uid, request.username);
+        return new JsonResult(new { success = true });
     }
 
     /// <summary>
@@ -216,6 +255,12 @@ public class SaveConfigRequest
 public class UidRequest
 {
     public string uid { get; set; }
+}
+
+public class PlexUsernameRequest
+{
+    public string uid { get; set; }
+    public string username { get; set; }
 }
 
 public class ConfigBackup

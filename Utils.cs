@@ -13,6 +13,8 @@ namespace AnimeList
         public static readonly string kitsuPrefix = "kitsu:";
         public static readonly string tmdbPrefix = "tmdb:";
         public static readonly string malPrefix = "mal:";
+        public static readonly string tvdbPrefix = "tvdb:";
+        public static readonly string anidbPrefix = "anidb:";
 
         /// <summary>
         /// Maps an <see cref="AnimeService"/> to its catalog id prefix. Used by

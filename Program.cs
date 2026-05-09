@@ -160,7 +160,30 @@ builder.Services.AddRateLimiter(options =>
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
         });
     });
+    // Webhook ingestion (/api/v1/scrobble/{token}). Partitioned by token, not IP — bingers
+    // behind a NAT / VPN exit shouldn't share a budget. Higher cap and a small queue because
+    // event delivery from Plex/Jellyfin can be bursty (catch-up sessions, server restarts
+    // flushing buffered events).
+    options.AddPolicy("scrobble", httpContext =>
+    {
+        // Token is the last path segment of /api/v1/scrobble/{token}.
+        var path = httpContext.Request.Path.Value ?? string.Empty;
+        var slash = path.LastIndexOf('/');
+        var key = slash >= 0 && slash < path.Length - 1 ? path[(slash + 1)..] : "anonymous";
+        return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 240,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 60,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+        });
+    });
 });
+
+// In-memory cache used by ScrobbleController to dedupe webhook deliveries inside a 60s
+// window. Lightweight — entries auto-expire and the cardinality is at most one per
+// (uid, anime, season, episode) currently being scrobbled.
+builder.Services.AddMemoryCache();
 
 builder.Services.AddSingleton<IAnimeMappingService, AnimeMappingService>();
 builder.Services.AddSingleton<IConfigStore, SqliteConfigStore>();

@@ -88,6 +88,33 @@ namespace AnimeList.Services
                 alter.CommandText = "ALTER TABLE configs ADD COLUMN linked_tokens TEXT";
                 alter.ExecuteNonQuery();
             }
+
+            // Idempotent migration: add `scrobble_token` (per-user webhook bearer) and
+            // `plex_username` (optional Plex Home filter). Both are nullable — populated on
+            // demand when the user pastes a URL into Plex/Jellyfin via the configure page.
+            // The unique index on scrobble_token gates the reverse lookup the webhook
+            // controller does on every inbound event.
+            if (!ColumnExists(conn, "configs", "scrobble_token"))
+            {
+                using var alter = conn.CreateCommand();
+                alter.CommandText = "ALTER TABLE configs ADD COLUMN scrobble_token TEXT";
+                alter.ExecuteNonQuery();
+            }
+            if (!ColumnExists(conn, "configs", "plex_username"))
+            {
+                using var alter = conn.CreateCommand();
+                alter.CommandText = "ALTER TABLE configs ADD COLUMN plex_username TEXT";
+                alter.ExecuteNonQuery();
+            }
+            using (var idx = conn.CreateCommand())
+            {
+                idx.CommandText = """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_configs_scrobble_token
+                        ON configs(scrobble_token)
+                        WHERE scrobble_token IS NOT NULL
+                    """;
+                idx.ExecuteNonQuery();
+            }
         }
 
         private static bool ColumnExists(SqliteConnection conn, string table, string column)
@@ -249,6 +276,130 @@ namespace AnimeList.Services
             cmd.Parameters.AddWithValue("$uid", uid);
             var raw = await cmd.ExecuteScalarAsync();
             return raw is long l ? l : 0L;
+        }
+
+        public async Task<string> EnsureScrobbleTokenAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return null;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+
+            using (var read = conn.CreateCommand())
+            {
+                read.CommandText = "SELECT scrobble_token FROM configs WHERE uid = $uid LIMIT 1";
+                read.Parameters.AddWithValue("$uid", uid);
+                using var reader = await read.ExecuteReaderAsync();
+                if (!await reader.ReadAsync()) return null;
+                if (!reader.IsDBNull(0))
+                {
+                    var existing = reader.GetString(0);
+                    if (!string.IsNullOrEmpty(existing)) return existing;
+                }
+            }
+
+            // First call: generate, store, return. Loop to defend against the (vanishingly
+            // unlikely) collision with another concurrently-generated token.
+            for (var attempt = 0; attempt < 4; attempt++)
+            {
+                var token = GenerateUid();
+                try
+                {
+                    using var write = conn.CreateCommand();
+                    write.CommandText = """
+                        UPDATE configs
+                           SET scrobble_token = $t, updated_at = $u
+                         WHERE uid = $uid AND scrobble_token IS NULL
+                        """;
+                    write.Parameters.AddWithValue("$t", token);
+                    write.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+                    write.Parameters.AddWithValue("$uid", uid);
+                    var affected = await write.ExecuteNonQueryAsync();
+                    if (affected == 0)
+                    {
+                        // Another caller stored one between our SELECT and UPDATE — read theirs.
+                        using var reread = conn.CreateCommand();
+                        reread.CommandText = "SELECT scrobble_token FROM configs WHERE uid = $uid LIMIT 1";
+                        reread.Parameters.AddWithValue("$uid", uid);
+                        return await reread.ExecuteScalarAsync() as string;
+                    }
+                    return token;
+                }
+                catch (SqliteException) { /* unique-index collision — try a fresh token */ }
+            }
+            return null;
+        }
+
+        public async Task<string> RotateScrobbleTokenAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return null;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+
+            for (var attempt = 0; attempt < 4; attempt++)
+            {
+                var token = GenerateUid();
+                try
+                {
+                    using var write = conn.CreateCommand();
+                    write.CommandText = """
+                        UPDATE configs
+                           SET scrobble_token = $t, updated_at = $u
+                         WHERE uid = $uid
+                        """;
+                    write.Parameters.AddWithValue("$t", token);
+                    write.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+                    write.Parameters.AddWithValue("$uid", uid);
+                    if (await write.ExecuteNonQueryAsync() == 0) return null; // unknown uid
+                    return token;
+                }
+                catch (SqliteException) { /* collision — retry */ }
+            }
+            return null;
+        }
+
+        public async Task<string> ResolveUidByScrobbleTokenAsync(string token)
+        {
+            if (string.IsNullOrEmpty(token)) return null;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT uid FROM configs WHERE scrobble_token = $t LIMIT 1";
+            cmd.Parameters.AddWithValue("$t", token);
+            return await cmd.ExecuteScalarAsync() as string;
+        }
+
+        public async Task SetPlexUsernameAsync(string uid, string username)
+        {
+            if (string.IsNullOrEmpty(uid)) return;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE configs
+                   SET plex_username = $u, updated_at = $ts
+                 WHERE uid = $uid
+                """;
+            cmd.Parameters.AddWithValue("$u",
+                string.IsNullOrWhiteSpace(username) ? (object)DBNull.Value : username.Trim());
+            cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$uid", uid);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<string> GetPlexUsernameAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return null;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT plex_username FROM configs WHERE uid = $uid LIMIT 1";
+            cmd.Parameters.AddWithValue("$uid", uid);
+            return await cmd.ExecuteScalarAsync() as string;
         }
 
         public async Task DeleteAsync(string uid)

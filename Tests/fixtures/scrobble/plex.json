@@ -1,0 +1,34 @@
+{
+  "event": "media.scrobble",
+  "user": true,
+  "owner": true,
+  "Account": {
+    "id": 1,
+    "thumb": "https://plex.tv/users/abc/avatar",
+    "title": "alice"
+  },
+  "Server": {
+    "title": "tower",
+    "uuid": "1234567890abcdef"
+  },
+  "Player": {
+    "local": true,
+    "publicAddress": "10.0.0.5",
+    "title": "Chrome",
+    "uuid": "abcdef1234567890"
+  },
+  "Metadata": {
+    "librarySectionType": "show",
+    "type": "episode",
+    "title": "The Journey Begins",
+    "grandparentTitle": "Frieren",
+    "parentTitle": "Season 1",
+    "parentIndex": 1,
+    "index": 1,
+    "Guid": [
+      { "id": "imdb://tt22248376" },
+      { "id": "tmdb://209867" },
+      { "id": "tvdb://422598" }
+    ]
+  }
+}

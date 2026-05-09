@@ -75,6 +75,40 @@ namespace AnimeList.Services.Interfaces
         Task RemoveLinkedTokenAsync(string uid, AnimeService service);
 
         /// <summary>
+        /// Returns the scrobble token for the given UID, generating + storing one if absent.
+        /// Idempotent — repeated calls for the same UID return the same token until
+        /// <see cref="RotateScrobbleTokenAsync"/> is called. Returns null if the UID is unknown.
+        /// </summary>
+        Task<string> EnsureScrobbleTokenAsync(string uid);
+
+        /// <summary>
+        /// Generates a fresh scrobble token, replaces any existing one, and returns it. Old
+        /// webhook URLs immediately stop working — used by the "Rotate" button on the configure
+        /// page.
+        /// </summary>
+        Task<string> RotateScrobbleTokenAsync(string uid);
+
+        /// <summary>
+        /// Reverse lookup: returns the UID associated with a scrobble token, or null when the
+        /// token doesn't match any row. The webhook controller uses this to authenticate
+        /// inbound requests.
+        /// </summary>
+        Task<string> ResolveUidByScrobbleTokenAsync(string token);
+
+        /// <summary>
+        /// Stores the optional Plex Home username for a UID. When set, Plex events whose
+        /// <c>Account.title</c> doesn't match are dropped — handles shared Plex servers where
+        /// roommates' viewing should not scrobble onto this user's trackers. Pass null/empty to
+        /// clear the filter.
+        /// </summary>
+        Task SetPlexUsernameAsync(string uid, string username);
+
+        /// <summary>
+        /// Reads the configured Plex Home username, or null if no filter is set.
+        /// </summary>
+        Task<string> GetPlexUsernameAsync(string uid);
+
+        /// <summary>
         /// Swaps the primary provider with the linked token of <paramref name="newPrimaryService"/>.
         /// The chosen link becomes the primary on this row; the previous primary moves into the
         /// linked-tokens array. The UID is preserved so existing install URLs keep working.
