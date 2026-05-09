@@ -43,7 +43,58 @@ public class HomeController : Controller
             // no benefit to a DB row plus no stable identity to dedupe on.
             if (!tokenData.anonymousUser)
             {
-                configUid = await _configStore.UpsertAsync(tokenData);
+                // Three-stage row resolution so logging in via a service that's currently
+                // a *linked* secondary on an existing config doesn't fork a duplicate row:
+                //
+                //   1. Primary-identity match — canonical "you're back" case. Existing
+                //      UpsertAsync already handles this; we call its read-only sibling
+                //      first so we can distinguish primary from linked when both match.
+                //   2. Linked-identity match — the service the user just authenticated
+                //      with is currently linked on some other row. Restore that row,
+                //      refresh the linked entry's tokens with the freshly-issued ones,
+                //      and switch the local tokenData over to the row's existing primary
+                //      so the page renders with the user's prior setup intact.
+                //   3. Brand-new identity — fall through to UpsertAsync's INSERT path.
+                //
+                // Primary always wins over linked: a user who is primary on row B and
+                // also listed as linked on row A should land on row B. Two AniSync
+                // configs with overlapping identities is a corner case but possible
+                // (different browsers, different "primary" choices on each install).
+                configUid = await _configStore.FindUidByPrimaryIdentityAsync(tokenData);
+                if (!string.IsNullOrEmpty(configUid))
+                {
+                    // Primary match — refresh tokens on the row so any rotation we picked
+                    // up during this login is persisted (matches UpsertAsync's UPDATE path).
+                    await _configStore.UpdateByUserAsync(tokenData);
+                }
+                else
+                {
+                    var linkedUid = await _configStore.FindUidByLinkedIdentityAsync(tokenData);
+                    if (!string.IsNullOrEmpty(linkedUid))
+                    {
+                        configUid = linkedUid;
+                        // Refresh the matching linked entry with the fresh tokens we just
+                        // received from the OAuth flow (or password grant). Clears any
+                        // lingering needs-reauth state on the link the user literally just
+                        // signed into.
+                        await _configStore.SetLinkedTokenAsync(configUid, new LinkedToken
+                        {
+                            Service = tokenData.anime_service,
+                            TokenData = tokenData,
+                            NeedsReauth = false,
+                        });
+                        // Switch the page over to the row's existing primary so all the
+                        // downstream renders (linked accounts list, install URL, manifest
+                        // payload, session token below) reflect the user's prior config
+                        // rather than the just-logged-in linked secondary.
+                        var primary = await _configStore.GetAsync(configUid);
+                        if (primary != null) tokenData = primary;
+                    }
+                    else
+                    {
+                        configUid = await _configStore.UpsertAsync(tokenData);
+                    }
+                }
                 // Used as cache-busting bytes in the install URL — see Index.cshtml's JS.
                 configRevision = await _configStore.GetRevisionAsync(configUid);
                 // Linked secondary accounts the multi-provider sync will fan writes out to.
