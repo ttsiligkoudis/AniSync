@@ -104,17 +104,42 @@ namespace AnimeList.Services
         {
             if (mappings?.Any() != true) return;
 
+            // The mapping objects are shared references between the input list and
+            // the cached `_imdbMapping[key]` list, so mutations on `mapping.Name` /
+            // `mapping.Episodes` (the only thing callers actually enrich) already
+            // propagate to the cache without us touching the dictionary. The job
+            // left for this method is to *add* any input mappings that aren't yet
+            // in the cached bucket — never to overwrite the bucket with the input
+            // subset.
+            //
+            // The earlier implementation called
+            // `_imdbMapping.AddOrUpdate(key, _, (_, _) => group.ToList())`, which
+            // REPLACED the whole bucket with whatever was passed in. When
+            // MetaController.BuildEntrySeasonAsync invokes us with a single
+            // per-cour mapping (after fetching its summary), that wiped every
+            // sibling cour from the bucket. The next `GetImdbMapping(imdb)`
+            // call then returned just one mapping, BuildSeasonsAsync took the
+            // single-mapping branch, and the manage-entry modal collapsed a
+            // multi-season franchise to a single-cour picker (visible after
+            // the first close + reopen).
             foreach (var group in mappings.GroupBy(g => g.ImdbId))
             {
-                if (!string.IsNullOrEmpty(group.Key))
-                {
-                    if (_imdbMapping.TryGetValue(group.Key, out var frozenEntries))
+                if (string.IsNullOrEmpty(group.Key)) continue;
+                var input = group.ToList();
+                _imdbMapping.AddOrUpdate(group.Key,
+                    _ => input,
+                    (_, existing) =>
                     {
-                        _imdbMapping.AddOrUpdate(group.Key,
-                            _ => group.ToList(),
-                            (_, list) => group.ToList());
-                    }                 
-                }
+                        var merged = new List<AnimeIdMapping>(existing);
+                        foreach (var m in input)
+                        {
+                            if (!merged.Any(e => e.AnilistId == m.AnilistId && e.KitsuId == m.KitsuId))
+                            {
+                                merged.Add(m);
+                            }
+                        }
+                        return merged;
+                    });
             }
         }
 
