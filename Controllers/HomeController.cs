@@ -93,12 +93,17 @@ public class HomeController : Controller
                 contributingNames.Add(lt.Service.ToString());
             }
 
+            // Honour the user's "Group anime seasons" toggle so the dashboard
+            // slice matches what /library renders for the same identity.
+            var dashboardConfig = await GetConfigByUidAsync(uid, _configStore);
+            var groupSeasons = dashboardConfig?.disableSeasonGrouping != true;
+
             // Fan-out fetches: 2 lists × N services in parallel. SafeFetchListAsync
             // wraps each call in a try/catch so one provider rate-limiting or
             // returning a 5xx doesn't abort the whole stats panel — that provider
             // just contributes zero entries to the union.
-            var watchingTasks = contributingTokens.Select(t => SafeFetchListAsync(t, ListType.Current)).ToList();
-            var completedTasks = contributingTokens.Select(t => SafeFetchListAsync(t, ListType.Completed)).ToList();
+            var watchingTasks = contributingTokens.Select(t => SafeFetchListAsync(t, ListType.Current, groupSeasons)).ToList();
+            var completedTasks = contributingTokens.Select(t => SafeFetchListAsync(t, ListType.Completed, groupSeasons)).ToList();
             await Task.WhenAll(watchingTasks.Concat(completedTasks));
 
             var dedupedWatching = new Dictionary<string, Meta>(StringComparer.Ordinal);
@@ -191,14 +196,16 @@ public class HomeController : Controller
 
     // Per-service GetAnimeListAsync dispatch — the same shape Library / Discover /
     // Catalog all use, factored here so Index can fetch two list types in parallel
-    // without three nested switch expressions.
-    private async Task<List<Meta>> FetchListAsync(TokenData tokenData, ListType listType)
+    // without three nested switch expressions. groupSeasons is plumbed through so
+    // the dashboard's Continue Watching / stats slice respects the user's
+    // "Group anime seasons" toggle the same way the addon catalog does.
+    private async Task<List<Meta>> FetchListAsync(TokenData tokenData, ListType listType, bool groupSeasons = true)
     {
         var metas = tokenData.anime_service switch
         {
-            AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listType),
-            AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType),
-            _                        => await _kitsuService.GetAnimeListAsync(tokenData, listType),
+            AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons),
+            AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons),
+            _                        => await _kitsuService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons),
         };
         return metas ?? [];
     }
@@ -206,9 +213,9 @@ public class HomeController : Controller
     // Cross-provider variant: catches per-service exceptions so one rate-limited
     // or 5xx'd provider doesn't abort the whole stats panel. The other providers
     // still contribute their data; the failing one contributes an empty list.
-    private async Task<List<Meta>> SafeFetchListAsync(TokenData tokenData, ListType listType)
+    private async Task<List<Meta>> SafeFetchListAsync(TokenData tokenData, ListType listType, bool groupSeasons = true)
     {
-        try { return await FetchListAsync(tokenData, listType); }
+        try { return await FetchListAsync(tokenData, listType, groupSeasons); }
         catch { return []; }
     }
 
