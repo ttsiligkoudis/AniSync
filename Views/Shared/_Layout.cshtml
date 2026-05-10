@@ -54,7 +54,9 @@
        framework, no jQuery dep, just a class on document.body. *@
     <aside class="nav-drawer" aria-label="Site navigation">
         <div class="nav-drawer-header">
-            <span class="site-logo">Ani<span class="accent">Sync</span></span>
+            <a class="site-logo" href="/" aria-label="AniSync home">
+                <img src="/logo.png" alt="AniSync" />
+            </a>
             <button class="drawer-close" aria-label="Close menu"
                     onclick="document.body.classList.remove('drawer-open')">×</button>
         </div>
@@ -82,7 +84,9 @@
     <div class="container">
         <main role="main" style="min-height: 100vh;">
             <header class="site-header">
-                <a class="site-logo" href="/">Ani<span class="accent">Sync</span></a>
+                <a class="site-logo" href="/" aria-label="AniSync home">
+                    <img src="/logo.png" alt="AniSync" />
+                </a>
                 @* Install pill — hidden by default, revealed by
                    pwa-install.js once the browser fires
                    beforeinstallprompt (Chromium / Edge / Android Chrome)
