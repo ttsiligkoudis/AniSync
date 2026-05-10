@@ -484,6 +484,28 @@
     }
     $('#stremioUrl, #stremioWebUrl').on('click', handleInstallClick);
 
+    // ── Save button (Configure page) ─────────────────────────────────
+    // Explicit Save CTA on /configure — wraps the same saveFlags()
+    // helper used by the install buttons, with a small status pill
+    // for "Saved" / "Failed" feedback so users have an obvious
+    // commit point for site preferences (currently just the
+    // Group-anime-seasons toggle).
+    $('#savePreferencesBtn').on('click', async function () {
+        var $btn = $(this);
+        var $status = $('#savePreferencesStatus');
+        $btn.prop('disabled', true).text('Saving…');
+        $status.removeClass('save-success save-error').text('');
+        try {
+            await saveFlags();
+            $status.addClass('save-success').text('✓ Saved');
+        } catch {
+            $status.addClass('save-error').text('✗ Save failed');
+        } finally {
+            $btn.prop('disabled', false).text('Save');
+            setTimeout(function () { $status.text(''); }, 3000);
+        }
+    });
+
     // ── Home Server Sync ──────────────────────────────────────────────
     // Builds and renders the scrobble URL into the read-only input. Called on page load and
     // again after Rotate so the displayed URL always matches the live token.

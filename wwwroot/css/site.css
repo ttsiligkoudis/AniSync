@@ -1918,6 +1918,17 @@ body.modal-open {
     color: #e74c3c;
 }
 
+/* Status pill rendered inline next to the Site-preferences Save button.
+   Empty by default; the Save click handler fills it with "✓ Saved" /
+   "✗ Save failed" then clears after 3s. */
+.save-preferences-status {
+    margin-left: 0.6rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1;
+    align-self: center;
+}
+
 /* ── Loading overlay ──
    Fixed full-viewport scrim with a centered spinner. Used by Manage Entry to block
    interaction while GetEntry / SaveEntry / DeleteEntry are in flight; the visibility
