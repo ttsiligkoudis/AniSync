@@ -556,6 +556,24 @@
             switchSeason(seasonTab);
             return;
         }
+        var synopsisToggle = e.target.closest && e.target.closest('button.anime-detail-synopsis-toggle');
+        if (synopsisToggle) {
+            e.preventDefault();
+            var wrap = synopsisToggle.closest('.anime-detail-synopsis-wrap');
+            if (wrap) {
+                var nowCollapsed = wrap.getAttribute('data-collapsed') === 'true';
+                if (nowCollapsed) {
+                    wrap.removeAttribute('data-collapsed');
+                    synopsisToggle.textContent = 'Show less';
+                    synopsisToggle.setAttribute('aria-expanded', 'true');
+                } else {
+                    wrap.setAttribute('data-collapsed', 'true');
+                    synopsisToggle.textContent = 'Show more';
+                    synopsisToggle.setAttribute('aria-expanded', 'false');
+                }
+            }
+            return;
+        }
         var episodeRow = e.target.closest && e.target.closest('li.anime-detail-episode[data-episode-num]');
         if (episodeRow) {
             var list = episodeRow.closest('ol.anime-detail-episodes[data-can-edit="true"]');

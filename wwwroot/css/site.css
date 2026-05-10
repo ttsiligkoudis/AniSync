@@ -2381,18 +2381,22 @@ body.modal-open {
     inset: 0;
     background-size: cover;
     background-position: center;
-    opacity: 0.45;
+    opacity: 0.55;
     z-index: -2;
-    /* Slight blur so the backdrop reads as ambient context rather than
-       fighting with the foreground content. */
-    filter: blur(1px) saturate(0.9);
-    transform: scale(1.05); /* hide blur edge artifacts */
+    /* Subtle blur + desaturation so the backdrop reads as ambient context
+       rather than fighting with foreground content. */
+    filter: blur(2px) saturate(0.85);
+    transform: scale(1.06); /* hide blur edge artifacts */
 }
 
+/* Two-stop gradient so bright art pieces don't wash out the title /
+   synopsis underneath. Top is mostly transparent (lets the art breathe),
+   bottom locks to the page bg so the hero blends into the next section. */
 .anime-detail-backdrop-shade {
     position: absolute;
     inset: 0;
-    background: linear-gradient(180deg, rgba(10, 10, 10, 0.4) 0%, rgba(10, 10, 10, 0.95) 100%);
+    background:
+        linear-gradient(180deg, rgba(10, 10, 10, 0.55) 0%, rgba(10, 10, 10, 0.92) 65%, #0A0A0A 100%);
     z-index: -1;
 }
 
@@ -2464,12 +2468,18 @@ body.modal-open {
 }
 
 .anime-detail-title {
-    font-size: 1.4rem;
+    font-size: 1.5rem;
     font-weight: 700;
     color: #fff;
     margin: 0;
-    line-height: 1.2;
-    letter-spacing: -0.01em;
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+}
+
+@media (min-width: 768px) {
+    .anime-detail-title {
+        font-size: 2rem;
+    }
 }
 
 .anime-detail-info {
@@ -2495,6 +2505,28 @@ body.modal-open {
     flex-wrap: wrap;
     gap: 0.3rem;
     margin-top: 0.2rem;
+}
+
+/* "By: KyoAni, MAPPA" production credit line. Linked studio names get a
+   subtle underline-on-hover so they read as clickable without the heavy
+   blue "Streaming" pill treatment used in the bottom link list. */
+.anime-detail-studios {
+    font-size: 0.85rem;
+    color: #aaa;
+    margin-top: 0.1rem;
+}
+
+.anime-detail-studio-link {
+    color: #d0d0d0;
+    text-decoration: none;
+    border-bottom: 1px dotted rgba(255, 255, 255, 0.25);
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.anime-detail-studio-link:hover {
+    color: #fff;
+    border-bottom-color: rgba(255, 255, 255, 0.6);
+    text-decoration: none;
 }
 
 .anime-detail-actions {
@@ -2537,11 +2569,46 @@ body.modal-open {
     font-weight: 500;
 }
 
+.anime-detail-synopsis-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+
 .anime-detail-synopsis {
     color: #d0d0d0;
     font-size: 0.92rem;
     line-height: 1.55;
     margin: 0;
+}
+
+/* Collapsed long-synopsis state: clamp to ~5 lines, gradient-fade the
+   bottom edge so the cut-off feels intentional. JS toggles
+   data-collapsed on the wrapper when the user clicks "Show more". */
+.anime-detail-synopsis-wrap[data-collapsed="true"] .anime-detail-synopsis {
+    display: -webkit-box;
+    -webkit-line-clamp: 5;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent 100%);
+            mask-image: linear-gradient(180deg, #000 70%, transparent 100%);
+}
+
+.anime-detail-synopsis-toggle {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: #60a5fa;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.anime-detail-synopsis-toggle:hover {
+    color: #93c5fd;
+    text-decoration: underline;
 }
 
 /* ── Season tabs (above episode list) ── */
