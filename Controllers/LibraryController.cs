@@ -71,6 +71,12 @@ namespace AnimeList.Controllers
             // detail of the link href.
             var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
 
+            // Honour the user's "Group anime seasons" toggle (disableSeasonGrouping
+            // bit) so the web-app library matches what the addon catalog shows on
+            // Stremio. Defaults to grouped (toggle ON) when no flags are stored.
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var groupSeasonsFromConfig = configuration?.disableSeasonGrouping != true;
+
             // Search runs as ListType.Search across the full anime database (mirrors
             // the addon's /catalog/.../Search behaviour); the active tab is ignored
             // while a search query is present. groupSeasons=false here too, matching
@@ -78,7 +84,7 @@ namespace AnimeList.Controllers
             // titles to the shortest variant which is wrong for "find this specific
             // anime" intent. Same dispatch table either way.
             var listForCall = hasSearch ? ListType.Search : activeList;
-            var groupSeasonsForCall = !hasSearch;
+            var groupSeasonsForCall = !hasSearch && groupSeasonsFromConfig;
             var metas = tokenData.anime_service switch
             {
                 AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),

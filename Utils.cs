@@ -460,6 +460,24 @@ namespace AnimeList
         }
 
         /// <summary>
+        /// Hydrates a <see cref="Configuration"/> for a session-authenticated web-app
+        /// route (Library / Discover / dashboard) where there's no URL config blob to
+        /// decode, only a UID resolved via <see cref="IConfigStore.FindUidByIdentityAsync"/>.
+        /// Reads the same flag bytes ResolveConfigAsync would and applies them, so toggles
+        /// like <c>disableSeasonGrouping</c> propagate to the web app's catalog renders
+        /// just like they do to the addon's path-config endpoints.
+        /// Returns null when uid is missing or empty (anonymous visitors).
+        /// </summary>
+        public static async Task<Configuration> GetConfigByUidAsync(string uid, IConfigStore store)
+        {
+            if (string.IsNullOrEmpty(uid)) return null;
+            var (f1, f2, f3, _) = await store.GetFlagsAsync(uid);
+            var cfg = new Configuration();
+            ApplyBinaryFlags(cfg, f1, f2, f3);
+            return cfg;
+        }
+
+        /// <summary>
         /// Writes flag bits into the existing <see cref="Configuration"/> instance. Used by
         /// both <see cref="DecodeBinaryFlags"/> (URL bytes path) and <see cref="ResolveConfigAsync"/>
         /// (DB-backed path) so the bit layout stays in one place.

@@ -82,12 +82,18 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
+            // Honour the user's "Group anime seasons" toggle so /discover behaves
+            // like /catalog over in the addon. Anonymous visitors have no UID and
+            // fall through to the default-grouped behaviour.
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var groupSeasonsFromConfig = configuration?.disableSeasonGrouping != true;
+
             // Search runs as ListType.Search; the active tab is ignored while a query
             // is present. groupSeasons=false during search matches the addon's Stremio-
             // side behaviour — collapsing seasons rewrites titles to the shortest
             // variant which fights the "find this specific anime" intent.
             var listForCall = hasSearch ? ListType.Search : activeList;
-            var groupSeasonsForCall = !hasSearch;
+            var groupSeasonsForCall = !hasSearch && groupSeasonsFromConfig;
             var metas = tokenData.anime_service switch
             {
                 AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
