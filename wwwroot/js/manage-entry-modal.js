@@ -287,6 +287,18 @@
     }
 
     function fadeOutCard(card) {
+        // Honour prefers-reduced-motion — skip the 280ms transform/opacity
+        // animation and remove the card immediately. The CSS @media rule
+        // already nulls transitions globally, but inline styles below set
+        // explicit transition properties that would override the CSS, so
+        // we have to short-circuit at the JS layer too.
+        var reduceMotion = window.matchMedia &&
+            window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (reduceMotion) {
+            if (card.parentNode) card.parentNode.removeChild(card);
+            return;
+        }
+
         // Smoothly collapse the card so the grid rows don't jump under the
         // user's eye. Width:0 + opacity:0 + the existing transition makes the
         // surrounding cards reflow into the gap.
