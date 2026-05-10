@@ -193,7 +193,10 @@ namespace AnimeList.Services
             // Mirror the catalog Meta builder so /anime/{id} renders consistent
             // hero chrome — score badge, "TV · 13 eps · 2026" info row.
             var meanScore = (double?)json["mean"];
-            var episodeCount = (int?)json["num_episodes"];
+            // Renamed from `episodeCount` to avoid shadowing the same name
+            // declared in the synthetic-videos fallback block further down
+            // in this method.
+            var numEps = (int?)json["num_episodes"];
             int? releaseYear = null;
             var startSeason = json["start_season"];
             if (startSeason != null && startSeason.Type != JTokenType.Null)
@@ -213,7 +216,7 @@ namespace AnimeList.Services
                     .Where(n => !string.IsNullOrEmpty(n))
                     .ToList(),
                 score = meanScore > 0 ? Math.Round(meanScore.Value, 1) : (double?)null,
-                episodes = episodeCount > 0 ? episodeCount : null,
+                episodes = numEps > 0 ? numEps : null,
                 year = releaseYear,
                 format = NormalizeFormat(mediaType),
             };

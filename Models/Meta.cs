@@ -54,6 +54,13 @@ namespace AnimeList.Models
         public List<Link> links { get; set; } = [];
         public string entryId { get; set; }
         public string entryStatus { get; set; }
+
+        // Slim Meta entries (id + name + poster + score + format + year +
+        // episodes) for the "audience also liked" carousel on the detail
+        // page. Populated by GetAnimeByIdAsync per service when the
+        // upstream provides recommendation data; null/empty on services /
+        // entries without recommendations support.
+        public List<Meta> recommendations { get; set; } = [];
         // Tells Stremio this series has scheduled / upcoming episodes so it renders the
         // "Upcoming" badge for videos whose `released` date is in the future. defaultVideoId
         // is intentionally null — Stremio uses the videos[] array to decide what to play.
