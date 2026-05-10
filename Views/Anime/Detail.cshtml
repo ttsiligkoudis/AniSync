@@ -1,0 +1,164 @@
+@model AnimeList.Controllers.AnimeDetailViewModel
+@{
+    ViewData["BodyClass"] = "anime-detail-page";
+    var a = Model.Anime;
+
+    if (a == null)
+    {
+        <div class="page-header">
+            <h1 class="page-title">Anime not found</h1>
+            <p class="page-subtitle">We couldn't pull metadata for this anime — it may be missing from the cross-service mapping or the upstream is temporarily down.</p>
+        </div>
+        <div class="hero-ctas" style="justify-content: center;">
+            <a class="hero-cta hero-cta-primary" href="/discover">Browse anime</a>
+            <a class="hero-cta hero-cta-secondary" href="/">Dashboard</a>
+        </div>
+        return;
+    }
+
+    var canEdit = !Model.AnonymousUser && !string.IsNullOrEmpty(Model.ConfigUid);
+
+    // Group external links by category so the page shows distinct sections
+    // (Streaming, Studio, Character, Similar, etc.) rather than one flat list.
+    var linksByCategory = (a.links ?? new())
+        .Where(l => !string.IsNullOrEmpty(l.url) && !string.IsNullOrEmpty(l.name))
+        // The "Manage" link is the standalone-page hand-off the addon uses;
+        // we have a proper Edit button on this page, so the link would be
+        // duplication. Filter it out.
+        .Where(l => !string.Equals(l.category, "Manage", StringComparison.OrdinalIgnoreCase))
+        .GroupBy(l => string.IsNullOrEmpty(l.category) ? "Links" : l.category)
+        .ToList();
+
+    var hasYouTube = a.trailerStreams?.Count > 0
+        && !string.IsNullOrEmpty(a.trailerStreams[0]?.ytId);
+}
+
+@* Hero block — backdrop image (when available) + poster + title + meta info.
+   Falls back to a flat dark hero when the backdrop is missing so the layout
+   doesn't collapse on entries without banner art. *@
+<section class="anime-detail-hero @(string.IsNullOrEmpty(a.background) ? "anime-detail-hero-flat" : "")">
+    @if (!string.IsNullOrEmpty(a.background))
+    {
+        <div class="anime-detail-backdrop" style="background-image: url('@a.background');"></div>
+        <div class="anime-detail-backdrop-shade"></div>
+    }
+    <div class="anime-detail-hero-body">
+        @if (!string.IsNullOrEmpty(a.poster))
+        {
+            <img class="anime-detail-poster" src="@a.poster" alt="@a.name" />
+        }
+        else
+        {
+            <div class="anime-detail-poster anime-detail-poster-placeholder"></div>
+        }
+        <div class="anime-detail-meta">
+            <h1 class="anime-detail-title">@a.name</h1>
+            @{
+                var infoBits = new List<string>();
+                if (!string.IsNullOrEmpty(a.format)) infoBits.Add(a.format);
+                if (a.episodes is int eps && eps > 0) infoBits.Add($"{eps} ep{(eps > 1 ? "s" : "")}");
+                if (a.year is int yr && yr > 0) infoBits.Add(yr.ToString());
+            }
+            @if (infoBits.Count > 0)
+            {
+                <div class="anime-detail-info">@string.Join(" · ", infoBits)</div>
+            }
+            @if (a.score is double sc && sc > 0)
+            {
+                <div class="anime-detail-score">★ @sc.ToString("0.0")</div>
+            }
+            @if (a.genres?.Count > 0)
+            {
+                <div class="anime-detail-genres">
+                    @foreach (var g in a.genres.Take(8))
+                    {
+                        <span class="genre-chip">@g</span>
+                    }
+                </div>
+            }
+            <div class="anime-detail-actions">
+                @if (canEdit)
+                {
+                    @* data-open-modal hook: manage-entry-modal.js intercepts
+                       the click and opens the inline editor for this anime,
+                       same code path the cards use. *@
+                    <button type="button" class="hero-cta hero-cta-primary"
+                            data-open-modal data-meta-id="@a.id" data-meta-name="@a.name">
+                        Edit entry
+                    </button>
+                }
+                else if (!Model.AnonymousUser)
+                {
+                    <a class="hero-cta hero-cta-secondary" href="@Url.Action("Configure", "Home")">Configure to edit</a>
+                }
+                @if (hasYouTube)
+                {
+                    var trailer = a.trailerStreams[0];
+                    <a class="hero-cta hero-cta-secondary"
+                       href="https://www.youtube.com/watch?v=@trailer.ytId"
+                       target="_blank" rel="noreferrer noopener">
+                        Watch trailer
+                    </a>
+                }
+            </div>
+        </div>
+    </div>
+</section>
+
+@if (!string.IsNullOrEmpty(a.description))
+{
+    <section class="anime-detail-section">
+        <h2 class="anime-detail-section-title">Synopsis</h2>
+        <p class="anime-detail-synopsis">@a.description</p>
+    </section>
+}
+
+@if (a.videos?.Count > 0)
+{
+    <section class="anime-detail-section">
+        <h2 class="anime-detail-section-title">Episodes <span class="anime-detail-section-count">(@a.videos.Count)</span></h2>
+        @* List rather than a poster grid: each row is one episode with its
+           thumbnail (if any), title, episode number, and air date. The list
+           scrolls on long-running shows; no pagination yet. *@
+        <ol class="anime-detail-episodes" reversed="false">
+            @foreach (var v in a.videos)
+            {
+                <li class="anime-detail-episode">
+                    @if (!string.IsNullOrEmpty(v.thumbnail))
+                    {
+                        <img class="anime-detail-episode-thumb" src="@v.thumbnail" alt="" loading="lazy" />
+                    }
+                    else
+                    {
+                        <div class="anime-detail-episode-thumb anime-detail-episode-thumb-placeholder"></div>
+                    }
+                    <div class="anime-detail-episode-body">
+                        <span class="anime-detail-episode-number">Episode @v.episode</span>
+                        <span class="anime-detail-episode-title">@(string.IsNullOrEmpty(v.title) ? $"Episode {v.episode}" : v.title)</span>
+                        @if (!string.IsNullOrEmpty(v.released))
+                        {
+                            <span class="anime-detail-episode-released">@v.released.Substring(0, Math.Min(10, v.released.Length))</span>
+                        }
+                    </div>
+                </li>
+            }
+        </ol>
+    </section>
+}
+
+@foreach (var group in linksByCategory)
+{
+    <section class="anime-detail-section">
+        <h2 class="anime-detail-section-title">@group.Key</h2>
+        <ul class="anime-detail-link-list">
+            @foreach (var link in group)
+            {
+                <li>
+                    <a class="anime-detail-link" href="@link.url" target="_blank" rel="noreferrer noopener">
+                        @link.name
+                    </a>
+                </li>
+            }
+        </ul>
+    </section>
+}

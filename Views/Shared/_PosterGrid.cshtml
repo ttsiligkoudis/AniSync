@@ -6,26 +6,28 @@
 }
 
 @* Shared poster-grid renderer for the web-app pages (Library, Discover, future
-   list-type tabs, future search). Cards link to the existing config-scoped
-   Manage Entry page when ConfigUid is set; otherwise (anonymous Discover) the
-   cards render as inert non-anchor divs so a click doesn't dead-end at /.
+   list-type tabs, future search). Cards link to /anime/{id} for the detail
+   page; the modal opens from the detail page's Edit button or via the +1
+   quick-action button on the card itself.
 
    StreamD-style card chrome:
      - Progress badge overlay (Ep N / Total) top-left when progress > 0 — only
        populated by user-list catalogs (Watching / Completed / etc.).
      - Score badge overlay (★ N.N) on the poster bottom-left when score > 0.
+     - +1 button bottom-right — bumps user's progress by one episode without
+       leaving the page (only when the entry has user-list context).
      - Title under the poster (clamped to 2 lines).
-     - Info row "format · X eps · year" underneath the title, joining whichever
-       of the three fields the per-service catalog query populated. Each chunk
-       is independently optional. *@
+     - Info row "format · X eps · year" underneath the title. *@
 @if (Model.Items?.Count > 0)
 {
     <div class="@wrapperClass">
         @foreach (var meta in Model.Items)
         {
-            var manageHref = !string.IsNullOrEmpty(Model.ConfigUid)
-                ? $"/{Model.ConfigUid}/Meta/ManageEntry/{meta.id}"
-                : null;
+            // All cards link to the new /anime/{id} detail page regardless of
+            // login state. Anonymous users can browse anime detail; the Edit
+            // button on the detail page only renders for logged-in non-
+            // anonymous users with a resolved UID.
+            var detailHref = $"/anime/{meta.id}";
 
             // Build the format · eps · year info row from whichever bits the
             // service surfaced. Joined with a middle-dot separator to match the
@@ -38,96 +40,47 @@
 
             var hasScore = meta.score.HasValue && meta.score.Value > 0;
             var hasProgress = meta.progress.HasValue && meta.progress.Value > 0;
-            // Build the progress label: "5 / 12" when total episodes is known,
-            // "Ep 5" when only the user's count is. The ratio reads more useful
-            // when total is available so the user sees "halfway through".
             var progressLabel = hasProgress
                 ? (meta.episodes is int totalEps && totalEps > 0
                     ? $"{meta.progress!.Value} / {totalEps}"
                     : $"Ep {meta.progress!.Value}")
                 : null;
 
-            var cardClass = manageHref != null ? "library-card" : "library-card library-card-inert";
-
-            if (manageHref != null)
-            {
-                @* data-meta-id + data-meta-name let the inline Manage Entry
-                   modal (wwwroot/js/manage-entry-modal.js) intercept the
-                   click and edit inline rather than navigating to the
-                   standalone Manage Entry page. The href stays as the
-                   non-JS fallback so progressive enhancement works
-                   correctly — JS off / load failure → page navigation.
-
-                   data-meta-status / data-meta-progress / data-meta-total are
-                   set when the entry has user-list context (entryStatus is
-                   non-null). They drive the +1-episode quick-action button:
-                   the JS reads the current values straight off the DOM,
-                   computes progress + 1, and POSTs to the save endpoint. *@
-                <a class="@cardClass" href="@manageHref" title="@meta.name"
-                   data-meta-id="@meta.id" data-meta-name="@meta.name"
-                   @(string.IsNullOrEmpty(meta.entryStatus) ? "" : $"data-meta-status=\"{meta.entryStatus}\"")
-                   @(meta.progress.HasValue ? $"data-meta-progress=\"{meta.progress.Value}\"" : "")
-                   @(meta.episodes is int totalE && totalE > 0 ? $"data-meta-total=\"{totalE}\"" : "")>
-                    <div class="library-card-poster-wrap">
-                        @if (!string.IsNullOrEmpty(meta.poster))
-                        {
-                            <img class="library-card-poster" src="@meta.poster" alt="@meta.name" loading="lazy" />
-                        }
-                        else
-                        {
-                            <div class="library-card-poster library-card-poster-placeholder"></div>
-                        }
-                        @if (hasProgress)
-                        {
-                            <span class="library-card-progress">@progressLabel</span>
-                        }
-                        @if (hasScore)
-                        {
-                            <span class="library-card-score">★ @meta.score.Value.ToString("0.0")</span>
-                        }
-                        @* Quick-action button — bottom-right, only when the
-                           card has user-list context. Tapping it bumps the
-                           user's progress by 1 episode without opening the
-                           modal. The button stops click propagation so the
-                           parent anchor doesn't navigate. *@
-                        @if (!string.IsNullOrEmpty(meta.entryStatus))
-                        {
-                            <button type="button" class="library-card-plus"
-                                    aria-label="Mark next episode watched"
-                                    title="+1 episode">+1</button>
-                        }
-                    </div>
-                    <span class="library-card-title">@meta.name</span>
-                    @if (infoBits.Count > 0)
+            <a class="library-card" href="@detailHref" title="@meta.name"
+               data-meta-id="@meta.id" data-meta-name="@meta.name"
+               @(string.IsNullOrEmpty(meta.entryStatus) ? "" : $"data-meta-status=\"{meta.entryStatus}\"")
+               @(meta.progress.HasValue ? $"data-meta-progress=\"{meta.progress.Value}\"" : "")
+               @(meta.episodes is int totalE && totalE > 0 ? $"data-meta-total=\"{totalE}\"" : "")>
+                <div class="library-card-poster-wrap">
+                    @if (!string.IsNullOrEmpty(meta.poster))
                     {
-                        <span class="library-card-meta">@infoLine</span>
+                        <img class="library-card-poster" src="@meta.poster" alt="@meta.name" loading="lazy" />
                     }
-                </a>
-            }
-            else
-            {
-                <div class="@cardClass" title="@meta.name">
-                    <div class="library-card-poster-wrap">
-                        @if (!string.IsNullOrEmpty(meta.poster))
-                        {
-                            <img class="library-card-poster" src="@meta.poster" alt="@meta.name" loading="lazy" />
-                        }
-                        else
-                        {
-                            <div class="library-card-poster library-card-poster-placeholder"></div>
-                        }
-                        @if (hasScore)
-                        {
-                            <span class="library-card-score">★ @meta.score.Value.ToString("0.0")</span>
-                        }
-                    </div>
-                    <span class="library-card-title">@meta.name</span>
-                    @if (infoBits.Count > 0)
+                    else
                     {
-                        <span class="library-card-meta">@infoLine</span>
+                        <div class="library-card-poster library-card-poster-placeholder"></div>
+                    }
+                    @if (hasProgress)
+                    {
+                        <span class="library-card-progress">@progressLabel</span>
+                    }
+                    @if (hasScore)
+                    {
+                        <span class="library-card-score">★ @meta.score.Value.ToString("0.0")</span>
+                    }
+                    @if (!string.IsNullOrEmpty(meta.entryStatus))
+                    {
+                        <button type="button" class="library-card-plus"
+                                aria-label="Mark next episode watched"
+                                title="+1 episode">+1</button>
                     }
                 </div>
-            }
+                <span class="library-card-title">@meta.name</span>
+                @if (infoBits.Count > 0)
+                {
+                    <span class="library-card-meta">@infoLine</span>
+                }
+            </a>
         }
     </div>
 }

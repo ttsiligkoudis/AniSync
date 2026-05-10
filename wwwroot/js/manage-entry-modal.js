@@ -453,13 +453,17 @@
             });
     }
 
-    // Card click interception. Targets only <a class="library-card"> elements
-    // that carry a data-meta-id (the link variant; inert anonymous cards are
-    // <div>s and don't match). Falls back to default navigation if the data
-    // attribute is missing — keeps the JS as progressive enhancement.
-    // The +1 button inside the card is handled first — its click event
-    // bubbles up through the anchor, but stopPropagation here keeps the
-    // parent anchor's default-prevented click from also opening the modal.
+    // Click interception. Two hooks live on the document:
+    //   1. button.library-card-plus inside a card → +1 quick-action.
+    //      preventDefault + stopPropagation so the parent anchor doesn't
+    //      navigate to the detail page on this click.
+    //   2. [data-open-modal] anywhere (typically the Edit button on the
+    //      /anime/{id} detail page) → open the modal for that meta id.
+    //
+    // Cards themselves are <a href="/anime/{id}"> and click-navigate to the
+    // detail page by default — no JS interception. The modal is reserved
+    // for explicit edit-intent actions (Edit button, +1 quick-action) so
+    // the card surface stays predictable.
     document.addEventListener('click', function (e) {
         var plusBtn = e.target.closest && e.target.closest('button.library-card-plus');
         if (plusBtn) {
@@ -469,10 +473,13 @@
             if (owningCard) bumpProgress(plusBtn, owningCard);
             return;
         }
-        var card = e.target.closest && e.target.closest('a.library-card[data-meta-id]');
-        if (!card) return;
-        e.preventDefault();
-        openModal(card.getAttribute('data-meta-id'), card.getAttribute('data-meta-name'), card);
+        var modalTrigger = e.target.closest && e.target.closest('[data-open-modal][data-meta-id]');
+        if (modalTrigger) {
+            e.preventDefault();
+            openModal(modalTrigger.getAttribute('data-meta-id'),
+                      modalTrigger.getAttribute('data-meta-name'),
+                      /* card */ null);
+        }
     });
 
     closeBtn.addEventListener('click', closeModal);
