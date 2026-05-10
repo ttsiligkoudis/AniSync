@@ -357,6 +357,30 @@ public class HomeController : Controller
     }
 
     /// <summary>
+    /// Stremio addon configuration page — split off from /configure so users
+    /// editing their list account don't have to scroll past the catalogs /
+    /// streams / install URL panel that's only relevant to the Stremio
+    /// integration. Reuses the Configure action's identity + flag resolution
+    /// verbatim and returns the same ConfigureViewModel; the Stremio.cshtml
+    /// view just renders a different subset of sections.
+    /// </summary>
+    [Route("/stremio")]
+    public Task<IActionResult> Stremio() => RenderConfigure("Stremio", config: null);
+
+    private async Task<IActionResult> RenderConfigure(string viewName, string config)
+    {
+        var result = await Configure(config);
+        if (result is ViewResult viewResult)
+        {
+            viewResult.ViewName = viewName;
+            return viewResult;
+        }
+        // Non-view results (RedirectResult / NotFound / etc.) flow through
+        // unchanged so the Stremio route inherits Configure's redirect logic.
+        return result;
+    }
+
+    /// <summary>
     /// Generates a fresh scrobble token for the given UID, invalidating any existing webhook
     /// URLs. Returns the new token so the JS can update the displayed URL without a reload.
     /// </summary>

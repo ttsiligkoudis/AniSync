@@ -1,0 +1,309 @@
+@model ConfigureViewModel
+@{
+    ViewData["ActiveNav"] = "stremio";
+    var stremioStr = "https://web.stremio.com/#/addons?addon=";
+    var cfg = Model.Configuration;
+}
+
+@* Stremio addon configuration — split off from /configure so users editing
+   their list account don't have to scroll past the catalogs / streams / install
+   URL panel that's only relevant to the Stremio integration. The shared
+   _ConfigurePageScript partial provides every JS handler this page needs;
+   selectors that don't match (linked accounts, danger zone, etc.) silently
+   no-op so the same script also drives /configure's site-side controls. *@
+<header class="page-header">
+    <h1 class="page-title">Stremio addon</h1>
+    <p class="page-subtitle">Catalogs · streams · install URL · scrobble webhook</p>
+</header>
+
+@if (Model.IsLoggedIn)
+{
+    <!-- ─── CATALOGS ────────────────────────────────────────────────── -->
+    <section class="section-card">
+        <span class="section-title">Catalogs</span>
+        <p class="section-description">Choose which catalogs and stream sources AniSync exposes to Stremio.</p>
+
+        <div class="catalogs-grid">
+            <span class="catalog-col-spacer"></span>
+            <span class="catalog-col-label">Enable</span>
+            <span class="catalog-col-label">Discover Only</span>
+            <hr class="option-sep" />
+
+            @* Select-all row — flips every row in the column it sits under. The aggregate *@
+            @* state of the master toggles is kept in sync via JS as users toggle individual *@
+            @* rows. *@
+            <span class="option-name option-name-all">Select all</span>
+            <label class="switch">
+                <input type="checkbox" id="enableAll" />
+                <span class="slider"></span>
+            </label>
+            <label class="switch">
+                <input type="checkbox" id="discoverOnlyAll" />
+                <span class="slider"></span>
+            </label>
+            <hr class="option-sep" />
+
+            @if (!Model.AnonymousUser)
+            {
+                <span class="option-name">Currently watching</span>
+                <label class="switch">
+                    <input type="checkbox" id="showCurrent" class="catalogCheck" @(cfg.showCurrent ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
+                <label class="switch @(!cfg.showCurrent ? "switch-disabled" : "")">
+                    <input type="checkbox" id="discoverOnlyCurrent" class="discoverCheck" @(cfg.discoverOnlyCurrent ? "checked" : "") @(!cfg.showCurrent ? "disabled" : "") />
+                    <span class="slider"></span>
+                </label>
+                <hr class="option-sep" />
+
+                <span class="option-name">Completed</span>
+                <label class="switch">
+                    <input type="checkbox" id="showCompleted" class="catalogCheck" @(cfg.showCompleted ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
+                <label class="switch @(!cfg.showCompleted ? "switch-disabled" : "")">
+                    <input type="checkbox" id="discoverOnlyCompleted" class="discoverCheck" @(cfg.discoverOnlyCompleted ? "checked" : "") @(!cfg.showCompleted ? "disabled" : "") />
+                    <span class="slider"></span>
+                </label>
+                <hr class="option-sep" />
+
+                <span class="option-name">Plan to Watch</span>
+                <label class="switch">
+                    <input type="checkbox" id="showPlanning" class="catalogCheck" @(cfg.showPlanning ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
+                <label class="switch @(!cfg.showPlanning ? "switch-disabled" : "")">
+                    <input type="checkbox" id="discoverOnlyPlanning" class="discoverCheck" @(cfg.discoverOnlyPlanning ? "checked" : "") @(!cfg.showPlanning ? "disabled" : "") />
+                    <span class="slider"></span>
+                </label>
+                <hr class="option-sep" />
+
+                <span class="option-name">On Hold</span>
+                <label class="switch">
+                    <input type="checkbox" id="showPaused" class="catalogCheck" @(cfg.showPaused ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
+                <label class="switch @(!cfg.showPaused ? "switch-disabled" : "")">
+                    <input type="checkbox" id="discoverOnlyPaused" class="discoverCheck" @(cfg.discoverOnlyPaused ? "checked" : "") @(!cfg.showPaused ? "disabled" : "") />
+                    <span class="slider"></span>
+                </label>
+                <hr class="option-sep" />
+
+                <span class="option-name">Dropped</span>
+                <label class="switch">
+                    <input type="checkbox" id="showDropped" class="catalogCheck" @(cfg.showDropped ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
+                <label class="switch @(!cfg.showDropped ? "switch-disabled" : "")">
+                    <input type="checkbox" id="discoverOnlyDropped" class="discoverCheck" @(cfg.discoverOnlyDropped ? "checked" : "") @(!cfg.showDropped ? "disabled" : "") />
+                    <span class="slider"></span>
+                </label>
+                <hr class="option-sep" />
+
+                @* AniList exposes REPEATING as a real status; MAL has an is_rewatching flag the *@
+                @* MalService surfaces as a synthetic Rewatching list. Kitsu has no equivalent. *@
+                @if (Model.IsAnilist || Model.IsMal)
+                {
+                    <span class="option-name">Rewatching</span>
+                    <label class="switch">
+                        <input type="checkbox" id="showRepeating" class="catalogCheck" @(cfg.showRepeating ? "checked" : "") />
+                        <span class="slider"></span>
+                    </label>
+                    <label class="switch @(!cfg.showRepeating ? "switch-disabled" : "")">
+                        <input type="checkbox" id="discoverOnlyRepeating" class="discoverCheck" @(cfg.discoverOnlyRepeating ? "checked" : "") @(!cfg.showRepeating ? "disabled" : "") />
+                        <span class="slider"></span>
+                    </label>
+                    <hr class="option-sep" />
+                }
+            }
+
+            <span class="option-name">Trending now</span>
+            <label class="switch">
+                <input type="checkbox" id="showTrending" class="catalogCheck" @(cfg.showTrending ? "checked" : "") />
+                <span class="slider"></span>
+            </label>
+            <label class="switch @(!cfg.showTrending ? "switch-disabled" : "")">
+                <input type="checkbox" id="discoverOnlyTrending" class="discoverCheck" @(cfg.discoverOnlyTrending ? "checked" : "") @(!cfg.showTrending ? "disabled" : "") />
+                <span class="slider"></span>
+            </label>
+            <hr class="option-sep" />
+
+            <span class="option-name">Seasonal Anime</span>
+            <label class="switch">
+                <input type="checkbox" id="showSeasonal" class="catalogCheck" @(cfg.showSeasonal ? "checked" : "") />
+                <span class="slider"></span>
+            </label>
+            <label class="switch @(!cfg.showSeasonal ? "switch-disabled" : "")">
+                <input type="checkbox" id="discoverOnlySeasonal" class="discoverCheck" @(cfg.discoverOnlySeasonal ? "checked" : "") @(!cfg.showSeasonal ? "disabled" : "") />
+                <span class="slider"></span>
+            </label>
+            <hr class="option-sep" />
+
+            <span class="option-name">Airing This Week</span>
+            <label class="switch">
+                <input type="checkbox" id="showAiring" class="catalogCheck" @(cfg.showAiring ? "checked" : "") />
+                <span class="slider"></span>
+            </label>
+            <label class="switch @(!cfg.showAiring ? "switch-disabled" : "")">
+                <input type="checkbox" id="discoverOnlyAiring" class="discoverCheck" @(cfg.discoverOnlyAiring ? "checked" : "") @(!cfg.showAiring ? "disabled" : "") />
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        @* Group multi-cour franchises into a single card via the IMDb / TMDB cross-service
+           mapping. Disable this to surface every cour as its own card with the service-native
+           id (kitsu:N / anilist:N / mal:N). *@
+        <div class="streams-grid">
+            <div class="stream-option">
+                <div class="option-name-wrap">
+                    <span class="option-name">Group anime seasons</span>
+                    <span class="option-name-sub">Collapse multi-cour franchises into a single catalog card. Off shows every cour separately.</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="groupSeasons" @(Model.GroupSeasons ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+    </section>
+
+    <!-- ─── STREAMS ─────────────────────────────────────────────────── -->
+    <section class="section-card">
+        <span class="section-title">Streams</span>
+        <p class="section-description">Choose what AniSync attaches to each episode in Stremio.</p>
+
+        <div class="streams-grid">
+            @* Manage Entry and Auto-track touch the user's list, so they only make sense *@
+            @* when there's an account behind the install. *@
+            @if (!Model.AnonymousUser)
+            {
+                <div class="stream-option">
+                    <div class="option-name-wrap">
+                        <span class="option-name">Manage Entry</span>
+                        <span class="option-name-sub">Quick-edit progress, score and notes from Stremio.</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="showManageEntry" @(Model.ShowManageEntry ? "checked" : "") />
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div class="stream-option">
+                    <div class="option-name-wrap">
+                        <span class="option-name">Auto-track progress</span>
+                        <span class="option-name-sub">Update your list when you start an episode in Stremio.</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="autoTrackProgress" @(Model.AutoTrackProgress ? "checked" : "") />
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            }
+
+            <div class="stream-option">
+                <div class="option-name-wrap">
+                    <span class="option-name">External services</span>
+                    <span class="option-name-sub">Crunchyroll, Netflix, HiDive, …</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="showExternalStreams" @(cfg.showExternalStreams ? "checked" : "") />
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+    </section>
+
+    <!-- ─── INSTALLATION OPTIONS ────────────────────────────────────── -->
+    <section class="section-card">
+        <span class="section-title">Installation Options</span>
+        <p class="section-description">
+            Install AniSync using your preferred method. The install URL updates automatically
+            when you change the toggles above — Stremio caches manifests, so a fresh install
+            is needed to pick up changes.
+        </p>
+
+        <div class="install-inner-card">
+            <div class="install-header">
+                <img src="/logo.png" alt="AniSync" class="install-icon-img" />
+                <div class="install-header-text">
+                    <h3>Stremio</h3>
+                    <p>Install to Stremio or other Stremio-compatible clients using the Manifest URL.</p>
+                </div>
+            </div>
+
+            <hr class="install-divider" />
+
+            <a id="stremioUrl" class="btn-primary-action btn-install" href="stremio://@Context.Request.Host">
+                Install to Stremio
+            </a>
+            <a id="stremioWebUrl" class="btn-secondary-action" target="_blank" rel="noopener" href="@($"{stremioStr}{Context.Request.Scheme}://{Context.Request.Host}")">
+                Install to Stremio Web
+            </a>
+
+            <p class="manifest-url-label">Direct Manifest URL</p>
+            <div class="manifest-url-row">
+                <input id="manifestUrlInput" class="manifest-url-input" readonly type="text" value="" />
+                <button id="copyManifestBtn" class="btn-icon-copy" type="button" title="Copy URL" aria-label="Copy URL">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </section>
+
+    @if (!Model.AnonymousUser)
+    {
+        <!-- ─── HOME SERVER SYNC ────────────────────────────────────────── -->
+        @* Webhook ingestion from Plex / Jellyfin / Emby. The URL below points to a single
+           endpoint that auto-detects which server is calling — users only ever copy one URL. *@
+        <section class="section-card">
+            <span class="section-title">Home Server Sync</span>
+            <p class="section-description">
+                Mirror your watch progress from Plex, Jellyfin, or Emby into your linked anime
+                trackers automatically. Paste the URL below into your media server's webhook
+                settings — same URL for any of the three.
+            </p>
+
+            <p class="manifest-url-label">Webhook URL</p>
+            <div class="manifest-url-row">
+                <input id="scrobbleUrlInput" class="manifest-url-input" readonly type="text" value="" />
+                <button id="copyScrobbleBtn" class="btn-icon-copy" type="button" title="Copy URL" aria-label="Copy URL">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="btn-action-row" style="margin-top: 0.75rem;">
+                <button id="rotateScrobbleBtn" class="btn-ghost btn-ghost-sm" type="button">Rotate token</button>
+                <span class="option-name-sub" style="margin-left: 0.5rem;">
+                    Anyone with this URL can scrobble onto your account. Rotating invalidates the old URL.
+                </span>
+            </div>
+
+            <p class="manifest-url-label" style="margin-top: 1.5rem;">Plex Home username (optional)</p>
+            <div class="manifest-url-row">
+                <input id="plexUsernameInput" class="manifest-url-input" type="text"
+                       placeholder="(accept any Plex username)"
+                       value="@(Model.PlexUsername ?? "")" />
+                <button id="savePlexUsernameBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;">Save</button>
+            </div>
+            <p class="option-name-sub" style="margin-top: 0.5rem;">
+                Set this only if you share your Plex server with others. Plex events from any
+                other username will be ignored. Jellyfin / Emby don't need this — their webhook
+                payloads only fire for the user who started playback.
+            </p>
+        </section>
+    }
+}
+else
+{
+    <div class="card-section">
+        <p class="hint-text">Sign in on the Configure page first, then come back here to set up the Stremio addon.</p>
+        <a class="btn-primary-action btn-login" href="@Url.Action("Configure", "Home")">Configure account</a>
+    </div>
+}
+
+@await Html.PartialAsync("_ConfigurePageScript")
