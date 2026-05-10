@@ -411,7 +411,12 @@ namespace AnimeList.Services
                                 node {
                                     mediaRecommendation {
                                         id
+                                        format
+                                        episodes
+                                        averageScore
+                                        seasonYear
                                         title { english romaji }
+                                        coverImage { large }
                                     }
                                 }
                             }
@@ -535,11 +540,35 @@ namespace AnimeList.Services
                         : (string)rec.title?.english;
                     if (string.IsNullOrEmpty(name)) continue;
 
+                    // Two outputs per recommendation:
+                    //   1. The Stremio-side "Similar" Link (kept for the addon's
+                    //      meta JSON consumers — Stremio uses these for "More
+                    //      like this" navigation in the addon flow).
+                    //   2. A slim Meta in anime.recommendations for the web
+                    //      app's detail-page carousel. Same id / name with
+                    //      poster + score + format + year + episodes pulled
+                    //      from the extended GraphQL subselection.
                     anime.links.Add(new Link
                     {
                         name = name,
                         category = "Similar",
                         url = $"https://anilist.co/anime/{recId.Value}",
+                    });
+
+                    anime.recommendations.Add(new Meta
+                    {
+                        id = $"{anilistPrefix}{recId.Value}",
+                        name = name,
+                        poster = (string)rec.coverImage?.large,
+                        type = IsMovieFormat((string)rec.format)
+                            ? MetaType.movie.ToString()
+                            : MetaType.series.ToString(),
+                        score = rec.averageScore != null
+                            ? Math.Round((double)rec.averageScore / 10, 1)
+                            : (double?)null,
+                        episodes = (int?)rec.episodes,
+                        year = (int?)rec.seasonYear,
+                        format = NormalizeFormat((string)rec.format),
                     });
                 }
             }

@@ -20,6 +20,7 @@ namespace AnimeList.Controllers
         private readonly ITmdbService _tmdbService;
         private readonly IAnimeMappingService _mappingService;
         private readonly IConfigStore _configStore;
+        private readonly IFillerListService _fillerListService;
         private readonly ILogger<AnimeController> _logger;
 
         public AnimeController(
@@ -30,6 +31,7 @@ namespace AnimeList.Controllers
             ITmdbService tmdbService,
             IAnimeMappingService mappingService,
             IConfigStore configStore,
+            IFillerListService fillerListService,
             ILogger<AnimeController> logger)
         {
             _tokenService = tokenService;
@@ -39,6 +41,7 @@ namespace AnimeList.Controllers
             _tmdbService = tmdbService;
             _mappingService = mappingService;
             _configStore = configStore;
+            _fillerListService = fillerListService;
             _logger = logger;
         }
 
@@ -111,6 +114,15 @@ namespace AnimeList.Controllers
             }
 
             if (anime == null) return NotFound();
+
+            // Filler / canon enrichment — same pattern as MetaController's
+            // EnrichMetaWithFillerAsync used by the Stremio addon path.
+            // Episodes get a coloured emoji prefix (🟦 canon, 🟨 filler,
+            // 🟧 mixed) so the user can skip filler at a glance. Best-effort:
+            // failures swallow into the standard logger and the list renders
+            // without prefixes. Skipped for movie-shaped entries since
+            // AnimeFillerList is a per-episode dataset.
+            await TryEnrichWithFillerAsync(anime);
 
             // Resolve UID for logged-in users so the Edit button's data-meta-id
             // hooks the existing modal flow.
@@ -203,6 +215,41 @@ namespace AnimeList.Controllers
             AnimeService.Kitsu       => m.KitsuId.HasValue ? $"{kitsuPrefix}{m.KitsuId.Value}" : null,
             _                        => null,
         };
+
+        // Mutate the meta's videos[] in place, prefixing each title with a
+        // coloured emoji that signals the AnimeFillerList classification for
+        // that episode. Mirrors MetaController.EnrichMetaWithFillerAsync. Best-
+        // effort: any lookup failure / unknown show is silently a no-op so the
+        // page still renders without prefixes.
+        private async Task TryEnrichWithFillerAsync(Meta meta)
+        {
+            try
+            {
+                if (meta == null || string.IsNullOrEmpty(meta.name) ||
+                    meta.videos == null || meta.videos.Count == 0) return;
+
+                var categories = await _fillerListService.GetEpisodeCategoriesAsync(meta.name);
+                if (categories.Count == 0) return;
+
+                foreach (var video in meta.videos)
+                {
+                    if (!categories.TryGetValue(video.episode, out var category)) continue;
+                    var prefix = category switch
+                    {
+                        "canon"  => "🟦 ",
+                        "filler" => "🟨 ",
+                        "mixed"  => "🟧 ",
+                        _ => null,
+                    };
+                    if (!string.IsNullOrEmpty(prefix))
+                        video.title = prefix + (video.title ?? string.Empty);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AnimeController: filler enrichment failed for {Name}.", meta?.name);
+            }
+        }
     }
 
     /// <summary>

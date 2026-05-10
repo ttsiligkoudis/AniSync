@@ -61,13 +61,19 @@
     var canEdit = !Model.AnonymousUser && !string.IsNullOrEmpty(Model.ConfigUid);
 
     // Group external links by category so the page shows distinct sections
-    // (Streaming, Studio, Character, Similar, etc.) rather than one flat list.
+    // (Streaming, Studio, Character, etc.) rather than one flat list.
+    // Filters:
+    //   - "Manage" is the standalone-page hand-off the addon uses; we have a
+    //     proper Edit button on this page, so it'd be duplication.
+    //   - "Similar" links double the recommendations carousel below since the
+    //     carousel uses the richer Meta.recommendations data populated from
+    //     the same source. Keep the Stremio-facing Link entries on the meta
+    //     (they still flow through to the addon JSON), just don't render
+    //     them as a separate links section here.
     var linksByCategory = (a.links ?? new())
         .Where(l => !string.IsNullOrEmpty(l.url) && !string.IsNullOrEmpty(l.name))
-        // The "Manage" link is the standalone-page hand-off the addon uses;
-        // we have a proper Edit button on this page, so the link would be
-        // duplication. Filter it out.
         .Where(l => !string.Equals(l.category, "Manage", StringComparison.OrdinalIgnoreCase))
+        .Where(l => !string.Equals(l.category, "Similar", StringComparison.OrdinalIgnoreCase))
         .GroupBy(l => string.IsNullOrEmpty(l.category) ? "Links" : l.category)
         .ToList();
 
@@ -208,6 +214,25 @@
                 </li>
             }
         </ol>
+    </section>
+}
+
+@if (a.recommendations?.Count > 0)
+{
+    @* Recommendations carousel — slim Metas with full poster chrome,
+       rendered through the same _PosterGrid partial in scroll-row mode that
+       the dashboard's Continue Watching shelf uses. Each card links to
+       /anime/{id}, so users can chain into related anime without leaving
+       the app. Currently AniList-populated only; MAL/Kitsu primaries see
+       the existing Similar links flow via the Stremio addon path. *@
+    <section class="anime-detail-section">
+        <h2 class="anime-detail-section-title">Recommended</h2>
+        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+        {
+            Items = a.recommendations,
+            ConfigUid = Model.ConfigUid,
+            Variant = "scroll",
+        })
     </section>
 }
 
