@@ -47,6 +47,18 @@ namespace AnimeList.Models
         public string airStatus { get; set; }
         public string source { get; set; }
 
+        // Average episode runtime in minutes (AniList's `duration` field).
+        // Surfaced in the detail-page info row. null when the upstream
+        // didn't ship a value or the entry is a movie (where the format
+        // string already implies "single runtime").
+        public int? avgDuration { get; set; }
+
+        // Tags (themes like "Reincarnation", "Cyberpunk", "Coming-of-age")
+        // beyond the broad genres list. Top-ranked subset only — the full
+        // AniList tag list runs 30+ entries per anime. Detail page renders
+        // a small subdued chip strip beneath genres.
+        public List<string> tags { get; set; } = [];
+
         // User's watched-episode count for THIS entry, populated only when the
         // catalog response naturally includes list-status data (i.e. user-list
         // queries like Currently Watching / Completed; null on Trending /

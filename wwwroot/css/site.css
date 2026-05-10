@@ -2573,6 +2573,25 @@ body.modal-open {
     margin-top: 0.2rem;
 }
 
+/* Themes strip below genres — smaller / lighter than the genre chips so
+   the visual hierarchy stays "broad genres first, themes second". */
+.anime-detail-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-top: 0.05rem;
+}
+
+.anime-detail-tag {
+    padding: 0.15rem 0.55rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 999px;
+    color: #999;
+    font-size: 0.72rem;
+    font-weight: 500;
+}
+
 /* "By: KyoAni, MAPPA" production credit line. Linked studio names get a
    subtle underline-on-hover so they read as clickable without the heavy
    blue "Streaming" pill treatment used in the bottom link list. */

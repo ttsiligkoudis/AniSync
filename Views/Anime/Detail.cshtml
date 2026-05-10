@@ -115,6 +115,7 @@
                 var infoBits = new List<string>();
                 if (!string.IsNullOrEmpty(a.format)) infoBits.Add(a.format);
                 if (a.episodes is int eps && eps > 0) infoBits.Add($"{eps} ep{(eps > 1 ? "s" : "")}");
+                if (a.avgDuration is int dur && dur > 0) infoBits.Add($"~{dur} min");
                 if (a.year is int yr && yr > 0) infoBits.Add(yr.ToString());
                 if (!string.IsNullOrEmpty(a.source)) infoBits.Add(a.source);
             }
@@ -168,6 +169,18 @@
                     @foreach (var g in a.genres.Take(8))
                     {
                         <span class="genre-chip">@g</span>
+                    }
+                </div>
+            }
+            @if (a.tags?.Count > 0)
+            {
+                @* Themes — smaller / lighter chips below the genre row to
+                   read as secondary metadata. AniList-only currently;
+                   MAL/Kitsu primaries skip this row gracefully. *@
+                <div class="anime-detail-tags">
+                    @foreach (var t in a.tags)
+                    {
+                        <span class="anime-detail-tag">@t</span>
                     }
                 </div>
             }
