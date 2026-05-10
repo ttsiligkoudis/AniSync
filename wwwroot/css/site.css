@@ -33,10 +33,12 @@ body {
 
 main {
     margin: 0 auto;
-    /* Bottom padding clears the fixed bottom-nav (~64px tall + safe-area) so
-       the last row of content isn't covered. Desktop drops the bottom-nav
-       via media query and reduces this to the original 3rem. */
-    padding: 1.5rem 1.25rem 6rem;
+    /* Bottom padding clears the fixed bottom-nav (~60-65px tall, plus the
+       iOS home-indicator safe-area when present) so the last row of content
+       isn't covered. The literal value gives ~50px clearance over the nav
+       on Android and the env() adds the home-indicator inset on iOS. Desktop
+       drops the bottom-nav via media query and reduces this to 3rem. */
+    padding: 1.5rem 1.25rem calc(7.5rem + env(safe-area-inset-bottom, 0px));
     display: flex;
     height: 100%;
     align-items: center;
