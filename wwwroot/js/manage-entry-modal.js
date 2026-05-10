@@ -40,6 +40,7 @@
     var cancelBtn = modal.querySelector('.entry-modal-cancel');
     var closeBtn = modal.querySelector('.entry-modal-close');
     var saveBtn = formEl.querySelector('.entry-modal-save');
+    var deleteBtn = formEl.querySelector('.entry-modal-delete');
 
     // Status enum values per service. AnimeService enum: 0=Kitsu, 1=Anilist,
     // 2=MyAnimeList. Mirrors the dropdown in Views/Meta/ManageEntry.cshtml so
@@ -151,6 +152,8 @@
         activeCard = null;
         activeOriginalStatus = null;
         saveBtn.disabled = false;
+        deleteBtn.hidden = true;
+        deleteBtn.disabled = false;
 
         // Hand focus back to the element that opened the modal. Skips when
         // that element is no longer in the DOM (e.g., the card was removed
@@ -242,6 +245,13 @@
                 finishedInput.value = data.finishedAt || '';
                 rewatchInput.value = data.rewatchCount || 0;
                 notesInput.value = data.notes || '';
+                // Reveal the Delete button only when the entry actually
+                // exists on the user's list (data.status non-empty). For
+                // the create flow ("Add to List" pill on the detail page)
+                // the entry is virtual until first save, so deleting it
+                // is meaningless.
+                deleteBtn.hidden = !data.status;
+                deleteBtn.disabled = false;
                 loadingEl.hidden = true;
                 formEl.hidden = false;
                 saveBtn.disabled = false;
@@ -605,6 +615,68 @@
     closeBtn.addEventListener('click', closeModal);
     cancelBtn.addEventListener('click', closeModal);
     backdrop.addEventListener('click', closeModal);
+
+    // Delete button — short-circuits to a save with empty status (the
+    // server-side semantic for "remove from list" — same code path the
+    // status="None" dropdown option uses, factored to a button so users
+    // don't have to discover it via the dropdown). Confirm() is enough:
+    // delete is reversible by re-adding, and the modal already shows the
+    // anime title in the header so the user knows what's about to drop.
+    deleteBtn.addEventListener('click', function () {
+        if (!activeEntryId) return;
+        var name = titleEl.textContent || 'this entry';
+        if (!window.confirm('Remove ' + name + ' from your list?')) return;
+
+        deleteBtn.disabled = true;
+        saveBtn.disabled = true;
+        errorEl.hidden = true;
+
+        var totalForCard = parseInt(progressInput.max, 10) || null;
+        var cardForUpdate = activeCard;
+        var serviceForUpdate = activeService;
+        var originalStatusForUpdate = activeOriginalStatus;
+
+        fetch('/api/library/entry/save', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            },
+            body: JSON.stringify({ id: activeEntryId, status: '' }),
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data && data.success) {
+                    if (cardForUpdate) {
+                        // Card-context delete: fade the card out and
+                        // tick down the dashboard stats. Same path the
+                        // save handler uses when a status change moves
+                        // the entry off the current page's list.
+                        showToast('Removed');
+                        fadeOutCard(cardForUpdate);
+                        adjustStatsForTransition(serviceForUpdate, originalStatusForUpdate, '', totalForCard);
+                        closeModal();
+                    } else {
+                        // No card → modal opened from the detail page.
+                        // Reload so the hero / user-state pill catches
+                        // up with the new server state.
+                        try { sessionStorage.setItem('anisync-toast', 'Removed'); }
+                        catch (e) { /* private-browsing — toast is best-effort */ }
+                        window.location.reload();
+                    }
+                } else {
+                    showError('Delete failed. Try again.');
+                    deleteBtn.disabled = false;
+                    saveBtn.disabled = false;
+                }
+            })
+            .catch(function () {
+                showError('Network error deleting.');
+                deleteBtn.disabled = false;
+                saveBtn.disabled = false;
+            });
+    });
 
     seasonSelect.addEventListener('change', function () {
         loadEntry(seasonSelect.value, /* isInitial */ false);
