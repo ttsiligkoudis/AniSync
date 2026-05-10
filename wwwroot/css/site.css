@@ -1955,6 +1955,24 @@ body.modal-open {
     flex-direction: column;
     align-items: flex-start;
     gap: 0.05rem;
+    color: inherit;
+    text-decoration: none;
+}
+
+/* Linkable stat-cell variant — used by the "This Season" strip where each
+   cell deep-links into a relevant /discover filter. Adds a subtle hover
+   lift / border tint so the click affordance reads. Non-link cells (the
+   user stats panel) stay static. */
+a.stats-cell-link {
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+a.stats-cell-link:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.18);
+    text-decoration: none;
+    color: inherit;
+    transform: translateY(-1px);
 }
 
 .stats-icon {

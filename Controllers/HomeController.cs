@@ -17,19 +17,22 @@ public class HomeController : Controller
     private readonly IAnilistService _anilistService;
     private readonly IKitsuService _kitsuService;
     private readonly IMalService _malService;
+    private readonly IAnilistFallback _anilistFallback;
 
     public HomeController(
         ITokenService tokenService,
         IConfigStore configStore,
         IAnilistService anilistService,
         IKitsuService kitsuService,
-        IMalService malService)
+        IMalService malService,
+        IAnilistFallback anilistFallback)
     {
         _tokenService = tokenService;
         _configStore = configStore;
         _anilistService = anilistService;
         _kitsuService = kitsuService;
         _malService = malService;
+        _anilistFallback = anilistFallback;
     }
 
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
@@ -162,6 +165,13 @@ public class HomeController : Controller
                 .ToList();
         }
 
+        // Seasonal stats apply to every visitor (anonymous + logged-in)
+        // since they describe the whole AniList catalog, not the user's
+        // list. Fired alongside the user-specific list fetches earlier
+        // when present, or stand-alone for anonymous renders. Failures
+        // swallow into zeros — the view hides the strip when total is 0.
+        var (seasonAiring, seasonNew, seasonTotal) = await _anilistFallback.GetSeasonStatsAsync();
+
         return View(new DashboardViewModel
         {
             TokenData = tokenData,
@@ -173,6 +183,9 @@ public class HomeController : Controller
             MeanScore = meanScore,
             TopGenres = topGenres,
             ContributingServices = contributingNames,
+            SeasonCurrentlyAiring = seasonAiring,
+            SeasonNewThis = seasonNew,
+            SeasonTotal = seasonTotal,
         });
     }
 

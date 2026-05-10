@@ -50,5 +50,14 @@ namespace AnimeList.Services.Interfaces
         /// reliably (currently MyAnimeList).
         /// </summary>
         Task<string> GetYoutubeTrailerIdAsync(int anilistId);
+
+        /// <summary>
+        /// Aggregate counts for the current season's anime — used by the
+        /// dashboard's "This Season" stat strip. Returns (currentlyAiring,
+        /// newThisSeason, totalThisSeason). One AniList GraphQL call with
+        /// aliased Page queries; pageInfo.total surfaces each count without
+        /// pulling a media result set per query.
+        /// </summary>
+        Task<(int currentlyAiring, int newThisSeason, int totalThisSeason)> GetSeasonStatsAsync();
     }
 }
