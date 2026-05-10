@@ -693,6 +693,93 @@ body.modal-open {
     color: #3B82F6;
 }
 
+/* Install-app pill in the site header. Hidden by default; pwa-install.js
+   reveals it on Chromium / Edge / Android once the browser fires
+   beforeinstallprompt. margin-left:auto keeps it right-aligned with the
+   hamburger button rather than floating in the centre when the header
+   uses justify-content: space-between. */
+.pwa-install-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-left: auto;
+    padding: 0.35rem 0.8rem;
+    border-radius: 999px;
+    background: rgba(59, 130, 246, 0.15);
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    color: #93c5fd;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.pwa-install-btn:hover {
+    background: #3B82F6;
+    border-color: #3B82F6;
+    color: #fff;
+}
+
+/* iOS Safari install instructions toast — appended to body by
+   pwa-install.js when the visitor is on iOS Safari and hasn't
+   dismissed it before. Bottom-anchored above the bottom-nav so it
+   doesn't overlap the primary nav. */
+.pwa-ios-hint {
+    position: fixed;
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 70px);
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.65rem 0.85rem;
+    border-radius: 0.75rem;
+    background: rgba(20, 20, 20, 0.96);
+    border: 1px solid rgba(59, 130, 246, 0.45);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    color: #e5e5e5;
+    font-size: 0.85rem;
+    backdrop-filter: blur(6px);
+}
+
+.pwa-ios-hint-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    line-height: 1.35;
+}
+
+.pwa-ios-hint-body strong {
+    color: #fff;
+    font-size: 0.9rem;
+}
+
+.pwa-ios-hint-body em {
+    font-style: normal;
+    color: #93c5fd;
+}
+
+.pwa-ios-hint-close {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #ccc;
+    font-size: 1.05rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.pwa-ios-hint-close:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
 .site-header-badge {
     display: inline-flex;
     align-items: center;
