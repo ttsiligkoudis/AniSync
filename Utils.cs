@@ -508,6 +508,48 @@ namespace AnimeList
             cfg.disableSeasonGrouping = (flags3 & 0x20) != 0;
         }
 
+        /// <summary>
+        /// Inverse of <see cref="ApplyBinaryFlags"/> — packs a <see cref="Configuration"/>'s
+        /// toggle bits into the same three-byte layout the store / save-flow uses. Used
+        /// by the partial that renders the configure / stremio pages to bake the
+        /// server-side initial state into JS, so the client-side save can preserve
+        /// bits whose corresponding input isn't on the current page (e.g. saving the
+        /// Group-anime-seasons toggle from /configure must not zero the Stremio
+        /// catalog/stream bits that only render on /stremio).
+        /// </summary>
+        public static (byte flags1, byte flags2, byte flags3) PackBinaryFlags(Configuration cfg)
+        {
+            byte f1 = 0;
+            if (cfg.showCurrent)            f1 |= 0x01;
+            if (cfg.showCompleted)          f1 |= 0x02;
+            if (cfg.showTrending)           f1 |= 0x04;
+            if (cfg.showSeasonal)           f1 |= 0x08;
+            if (cfg.discoverOnlyCurrent)    f1 |= 0x10;
+            if (cfg.discoverOnlyCompleted)  f1 |= 0x20;
+            if (cfg.discoverOnlyTrending)   f1 |= 0x40;
+            if (cfg.discoverOnlySeasonal)   f1 |= 0x80;
+
+            byte f2 = 0;
+            if (cfg.showPlanning)           f2 |= 0x01;
+            if (cfg.showPaused)             f2 |= 0x02;
+            if (cfg.showDropped)            f2 |= 0x04;
+            if (cfg.showRepeating)          f2 |= 0x08;
+            if (cfg.discoverOnlyPlanning)   f2 |= 0x10;
+            if (cfg.discoverOnlyPaused)     f2 |= 0x20;
+            if (cfg.discoverOnlyDropped)    f2 |= 0x40;
+            if (cfg.discoverOnlyRepeating)  f2 |= 0x80;
+
+            byte f3 = 0;
+            if (cfg.showAiring)             f3 |= 0x01;
+            if (cfg.showExternalStreams)    f3 |= 0x02;
+            if (cfg.hideManageEntry)        f3 |= 0x04;
+            if (cfg.disableAutoTrack)       f3 |= 0x08;
+            if (cfg.discoverOnlyAiring)     f3 |= 0x10;
+            if (cfg.disableSeasonGrouping)  f3 |= 0x20;
+
+            return (f1, f2, f3);
+        }
+
         private static Configuration DecodeBinaryConfig(byte[] data, int headerLen, byte flags1, byte flags2, byte flags3)
         {
             var cfg = DecodeBinaryFlags(flags1, flags2, flags3);
