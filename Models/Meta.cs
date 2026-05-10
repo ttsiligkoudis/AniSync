@@ -38,6 +38,13 @@ namespace AnimeList.Models
         public int? episodes { get; set; }
         public int? year { get; set; }
         public string format { get; set; }
+
+        // User's watched-episode count for THIS entry, populated only when the
+        // catalog response naturally includes list-status data (i.e. user-list
+        // queries like Currently Watching / Completed; null on Trending /
+        // Seasonal / Airing because those return media without per-user
+        // context). Cards render an "Ep N / Total" badge when set.
+        public int? progress { get; set; }
         public List<string> genres { get; set; }
         public string background { get; set; }
         public string type { get; set; } = MetaType.series.ToString();

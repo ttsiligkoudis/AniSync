@@ -508,6 +508,10 @@ namespace AnimeList.Services
                 episodes = episodeCount > 0 ? episodeCount : null,
                 year = releaseYear,
                 format = NormalizeFormat(mediaType),
+                // num_episodes_watched is the user's progress on MAL — only present
+                // on user-list responses (listStatus is null on Trending / Seasonal /
+                // search). Cards render the "Ep N / Total" badge when set.
+                progress = (int?)listStatus?["num_episodes_watched"],
             };
         }
 
