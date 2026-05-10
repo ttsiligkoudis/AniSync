@@ -100,6 +100,34 @@
         <div class="anime-detail-backdrop" style="background-image: url('@a.background');"></div>
         <div class="anime-detail-backdrop-shade"></div>
     }
+    @if (canEdit)
+    {
+        @* Pencil icon, absolute-positioned top-right of the hero card.
+           Replaces the previous "Edit entry" CTA — the action is the
+           same (opens the manage-entry modal via the data-open-modal
+           hook intercepted by manage-entry-modal.js), the button just
+           tucks out of the way so the hero reads as content, not chrome. *@
+        <button type="button" class="anime-detail-edit-btn"
+                data-open-modal data-meta-id="@a.id" data-meta-name="@a.name"
+                aria-label="Edit entry">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+            </svg>
+        </button>
+    }
+    else if (!Model.AnonymousUser)
+    {
+        <a class="anime-detail-edit-btn" href="@Url.Action("Configure", "Home")"
+           aria-label="Configure to edit">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+            </svg>
+        </a>
+    }
     <div class="anime-detail-hero-body">
         @if (!string.IsNullOrEmpty(a.poster))
         {
@@ -159,7 +187,23 @@
                     if (Model.Entry.UserScore is double us && us > 0) userBits.Add($"Your score: {us.ToString("0.0")}");
                     if (userBits.Count > 0)
                     {
-                        <span class="anime-detail-user-state">@string.Join(" · ", userBits)</span>
+                        @* When the user can edit, render as a button that
+                           opens the manage-entry modal — same code path as
+                           the pencil icon. data-open-modal is the global
+                           hook intercepted by manage-entry-modal.js. The
+                           button keeps the .anime-detail-user-state class
+                           so the cobalt-pill styling carries over verbatim. *@
+                        if (canEdit)
+                        {
+                            <button type="button" class="anime-detail-user-state"
+                                    data-open-modal data-meta-id="@a.id" data-meta-name="@a.name">
+                                @string.Join(" · ", userBits)
+                            </button>
+                        }
+                        else
+                        {
+                            <span class="anime-detail-user-state">@string.Join(" · ", userBits)</span>
+                        }
                     }
                 }
             </div>
@@ -191,37 +235,6 @@
                     }
                 </div>
             }
-            @if (a.tags?.Count > 0)
-            {
-                @* Themes — smaller / lighter chips below the genre row to
-                   read as secondary metadata. AniList-only currently;
-                   MAL/Kitsu primaries skip this row gracefully. *@
-                <div class="anime-detail-tags">
-                    @foreach (var t in a.tags)
-                    {
-                        <span class="anime-detail-tag">@t</span>
-                    }
-                </div>
-            }
-            <div class="anime-detail-actions">
-                @if (canEdit)
-                {
-                    @* data-open-modal hook: manage-entry-modal.js intercepts
-                       the click and opens the inline editor for this anime,
-                       same code path the cards use. *@
-                    <button type="button" class="hero-cta hero-cta-primary"
-                            data-open-modal data-meta-id="@a.id" data-meta-name="@a.name">
-                        Edit entry
-                    </button>
-                }
-                else if (!Model.AnonymousUser)
-                {
-                    <a class="hero-cta hero-cta-secondary" href="@Url.Action("Configure", "Home")">Configure to edit</a>
-                }
-                @* "Watch trailer" hero CTA was here previously; replaced by
-                   the dedicated thumbnail card section below the synopsis
-                   so the hero stays focused on the primary edit action. *@
-            </div>
         </div>
     </div>
 </section>
@@ -237,7 +250,7 @@
     var isLongSynopsis = a.description.Length > 180;
     <section class="anime-detail-section">
         <h2 class="anime-detail-section-title">Synopsis</h2>
-        <div class="anime-detail-synopsis-wrap" @(isLongSynopsis ? "data-collapsed=\"true\"" : "")>
+        <div class="anime-detail-synopsis-wrap" @Html.Raw(isLongSynopsis ? "data-collapsed=\"true\"" : "")>
             <p class="anime-detail-synopsis">@a.description</p>
             @if (isLongSynopsis)
             {
