@@ -453,17 +453,92 @@
             });
     }
 
-    // Click interception. Two hooks live on the document:
+    // Quick-mark-watched on /anime/{id}'s episode list. Bumps progress to
+    // the clicked episode's number (preserving status), updates checkmarks
+    // on rows ≤ new progress, refreshes the user-state panel in the hero,
+    // and bumps the dashboard stats if applicable. No reload — same
+    // optimistic pattern the +1 quick-action uses on cards.
+    function markEpisodeWatched(row, list) {
+        var newProgress = parseInt(row.getAttribute('data-episode-num'), 10);
+        var currentProgress = parseInt(list.getAttribute('data-current-progress') || '0', 10);
+        if (!newProgress || newProgress === currentProgress) return;
+
+        var id = list.getAttribute('data-meta-id');
+        var status = list.getAttribute('data-current-status');
+        if (!id || !status) return;
+
+        // Disable interaction while the request is in flight; a single
+        // listener on document keeps clicks deduped without per-row state.
+        list.classList.add('anime-detail-episodes-busy');
+
+        fetch('/api/library/entry/save', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            },
+            body: JSON.stringify({ id: id, status: status, progress: newProgress }),
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data || !data.success) {
+                    if (window.AniSyncToast) window.AniSyncToast.show('Save failed');
+                    return;
+                }
+                // Update checkmark classes on every row (handles both
+                // bumping forward and rare back-step). Also persist the new
+                // current-progress on the list so subsequent clicks compute
+                // deltas correctly without re-reading from the DOM tree.
+                list.setAttribute('data-current-progress', String(newProgress));
+                Array.prototype.forEach.call(list.querySelectorAll('li.anime-detail-episode'), function (li) {
+                    var num = parseInt(li.getAttribute('data-episode-num') || '0', 10);
+                    if (num > 0 && num <= newProgress) {
+                        li.classList.add('anime-detail-episode-watched');
+                    } else {
+                        li.classList.remove('anime-detail-episode-watched');
+                    }
+                });
+                refreshDetailUserState(newProgress);
+                if (window.AniSyncToast) window.AniSyncToast.show('Watched ep ' + newProgress);
+            })
+            .catch(function () {
+                if (window.AniSyncToast) window.AniSyncToast.show('Network error');
+            })
+            .finally(function () {
+                list.classList.remove('anime-detail-episodes-busy');
+            });
+    }
+
+    // Update the hero's user-state strip ("Watching · Ep 5/12 · Your score:
+    // 8.0") to reflect the new progress without a page reload. The strip is
+    // server-rendered with " · "-joined bits; we look for the "Ep N/M" or
+    // "Ep N" chunk and replace it. Best-effort — the next full page render
+    // produces the canonical version.
+    function refreshDetailUserState(newProgress) {
+        var stateEl = document.querySelector('.anime-detail-user-state');
+        if (!stateEl) return;
+        var text = stateEl.textContent;
+        var replaced = text.replace(/Ep \d+(\s*\/\s*\d+)?/, function (match) {
+            var totalMatch = match.match(/\/\s*(\d+)/);
+            return totalMatch ? 'Ep ' + newProgress + ' / ' + totalMatch[1] : 'Ep ' + newProgress;
+        });
+        if (replaced !== text) stateEl.textContent = replaced;
+    }
+
+    // Click interception. Three hooks live on the document:
     //   1. button.library-card-plus inside a card → +1 quick-action.
     //      preventDefault + stopPropagation so the parent anchor doesn't
     //      navigate to the detail page on this click.
-    //   2. [data-open-modal] anywhere (typically the Edit button on the
+    //   2. li.anime-detail-episode inside a click-enabled list → quick-
+    //      mark-watched: bumps progress to that episode's number.
+    //   3. [data-open-modal] anywhere (typically the Edit button on the
     //      /anime/{id} detail page) → open the modal for that meta id.
     //
     // Cards themselves are <a href="/anime/{id}"> and click-navigate to the
     // detail page by default — no JS interception. The modal is reserved
-    // for explicit edit-intent actions (Edit button, +1 quick-action) so
-    // the card surface stays predictable.
+    // for explicit edit-intent actions (Edit button, +1 quick-action,
+    // episode click) so the card surface stays predictable.
     document.addEventListener('click', function (e) {
         var plusBtn = e.target.closest && e.target.closest('button.library-card-plus');
         if (plusBtn) {
@@ -472,6 +547,15 @@
             var owningCard = plusBtn.closest('a.library-card[data-meta-id]');
             if (owningCard) bumpProgress(plusBtn, owningCard);
             return;
+        }
+        var episodeRow = e.target.closest && e.target.closest('li.anime-detail-episode[data-episode-num]');
+        if (episodeRow) {
+            var list = episodeRow.closest('ol.anime-detail-episodes[data-can-edit="true"]');
+            if (list) {
+                e.preventDefault();
+                markEpisodeWatched(episodeRow, list);
+                return;
+            }
         }
         var modalTrigger = e.target.closest && e.target.closest('[data-open-modal][data-meta-id]');
         if (modalTrigger) {

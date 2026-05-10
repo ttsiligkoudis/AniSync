@@ -140,6 +140,74 @@ namespace AnimeList.Services
             return result;
         }
 
+        public async Task<List<Meta>> GetRecommendationMetasAsync(int anilistId)
+        {
+            // Same query shape as the authenticated AnilistService meta-detail
+            // recommendations subselection — coverImage + format + episodes +
+            // averageScore + seasonYear so the carousel cards have the full
+            // chrome (poster + score badge + format/eps/year info row). ids
+            // stay in anilist:N space; AnimeController.Detail's mapping path
+            // resolves them to the user's primary on click.
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($id: Int) {
+                        Media(id: $id, type: ANIME) {
+                            recommendations(sort: RATING_DESC, perPage: 15) {
+                                edges {
+                                    node {
+                                        mediaRecommendation {
+                                            id
+                                            format
+                                            episodes
+                                            averageScore
+                                            seasonYear
+                                            title { english romaji }
+                                            coverImage { large }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }",
+                variables = new { id = anilistId }
+            });
+
+            var data = await PostJsonAsync(requestBody);
+            var edges = data?.Media?.recommendations?.edges;
+            if (edges == null) return [];
+
+            var result = new List<Meta>();
+            foreach (var edge in edges)
+            {
+                var rec = edge.node?.mediaRecommendation;
+                if (rec == null) continue;
+                var recId = (int?)rec.id;
+                if (!recId.HasValue) continue;
+                var name = string.IsNullOrEmpty((string)rec.title?.english)
+                    ? (string)rec.title?.romaji
+                    : (string)rec.title?.english;
+                if (string.IsNullOrEmpty(name)) continue;
+
+                result.Add(new Meta
+                {
+                    id = $"{anilistPrefix}{recId.Value}",
+                    name = name,
+                    poster = (string)rec.coverImage?.large,
+                    type = IsMovieFormat((string)rec.format)
+                        ? MetaType.movie.ToString()
+                        : MetaType.series.ToString(),
+                    score = rec.averageScore != null
+                        ? Math.Round((double)rec.averageScore / 10, 1)
+                        : (double?)null,
+                    episodes = (int?)rec.episodes,
+                    year = (int?)rec.seasonYear,
+                    format = NormalizeFormat((string)rec.format),
+                });
+            }
+            return result;
+        }
+
         public async Task<List<StreamingLink>> GetExternalLinksAsync(int anilistId)
         {
             var requestBody = SerializeObject(new

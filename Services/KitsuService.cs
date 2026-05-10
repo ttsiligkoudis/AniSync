@@ -471,6 +471,12 @@ namespace AnimeList.Services
                 {
                     var similar = await _anilistFallback.GetRecommendationsAsync(mapping.AnilistId.Value, AnimeService.Kitsu);
                     anime.links.AddRange(similar);
+                    // Parallel call for the detail-page carousel — same upstream,
+                    // richer per-rec shape. Kept separate from the Link-flavoured
+                    // fallback above because the addon JSON path consumes Links
+                    // and the web app's carousel consumes Metas. Best-effort.
+                    var recMetas = await _anilistFallback.GetRecommendationMetasAsync(mapping.AnilistId.Value);
+                    anime.recommendations.AddRange(recMetas);
                 }
                 catch
                 {

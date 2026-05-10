@@ -188,13 +188,24 @@
 {
     <section class="anime-detail-section">
         <h2 class="anime-detail-section-title">Episodes <span class="anime-detail-section-count">(@a.videos.Count)</span></h2>
-        @* List rather than a poster grid: each row is one episode with its
-           thumbnail (if any), title, episode number, and air date. The list
-           scrolls on long-running shows; no pagination yet. *@
-        <ol class="anime-detail-episodes" reversed="false">
+        @* The episodes list doubles as a click-to-mark-watched surface for
+           logged-in users with a tracking entry: tap episode N → progress
+           bumps to N. data-can-edit / data-current-progress / data-current-
+           status are read by manage-entry-modal.js's quick-mark handler.
+           Each row gets data-episode-num and a .anime-detail-episode-watched
+           class when episode.episode <= current progress, so users see at a
+           glance what they've already watched. *@
+        @{
+            var canQuickMark = canEdit && Model.Entry != null && !string.IsNullOrEmpty(Model.Entry.Status);
+            var currentProgress = Model.Entry?.Progress ?? 0;
+        }
+        <ol class="anime-detail-episodes" reversed="false"
+            @(canQuickMark ? $"data-can-edit=\"true\" data-meta-id=\"{a.id}\" data-current-progress=\"{currentProgress}\" data-current-status=\"{Model.Entry.Status}\"" : "")>
             @foreach (var v in a.videos)
             {
-                <li class="anime-detail-episode">
+                var watched = currentProgress > 0 && v.episode <= currentProgress;
+                var rowClass = watched ? "anime-detail-episode anime-detail-episode-watched" : "anime-detail-episode";
+                <li class="@rowClass" data-episode-num="@v.episode">
                     @if (!string.IsNullOrEmpty(v.thumbnail))
                     {
                         <img class="anime-detail-episode-thumb" src="@v.thumbnail" alt="" loading="lazy" />
@@ -211,6 +222,15 @@
                             <span class="anime-detail-episode-released">@v.released.Substring(0, Math.Min(10, v.released.Length))</span>
                         }
                     </div>
+                    @if (watched)
+                    {
+                        @* Inline check icon for already-watched episodes. *@
+                        <span class="anime-detail-episode-check" aria-label="Watched">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                        </span>
+                    }
                 </li>
             }
         </ol>
