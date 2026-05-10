@@ -28,5 +28,12 @@ namespace AnimeList.Models
         public int TotalHoursWatched { get; set; }
         public double? MeanScore { get; set; }
         public List<(string genre, int count)> TopGenres { get; set; } = [];
+
+        // Names of the services that contributed data to the stats (primary
+        // first, then any healthy linked secondaries). The view's "via X"
+        // subtitle uses this to communicate "your stats span N accounts" when
+        // there are multiple contributors. Empty for anonymous / not-logged-in
+        // users, single-element for users with no linked accounts.
+        public List<string> ContributingServices { get; set; } = [];
     }
 }

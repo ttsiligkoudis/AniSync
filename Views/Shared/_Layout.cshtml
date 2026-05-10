@@ -128,8 +128,18 @@
                 <button class="entry-modal-close" type="button" aria-label="Close">×</button>
             </header>
             <div class="entry-modal-body">
-                <div class="entry-modal-loading">Loading…</div>
+                <div class="entry-modal-loading" aria-live="polite">Loading…</div>
                 <form class="entry-modal-form" hidden>
+                    @* Season selector — hidden by default, shown only when the
+                       opened anime is a franchise split across multiple service
+                       entries (Attack on Titan, JoJo, Demon Slayer, etc.). The
+                       options are populated by the modal JS from the
+                       /api/library/entry response's seasons array. Changing the
+                       selection re-fetches entry data for that cour. *@
+                    <div class="entry-modal-field" data-season-field hidden>
+                        <label class="entry-modal-label" for="entry-modal-season">Season</label>
+                        <select id="entry-modal-season" name="season" class="entry-modal-select"></select>
+                    </div>
                     <div class="entry-modal-field">
                         <label class="entry-modal-label" for="entry-modal-status">Status</label>
                         <select id="entry-modal-status" name="status" class="entry-modal-select"></select>
@@ -145,7 +155,27 @@
                         <label class="entry-modal-label" for="entry-modal-score">Score</label>
                         <input id="entry-modal-score" type="number" name="score" min="0" max="10" step="0.1" class="entry-modal-input" placeholder="0–10" />
                     </div>
-                    <div class="entry-modal-error" hidden></div>
+                    @* Started + Finished dates side-by-side on wider viewports
+                       so they don't burn vertical space in the modal. *@
+                    <div class="entry-modal-field-row">
+                        <div class="entry-modal-field">
+                            <label class="entry-modal-label" for="entry-modal-started">Started</label>
+                            <input id="entry-modal-started" type="date" name="startedAt" class="entry-modal-input" />
+                        </div>
+                        <div class="entry-modal-field">
+                            <label class="entry-modal-label" for="entry-modal-finished">Finished</label>
+                            <input id="entry-modal-finished" type="date" name="finishedAt" class="entry-modal-input" />
+                        </div>
+                    </div>
+                    <div class="entry-modal-field">
+                        <label class="entry-modal-label" for="entry-modal-rewatch">Rewatches</label>
+                        <input id="entry-modal-rewatch" type="number" name="rewatchCount" min="0" class="entry-modal-input" placeholder="0" />
+                    </div>
+                    <div class="entry-modal-field">
+                        <label class="entry-modal-label" for="entry-modal-notes">Notes</label>
+                        <textarea id="entry-modal-notes" name="notes" rows="3" class="entry-modal-textarea" placeholder="Personal notes about this entry…"></textarea>
+                    </div>
+                    <div class="entry-modal-error" role="alert" hidden></div>
                     <div class="entry-modal-actions">
                         <button type="button" class="entry-modal-cancel">Cancel</button>
                         <button type="submit" class="entry-modal-save">Save</button>
@@ -156,6 +186,13 @@
         <script src="~/js/manage-entry-modal.js" asp-append-version="true" defer></script>
     }
 
+    @* Toast container — receives "Saved!" / "Error" feedback from in-page
+       actions that survive page reloads via sessionStorage. Always rendered
+       (anonymous users can't trigger the modal but other future actions
+       might fire toasts). The container is positioned fixed via site.css. *@
+    <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="~/js/toast.js" asp-append-version="true" defer></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>

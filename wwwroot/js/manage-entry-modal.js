@@ -6,10 +6,16 @@
 //
 // Flow:
 //   1. User clicks a poster card → JS intercepts (preventDefault) → modal opens.
-//   2. Fetch entry via /api/library/entry → populate form.
-//   3. User edits → submit → POST /api/library/entry/save.
-//   4. Reload the page on success so the list reflects status changes (e.g.
-//      moving from Watching → Completed).
+//   2. Fetch entry via /api/library/entry → populate form. If the anime is a
+//      franchise split across multiple service entries (Attack on Titan, JoJo,
+//      etc.), the response includes a seasons array; the modal renders a
+//      Season dropdown that re-fetches form data when changed.
+//   3. User edits → submit → POST /api/library/entry/save (using the resolved
+//      per-cour entry id, NOT the original card id).
+//   4. On success: show "Saved" toast inline + optimistically update the
+//      clicked card (refresh progress badge) or fade-and-remove it when the
+//      new status no longer matches the current page's list filter. No page
+//      reload — keeps scroll position and feels like a real app.
 (function () {
     'use strict';
 
@@ -21,10 +27,16 @@
     var loadingEl = modal.querySelector('.entry-modal-loading');
     var formEl = modal.querySelector('.entry-modal-form');
     var errorEl = modal.querySelector('.entry-modal-error');
+    var seasonField = modal.querySelector('[data-season-field]');
+    var seasonSelect = modal.querySelector('#entry-modal-season');
     var statusSelect = modal.querySelector('#entry-modal-status');
     var progressInput = modal.querySelector('#entry-modal-progress');
     var totalEl = modal.querySelector('.entry-modal-total');
     var scoreInput = modal.querySelector('#entry-modal-score');
+    var startedInput = modal.querySelector('#entry-modal-started');
+    var finishedInput = modal.querySelector('#entry-modal-finished');
+    var rewatchInput = modal.querySelector('#entry-modal-rewatch');
+    var notesInput = modal.querySelector('#entry-modal-notes');
     var cancelBtn = modal.querySelector('.entry-modal-cancel');
     var closeBtn = modal.querySelector('.entry-modal-close');
     var saveBtn = formEl.querySelector('.entry-modal-save');
@@ -55,7 +67,7 @@
         ],
         // MyAnimeList
         2: [
-            ['',                'â€” None (not in list) â€”'],
+            ['',                '— None (not in list) —'],
             ['watching',        'Watching'],
             ['plan_to_watch',   'Planning'],
             ['completed',       'Completed'],
@@ -64,14 +76,48 @@
             ['rewatching',      'Rewatching'],
         ],
     };
-    // Fix the mojibake from the literal above (the editor occasionally
-    // mangles em-dashes when serialising) — explicit override at runtime.
-    STATUS_OPTIONS[2][0][1] = '— None (not in list) —';
 
-    var currentId = null;
+    // Per-service status string → AniSync's tab slug (the value of ?list= on
+    // /library). Used post-save to decide whether the edited card should
+    // remain in the current view or fade out (its status moved out of the
+    // tab's filter, e.g. user marked Watching → Completed while on the
+    // Watching tab — card no longer belongs here).
+    var SERVICE_STATUS_TO_FILTER = {
+        0: { 'current': 'current', 'planned': 'planning', 'completed': 'completed', 'on_hold': 'paused', 'dropped': 'dropped' },
+        1: { 'CURRENT': 'current', 'PLANNING': 'planning', 'COMPLETED': 'completed', 'PAUSED': 'paused', 'DROPPED': 'dropped', 'REPEATING': 'repeating' },
+        2: { 'watching': 'current', 'plan_to_watch': 'planning', 'completed': 'completed', 'on_hold': 'paused', 'dropped': 'dropped', 'rewatching': 'repeating' },
+    };
 
-    function openModal(id, name) {
-        currentId = id;
+    // The currently-active per-cour entry id (anilist:N / kitsu:N / mal:N).
+    // Distinct from the card's original id, which might be a cross-service
+    // imdb:/tmdb: id that resolves to one of multiple per-cour entries. Save
+    // payloads send activeEntryId, not the card id.
+    var activeEntryId = null;
+    // Service of the currently-loaded entry — needed for the save-side
+    // status→filter mapping, since each service uses different status enums.
+    var activeService = null;
+    // The DOM card that opened the modal. Held so we can update or remove
+    // it after save without a full page reload.
+    var activeCard = null;
+    // The status the entry had AT LOAD time (before user edits). The save
+    // handler diffs this against the new status to figure out which stat
+    // counters to bump/decrement.
+    var activeOriginalStatus = null;
+    // The element that had focus before the modal opened — restored on
+    // close so keyboard users return to where they left off.
+    var lastFocused = null;
+
+    // Focusable selector used by the trap — a CSS-side allowlist of every
+    // element type that should participate in Tab cycling inside the modal.
+    var FOCUSABLE_SEL = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+    function openModal(id, name, card) {
+        // Remember which element opened the modal so close can restore focus
+        // there. Falls back to body if there's no active element (rare —
+        // would require the modal to be triggered by something other than a
+        // click handler).
+        lastFocused = document.activeElement;
+
         titleEl.textContent = name || 'Manage entry';
         loadingEl.hidden = false;
         formEl.hidden = true;
@@ -79,8 +125,77 @@
         modal.hidden = false;
         backdrop.hidden = false;
         document.body.classList.add('modal-open');
+        setBackgroundInert(true);
 
-        fetch('/api/library/entry?id=' + encodeURIComponent(id), {
+        // Reset season picker; will be re-populated by loadEntry if applicable.
+        seasonField.hidden = true;
+        activeCard = card || null;
+
+        // Focus the close (×) button so keyboard / screen-reader users land
+        // somewhere predictable inside the dialog. The form is still loading
+        // — once it appears, the user can Tab into the inputs naturally.
+        // Wrapped in setTimeout to give the browser a paint cycle so the
+        // .focus() call doesn't race the modal's reveal transition.
+        setTimeout(function () { closeBtn.focus(); }, 30);
+
+        loadEntry(id, /* isInitial */ true);
+    }
+
+    function closeModal() {
+        modal.hidden = true;
+        backdrop.hidden = true;
+        document.body.classList.remove('modal-open');
+        setBackgroundInert(false);
+        activeEntryId = null;
+        activeService = null;
+        activeCard = null;
+        activeOriginalStatus = null;
+        saveBtn.disabled = false;
+
+        // Hand focus back to the element that opened the modal. Skips when
+        // that element is no longer in the DOM (e.g., the card was removed
+        // by the optimistic update post-save) — fall back to body so focus
+        // doesn't get stuck on a detached node.
+        if (lastFocused && document.contains(lastFocused) &&
+            typeof lastFocused.focus === 'function') {
+            try { lastFocused.focus(); } catch (e) { /* ignore */ }
+        }
+        lastFocused = null;
+    }
+
+    // Mark every body-level element except the modal + backdrop as inert
+    // while the modal is open, so background interactives are unfocusable
+    // (Tab stays inside the modal) AND hidden from screen readers (so the
+    // SR reading order doesn't drift past the dialog). Modern browsers
+    // (Chrome 102+, Firefox 112+, Safari 15.5+) all support [inert]; older
+    // ones gracefully degrade to "still focusable but covered by backdrop".
+    function setBackgroundInert(on) {
+        var children = document.body.children;
+        for (var i = 0; i < children.length; i++) {
+            var child = children[i];
+            if (child === modal || child === backdrop) continue;
+            // Toast container too — toasts during modal-open shouldn't
+            // steal the SR cursor; they remain visible but inert.
+            if (on) child.setAttribute('inert', '');
+            else child.removeAttribute('inert');
+        }
+    }
+
+    function showError(msg) {
+        loadingEl.hidden = true;
+        errorEl.textContent = msg;
+        errorEl.hidden = false;
+        formEl.hidden = false;
+    }
+
+    function loadEntry(id, isInitial) {
+        if (!isInitial) {
+            // Show a soft loading state without re-hiding the whole form so
+            // the user keeps context (which season they picked) while the
+            // fields refresh.
+            saveBtn.disabled = true;
+        }
+        return fetch('/api/library/entry?id=' + encodeURIComponent(id), {
             credentials: 'same-origin',
             headers: { 'Accept': 'application/json' },
         })
@@ -90,6 +205,27 @@
                     showError('Failed to load entry. Try again.');
                     return;
                 }
+                activeEntryId = data.selectedEntryId || id;
+                activeService = data.service;
+                activeOriginalStatus = data.status || null;
+
+                // Seasons dropdown: only render when the franchise has 2+
+                // mappings. Single-mapping responses don't need a picker.
+                if (data.seasons && data.seasons.length > 1 && isInitial) {
+                    seasonSelect.innerHTML = '';
+                    data.seasons.forEach(function (s) {
+                        var opt = document.createElement('option');
+                        opt.value = s.id;
+                        opt.textContent = s.label;
+                        if (s.totalEpisodes != null) opt.setAttribute('data-total', s.totalEpisodes);
+                        if (s.id === activeEntryId) opt.selected = true;
+                        seasonSelect.appendChild(opt);
+                    });
+                    seasonField.hidden = false;
+                } else if (isInitial) {
+                    seasonField.hidden = true;
+                }
+
                 populateStatusOptions(data.service);
                 statusSelect.value = data.status || '';
                 progressInput.value = data.progress || 0;
@@ -102,27 +238,18 @@
                     totalEl.hidden = true;
                 }
                 scoreInput.value = data.score || '';
+                startedInput.value = data.startedAt || '';
+                finishedInput.value = data.finishedAt || '';
+                rewatchInput.value = data.rewatchCount || 0;
+                notesInput.value = data.notes || '';
                 loadingEl.hidden = true;
                 formEl.hidden = false;
+                saveBtn.disabled = false;
             })
             .catch(function () {
                 showError('Network error loading entry.');
+                saveBtn.disabled = false;
             });
-    }
-
-    function closeModal() {
-        modal.hidden = true;
-        backdrop.hidden = true;
-        document.body.classList.remove('modal-open');
-        currentId = null;
-        saveBtn.disabled = false;
-    }
-
-    function showError(msg) {
-        loadingEl.hidden = true;
-        errorEl.textContent = msg;
-        errorEl.hidden = false;
-        formEl.hidden = false;
     }
 
     function populateStatusOptions(service) {
@@ -136,6 +263,137 @@
         });
     }
 
+    // What list-status filter does the current page apply to its cards?
+    //   /library?list=X  → X (defaults to "current")
+    //   /                → "current" (Continue Watching shelf is implicitly Watching)
+    //   /discover, etc.  → null (no list-status filter — cards stay regardless)
+    function getPageListFilter() {
+        var path = window.location.pathname;
+        var params = new URLSearchParams(window.location.search);
+        if (path === '/library' || path === '/library/') {
+            return (params.get('list') || 'current').toLowerCase();
+        }
+        if (path === '/' || path === '') {
+            return 'current';
+        }
+        return null;
+    }
+
+    function statusBelongsHere(service, savedStatus, filter) {
+        if (!filter) return true;            // no filter — card stays regardless
+        if (!savedStatus) return false;      // status="" = entry deleted, never belongs
+        var map = SERVICE_STATUS_TO_FILTER[service];
+        return map ? map[savedStatus] === filter : true;
+    }
+
+    function fadeOutCard(card) {
+        // Honour prefers-reduced-motion — skip the 280ms transform/opacity
+        // animation and remove the card immediately. The CSS @media rule
+        // already nulls transitions globally, but inline styles below set
+        // explicit transition properties that would override the CSS, so
+        // we have to short-circuit at the JS layer too.
+        var reduceMotion = window.matchMedia &&
+            window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (reduceMotion) {
+            if (card.parentNode) card.parentNode.removeChild(card);
+            return;
+        }
+
+        // Smoothly collapse the card so the grid rows don't jump under the
+        // user's eye. Width:0 + opacity:0 + the existing transition makes the
+        // surrounding cards reflow into the gap.
+        card.style.transition = 'opacity 0.25s, transform 0.25s';
+        card.style.opacity = '0';
+        card.style.transform = 'scale(0.92)';
+        setTimeout(function () {
+            if (card.parentNode) card.parentNode.removeChild(card);
+        }, 280);
+    }
+
+    function refreshCardProgress(card, progress, totalEpisodes) {
+        // The progress badge sits inside .library-card-poster-wrap (top-left)
+        // alongside the score badge (bottom-left). Add it if missing, update
+        // text if present, remove if progress was zeroed.
+        var wrap = card.querySelector('.library-card-poster-wrap');
+        if (!wrap) return;
+        var existing = wrap.querySelector('.library-card-progress');
+
+        if (!progress || progress <= 0) {
+            if (existing) existing.parentNode.removeChild(existing);
+            return;
+        }
+
+        var label = totalEpisodes && totalEpisodes > 0
+            ? progress + ' / ' + totalEpisodes
+            : 'Ep ' + progress;
+
+        if (existing) {
+            existing.textContent = label;
+        } else {
+            var span = document.createElement('span');
+            span.className = 'library-card-progress';
+            span.textContent = label;
+            wrap.appendChild(span);
+        }
+    }
+
+    function showToast(text) {
+        if (window.AniSyncToast && window.AniSyncToast.show) {
+            window.AniSyncToast.show(text);
+        }
+    }
+
+    // Stat-cell adjustment — keeps the dashboard's Watching / Completed /
+    // Hours numbers in sync with optimistic card removals/additions. No-ops
+    // gracefully when the dashboard isn't on the current page (Library /
+    // Discover have no stats panel — querySelector returns null).
+    function adjustStat(name, delta) {
+        var num = document.querySelector('.stats-cell[data-stat="' + name + '"] .stats-number');
+        if (!num) return;
+        // Strip locale separators (commas) before parsing so "1,234" → 1234.
+        var current = parseInt(num.textContent.replace(/[^\d-]/g, ''), 10) || 0;
+        var next = Math.max(0, current + delta);
+        num.textContent = next.toLocaleString();
+    }
+
+    // Hours bucket adjusts in lockstep with Completed when the entry has a
+    // known total-episodes count. Uses the same 24-min/episode assumption
+    // HomeController.Index applies server-side so the client-side delta
+    // matches the next full render.
+    function adjustHours(episodesDelta) {
+        var num = document.querySelector('.stats-cell[data-stat="hours"] .stats-number');
+        if (!num) return;
+        var current = parseInt(num.textContent.replace(/[^\d-]/g, ''), 10) || 0;
+        var next = Math.max(0, current + Math.round(episodesDelta * 24 / 60));
+        num.textContent = next.toLocaleString();
+    }
+
+    // Translate per-service status → AniSync filter slug, returning null for
+    // unknown / empty status. Used by the stat-adjustment logic to detect
+    // bucket transitions (Watching → Completed etc.).
+    function statusToFilter(service, status) {
+        if (!status) return null;
+        var map = SERVICE_STATUS_TO_FILTER[service];
+        return map ? (map[status] || null) : null;
+    }
+
+    function adjustStatsForTransition(service, oldStatus, newStatus, totalEpisodes) {
+        var oldFilter = statusToFilter(service, oldStatus);
+        var newFilter = statusToFilter(service, newStatus);
+        if (oldFilter === newFilter) return;
+
+        if (oldFilter === 'current') adjustStat('watching', -1);
+        if (oldFilter === 'completed') {
+            adjustStat('completed', -1);
+            if (totalEpisodes) adjustHours(-totalEpisodes);
+        }
+        if (newFilter === 'current') adjustStat('watching', 1);
+        if (newFilter === 'completed') {
+            adjustStat('completed', 1);
+            if (totalEpisodes) adjustHours(totalEpisodes);
+        }
+    }
+
     // Card click interception. Targets only <a class="library-card"> elements
     // that carry a data-meta-id (the link variant; inert anonymous cards are
     // <div>s and don't match). Falls back to default navigation if the data
@@ -144,29 +402,76 @@
         var card = e.target.closest && e.target.closest('a.library-card[data-meta-id]');
         if (!card) return;
         e.preventDefault();
-        openModal(card.getAttribute('data-meta-id'), card.getAttribute('data-meta-name'));
+        openModal(card.getAttribute('data-meta-id'), card.getAttribute('data-meta-name'), card);
     });
 
     closeBtn.addEventListener('click', closeModal);
     cancelBtn.addEventListener('click', closeModal);
     backdrop.addEventListener('click', closeModal);
 
+    seasonSelect.addEventListener('change', function () {
+        loadEntry(seasonSelect.value, /* isInitial */ false);
+    });
+
     document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && !modal.hidden) closeModal();
+        if (modal.hidden) return;
+        if (e.key === 'Escape') {
+            closeModal();
+            return;
+        }
+        // Focus trap — Tab/Shift+Tab cycles within the modal's focusable
+        // elements. Backstop for the [inert] background: even when inert
+        // unfocuses background elements, the browser would otherwise hand
+        // focus to its own URL bar / chrome on Tab past the last focusable.
+        if (e.key === 'Tab') {
+            var focusables = Array.prototype.filter.call(
+                modal.querySelectorAll(FOCUSABLE_SEL),
+                function (el) {
+                    // Skip elements that are visually hidden / inside a
+                    // hidden field-group (e.g. the season selector when
+                    // not applicable) — those shouldn't be tab stops.
+                    return !el.disabled && el.offsetParent !== null;
+                }
+            );
+            if (!focusables.length) return;
+            var first = focusables[0];
+            var last = focusables[focusables.length - 1];
+            if (e.shiftKey && document.activeElement === first) {
+                e.preventDefault();
+                last.focus();
+            } else if (!e.shiftKey && document.activeElement === last) {
+                e.preventDefault();
+                first.focus();
+            }
+        }
     });
 
     formEl.addEventListener('submit', function (e) {
         e.preventDefault();
-        if (!currentId) return;
+        if (!activeEntryId) return;
         saveBtn.disabled = true;
         errorEl.hidden = true;
 
+        var newProgress = parseInt(progressInput.value || '0', 10);
+        var newStatus = statusSelect.value;
+        var totalForCard = parseInt(progressInput.max, 10) || null;
+
         var payload = {
-            id: currentId,
-            status: statusSelect.value,
-            progress: parseInt(progressInput.value || '0', 10),
+            id: activeEntryId,
+            status: newStatus,
+            progress: newProgress,
             score: scoreInput.value ? parseFloat(scoreInput.value) : null,
+            startedAt: startedInput.value || null,
+            finishedAt: finishedInput.value || null,
+            rewatchCount: rewatchInput.value ? parseInt(rewatchInput.value, 10) : null,
+            notes: notesInput.value || null,
         };
+
+        // Capture state for the optimistic update before closing the modal
+        // (which clears activeCard / activeService / activeOriginalStatus).
+        var cardForUpdate = activeCard;
+        var serviceForUpdate = activeService;
+        var originalStatusForUpdate = activeOriginalStatus;
 
         fetch('/api/library/entry/save', {
             method: 'POST',
@@ -180,12 +485,27 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data && data.success) {
-                    // Reload so list/grid reflects the change. Status moves
-                    // (Watching → Completed) and progress updates only show up
-                    // after a refetch. v1 could optimistically update the DOM
-                    // and skip the reload, but a full refresh is honest about
-                    // server state and matches the page-version behaviour.
-                    window.location.reload();
+                    showToast('Saved');
+
+                    // Optimistic in-place card update — no page reload, scroll
+                    // position preserved. If the new status no longer matches
+                    // the page's list filter (e.g. user moved Watching →
+                    // Completed while viewing the Watching tab), fade-and-
+                    // remove the card. Otherwise refresh the progress badge.
+                    if (cardForUpdate) {
+                        var filter = getPageListFilter();
+                        var stays = statusBelongsHere(serviceForUpdate, newStatus, filter);
+                        if (!stays) {
+                            fadeOutCard(cardForUpdate);
+                        } else {
+                            refreshCardProgress(cardForUpdate, newProgress, totalForCard);
+                        }
+                    }
+                    // Keep the dashboard stats panel in sync with the bucket
+                    // transition. No-op on /library / /discover where the
+                    // panel doesn't exist.
+                    adjustStatsForTransition(serviceForUpdate, originalStatusForUpdate, newStatus, totalForCard);
+                    closeModal();
                 } else {
                     showError('Save failed. Try again.');
                     saveBtn.disabled = false;

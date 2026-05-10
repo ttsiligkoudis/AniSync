@@ -59,6 +59,7 @@ public class HomeController : Controller
         int totalHoursWatched = 0;
         double? meanScore = null;
         List<(string genre, int count)> topGenres = [];
+        List<string> contributingNames = [];
 
         // Continue-watching + stats surfaces only fire for non-anonymous logged-in
         // users. Anonymous and not-logged-in visitors get the plain three-tile
@@ -69,21 +70,61 @@ public class HomeController : Controller
             var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
             uid = resolved;
 
-            // Fetch Currently Watching (drives the Continue Watching grid + watching
-            // count) and Completed (drives the completed count + top-genres taste
-            // profile + hours-watched + mean-score) in parallel. Two upstream calls
-            // per dashboard render — the lists tend to be small enough that this is
-            // cheap. Cache later if it shows up in profiles.
-            var watchingTask = FetchListAsync(tokenData, ListType.Current);
-            var completedTask = FetchListAsync(tokenData, ListType.Completed);
-            await Task.WhenAll(watchingTask, completedTask);
+            // Cross-provider stats: pull the user's Watching + Completed lists
+            // from the primary AND every healthy linked secondary, then dedup
+            // the union by Meta.id. The catalog Meta builders use ResolveGroupedId
+            // with cross-service mapping fallback, so the same anime fetched via
+            // AniList and MAL produces the SAME externalId — which makes
+            // Dictionary<string, Meta> keyed on Meta.id a sufficient dedup
+            // strategy. Users with no linked accounts behave identically to
+            // before (only the primary's lists feed the stats).
+            var contributingTokens = new List<TokenData> { tokenData };
+            contributingNames.Add(tokenData.anime_service.ToString());
+            var linkedTokens = !string.IsNullOrEmpty(uid)
+                ? await _configStore.GetLinkedTokensAsync(uid)
+                : [];
+            foreach (var lt in linkedTokens)
+            {
+                if (lt.NeedsReauth || lt.TokenData == null || lt.TokenData.anonymousUser) continue;
+                contributingTokens.Add(lt.TokenData);
+                contributingNames.Add(lt.Service.ToString());
+            }
 
-            var watching = watchingTask.Result;
-            var completed = completedTask.Result;
+            // Fan-out fetches: 2 lists × N services in parallel. SafeFetchListAsync
+            // wraps each call in a try/catch so one provider rate-limiting or
+            // returning a 5xx doesn't abort the whole stats panel — that provider
+            // just contributes zero entries to the union.
+            var watchingTasks = contributingTokens.Select(t => SafeFetchListAsync(t, ListType.Current)).ToList();
+            var completedTasks = contributingTokens.Select(t => SafeFetchListAsync(t, ListType.Completed)).ToList();
+            await Task.WhenAll(watchingTasks.Concat(completedTasks));
+
+            var dedupedWatching = new Dictionary<string, Meta>(StringComparer.Ordinal);
+            var dedupedCompleted = new Dictionary<string, Meta>(StringComparer.Ordinal);
+            foreach (var task in watchingTasks)
+                foreach (var m in task.Result)
+                    if (!string.IsNullOrEmpty(m.id))
+                        dedupedWatching.TryAdd(m.id, m);
+            foreach (var task in completedTasks)
+                foreach (var m in task.Result)
+                    if (!string.IsNullOrEmpty(m.id))
+                        dedupedCompleted.TryAdd(m.id, m);
+
+            var watching = dedupedWatching.Values.ToList();
+            var completed = dedupedCompleted.Values.ToList();
 
             watchingTotal = watching.Count;
             completedTotal = completed.Count;
-            continueWatching = watching.Take(ContinueWatchingMaxItems).ToList();
+
+            // Continue Watching uses the PRIMARY's watching list only — it's a
+            // "what to watch next" surface where each card's "Ep N / Total"
+            // progress badge is meaningful to the user, and that signal is per-
+            // provider (the same anime on AniList vs MAL has different progress
+            // depending on which the user is actively updating). Aggregating
+            // across services would either show the union (with possibly stale
+            // progress for whichever service the user doesn't actively update)
+            // or pick one arbitrarily. Keeping it primary-only is the honest
+            // default; users can revisit if it feels wrong.
+            continueWatching = watchingTasks[0].Result.Take(ContinueWatchingMaxItems).ToList();
 
             // Hours watched: sum of episodes across Completed entries × 24 minutes
             // (the typical TV-anime episode length — not exact for movies/specials
@@ -131,6 +172,7 @@ public class HomeController : Controller
             TotalHoursWatched = totalHoursWatched,
             MeanScore = meanScore,
             TopGenres = topGenres,
+            ContributingServices = contributingNames,
         });
     }
 
@@ -146,6 +188,15 @@ public class HomeController : Controller
             _                        => await _kitsuService.GetAnimeListAsync(tokenData, listType),
         };
         return metas ?? [];
+    }
+
+    // Cross-provider variant: catches per-service exceptions so one rate-limited
+    // or 5xx'd provider doesn't abort the whole stats panel. The other providers
+    // still contribute their data; the failing one contributes an empty list.
+    private async Task<List<Meta>> SafeFetchListAsync(TokenData tokenData, ListType listType)
+    {
+        try { return await FetchListAsync(tokenData, listType); }
+        catch { return []; }
     }
 
     [Route("/configure")]
