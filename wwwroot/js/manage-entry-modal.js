@@ -103,8 +103,21 @@
     // handler diffs this against the new status to figure out which stat
     // counters to bump/decrement.
     var activeOriginalStatus = null;
+    // The element that had focus before the modal opened — restored on
+    // close so keyboard users return to where they left off.
+    var lastFocused = null;
+
+    // Focusable selector used by the trap — a CSS-side allowlist of every
+    // element type that should participate in Tab cycling inside the modal.
+    var FOCUSABLE_SEL = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
     function openModal(id, name, card) {
+        // Remember which element opened the modal so close can restore focus
+        // there. Falls back to body if there's no active element (rare —
+        // would require the modal to be triggered by something other than a
+        // click handler).
+        lastFocused = document.activeElement;
+
         titleEl.textContent = name || 'Manage entry';
         loadingEl.hidden = false;
         formEl.hidden = true;
@@ -112,9 +125,19 @@
         modal.hidden = false;
         backdrop.hidden = false;
         document.body.classList.add('modal-open');
+        setBackgroundInert(true);
+
         // Reset season picker; will be re-populated by loadEntry if applicable.
         seasonField.hidden = true;
         activeCard = card || null;
+
+        // Focus the close (×) button so keyboard / screen-reader users land
+        // somewhere predictable inside the dialog. The form is still loading
+        // — once it appears, the user can Tab into the inputs naturally.
+        // Wrapped in setTimeout to give the browser a paint cycle so the
+        // .focus() call doesn't race the modal's reveal transition.
+        setTimeout(function () { closeBtn.focus(); }, 30);
+
         loadEntry(id, /* isInitial */ true);
     }
 
@@ -122,11 +145,40 @@
         modal.hidden = true;
         backdrop.hidden = true;
         document.body.classList.remove('modal-open');
+        setBackgroundInert(false);
         activeEntryId = null;
         activeService = null;
         activeCard = null;
         activeOriginalStatus = null;
         saveBtn.disabled = false;
+
+        // Hand focus back to the element that opened the modal. Skips when
+        // that element is no longer in the DOM (e.g., the card was removed
+        // by the optimistic update post-save) — fall back to body so focus
+        // doesn't get stuck on a detached node.
+        if (lastFocused && document.contains(lastFocused) &&
+            typeof lastFocused.focus === 'function') {
+            try { lastFocused.focus(); } catch (e) { /* ignore */ }
+        }
+        lastFocused = null;
+    }
+
+    // Mark every body-level element except the modal + backdrop as inert
+    // while the modal is open, so background interactives are unfocusable
+    // (Tab stays inside the modal) AND hidden from screen readers (so the
+    // SR reading order doesn't drift past the dialog). Modern browsers
+    // (Chrome 102+, Firefox 112+, Safari 15.5+) all support [inert]; older
+    // ones gracefully degrade to "still focusable but covered by backdrop".
+    function setBackgroundInert(on) {
+        var children = document.body.children;
+        for (var i = 0; i < children.length; i++) {
+            var child = children[i];
+            if (child === modal || child === backdrop) continue;
+            // Toast container too — toasts during modal-open shouldn't
+            // steal the SR cursor; they remain visible but inert.
+            if (on) child.setAttribute('inert', '');
+            else child.removeAttribute('inert');
+        }
     }
 
     function showError(msg) {
@@ -350,7 +402,36 @@
     });
 
     document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && !modal.hidden) closeModal();
+        if (modal.hidden) return;
+        if (e.key === 'Escape') {
+            closeModal();
+            return;
+        }
+        // Focus trap — Tab/Shift+Tab cycles within the modal's focusable
+        // elements. Backstop for the [inert] background: even when inert
+        // unfocuses background elements, the browser would otherwise hand
+        // focus to its own URL bar / chrome on Tab past the last focusable.
+        if (e.key === 'Tab') {
+            var focusables = Array.prototype.filter.call(
+                modal.querySelectorAll(FOCUSABLE_SEL),
+                function (el) {
+                    // Skip elements that are visually hidden / inside a
+                    // hidden field-group (e.g. the season selector when
+                    // not applicable) — those shouldn't be tab stops.
+                    return !el.disabled && el.offsetParent !== null;
+                }
+            );
+            if (!focusables.length) return;
+            var first = focusables[0];
+            var last = focusables[focusables.length - 1];
+            if (e.shiftKey && document.activeElement === first) {
+                e.preventDefault();
+                last.focus();
+            } else if (!e.shiftKey && document.activeElement === last) {
+                e.preventDefault();
+                first.focus();
+            }
+        }
     });
 
     formEl.addEventListener('submit', function (e) {

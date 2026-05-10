@@ -128,7 +128,7 @@
                 <button class="entry-modal-close" type="button" aria-label="Close">×</button>
             </header>
             <div class="entry-modal-body">
-                <div class="entry-modal-loading">Loading…</div>
+                <div class="entry-modal-loading" aria-live="polite">Loading…</div>
                 <form class="entry-modal-form" hidden>
                     @* Season selector — hidden by default, shown only when the
                        opened anime is a franchise split across multiple service
@@ -175,7 +175,7 @@
                         <label class="entry-modal-label" for="entry-modal-notes">Notes</label>
                         <textarea id="entry-modal-notes" name="notes" rows="3" class="entry-modal-textarea" placeholder="Personal notes about this entry…"></textarea>
                     </div>
-                    <div class="entry-modal-error" hidden></div>
+                    <div class="entry-modal-error" role="alert" hidden></div>
                     <div class="entry-modal-actions">
                         <button type="button" class="entry-modal-cancel">Cancel</button>
                         <button type="submit" class="entry-modal-save">Save</button>
