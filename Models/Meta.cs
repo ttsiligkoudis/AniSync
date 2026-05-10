@@ -39,6 +39,26 @@ namespace AnimeList.Models
         public int? year { get; set; }
         public string format { get; set; }
 
+        // Display-ready airing status ("Airing" / "Finished" / "Hiatus" /
+        // "Cancelled" / "Not Yet Released") and source-material label
+        // ("Manga adaptation" / "Original" / "Novel adaptation" / etc.).
+        // Populated on the detail-side per-service Meta builder; null on
+        // catalog responses where the data isn't fetched.
+        public string airStatus { get; set; }
+        public string source { get; set; }
+
+        // Average episode runtime in minutes (AniList's `duration` field).
+        // Surfaced in the detail-page info row. null when the upstream
+        // didn't ship a value or the entry is a movie (where the format
+        // string already implies "single runtime").
+        public int? avgDuration { get; set; }
+
+        // Tags (themes like "Reincarnation", "Cyberpunk", "Coming-of-age")
+        // beyond the broad genres list. Top-ranked subset only — the full
+        // AniList tag list runs 30+ entries per anime. Detail page renders
+        // a small subdued chip strip beneath genres.
+        public List<string> tags { get; set; } = [];
+
         // User's watched-episode count for THIS entry, populated only when the
         // catalog response naturally includes list-status data (i.e. user-list
         // queries like Currently Watching / Completed; null on Trending /

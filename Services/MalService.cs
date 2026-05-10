@@ -219,6 +219,8 @@ namespace AnimeList.Services
                 episodes = numEps > 0 ? numEps : null,
                 year = releaseYear,
                 format = NormalizeFormat(mediaType),
+                airStatus = NormalizeAirStatus((string)json["status"]),
+                source = NormalizeSource((string)json["source"]),
             };
 
             // Trailer: try MAL's own `videos` first (rare but present on some titles), then

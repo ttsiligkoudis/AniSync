@@ -374,6 +374,9 @@ namespace AnimeList.Services
                     Media(id: $id) {
                         id
                         format
+                        status
+                        source
+                        duration
                         averageScore
                         seasonYear
                         title {
@@ -472,7 +475,31 @@ namespace AnimeList.Services
                 episodes = (int?)result.episodes,
                 year = (int?)result.seasonYear,
                 format = NormalizeFormat((string)result.format),
+                airStatus = NormalizeAirStatus((string)result.status),
+                source = NormalizeSource((string)result.source),
+                avgDuration = (int?)result.duration,
             };
+
+            // Tags subselection is already fetched (rank + isAdult). Filter
+            // out adult-only tags and rank-50-or-below noise; keep the top
+            // 8 by rank for the detail page's themes strip.
+            if (result.tags != null)
+            {
+                var topTags = new List<(string name, int rank)>();
+                foreach (var tag in result.tags)
+                {
+                    var tagName = (string)tag.name;
+                    var tagRank = (int?)tag.rank ?? 0;
+                    var tagAdult = (bool?)tag.isAdult ?? false;
+                    if (string.IsNullOrEmpty(tagName) || tagAdult || tagRank < 50) continue;
+                    topTags.Add((tagName, tagRank));
+                }
+                anime.tags = topTags
+                    .OrderByDescending(t => t.rank)
+                    .Take(8)
+                    .Select(t => t.name)
+                    .ToList();
+            }
 
             if (result.trailer != null && result.trailer.site == "youtube")
             {

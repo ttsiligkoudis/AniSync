@@ -60,8 +60,16 @@
 
     var canEdit = !Model.AnonymousUser && !string.IsNullOrEmpty(Model.ConfigUid);
 
+    // Studios get surfaced in the hero ("By: KyoAni, MAPPA") rather than
+    // buried in the bottom link list — production credit is part of the
+    // anime's identity. Pull them out before grouping the rest.
+    var studios = (a.links ?? new())
+        .Where(l => string.Equals(l.category, "Studio", StringComparison.OrdinalIgnoreCase))
+        .Where(l => !string.IsNullOrEmpty(l.name))
+        .ToList();
+
     // Group external links by category so the page shows distinct sections
-    // (Streaming, Studio, Character, etc.) rather than one flat list.
+    // (Streaming, Character, etc.) rather than one flat list.
     // Filters:
     //   - "Manage" is the standalone-page hand-off the addon uses; we have a
     //     proper Edit button on this page, so it'd be duplication.
@@ -70,10 +78,12 @@
     //     the same source. Keep the Stremio-facing Link entries on the meta
     //     (they still flow through to the addon JSON), just don't render
     //     them as a separate links section here.
+    //   - "Studio" surfaces in the hero (above), don't double-render below.
     var linksByCategory = (a.links ?? new())
         .Where(l => !string.IsNullOrEmpty(l.url) && !string.IsNullOrEmpty(l.name))
         .Where(l => !string.Equals(l.category, "Manage", StringComparison.OrdinalIgnoreCase))
         .Where(l => !string.Equals(l.category, "Similar", StringComparison.OrdinalIgnoreCase))
+        .Where(l => !string.Equals(l.category, "Studio", StringComparison.OrdinalIgnoreCase))
         .GroupBy(l => string.IsNullOrEmpty(l.category) ? "Links" : l.category)
         .ToList();
 
@@ -105,15 +115,53 @@
                 var infoBits = new List<string>();
                 if (!string.IsNullOrEmpty(a.format)) infoBits.Add(a.format);
                 if (a.episodes is int eps && eps > 0) infoBits.Add($"{eps} ep{(eps > 1 ? "s" : "")}");
+                if (a.avgDuration is int dur && dur > 0) infoBits.Add($"~{dur} min");
                 if (a.year is int yr && yr > 0) infoBits.Add(yr.ToString());
+                if (!string.IsNullOrEmpty(a.source)) infoBits.Add(a.source);
             }
             @if (infoBits.Count > 0)
             {
                 <div class="anime-detail-info">@string.Join(" · ", infoBits)</div>
             }
-            @if (a.score is double sc && sc > 0)
+            @* Score (community) + airing status side by side. The status pill
+               color-shifts on "Airing" / "On hiatus" / "Cancelled" so the
+               state reads at a glance — Stremio-style "currently airing"
+               cue without a separate "next episode in N days" widget. *@
+            <div class="anime-detail-badges">
+                @if (a.score is double sc && sc > 0)
+                {
+                    <span class="anime-detail-score">★ @sc.ToString("0.0")</span>
+                }
+                @if (!string.IsNullOrEmpty(a.airStatus))
+                {
+                    var statusKey = a.airStatus.ToLowerInvariant().Replace(" ", "-");
+                    <span class="anime-detail-status anime-detail-status-@statusKey">
+                        @if (a.airStatus == "Airing")
+                        {
+                            <span class="anime-detail-status-dot" aria-hidden="true"></span>
+                        }
+                        @a.airStatus
+                    </span>
+                }
+            </div>
+            @if (studios.Count > 0)
             {
-                <div class="anime-detail-score">★ @sc.ToString("0.0")</div>
+                <div class="anime-detail-studios">
+                    By
+                    @for (var i = 0; i < studios.Count; i++)
+                    {
+                        var s = studios[i];
+                        if (i > 0) { <text>, </text> }
+                        if (!string.IsNullOrEmpty(s.url))
+                        {
+                            <a href="@s.url" class="anime-detail-studio-link" target="_blank" rel="noreferrer noopener">@s.name</a>
+                        }
+                        else
+                        {
+                            <span>@s.name</span>
+                        }
+                    }
+                </div>
             }
             @if (a.genres?.Count > 0)
             {
@@ -121,6 +169,18 @@
                     @foreach (var g in a.genres.Take(8))
                     {
                         <span class="genre-chip">@g</span>
+                    }
+                </div>
+            }
+            @if (a.tags?.Count > 0)
+            {
+                @* Themes — smaller / lighter chips below the genre row to
+                   read as secondary metadata. AniList-only currently;
+                   MAL/Kitsu primaries skip this row gracefully. *@
+                <div class="anime-detail-tags">
+                    @foreach (var t in a.tags)
+                    {
+                        <span class="anime-detail-tag">@t</span>
                     }
                 </div>
             }
@@ -178,51 +238,60 @@
 
 @if (!string.IsNullOrEmpty(a.description))
 {
+    @* Long AniList synopses run 500+ words; clamp to ~5 lines and offer an
+       expand toggle. The data-collapsed attribute keys the CSS line-clamp
+       and the JS toggle below; short synopses skip the toggle entirely. *@
+    var isLongSynopsis = a.description.Length > 300;
     <section class="anime-detail-section">
         <h2 class="anime-detail-section-title">Synopsis</h2>
-        <p class="anime-detail-synopsis">@a.description</p>
+        <div class="anime-detail-synopsis-wrap" @(isLongSynopsis ? "data-collapsed=\"true\"" : "")>
+            <p class="anime-detail-synopsis">@a.description</p>
+            @if (isLongSynopsis)
+            {
+                <button type="button" class="anime-detail-synopsis-toggle"
+                        aria-expanded="false">Show more</button>
+            }
+        </div>
     </section>
 }
 
 @if (a.videos?.Count > 0)
 {
-    @{
-        var canQuickMark = canEdit && Model.Entry != null && !string.IsNullOrEmpty(Model.Entry.Status);
-        var currentProgress = Model.Entry?.Progress ?? 0;
+    var canQuickMark = canEdit && Model.Entry != null && !string.IsNullOrEmpty(Model.Entry.Status);
+    var currentProgress = Model.Entry?.Progress ?? 0;
 
-        // Group episodes by their `season` field. Single-season anime end up
-        // with one group and no tabs; multi-cour franchises (Stremio-style
-        // mapping with the IMDb id grouped) get a row of pill tabs.
-        var seasonGroups = a.videos
-            .GroupBy(v => v.season > 0 ? v.season : 1)
-            .OrderBy(g => g.Key)
-            .ToList();
-        var hasMultipleSeasons = seasonGroups.Count > 1;
+    // Group episodes by their `season` field. Single-season anime end up
+    // with one group and no tabs; multi-cour franchises (Stremio-style
+    // mapping with the IMDb id grouped) get a row of pill tabs.
+    var seasonGroups = a.videos
+        .GroupBy(v => v.season > 0 ? v.season : 1)
+        .OrderBy(g => g.Key)
+        .ToList();
+    var hasMultipleSeasons = seasonGroups.Count > 1;
 
-        // Default visible season: the one containing the user's current
-        // progress when known, otherwise the latest. Stremio's pattern is
-        // "land where the user left off" so they can pick up directly.
-        int defaultSeason;
-        if (currentProgress > 0)
-        {
-            // Find the season group whose episodes include the current progress.
-            // The franchise mapping stores cour-specific episode numbers, so
-            // the absolute episode 7 might be Season 1 ep 7 OR Season 2 ep 1
-            // depending on numbering. Pick the season whose max ep ≥ progress
-            // (closest fit).
-            var match = seasonGroups
-                .FirstOrDefault(g => g.Any(v => v.episode == currentProgress)) ?? seasonGroups.Last();
-            defaultSeason = match.Key;
-        }
-        else
-        {
-            defaultSeason = seasonGroups.Last().Key;
-        }
-
-        // Treat each row's air date relative to today so we can amber-tint
-        // future dates and skip the watched check on unaired episodes.
-        var today = DateTime.UtcNow.Date;
+    // Default visible season: the one containing the user's current
+    // progress when known, otherwise the latest. Stremio's pattern is
+    // "land where the user left off" so they can pick up directly.
+    int defaultSeason;
+    if (currentProgress > 0)
+    {
+        // Find the season group whose episodes include the current progress.
+        // The franchise mapping stores cour-specific episode numbers, so
+        // the absolute episode 7 might be Season 1 ep 7 OR Season 2 ep 1
+        // depending on numbering. Pick the first match by episode-num,
+        // falling back to the last season when no row matches.
+        var match = seasonGroups
+            .FirstOrDefault(g => g.Any(v => v.episode == currentProgress)) ?? seasonGroups.Last();
+        defaultSeason = match.Key;
     }
+    else
+    {
+        defaultSeason = seasonGroups.Last().Key;
+    }
+
+    // Treat each row's air date relative to today so we can amber-tint
+    // future dates and skip the watched check on unaired episodes.
+    var today = DateTime.UtcNow.Date;
     <section class="anime-detail-section">
         <h2 class="anime-detail-section-title">Episodes <span class="anime-detail-section-count">(@a.videos.Count)</span></h2>
 
