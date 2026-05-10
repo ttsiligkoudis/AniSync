@@ -99,6 +99,10 @@
     // The DOM card that opened the modal. Held so we can update or remove
     // it after save without a full page reload.
     var activeCard = null;
+    // The status the entry had AT LOAD time (before user edits). The save
+    // handler diffs this against the new status to figure out which stat
+    // counters to bump/decrement.
+    var activeOriginalStatus = null;
 
     function openModal(id, name, card) {
         titleEl.textContent = name || 'Manage entry';
@@ -121,6 +125,7 @@
         activeEntryId = null;
         activeService = null;
         activeCard = null;
+        activeOriginalStatus = null;
         saveBtn.disabled = false;
     }
 
@@ -150,6 +155,7 @@
                 }
                 activeEntryId = data.selectedEntryId || id;
                 activeService = data.service;
+                activeOriginalStatus = data.status || null;
 
                 // Seasons dropdown: only render when the franchise has 2+
                 // mappings. Single-mapping responses don't need a picker.
@@ -273,6 +279,57 @@
         }
     }
 
+    // Stat-cell adjustment — keeps the dashboard's Watching / Completed /
+    // Hours numbers in sync with optimistic card removals/additions. No-ops
+    // gracefully when the dashboard isn't on the current page (Library /
+    // Discover have no stats panel — querySelector returns null).
+    function adjustStat(name, delta) {
+        var num = document.querySelector('.stats-cell[data-stat="' + name + '"] .stats-number');
+        if (!num) return;
+        // Strip locale separators (commas) before parsing so "1,234" → 1234.
+        var current = parseInt(num.textContent.replace(/[^\d-]/g, ''), 10) || 0;
+        var next = Math.max(0, current + delta);
+        num.textContent = next.toLocaleString();
+    }
+
+    // Hours bucket adjusts in lockstep with Completed when the entry has a
+    // known total-episodes count. Uses the same 24-min/episode assumption
+    // HomeController.Index applies server-side so the client-side delta
+    // matches the next full render.
+    function adjustHours(episodesDelta) {
+        var num = document.querySelector('.stats-cell[data-stat="hours"] .stats-number');
+        if (!num) return;
+        var current = parseInt(num.textContent.replace(/[^\d-]/g, ''), 10) || 0;
+        var next = Math.max(0, current + Math.round(episodesDelta * 24 / 60));
+        num.textContent = next.toLocaleString();
+    }
+
+    // Translate per-service status → AniSync filter slug, returning null for
+    // unknown / empty status. Used by the stat-adjustment logic to detect
+    // bucket transitions (Watching → Completed etc.).
+    function statusToFilter(service, status) {
+        if (!status) return null;
+        var map = SERVICE_STATUS_TO_FILTER[service];
+        return map ? (map[status] || null) : null;
+    }
+
+    function adjustStatsForTransition(service, oldStatus, newStatus, totalEpisodes) {
+        var oldFilter = statusToFilter(service, oldStatus);
+        var newFilter = statusToFilter(service, newStatus);
+        if (oldFilter === newFilter) return;
+
+        if (oldFilter === 'current') adjustStat('watching', -1);
+        if (oldFilter === 'completed') {
+            adjustStat('completed', -1);
+            if (totalEpisodes) adjustHours(-totalEpisodes);
+        }
+        if (newFilter === 'current') adjustStat('watching', 1);
+        if (newFilter === 'completed') {
+            adjustStat('completed', 1);
+            if (totalEpisodes) adjustHours(totalEpisodes);
+        }
+    }
+
     // Card click interception. Targets only <a class="library-card"> elements
     // that carry a data-meta-id (the link variant; inert anonymous cards are
     // <div>s and don't match). Falls back to default navigation if the data
@@ -318,9 +375,10 @@
         };
 
         // Capture state for the optimistic update before closing the modal
-        // (which clears activeCard / activeService).
+        // (which clears activeCard / activeService / activeOriginalStatus).
         var cardForUpdate = activeCard;
         var serviceForUpdate = activeService;
+        var originalStatusForUpdate = activeOriginalStatus;
 
         fetch('/api/library/entry/save', {
             method: 'POST',
@@ -350,6 +408,10 @@
                             refreshCardProgress(cardForUpdate, newProgress, totalForCard);
                         }
                     }
+                    // Keep the dashboard stats panel in sync with the bucket
+                    // transition. No-op on /library / /discover where the
+                    // panel doesn't exist.
+                    adjustStatsForTransition(serviceForUpdate, originalStatusForUpdate, newStatus, totalForCard);
                     closeModal();
                 } else {
                     showError('Save failed. Try again.');
