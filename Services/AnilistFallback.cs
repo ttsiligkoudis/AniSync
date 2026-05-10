@@ -1,5 +1,6 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace AnimeList.Services
 {
@@ -10,13 +11,21 @@ namespace AnimeList.Services
     {
         private readonly IHttpClientFactory _clientFactory;
         private readonly IAnimeMappingService _mappingService;
+        private readonly IMemoryCache _cache;
         private const string _api = "https://graphql.anilist.co";
         private const int PageSize = 50;
+        // 24-hour TTL on the seasonal stat counts — the catalog moves slowly
+        // (a few additions per week, status flips on Tuesdays, etc.) so day-
+        // stale numbers are fine. Keyed by (season, year) so the cache
+        // naturally rotates when AniList moves to the next season; the old
+        // season's entry just expires unread.
+        private static readonly TimeSpan SeasonStatsCacheDuration = TimeSpan.FromHours(24);
 
-        public AnilistFallback(IHttpClientFactory clientFactory, IAnimeMappingService mappingService)
+        public AnilistFallback(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IMemoryCache cache)
         {
             _clientFactory = clientFactory;
             _mappingService = mappingService;
+            _cache = cache;
         }
 
         public async Task<List<Meta>> GetAiringScheduleAsync(AnimeService translateTo, string skip = null)
@@ -307,6 +316,20 @@ namespace AnimeList.Services
 
         public async Task<(int currentlyAiring, int newThisSeason, int totalThisSeason)> GetSeasonStatsAsync()
         {
+            // Cache key includes season + year so the entry naturally
+            // invalidates when AniList moves to the next season — the
+            // OLD entry just sits dead in cache until eviction. AnilistFallback
+            // is registered as Scoped, but IMemoryCache is the singleton so
+            // the cache survives across requests despite this service's
+            // per-request lifetime.
+            var (season, year) = GetSeasonAndYear(SeasonCurrent);
+            var cacheKey = $"anilist:season-stats:{season}:{year}";
+
+            if (_cache.TryGetValue<(int, int, int)>(cacheKey, out var cached))
+            {
+                return cached;
+            }
+
             // Single aliased GraphQL call — three Page queries each request
             // perPage:1 + pageInfo.total so we get the count without paying
             // for a result set. AniList's Page.pageInfo.total returns the
@@ -322,7 +345,6 @@ namespace AnimeList.Services
             //     Excludes shows that already FINISHED earlier this
             //     calendar season but were tagged with the season anyway
             //     (rare but exists for short re-airs).
-            var (season, year) = GetSeasonAndYear(SeasonCurrent);
             var requestBody = SerializeObject(new
             {
                 query = @"
@@ -350,6 +372,18 @@ namespace AnimeList.Services
                 var airing = (int?)data.airing?.pageInfo?.total ?? 0;
                 var newThis = (int?)data.newThis?.pageInfo?.total ?? 0;
                 var total = (int?)data.total?.pageInfo?.total ?? 0;
+
+                // Only cache non-zero results so a transient upstream blip
+                // (sandbox blocks GraphQL / rate-limit / 5xx) doesn't lock
+                // in zeros for 24 hours. Zeros are returned to the caller
+                // for this one render but the next request retries fresh.
+                if (total > 0)
+                {
+                    _cache.Set(cacheKey, (airing, newThis, total), new MemoryCacheEntryOptions
+                    {
+                        AbsoluteExpirationRelativeToNow = SeasonStatsCacheDuration,
+                    });
+                }
                 return (airing, newThis, total);
             }
             catch
