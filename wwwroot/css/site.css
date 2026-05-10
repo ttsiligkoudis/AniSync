@@ -510,19 +510,51 @@ body.modal-open {
 
 .entry-modal-actions {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
     gap: 0.5rem;
     margin-top: 0.4rem;
 }
 
+/* Cancel + Save sit together on the trailing edge as a unit; Delete
+   takes the leading edge on its own so a destructive misclick can't
+   land on it from muscle-memory aimed at the primary CTA. */
+.entry-modal-actions-end {
+    display: flex;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
 .entry-modal-cancel,
-.entry-modal-save {
+.entry-modal-save,
+.entry-modal-delete {
     padding: 0.55rem 1rem;
     border-radius: 999px;
     font-size: 0.9rem;
     font-weight: 600;
     cursor: pointer;
     transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+/* Destructive-red treatment so the button reads unambiguously as
+   "remove from list" rather than another flavour of save. Tinted
+   ghost-style on rest, full-fill on hover so a hovered state feels
+   like the user is committing toward the action. */
+.entry-modal-delete {
+    background: transparent;
+    border: 1px solid rgba(239, 68, 68, 0.45);
+    color: #fca5a5;
+}
+
+.entry-modal-delete:hover {
+    background: #ef4444;
+    border-color: #ef4444;
+    color: #fff;
+}
+
+.entry-modal-delete:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 .entry-modal-cancel {
@@ -2646,6 +2678,7 @@ a.stats-cell-link:hover {
 .anime-detail-user-state {
     display: inline-flex;
     align-items: center;
+    gap: 0.4rem;
     padding: 0.3rem 0.7rem;
     background: rgba(59, 130, 246, 0.12);
     border: 1px solid rgba(59, 130, 246, 0.3);
@@ -2654,10 +2687,10 @@ a.stats-cell-link:hover {
     font-size: 0.82rem;
     font-weight: 500;
     line-height: 1.2;
-    /* When rendered as a <button> for click-to-edit, reset the browser
-       defaults so it visually matches the <span> variant. */
+    /* When rendered as a <button> for click-to-edit / add-to-list,
+       reset the browser defaults so it visually matches the <span>
+       variant the anonymous render falls back to. */
     font-family: inherit;
-    cursor: pointer;
 }
 
 button.anime-detail-user-state {
@@ -2669,36 +2702,12 @@ button.anime-detail-user-state:hover {
     border-color: rgba(59, 130, 246, 0.45);
 }
 
-/* Pencil edit button — absolute top-right of the hero card, replacing
-   the previous full-width "Edit entry" CTA. Glassy circular button with
-   the cobalt accent on hover so it reads as the primary action without
-   stealing attention from the title/poster underneath. */
-.anime-detail-edit-btn {
-    position: absolute;
-    top: 0.75rem;
-    right: 0.75rem;
-    z-index: 2;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 38px;
-    height: 38px;
-    border-radius: 999px;
-    background: rgba(0, 0, 0, 0.55);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    color: #fff;
-    cursor: pointer;
-    text-decoration: none;
-    transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
-}
-
-.anime-detail-edit-btn:hover {
-    background: #3B82F6;
-    border-color: #3B82F6;
-}
-
-.anime-detail-edit-btn:active {
-    transform: scale(0.94);
+/* Trailing pencil / plus glyph baked into the pill. Slightly dimmer
+   than the label so it reads as an action-affordance rather than
+   competing with the status text. */
+.anime-detail-user-state-icon {
+    flex-shrink: 0;
+    color: #93c5fd;
 }
 
 .anime-detail-section {

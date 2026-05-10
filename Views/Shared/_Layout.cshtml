@@ -176,9 +176,18 @@
                         <textarea id="entry-modal-notes" name="notes" rows="3" class="entry-modal-textarea" placeholder="Personal notes about this entry…"></textarea>
                     </div>
                     <div class="entry-modal-error" role="alert" hidden></div>
+                    @* Delete sits at the leading edge so it's visually
+                       separated from the Cancel/Save pair on the trailing
+                       edge — destructive actions shouldn't be next to the
+                       primary CTA where a misclick lands. Hidden by default;
+                       the modal JS reveals it once load resolves with a
+                       non-empty status (i.e. the entry actually exists). *@
                     <div class="entry-modal-actions">
-                        <button type="button" class="entry-modal-cancel">Cancel</button>
-                        <button type="submit" class="entry-modal-save">Save</button>
+                        <button type="button" class="entry-modal-delete" hidden>Delete</button>
+                        <div class="entry-modal-actions-end">
+                            <button type="button" class="entry-modal-cancel">Cancel</button>
+                            <button type="submit" class="entry-modal-save">Save</button>
+                        </div>
                     </div>
                 </form>
             </div>
