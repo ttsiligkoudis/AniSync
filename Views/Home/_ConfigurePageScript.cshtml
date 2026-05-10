@@ -18,7 +18,7 @@
     // Origin (scheme://host) of the addon — used to build the manifest URL and the
     // stremio:// deep-link. These never include flags; flags live in the URL path bytes.
     var addonOrigin = '@(Context.Request.Scheme)://@(Context.Request.Host)';
-    var stremioWebPrefix = '@stremioStr';
+    var stremioWebPrefix = 'https://web.stremio.com/#/addons?addon=';
 
     // Authenticated users have a 16-byte UID (base64url) pointing at a row in the
     // server-side config store; anonymous users still embed their (tiny) token data inline.
