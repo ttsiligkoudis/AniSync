@@ -139,15 +139,11 @@ namespace AnimeList.Controllers
             // AnimeFillerList is a per-episode dataset.
             await TryEnrichWithFillerAsync(anime);
 
-            // Resolve UID for logged-in users so the Edit button's data-meta-id
-            // hooks the existing modal flow.
-            string uid = null;
+            // uid was already resolved at the top of the action (alongside
+            // the configuration load); reuse it here for the entry fetch.
             EntryViewState entry = null;
             if (!tokenData.anonymousUser)
             {
-                var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
-                uid = resolved;
-
                 // Fetch the user's entry against the resolved per-service id so
                 // the hero can surface "You're watching · Ep 5/12 · Your score:
                 // 8.0" alongside the public meta. Best-effort: failures swallow
