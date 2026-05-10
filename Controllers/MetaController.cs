@@ -603,12 +603,31 @@ namespace AnimeList.Controllers
                     string.IsNullOrWhiteSpace(tokenData.access_token))
                     return new JsonResult(new { success = false, error = "not-authenticated" });
 
-                var entry = tokenData.anime_service switch
+                var animeService = tokenData.anime_service;
+
+                // Resolve seasons + selected entry id when the click came from a card
+                // with a cross-service id (imdb:/tmdb:); for native ids (anilist: /
+                // kitsu: / mal:) BuildSeasonsAsync short-circuits with an empty
+                // seasons list and the original id. isSeries is passed true because
+                // the id-prefix check inside BuildSeasonsAsync is the real gate —
+                // movies with imdb/tmdb ids resolve to a single mapping and return
+                // empty seasons anyway. videos:null skips auto-episode-selection,
+                // which the modal doesn't need (user picks manually if at all).
+                var (seasons, selectedEntryId, _) =
+                    await BuildSeasonsAsync(id, isSeries: true, animeService, videos: null, season, episode: null);
+
+                var entry = animeService switch
                 {
-                    AnimeService.Anilist     => await _anilistService.GetAnimeEntryAsync(tokenData, id, season),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, id, season),
-                    _                        => await _kitsuService.GetAnimeEntryAsync(tokenData, id, season),
+                    AnimeService.Anilist     => await _anilistService.GetAnimeEntryAsync(tokenData, selectedEntryId, null),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, selectedEntryId, null),
+                    _                        => await _kitsuService.GetAnimeEntryAsync(tokenData, selectedEntryId, null),
                 };
+
+                // totalEpisodes comes from the entry itself when present; falls back
+                // to the matched season's count when the user has no entry yet (so
+                // the progress input still shows the right max).
+                var totalEpisodes = entry?.TotalEpisodes
+                    ?? seasons.FirstOrDefault(s => s.Id == selectedEntryId)?.TotalEpisodes;
 
                 return new JsonResult(new
                 {
@@ -617,10 +636,15 @@ namespace AnimeList.Controllers
                     // right per-provider option set (AniList/MAL/Kitsu use different
                     // status enum values). Sent as the integer enum value so client-
                     // side switch statements stay compact.
-                    service = (int)tokenData.anime_service,
+                    service = (int)animeService,
+                    selectedEntryId,
+                    // Seasons array is empty for non-franchise entries; the modal
+                    // hides the dropdown when length < 2 (a single mapping isn't
+                    // worth a picker — there's nothing to pick).
+                    seasons = seasons.Select(s => new { id = s.Id, label = s.Label, totalEpisodes = s.TotalEpisodes }),
                     status = entry?.Status,
                     progress = entry?.Progress ?? 0,
-                    totalEpisodes = entry?.TotalEpisodes,
+                    totalEpisodes,
                     score = entry?.Score,
                     notes = entry?.Notes,
                     rewatchCount = entry?.RewatchCount ?? 0,

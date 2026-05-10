@@ -130,6 +130,16 @@
             <div class="entry-modal-body">
                 <div class="entry-modal-loading">Loading…</div>
                 <form class="entry-modal-form" hidden>
+                    @* Season selector — hidden by default, shown only when the
+                       opened anime is a franchise split across multiple service
+                       entries (Attack on Titan, JoJo, Demon Slayer, etc.). The
+                       options are populated by the modal JS from the
+                       /api/library/entry response's seasons array. Changing the
+                       selection re-fetches entry data for that cour. *@
+                    <div class="entry-modal-field" data-season-field hidden>
+                        <label class="entry-modal-label" for="entry-modal-season">Season</label>
+                        <select id="entry-modal-season" name="season" class="entry-modal-select"></select>
+                    </div>
                     <div class="entry-modal-field">
                         <label class="entry-modal-label" for="entry-modal-status">Status</label>
                         <select id="entry-modal-status" name="status" class="entry-modal-select"></select>

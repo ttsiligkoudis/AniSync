@@ -6,10 +6,15 @@
 //
 // Flow:
 //   1. User clicks a poster card → JS intercepts (preventDefault) → modal opens.
-//   2. Fetch entry via /api/library/entry → populate form.
-//   3. User edits → submit → POST /api/library/entry/save.
+//   2. Fetch entry via /api/library/entry → populate form. If the anime is a
+//      franchise split across multiple service entries (Attack on Titan, JoJo,
+//      etc.), the response includes a seasons array; the modal renders a
+//      Season dropdown that re-fetches form data when changed.
+//   3. User edits → submit → POST /api/library/entry/save (using the resolved
+//      per-cour entry id, NOT the original card id).
 //   4. Reload the page on success so the list reflects status changes (e.g.
-//      moving from Watching → Completed).
+//      moving from Watching → Completed). A "Saved" toast survives the reload
+//      via sessionStorage.
 (function () {
     'use strict';
 
@@ -21,6 +26,8 @@
     var loadingEl = modal.querySelector('.entry-modal-loading');
     var formEl = modal.querySelector('.entry-modal-form');
     var errorEl = modal.querySelector('.entry-modal-error');
+    var seasonField = modal.querySelector('[data-season-field]');
+    var seasonSelect = modal.querySelector('#entry-modal-season');
     var statusSelect = modal.querySelector('#entry-modal-status');
     var progressInput = modal.querySelector('#entry-modal-progress');
     var totalEl = modal.querySelector('.entry-modal-total');
@@ -59,7 +66,7 @@
         ],
         // MyAnimeList
         2: [
-            ['',                'â€” None (not in list) â€”'],
+            ['',                '— None (not in list) —'],
             ['watching',        'Watching'],
             ['plan_to_watch',   'Planning'],
             ['completed',       'Completed'],
@@ -68,14 +75,14 @@
             ['rewatching',      'Rewatching'],
         ],
     };
-    // Fix the mojibake from the literal above (the editor occasionally
-    // mangles em-dashes when serialising) — explicit override at runtime.
-    STATUS_OPTIONS[2][0][1] = '— None (not in list) —';
 
-    var currentId = null;
+    // The currently-active per-cour entry id (anilist:N / kitsu:N / mal:N).
+    // Distinct from the card's original id, which might be a cross-service
+    // imdb:/tmdb: id that resolves to one of multiple per-cour entries. Save
+    // payloads send activeEntryId, not the card id.
+    var activeEntryId = null;
 
     function openModal(id, name) {
-        currentId = id;
         titleEl.textContent = name || 'Manage entry';
         loadingEl.hidden = false;
         formEl.hidden = true;
@@ -83,8 +90,34 @@
         modal.hidden = false;
         backdrop.hidden = false;
         document.body.classList.add('modal-open');
+        // Reset season picker; will be re-populated by loadEntry if applicable.
+        seasonField.hidden = true;
+        loadEntry(id, /* isInitial */ true);
+    }
 
-        fetch('/api/library/entry?id=' + encodeURIComponent(id), {
+    function closeModal() {
+        modal.hidden = true;
+        backdrop.hidden = true;
+        document.body.classList.remove('modal-open');
+        activeEntryId = null;
+        saveBtn.disabled = false;
+    }
+
+    function showError(msg) {
+        loadingEl.hidden = true;
+        errorEl.textContent = msg;
+        errorEl.hidden = false;
+        formEl.hidden = false;
+    }
+
+    function loadEntry(id, isInitial) {
+        if (!isInitial) {
+            // Show a soft loading state without re-hiding the whole form so
+            // the user keeps context (which season they picked) while the
+            // fields refresh.
+            saveBtn.disabled = true;
+        }
+        return fetch('/api/library/entry?id=' + encodeURIComponent(id), {
             credentials: 'same-origin',
             headers: { 'Accept': 'application/json' },
         })
@@ -94,6 +127,31 @@
                     showError('Failed to load entry. Try again.');
                     return;
                 }
+                // selectedEntryId is the per-cour id the server resolved this
+                // request to; for native ids it's the same as the request id,
+                // for cross-service ids it's the picked cour. Save targets
+                // this id explicitly.
+                activeEntryId = data.selectedEntryId || id;
+
+                // Seasons dropdown: only render when the franchise has 2+
+                // mappings. Single-mapping responses don't need a picker
+                // (server still resolves to the per-cour id, just no choice
+                // for the user to make).
+                if (data.seasons && data.seasons.length > 1 && isInitial) {
+                    seasonSelect.innerHTML = '';
+                    data.seasons.forEach(function (s) {
+                        var opt = document.createElement('option');
+                        opt.value = s.id;
+                        opt.textContent = s.label;
+                        if (s.totalEpisodes != null) opt.setAttribute('data-total', s.totalEpisodes);
+                        if (s.id === activeEntryId) opt.selected = true;
+                        seasonSelect.appendChild(opt);
+                    });
+                    seasonField.hidden = false;
+                } else if (isInitial) {
+                    seasonField.hidden = true;
+                }
+
                 populateStatusOptions(data.service);
                 statusSelect.value = data.status || '';
                 progressInput.value = data.progress || 0;
@@ -112,25 +170,12 @@
                 notesInput.value = data.notes || '';
                 loadingEl.hidden = true;
                 formEl.hidden = false;
+                saveBtn.disabled = false;
             })
             .catch(function () {
                 showError('Network error loading entry.');
+                saveBtn.disabled = false;
             });
-    }
-
-    function closeModal() {
-        modal.hidden = true;
-        backdrop.hidden = true;
-        document.body.classList.remove('modal-open');
-        currentId = null;
-        saveBtn.disabled = false;
-    }
-
-    function showError(msg) {
-        loadingEl.hidden = true;
-        errorEl.textContent = msg;
-        errorEl.hidden = false;
-        formEl.hidden = false;
     }
 
     function populateStatusOptions(service) {
@@ -159,18 +204,29 @@
     cancelBtn.addEventListener('click', closeModal);
     backdrop.addEventListener('click', closeModal);
 
+    // Season change — re-fetch entry data for the picked cour. The dropdown
+    // stays visible (isInitial: false) so the user keeps their picker context;
+    // only the form fields below refresh. activeEntryId updates inside
+    // loadEntry, so the next save targets the picked cour.
+    seasonSelect.addEventListener('change', function () {
+        loadEntry(seasonSelect.value, /* isInitial */ false);
+    });
+
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape' && !modal.hidden) closeModal();
     });
 
     formEl.addEventListener('submit', function (e) {
         e.preventDefault();
-        if (!currentId) return;
+        if (!activeEntryId) return;
         saveBtn.disabled = true;
         errorEl.hidden = true;
 
         var payload = {
-            id: currentId,
+            // Send the resolved per-cour entry id so the SaveEntry endpoint
+            // doesn't have to redo the seasons resolution server-side. For
+            // single-mapping anime this matches the original card id.
+            id: activeEntryId,
             status: statusSelect.value,
             progress: parseInt(progressInput.value || '0', 10),
             score: scoreInput.value ? parseFloat(scoreInput.value) : null,
