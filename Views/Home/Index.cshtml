@@ -49,9 +49,17 @@
 @if (isLoggedIn && !anonymousUser && Model.CompletedTotal > 0)
 {
     <section class="dashboard-section stats-section">
+        @{
+            // "via X" when only the primary contributed; "across X + Y, Z" when
+            // linked secondaries also fed in. Communicates that the stats are
+            // a unioned (deduped) view rather than a single-service slice.
+            var statsAttribution = Model.ContributingServices.Count > 1
+                ? $"across {Model.ContributingServices[0]} + {Model.ContributingServices.Count - 1} linked"
+                : $"via {serviceLabel}";
+        }
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">Your stats</h2>
-            <span class="dashboard-section-link-muted">via @serviceLabel</span>
+            <span class="dashboard-section-link-muted">@statsAttribution</span>
         </div>
         @* 4-cell stats strip: Watching · Completed · Hours · Mean Score. Wraps
            to 2x2 on narrow viewports via flex-wrap. Per-cell soft-coloured icon
