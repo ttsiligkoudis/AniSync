@@ -12,9 +12,10 @@
 //      Season dropdown that re-fetches form data when changed.
 //   3. User edits → submit → POST /api/library/entry/save (using the resolved
 //      per-cour entry id, NOT the original card id).
-//   4. Reload the page on success so the list reflects status changes (e.g.
-//      moving from Watching → Completed). A "Saved" toast survives the reload
-//      via sessionStorage.
+//   4. On success: show "Saved" toast inline + optimistically update the
+//      clicked card (refresh progress badge) or fade-and-remove it when the
+//      new status no longer matches the current page's list filter. No page
+//      reload — keeps scroll position and feels like a real app.
 (function () {
     'use strict';
 
@@ -76,13 +77,30 @@
         ],
     };
 
+    // Per-service status string → AniSync's tab slug (the value of ?list= on
+    // /library). Used post-save to decide whether the edited card should
+    // remain in the current view or fade out (its status moved out of the
+    // tab's filter, e.g. user marked Watching → Completed while on the
+    // Watching tab — card no longer belongs here).
+    var SERVICE_STATUS_TO_FILTER = {
+        0: { 'current': 'current', 'planned': 'planning', 'completed': 'completed', 'on_hold': 'paused', 'dropped': 'dropped' },
+        1: { 'CURRENT': 'current', 'PLANNING': 'planning', 'COMPLETED': 'completed', 'PAUSED': 'paused', 'DROPPED': 'dropped', 'REPEATING': 'repeating' },
+        2: { 'watching': 'current', 'plan_to_watch': 'planning', 'completed': 'completed', 'on_hold': 'paused', 'dropped': 'dropped', 'rewatching': 'repeating' },
+    };
+
     // The currently-active per-cour entry id (anilist:N / kitsu:N / mal:N).
     // Distinct from the card's original id, which might be a cross-service
     // imdb:/tmdb: id that resolves to one of multiple per-cour entries. Save
     // payloads send activeEntryId, not the card id.
     var activeEntryId = null;
+    // Service of the currently-loaded entry — needed for the save-side
+    // status→filter mapping, since each service uses different status enums.
+    var activeService = null;
+    // The DOM card that opened the modal. Held so we can update or remove
+    // it after save without a full page reload.
+    var activeCard = null;
 
-    function openModal(id, name) {
+    function openModal(id, name, card) {
         titleEl.textContent = name || 'Manage entry';
         loadingEl.hidden = false;
         formEl.hidden = true;
@@ -92,6 +110,7 @@
         document.body.classList.add('modal-open');
         // Reset season picker; will be re-populated by loadEntry if applicable.
         seasonField.hidden = true;
+        activeCard = card || null;
         loadEntry(id, /* isInitial */ true);
     }
 
@@ -100,6 +119,8 @@
         backdrop.hidden = true;
         document.body.classList.remove('modal-open');
         activeEntryId = null;
+        activeService = null;
+        activeCard = null;
         saveBtn.disabled = false;
     }
 
@@ -127,16 +148,11 @@
                     showError('Failed to load entry. Try again.');
                     return;
                 }
-                // selectedEntryId is the per-cour id the server resolved this
-                // request to; for native ids it's the same as the request id,
-                // for cross-service ids it's the picked cour. Save targets
-                // this id explicitly.
                 activeEntryId = data.selectedEntryId || id;
+                activeService = data.service;
 
                 // Seasons dropdown: only render when the franchise has 2+
-                // mappings. Single-mapping responses don't need a picker
-                // (server still resolves to the per-cour id, just no choice
-                // for the user to make).
+                // mappings. Single-mapping responses don't need a picker.
                 if (data.seasons && data.seasons.length > 1 && isInitial) {
                     seasonSelect.innerHTML = '';
                     data.seasons.forEach(function (s) {
@@ -189,6 +205,74 @@
         });
     }
 
+    // What list-status filter does the current page apply to its cards?
+    //   /library?list=X  → X (defaults to "current")
+    //   /                → "current" (Continue Watching shelf is implicitly Watching)
+    //   /discover, etc.  → null (no list-status filter — cards stay regardless)
+    function getPageListFilter() {
+        var path = window.location.pathname;
+        var params = new URLSearchParams(window.location.search);
+        if (path === '/library' || path === '/library/') {
+            return (params.get('list') || 'current').toLowerCase();
+        }
+        if (path === '/' || path === '') {
+            return 'current';
+        }
+        return null;
+    }
+
+    function statusBelongsHere(service, savedStatus, filter) {
+        if (!filter) return true;            // no filter — card stays regardless
+        if (!savedStatus) return false;      // status="" = entry deleted, never belongs
+        var map = SERVICE_STATUS_TO_FILTER[service];
+        return map ? map[savedStatus] === filter : true;
+    }
+
+    function fadeOutCard(card) {
+        // Smoothly collapse the card so the grid rows don't jump under the
+        // user's eye. Width:0 + opacity:0 + the existing transition makes the
+        // surrounding cards reflow into the gap.
+        card.style.transition = 'opacity 0.25s, transform 0.25s';
+        card.style.opacity = '0';
+        card.style.transform = 'scale(0.92)';
+        setTimeout(function () {
+            if (card.parentNode) card.parentNode.removeChild(card);
+        }, 280);
+    }
+
+    function refreshCardProgress(card, progress, totalEpisodes) {
+        // The progress badge sits inside .library-card-poster-wrap (top-left)
+        // alongside the score badge (bottom-left). Add it if missing, update
+        // text if present, remove if progress was zeroed.
+        var wrap = card.querySelector('.library-card-poster-wrap');
+        if (!wrap) return;
+        var existing = wrap.querySelector('.library-card-progress');
+
+        if (!progress || progress <= 0) {
+            if (existing) existing.parentNode.removeChild(existing);
+            return;
+        }
+
+        var label = totalEpisodes && totalEpisodes > 0
+            ? progress + ' / ' + totalEpisodes
+            : 'Ep ' + progress;
+
+        if (existing) {
+            existing.textContent = label;
+        } else {
+            var span = document.createElement('span');
+            span.className = 'library-card-progress';
+            span.textContent = label;
+            wrap.appendChild(span);
+        }
+    }
+
+    function showToast(text) {
+        if (window.AniSyncToast && window.AniSyncToast.show) {
+            window.AniSyncToast.show(text);
+        }
+    }
+
     // Card click interception. Targets only <a class="library-card"> elements
     // that carry a data-meta-id (the link variant; inert anonymous cards are
     // <div>s and don't match). Falls back to default navigation if the data
@@ -197,17 +281,13 @@
         var card = e.target.closest && e.target.closest('a.library-card[data-meta-id]');
         if (!card) return;
         e.preventDefault();
-        openModal(card.getAttribute('data-meta-id'), card.getAttribute('data-meta-name'));
+        openModal(card.getAttribute('data-meta-id'), card.getAttribute('data-meta-name'), card);
     });
 
     closeBtn.addEventListener('click', closeModal);
     cancelBtn.addEventListener('click', closeModal);
     backdrop.addEventListener('click', closeModal);
 
-    // Season change — re-fetch entry data for the picked cour. The dropdown
-    // stays visible (isInitial: false) so the user keeps their picker context;
-    // only the form fields below refresh. activeEntryId updates inside
-    // loadEntry, so the next save targets the picked cour.
     seasonSelect.addEventListener('change', function () {
         loadEntry(seasonSelect.value, /* isInitial */ false);
     });
@@ -222,22 +302,25 @@
         saveBtn.disabled = true;
         errorEl.hidden = true;
 
+        var newProgress = parseInt(progressInput.value || '0', 10);
+        var newStatus = statusSelect.value;
+        var totalForCard = parseInt(progressInput.max, 10) || null;
+
         var payload = {
-            // Send the resolved per-cour entry id so the SaveEntry endpoint
-            // doesn't have to redo the seasons resolution server-side. For
-            // single-mapping anime this matches the original card id.
             id: activeEntryId,
-            status: statusSelect.value,
-            progress: parseInt(progressInput.value || '0', 10),
+            status: newStatus,
+            progress: newProgress,
             score: scoreInput.value ? parseFloat(scoreInput.value) : null,
-            // Date inputs serialise to "yyyy-MM-dd" or empty string when unset.
-            // The server's ParseDate treats empty/invalid as null, so empty
-            // strings here are equivalent to "no date set".
             startedAt: startedInput.value || null,
             finishedAt: finishedInput.value || null,
             rewatchCount: rewatchInput.value ? parseInt(rewatchInput.value, 10) : null,
             notes: notesInput.value || null,
         };
+
+        // Capture state for the optimistic update before closing the modal
+        // (which clears activeCard / activeService).
+        var cardForUpdate = activeCard;
+        var serviceForUpdate = activeService;
 
         fetch('/api/library/entry/save', {
             method: 'POST',
@@ -251,16 +334,23 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data && data.success) {
-                    // Queue a "Saved" toast that survives the page reload via
-                    // sessionStorage — toast.js pops it on the next page load.
-                    // Reload so list/grid reflects the change (status moves
-                    // like Watching → Completed only show up after a refetch);
-                    // v1 polish could swap to optimistic DOM update + skip
-                    // reload, but the per-service status→tab mapping is fiddly
-                    // and a full refresh is honest about server state.
-                    try { sessionStorage.setItem('anisync-toast', 'Saved'); }
-                    catch (e) { /* private-browsing or quota — proceed without toast */ }
-                    window.location.reload();
+                    showToast('Saved');
+
+                    // Optimistic in-place card update — no page reload, scroll
+                    // position preserved. If the new status no longer matches
+                    // the page's list filter (e.g. user moved Watching →
+                    // Completed while viewing the Watching tab), fade-and-
+                    // remove the card. Otherwise refresh the progress badge.
+                    if (cardForUpdate) {
+                        var filter = getPageListFilter();
+                        var stays = statusBelongsHere(serviceForUpdate, newStatus, filter);
+                        if (!stays) {
+                            fadeOutCard(cardForUpdate);
+                        } else {
+                            refreshCardProgress(cardForUpdate, newProgress, totalForCard);
+                        }
+                    }
+                    closeModal();
                 } else {
                     showError('Save failed. Try again.');
                     saveBtn.disabled = false;
