@@ -222,15 +222,9 @@
                 {
                     <a class="hero-cta hero-cta-secondary" href="@Url.Action("Configure", "Home")">Configure to edit</a>
                 }
-                @if (hasYouTube)
-                {
-                    var trailer = a.trailerStreams[0];
-                    <a class="hero-cta hero-cta-secondary"
-                       href="https://www.youtube.com/watch?v=@trailer.ytId"
-                       target="_blank" rel="noreferrer noopener">
-                        Watch trailer
-                    </a>
-                }
+                @* "Watch trailer" hero CTA was here previously; replaced by
+                   the dedicated thumbnail card section below the synopsis
+                   so the hero stays focused on the primary edit action. *@
             </div>
         </div>
     </div>
@@ -252,6 +246,34 @@
                         aria-expanded="false">Show more</button>
             }
         </div>
+    </section>
+}
+
+@if (hasYouTube)
+{
+    var trailer = a.trailerStreams[0];
+    var trailerUrl = $"https://www.youtube.com/watch?v={trailer.ytId}";
+    @* YouTube thumbnail-with-play-overlay card. hqdefault is the safest
+       URL — always exists on YouTube (vs maxresdefault which 404s for
+       some videos). Click → opens YouTube in a new tab; we don't embed
+       the iframe to avoid the privacy + load-cost of YouTube's player. *@
+    <section class="anime-detail-section">
+        <h2 class="anime-detail-section-title">Trailer</h2>
+        <a class="anime-detail-trailer-card"
+           href="@trailerUrl"
+           target="_blank"
+           rel="noreferrer noopener"
+           aria-label="Watch trailer on YouTube">
+            <img src="https://img.youtube.com/vi/@trailer.ytId/hqdefault.jpg"
+                 alt="" loading="lazy"
+                 class="anime-detail-trailer-thumb" />
+            <span class="anime-detail-trailer-shade" aria-hidden="true"></span>
+            <span class="anime-detail-trailer-play" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="36" height="36" fill="currentColor">
+                    <path d="M8 5v14l11-7z"></path>
+                </svg>
+            </span>
+        </a>
     </section>
 }
 
