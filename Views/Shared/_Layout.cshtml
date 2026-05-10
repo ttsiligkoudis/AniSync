@@ -182,7 +182,13 @@
                         <label class="entry-modal-label" for="entry-modal-status">Status</label>
                         <select id="entry-modal-status" name="status" class="entry-modal-select"></select>
                     </div>
-                    <div class="entry-modal-field">
+                    @* data-progress-field hooks an attribute selector in
+                       manage-entry-modal.js that hides this whole wrapper
+                       when totalEpisodes === 1 (movies + single-episode
+                       OVAs). The status dropdown alone carries enough
+                       state for those — there's nothing to "watch ep 4
+                       of" when the show is one playthrough. *@
+                    <div class="entry-modal-field" data-progress-field>
                         <label class="entry-modal-label" for="entry-modal-progress">Episodes Watched</label>
                         <div class="entry-modal-progress-row">
                             <input id="entry-modal-progress" type="number" name="progress" min="0" class="entry-modal-input" />
