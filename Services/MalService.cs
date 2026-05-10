@@ -267,6 +267,22 @@ namespace AnimeList.Services
                         category = "Similar",
                         url = $"https://myanimelist.net/anime/{rid.Value}",
                     });
+
+                    // Slim Meta for the detail-page recommendations carousel —
+                    // same shape AniList produces. MAL's recommendations sub-
+                    // node is fixed (id + title + main_picture); score / year
+                    // / format / episodes aren't available here, so the
+                    // carousel cards render poster + title only. _PosterGrid
+                    // handles missing fields gracefully (info row just skips).
+                    var recPoster = SafeGet<string>(rec, "main_picture", "large")
+                                    ?? SafeGet<string>(rec, "main_picture", "medium");
+                    anime.recommendations.Add(new Meta
+                    {
+                        id = $"{malPrefix}{rid.Value}",
+                        name = name,
+                        poster = recPoster,
+                        type = MetaType.series.ToString(),
+                    });
                 }
             }
 

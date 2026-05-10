@@ -27,6 +27,17 @@ namespace AnimeList.Services.Interfaces
         Task<List<Link>> GetRecommendationsAsync(int anilistId, AnimeService translateTo);
 
         /// <summary>
+        /// Returns slim <see cref="Meta"/> entries (id + name + poster +
+        /// score + format + year + episodes) for the detail page's
+        /// recommendations carousel. Parallels
+        /// <see cref="GetRecommendationsAsync"/> but with the richer card-
+        /// level data the carousel needs. ids stay in the AniList-prefixed
+        /// space (anilist:N); the detail page's controller resolves
+        /// cross-service via the mapping when the user clicks a card.
+        /// </summary>
+        Task<List<Meta>> GetRecommendationMetasAsync(int anilistId);
+
+        /// <summary>
         /// Fetches the legal-streaming destinations (Crunchyroll, Netflix, …) for an AniList
         /// anime id. Used by services that don't expose streaming links natively (currently
         /// MyAnimeList) so MAL users still see the same external-service streams in Stremio.
