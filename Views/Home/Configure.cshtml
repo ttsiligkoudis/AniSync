@@ -20,48 +20,65 @@
     <p class="page-subtitle">Stremio install URL · linked accounts · backups · scrobble webhook</p>
 </header>
 
-@if (!Model.AnonymousUser)
+@if (!Model.AnonymousUser || Model.IsLoggedIn)
 {
-    @* Pre-login the picker shows all three providers — the user picks one to authenticate.
-       Post-login it shrinks to "primary + healthy linked accounts" so unlinked providers
-       don't tease as tappable. The HTML stays identical between states; the only thing
-       that changes is which pills render. *@
-    var kitsuLinked   = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.Kitsu,        out var kl) && !kl.NeedsReauth;
-    var anilistLinked = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.Anilist,      out var al) && !al.NeedsReauth;
-    var malLinked     = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.MyAnimeList, out var ml) && !ml.NeedsReauth;
+    @* Account card — wraps the provider picker and the connected/disconnect
+       badge into the same .section-card surface every other group on the page
+       uses, so the page reads as a stack of cards rather than a stripe of
+       loose chrome above one. The picker doubles as a primary swap when the
+       user has linked accounts. *@
+    <section class="section-card">
+        <span class="section-title">Account</span>
 
-    var showKitsu   = !Model.IsLoggedIn || Model.IsKitsu   || kitsuLinked;
-    var showAnilist = !Model.IsLoggedIn || Model.IsAnilist || anilistLinked;
-    var showMal     = !Model.IsLoggedIn || Model.IsMal     || malLinked;
+        @if (!Model.AnonymousUser)
+        {
+            @* Pre-login the picker shows all three providers — the user picks one to authenticate.
+               Post-login it shrinks to "primary + healthy linked accounts" so unlinked providers
+               don't tease as tappable. The HTML stays identical between states; the only thing
+               that changes is which pills render. *@
+            var kitsuLinked   = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.Kitsu,        out var kl) && !kl.NeedsReauth;
+            var anilistLinked = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.Anilist,      out var al) && !al.NeedsReauth;
+            var malLinked     = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.MyAnimeList, out var ml) && !ml.NeedsReauth;
 
-    if (Model.HasSwappableLinks)
-    {
-        <p class="service-toggle-hint">Tap another account below to make it your primary.</p>
-    }
+            var showKitsu   = !Model.IsLoggedIn || Model.IsKitsu   || kitsuLinked;
+            var showAnilist = !Model.IsLoggedIn || Model.IsAnilist || anilistLinked;
+            var showMal     = !Model.IsLoggedIn || Model.IsMal     || malLinked;
 
-    <div class="service-toggle" id="serviceToggle">
-        @if (showKitsu)
-        {
-            <span class="label @(Model.IsKitsu ? "active" : "")" id="labelKitsu" data-service="0" data-service-name="Kitsu">Kitsu</span>
+            if (Model.HasSwappableLinks)
+            {
+                <p class="service-toggle-hint">Tap another account below to make it your primary.</p>
+            }
+
+            <div class="service-toggle" id="serviceToggle">
+                @if (showKitsu)
+                {
+                    <span class="label @(Model.IsKitsu ? "active" : "")" id="labelKitsu" data-service="0" data-service-name="Kitsu">Kitsu</span>
+                }
+                @if (showAnilist)
+                {
+                    <span class="label @(Model.IsAnilist ? "active" : "")" id="labelAnilist" data-service="1" data-service-name="Anilist">AniList</span>
+                }
+                @if (showMal)
+                {
+                    <span class="label @(Model.IsMal ? "active" : "")" id="labelMal" data-service="2" data-service-name="MyAnimeList">MyAnimeList</span>
+                }
+            </div>
         }
-        @if (showAnilist)
+
+        @if (Model.IsLoggedIn)
         {
-            <span class="label @(Model.IsAnilist ? "active" : "")" id="labelAnilist" data-service="1" data-service-name="Anilist">AniList</span>
+            <div class="account-status">
+                <span class="success-badge">
+                    @(!Model.AnonymousUser ? $"✓ Connected to {Model.AnimeService}" : "Connected without Account")
+                </span>
+                <button id="disconnectBtn" type="button" class="account-disconnect-btn">Disconnect</button>
+            </div>
         }
-        @if (showMal)
-        {
-            <span class="label @(Model.IsMal ? "active" : "")" id="labelMal" data-service="2" data-service-name="MyAnimeList">MyAnimeList</span>
-        }
-    </div>
+    </section>
 }
 
 @if (Model.IsLoggedIn)
 {
-    <span class="success-badge">
-        @(!Model.AnonymousUser ? $"✓ Connected to {Model.AnimeService}" : "Connected without Account")
-        <button id="disconnectBtn" class="success-badge-action" title="Disconnect">✗</button>
-    </span>
-
     @if (!Model.AnonymousUser)
     {
         // linkedTokens / linkedByService come from the page-top @{} block. Promotion to

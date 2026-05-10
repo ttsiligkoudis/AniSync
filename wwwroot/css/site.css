@@ -946,27 +946,69 @@ body.modal-open {
 /* ── Service toggle ── */
 .service-toggle {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.5rem 1rem;
-    border-radius: 2rem;
-    background: rgba(255,255,255,0.06);
+    align-items: stretch;
+    gap: 0.4rem;
+    padding: 0.3rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .service-toggle .label {
+    flex: 1;
+    text-align: center;
     font-size: 0.85rem;
     font-weight: 600;
-    color: #666;
-    transition: color 0.2s, background 0.2s;
+    color: #aaa;
+    transition: color 0.15s, background 0.15s;
     cursor: pointer;
     user-select: none;
-    padding: 0.3rem 0.8rem;
-    border-radius: 1.5rem;
+    padding: 0.45rem 0.9rem;
+    border-radius: 999px;
 }
 
-.service-toggle .label.active {
+.service-toggle .label:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.service-toggle .label.active,
+.service-toggle .label.active:hover {
     color: #fff;
     background: #3B82F6;
+}
+
+/* Account-card chrome: the connected-pill + disconnect button row that
+   sits below the provider picker. The previous design hung a tiny ✗
+   chip off the green pill; the button is now an explicit ghost button
+   with a clear text label so it doesn't read as a stray decoration. */
+.account-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-top: 0.85rem;
+}
+
+.account-disconnect-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #ccc;
+    padding: 0.4rem 0.95rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.account-disconnect-btn:hover,
+.account-disconnect-btn:focus {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.45);
+    color: #fca5a5;
 }
 
 /* Short hint that surfaces just above the pill row when the user has at least
