@@ -156,6 +156,13 @@
         <script src="~/js/manage-entry-modal.js" asp-append-version="true" defer></script>
     }
 
+    @* Toast container — receives "Saved!" / "Error" feedback from in-page
+       actions that survive page reloads via sessionStorage. Always rendered
+       (anonymous users can't trigger the modal but other future actions
+       might fire toasts). The container is positioned fixed via site.css. *@
+    <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="~/js/toast.js" asp-append-version="true" defer></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>

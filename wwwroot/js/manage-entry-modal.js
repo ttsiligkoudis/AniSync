@@ -180,11 +180,15 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data && data.success) {
-                    // Reload so list/grid reflects the change. Status moves
-                    // (Watching → Completed) and progress updates only show up
-                    // after a refetch. v1 could optimistically update the DOM
-                    // and skip the reload, but a full refresh is honest about
-                    // server state and matches the page-version behaviour.
+                    // Queue a "Saved" toast that survives the page reload via
+                    // sessionStorage — toast.js pops it on the next page load.
+                    // Reload so list/grid reflects the change (status moves
+                    // like Watching → Completed only show up after a refetch);
+                    // v1 polish could swap to optimistic DOM update + skip
+                    // reload, but the per-service status→tab mapping is fiddly
+                    // and a full refresh is honest about server state.
+                    try { sessionStorage.setItem('anisync-toast', 'Saved'); }
+                    catch (e) { /* private-browsing or quota — proceed without toast */ }
                     window.location.reload();
                 } else {
                     showError('Save failed. Try again.');
