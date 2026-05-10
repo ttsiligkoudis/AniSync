@@ -56,9 +56,18 @@
                    click and edit inline rather than navigating to the
                    standalone Manage Entry page. The href stays as the
                    non-JS fallback so progressive enhancement works
-                   correctly — JS off / load failure → page navigation. *@
+                   correctly — JS off / load failure → page navigation.
+
+                   data-meta-status / data-meta-progress / data-meta-total are
+                   set when the entry has user-list context (entryStatus is
+                   non-null). They drive the +1-episode quick-action button:
+                   the JS reads the current values straight off the DOM,
+                   computes progress + 1, and POSTs to the save endpoint. *@
                 <a class="@cardClass" href="@manageHref" title="@meta.name"
-                   data-meta-id="@meta.id" data-meta-name="@meta.name">
+                   data-meta-id="@meta.id" data-meta-name="@meta.name"
+                   @(string.IsNullOrEmpty(meta.entryStatus) ? "" : $"data-meta-status=\"{meta.entryStatus}\"")
+                   @(meta.progress.HasValue ? $"data-meta-progress=\"{meta.progress.Value}\"" : "")
+                   @(meta.episodes is int totalE && totalE > 0 ? $"data-meta-total=\"{totalE}\"" : "")>
                     <div class="library-card-poster-wrap">
                         @if (!string.IsNullOrEmpty(meta.poster))
                         {
@@ -75,6 +84,17 @@
                         @if (hasScore)
                         {
                             <span class="library-card-score">★ @meta.score.Value.ToString("0.0")</span>
+                        }
+                        @* Quick-action button — bottom-right, only when the
+                           card has user-list context. Tapping it bumps the
+                           user's progress by 1 episode without opening the
+                           modal. The button stops click propagation so the
+                           parent anchor doesn't navigate. *@
+                        @if (!string.IsNullOrEmpty(meta.entryStatus))
+                        {
+                            <button type="button" class="library-card-plus"
+                                    aria-label="Mark next episode watched"
+                                    title="+1 episode">+1</button>
                         }
                     </div>
                     <span class="library-card-title">@meta.name</span>

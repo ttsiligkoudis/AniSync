@@ -394,11 +394,81 @@
         }
     }
 
+    // +1 episode quick-action — bumps the user's progress by 1 without
+    // opening the modal. Reuses /api/library/entry/save with the existing
+    // status preserved (read from data-meta-status), progress incremented.
+    // Optimistic in-place update of the progress badge + dashboard stats,
+    // matching the modal save flow's behaviour.
+    function bumpProgress(plusBtn, card) {
+        var id = card.getAttribute('data-meta-id');
+        var status = card.getAttribute('data-meta-status');
+        var currentProgress = parseInt(card.getAttribute('data-meta-progress') || '0', 10);
+        var totalEpisodes = parseInt(card.getAttribute('data-meta-total') || '0', 10) || null;
+        if (!id || !status) return;
+
+        // Don't let the user push progress above the show's total — most
+        // services reject it anyway. If they're at the cap, +1 is a no-op
+        // (user should mark Completed via the modal instead).
+        if (totalEpisodes && currentProgress >= totalEpisodes) {
+            if (window.AniSyncToast) window.AniSyncToast.show('Already at last episode');
+            return;
+        }
+
+        var newProgress = currentProgress + 1;
+        plusBtn.disabled = true;
+
+        fetch('/api/library/entry/save', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            },
+            body: JSON.stringify({
+                id: id,
+                status: status,
+                progress: newProgress,
+                // Other fields left null — the SaveEntryRequest accepts that
+                // and the per-service save methods preserve existing values
+                // for unspecified fields rather than wiping them.
+            }),
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data && data.success) {
+                    if (window.AniSyncToast) window.AniSyncToast.show('+1 ep');
+                    refreshCardProgress(card, newProgress, totalEpisodes);
+                    // Persist on the card itself so subsequent clicks see the
+                    // updated value (data attr is the source of truth here).
+                    card.setAttribute('data-meta-progress', String(newProgress));
+                } else {
+                    if (window.AniSyncToast) window.AniSyncToast.show('Save failed');
+                }
+            })
+            .catch(function () {
+                if (window.AniSyncToast) window.AniSyncToast.show('Network error');
+            })
+            .finally(function () {
+                plusBtn.disabled = false;
+            });
+    }
+
     // Card click interception. Targets only <a class="library-card"> elements
     // that carry a data-meta-id (the link variant; inert anonymous cards are
     // <div>s and don't match). Falls back to default navigation if the data
     // attribute is missing — keeps the JS as progressive enhancement.
+    // The +1 button inside the card is handled first — its click event
+    // bubbles up through the anchor, but stopPropagation here keeps the
+    // parent anchor's default-prevented click from also opening the modal.
     document.addEventListener('click', function (e) {
+        var plusBtn = e.target.closest && e.target.closest('button.library-card-plus');
+        if (plusBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            var owningCard = plusBtn.closest('a.library-card[data-meta-id]');
+            if (owningCard) bumpProgress(plusBtn, owningCard);
+            return;
+        }
         var card = e.target.closest && e.target.closest('a.library-card[data-meta-id]');
         if (!card) return;
         e.preventDefault();
