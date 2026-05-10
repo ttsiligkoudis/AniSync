@@ -1,4 +1,46 @@
 @model AnimeList.Controllers.AnimeDetailViewModel
+@functions {
+    // Per-service status → user-facing label. Kept inline because the detail
+    // page is the only consumer; if a second view ever needs it, extract to
+    // Utils. The fall-through (`_ => status`) lets unrecognised values render
+    // as-is rather than swallowing them silently.
+    static string PrettyStatus(AnimeService svc, string status)
+    {
+        if (string.IsNullOrEmpty(status)) return null;
+        return svc switch
+        {
+            AnimeService.Anilist => status switch
+            {
+                "CURRENT" => "Watching",
+                "PLANNING" => "Planning",
+                "COMPLETED" => "Completed",
+                "PAUSED" => "Paused",
+                "DROPPED" => "Dropped",
+                "REPEATING" => "Rewatching",
+                _ => status,
+            },
+            AnimeService.MyAnimeList => status switch
+            {
+                "watching" => "Watching",
+                "plan_to_watch" => "Planning",
+                "completed" => "Completed",
+                "on_hold" => "On Hold",
+                "dropped" => "Dropped",
+                "rewatching" => "Rewatching",
+                _ => status,
+            },
+            _ => status switch
+            {
+                "current" => "Watching",
+                "planned" => "Planning",
+                "completed" => "Completed",
+                "on_hold" => "On Hold",
+                "dropped" => "Dropped",
+                _ => status,
+            },
+        };
+    }
+}
 @{
     ViewData["BodyClass"] = "anime-detail-page";
     var a = Model.Anime;
@@ -74,6 +116,29 @@
                     {
                         <span class="genre-chip">@g</span>
                     }
+                </div>
+            }
+            @* User-state panel — only renders when the user is logged in
+               AND has a tracking entry for this anime. Shows a compact
+               summary of their progress / status / their personal score.
+               Distinct visual treatment (cobalt-tinted) so it reads as
+               "you" data, separate from the database / community stats
+               above. *@
+            @if (Model.Entry != null)
+            {
+                var statusLabel = PrettyStatus(Model.AnimeService, Model.Entry.Status);
+                var userBits = new List<string>();
+                if (!string.IsNullOrEmpty(statusLabel)) userBits.Add(statusLabel);
+                if (Model.Entry.Progress > 0)
+                {
+                    userBits.Add(Model.Entry.TotalEpisodes is int t && t > 0
+                        ? $"Ep {Model.Entry.Progress} / {t}"
+                        : $"Ep {Model.Entry.Progress}");
+                }
+                if (Model.Entry.UserScore is double us && us > 0) userBits.Add($"Your score: {us.ToString("0.0")}");
+
+                <div class="anime-detail-user-state">
+                    @string.Join(" · ", userBits)
                 </div>
             }
             <div class="anime-detail-actions">

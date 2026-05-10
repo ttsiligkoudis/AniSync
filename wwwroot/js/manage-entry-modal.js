@@ -562,14 +562,10 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data && data.success) {
-                    showToast('Saved');
-
-                    // Optimistic in-place card update — no page reload, scroll
-                    // position preserved. If the new status no longer matches
-                    // the page's list filter (e.g. user moved Watching →
-                    // Completed while viewing the Watching tab), fade-and-
-                    // remove the card. Otherwise refresh the progress badge.
                     if (cardForUpdate) {
+                        // Card-context save — optimistic in-place update +
+                        // toast inline. Scroll position preserved.
+                        showToast('Saved');
                         var filter = getPageListFilter();
                         var stays = statusBelongsHere(serviceForUpdate, newStatus, filter);
                         if (!stays) {
@@ -577,12 +573,19 @@
                         } else {
                             refreshCardProgress(cardForUpdate, newProgress, totalForCard);
                         }
+                        adjustStatsForTransition(serviceForUpdate, originalStatusForUpdate, newStatus, totalForCard);
+                        closeModal();
+                    } else {
+                        // No card → modal opened from the detail page Edit
+                        // button (or any future non-card entry point). The
+                        // page's user-state panel / hero meta / etc. would
+                        // go stale if we just close. Reload so it catches
+                        // up with server state; queue the toast through
+                        // sessionStorage so it survives the navigation.
+                        try { sessionStorage.setItem('anisync-toast', 'Saved'); }
+                        catch (e) { /* private-browsing — toast is best-effort */ }
+                        window.location.reload();
                     }
-                    // Keep the dashboard stats panel in sync with the bucket
-                    // transition. No-op on /library / /discover where the
-                    // panel doesn't exist.
-                    adjustStatsForTransition(serviceForUpdate, originalStatusForUpdate, newStatus, totalForCard);
-                    closeModal();
                 } else {
                     showError('Save failed. Try again.');
                     saveBtn.disabled = false;

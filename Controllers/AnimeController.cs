@@ -115,10 +115,48 @@ namespace AnimeList.Controllers
             // Resolve UID for logged-in users so the Edit button's data-meta-id
             // hooks the existing modal flow.
             string uid = null;
+            EntryViewState entry = null;
             if (!tokenData.anonymousUser)
             {
                 var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
                 uid = resolved;
+
+                // Fetch the user's entry against the resolved per-service id so
+                // the hero can surface "You're watching · Ep 5/12 · Your score:
+                // 8.0" alongside the public meta. Best-effort: failures swallow
+                // and the page renders without the user-state panel.
+                try
+                {
+                    var resolvedEntryId = await _mappingService.GetIdByService(anime.id, animeService);
+                    var entryId = string.IsNullOrEmpty(resolvedEntryId) ? anime.id : (animeService switch
+                    {
+                        AnimeService.Anilist     => $"{anilistPrefix}{resolvedEntryId}",
+                        AnimeService.MyAnimeList => $"{malPrefix}{resolvedEntryId}",
+                        _                        => $"{kitsuPrefix}{resolvedEntryId}",
+                    });
+
+                    var raw = animeService switch
+                    {
+                        AnimeService.Anilist     => await _anilistService.GetAnimeEntryAsync(tokenData, entryId, null),
+                        AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, entryId, null),
+                        _                        => await _kitsuService.GetAnimeEntryAsync(tokenData, entryId, null),
+                    };
+
+                    if (raw != null && !string.IsNullOrEmpty(raw.Status))
+                    {
+                        entry = new EntryViewState
+                        {
+                            Status = raw.Status,
+                            Progress = raw.Progress,
+                            TotalEpisodes = raw.TotalEpisodes,
+                            UserScore = raw.Score,
+                        };
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "AnimeController.Detail: entry fetch failed for {Id}.", anime.id);
+                }
             }
 
             return View(new AnimeDetailViewModel
@@ -127,6 +165,7 @@ namespace AnimeList.Controllers
                 AnimeService = animeService,
                 AnonymousUser = tokenData.anonymousUser,
                 ConfigUid = uid,
+                Entry = entry,
             });
         }
 
@@ -169,7 +208,7 @@ namespace AnimeList.Controllers
     /// <summary>
     /// View model for the /anime/{id} detail page. Carries the resolved Meta
     /// (or null for the not-found render) plus the session-derived bits the
-    /// view needs to decide whether to render the Edit button.
+    /// view needs to decide whether to render the Edit button + user-state.
     /// </summary>
     public class AnimeDetailViewModel
     {
@@ -177,5 +216,23 @@ namespace AnimeList.Controllers
         public AnimeService AnimeService { get; set; }
         public bool AnonymousUser { get; set; }
         public string ConfigUid { get; set; }
+        // User's tracking state for this entry — null for anonymous visitors,
+        // not-yet-tracked entries, or transient fetch failures (the hero
+        // gracefully omits the user-state panel when this is null).
+        public EntryViewState Entry { get; set; }
+    }
+
+    /// <summary>
+    /// User-side tracking state surfaced on the detail page hero. A small
+    /// projection of <see cref="ManageEntryViewModel"/> with just the four
+    /// fields the page renders, so we don't carry the full edit-form payload
+    /// where it isn't needed.
+    /// </summary>
+    public class EntryViewState
+    {
+        public string Status { get; set; }
+        public int Progress { get; set; }
+        public int? TotalEpisodes { get; set; }
+        public double? UserScore { get; set; }
     }
 }

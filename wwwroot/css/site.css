@@ -2442,6 +2442,21 @@ body.anime-detail-page main {
     margin-top: 0.5rem;
 }
 
+/* Compact user-state panel below the genres — "Watching · Ep 5/12 · Your
+   score: 8.0". Cobalt-tinted to read as personal data, distinct from the
+   neutral-grey community info row above. */
+.anime-detail-user-state {
+    margin-top: 0.4rem;
+    padding: 0.45rem 0.85rem;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    border-radius: 0.6rem;
+    color: #c4daff;
+    font-size: 0.85rem;
+    font-weight: 500;
+    align-self: flex-start;
+}
+
 .anime-detail-section {
     width: 100%;
     margin-top: 0.5rem;
