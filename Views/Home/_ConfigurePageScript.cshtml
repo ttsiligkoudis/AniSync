@@ -32,6 +32,20 @@
     // Per-user scrobble bearer token. Empty for anonymous installs (no Home Server Sync UI).
     var scrobbleToken = '@(Model.ScrobbleToken ?? "")';
 
+    // Server-rendered initial flag bytes. We use these as a baseline when
+    // readFlags() runs on a page that doesn't expose every toggle (e.g.
+    // /configure shows only Group-anime-seasons; saving without preserving
+    // the catalog/stream bits would otherwise zero them out, losing what
+    // the user picked on /stremio). For each bit, readFlags() reads the
+    // DOM checkbox if its input exists, otherwise falls back to the
+    // corresponding bit from these initial values.
+    @{
+        var (initF1, initF2, initF3) = PackBinaryFlags(Model.Configuration);
+    }
+    var initialFlags1 = @initF1;
+    var initialFlags2 = @initF2;
+    var initialFlags3 = @initF3;
+
     function base64UrlToBytes(str) {
         if (!str) return new Uint8Array(0);
         var base64 = str.replace(/-/g, '+').replace(/_/g, '/');
@@ -51,44 +65,49 @@
     var uidBytes = base64UrlToBytes(configUid);
     var tokenBytes = base64UrlToBytes(tokenDataStr);
 
+    // Read a single bit. If the input exists in the DOM, use its checked state;
+    // otherwise preserve the bit from the server-rendered initial value so we
+    // never zero out a flag just because its checkbox isn't on the current page.
+    function bitFor(selector, initial, mask) {
+        var $el = $(selector);
+        if ($el.length === 0) return initial & mask;
+        return $el.is(':checked') ? mask : 0;
+    }
+    // Same shape for inverse bits — stored 1 = "off", so "checked → 0, unchecked → mask".
+    function inverseBitFor(selector, initial, mask) {
+        var $el = $(selector);
+        if ($el.length === 0) return initial & mask;
+        return $el.is(':checked') ? 0 : mask;
+    }
+
     function readFlags() {
         var flags1 = 0;
-        if ($('#showCurrent').is(':checked'))           flags1 |= 0x01;
-        if ($('#showCompleted').is(':checked'))         flags1 |= 0x02;
-        if ($('#showTrending').is(':checked'))          flags1 |= 0x04;
-        if ($('#showSeasonal').is(':checked'))          flags1 |= 0x08;
-        if ($('#discoverOnlyCurrent').is(':checked'))   flags1 |= 0x10;
-        if ($('#discoverOnlyCompleted').is(':checked')) flags1 |= 0x20;
-        if ($('#discoverOnlyTrending').is(':checked'))  flags1 |= 0x40;
-        if ($('#discoverOnlySeasonal').is(':checked'))  flags1 |= 0x80;
+        flags1 |= bitFor('#showCurrent',           initialFlags1, 0x01);
+        flags1 |= bitFor('#showCompleted',         initialFlags1, 0x02);
+        flags1 |= bitFor('#showTrending',          initialFlags1, 0x04);
+        flags1 |= bitFor('#showSeasonal',          initialFlags1, 0x08);
+        flags1 |= bitFor('#discoverOnlyCurrent',   initialFlags1, 0x10);
+        flags1 |= bitFor('#discoverOnlyCompleted', initialFlags1, 0x20);
+        flags1 |= bitFor('#discoverOnlyTrending',  initialFlags1, 0x40);
+        flags1 |= bitFor('#discoverOnlySeasonal',  initialFlags1, 0x80);
 
         var flags2 = 0;
-        if ($('#showPlanning').is(':checked'))           flags2 |= 0x01;
-        if ($('#showPaused').is(':checked'))             flags2 |= 0x02;
-        if ($('#showDropped').is(':checked'))            flags2 |= 0x04;
-        if ($('#showRepeating').is(':checked'))          flags2 |= 0x08;
-        if ($('#discoverOnlyPlanning').is(':checked'))   flags2 |= 0x10;
-        if ($('#discoverOnlyPaused').is(':checked'))     flags2 |= 0x20;
-        if ($('#discoverOnlyDropped').is(':checked'))    flags2 |= 0x40;
-        if ($('#discoverOnlyRepeating').is(':checked'))  flags2 |= 0x80;
+        flags2 |= bitFor('#showPlanning',           initialFlags2, 0x01);
+        flags2 |= bitFor('#showPaused',             initialFlags2, 0x02);
+        flags2 |= bitFor('#showDropped',            initialFlags2, 0x04);
+        flags2 |= bitFor('#showRepeating',          initialFlags2, 0x08);
+        flags2 |= bitFor('#discoverOnlyPlanning',   initialFlags2, 0x10);
+        flags2 |= bitFor('#discoverOnlyPaused',     initialFlags2, 0x20);
+        flags2 |= bitFor('#discoverOnlyDropped',    initialFlags2, 0x40);
+        flags2 |= bitFor('#discoverOnlyRepeating',  initialFlags2, 0x80);
 
         var flags3 = 0;
-        if ($('#showAiring').is(':checked'))             flags3 |= 0x01;
-        if ($('#showExternalStreams').is(':checked'))    flags3 |= 0x02;
-        // Inverse bits: stored 1 = "off". Toggling the UI off sets the bit; default-checked
-        // toggles leave the bit at 0, matching pre-feature behavior for existing rows.
-        // The toggles are hidden for anonymous users (no account → nothing to manage), so
-        // .length-guard before reading state to avoid setting the bit just because the input
-        // doesn't exist on the page.
-        var $manage = $('#showManageEntry');
-        if ($manage.length && !$manage.is(':checked'))   flags3 |= 0x04;
-        var $autoTrack = $('#autoTrackProgress');
-        if ($autoTrack.length && !$autoTrack.is(':checked')) flags3 |= 0x08;
-        if ($('#discoverOnlyAiring').is(':checked'))     flags3 |= 0x10;
-        // Inverse bit again: default-checked "Group anime seasons" leaves the bit at 0,
-        // so legacy installs (zero flags) keep the existing IMDb-grouped behavior.
-        var $group = $('#groupSeasons');
-        if ($group.length && !$group.is(':checked'))     flags3 |= 0x20;
+        flags3 |= bitFor('#showAiring',             initialFlags3, 0x01);
+        flags3 |= bitFor('#showExternalStreams',    initialFlags3, 0x02);
+        flags3 |= inverseBitFor('#showManageEntry', initialFlags3, 0x04);
+        flags3 |= inverseBitFor('#autoTrackProgress', initialFlags3, 0x08);
+        flags3 |= bitFor('#discoverOnlyAiring',     initialFlags3, 0x10);
+        flags3 |= inverseBitFor('#groupSeasons',    initialFlags3, 0x20);
 
         return { flags1: flags1, flags2: flags2, flags3: flags3 };
     }
