@@ -186,51 +186,142 @@
 
 @if (a.videos?.Count > 0)
 {
+    @{
+        var canQuickMark = canEdit && Model.Entry != null && !string.IsNullOrEmpty(Model.Entry.Status);
+        var currentProgress = Model.Entry?.Progress ?? 0;
+
+        // Group episodes by their `season` field. Single-season anime end up
+        // with one group and no tabs; multi-cour franchises (Stremio-style
+        // mapping with the IMDb id grouped) get a row of pill tabs.
+        var seasonGroups = a.videos
+            .GroupBy(v => v.season > 0 ? v.season : 1)
+            .OrderBy(g => g.Key)
+            .ToList();
+        var hasMultipleSeasons = seasonGroups.Count > 1;
+
+        // Default visible season: the one containing the user's current
+        // progress when known, otherwise the latest. Stremio's pattern is
+        // "land where the user left off" so they can pick up directly.
+        int defaultSeason;
+        if (currentProgress > 0)
+        {
+            // Find the season group whose episodes include the current progress.
+            // The franchise mapping stores cour-specific episode numbers, so
+            // the absolute episode 7 might be Season 1 ep 7 OR Season 2 ep 1
+            // depending on numbering. Pick the season whose max ep ≥ progress
+            // (closest fit).
+            var match = seasonGroups
+                .FirstOrDefault(g => g.Any(v => v.episode == currentProgress)) ?? seasonGroups.Last();
+            defaultSeason = match.Key;
+        }
+        else
+        {
+            defaultSeason = seasonGroups.Last().Key;
+        }
+
+        // Treat each row's air date relative to today so we can amber-tint
+        // future dates and skip the watched check on unaired episodes.
+        var today = DateTime.UtcNow.Date;
+    }
     <section class="anime-detail-section">
         <h2 class="anime-detail-section-title">Episodes <span class="anime-detail-section-count">(@a.videos.Count)</span></h2>
-        @* The episodes list doubles as a click-to-mark-watched surface for
-           logged-in users with a tracking entry: tap episode N → progress
-           bumps to N. data-can-edit / data-current-progress / data-current-
-           status are read by manage-entry-modal.js's quick-mark handler.
-           Each row gets data-episode-num and a .anime-detail-episode-watched
-           class when episode.episode <= current progress, so users see at a
-           glance what they've already watched. *@
-        @{
-            var canQuickMark = canEdit && Model.Entry != null && !string.IsNullOrEmpty(Model.Entry.Status);
-            var currentProgress = Model.Entry?.Progress ?? 0;
+
+        @if (hasMultipleSeasons)
+        {
+            @* Horizontally-scrollable season tab strip. Each tab carries a
+               data-season-num the JS uses to toggle which <li>s are visible
+               in the single shared episode list below. Active tab gets the
+               cobalt fill. *@
+            <nav class="season-tabs" role="tablist" aria-label="Seasons">
+                @foreach (var g in seasonGroups)
+                {
+                    var isActive = g.Key == defaultSeason;
+                    <button type="button"
+                            class="season-tab @(isActive ? "season-tab-active" : "")"
+                            data-season-num="@g.Key"
+                            role="tab"
+                            aria-selected="@(isActive ? "true" : "false")">
+                        Season @g.Key
+                    </button>
+                }
+            </nav>
         }
+
         <ol class="anime-detail-episodes" reversed="false"
+            data-active-season="@defaultSeason"
             @(canQuickMark ? $"data-can-edit=\"true\" data-meta-id=\"{a.id}\" data-current-progress=\"{currentProgress}\" data-current-status=\"{Model.Entry.Status}\"" : "")>
             @foreach (var v in a.videos)
             {
                 var watched = currentProgress > 0 && v.episode <= currentProgress;
-                var rowClass = watched ? "anime-detail-episode anime-detail-episode-watched" : "anime-detail-episode";
-                <li class="@rowClass" data-episode-num="@v.episode">
-                    @if (!string.IsNullOrEmpty(v.thumbnail))
-                    {
-                        <img class="anime-detail-episode-thumb" src="@v.thumbnail" alt="" loading="lazy" />
-                    }
-                    else
-                    {
-                        <div class="anime-detail-episode-thumb anime-detail-episode-thumb-placeholder"></div>
-                    }
-                    <div class="anime-detail-episode-body">
-                        <span class="anime-detail-episode-number">Episode @v.episode</span>
-                        <span class="anime-detail-episode-title">@(string.IsNullOrEmpty(v.title) ? $"Episode {v.episode}" : v.title)</span>
-                        @if (!string.IsNullOrEmpty(v.released))
+                bool isFuture = false;
+                if (!string.IsNullOrEmpty(v.released) && v.released.Length >= 10
+                    && DateTime.TryParse(v.released[..10], out var releaseDate))
+                {
+                    isFuture = releaseDate.Date > today;
+                }
+
+                var classes = new List<string> { "anime-detail-episode" };
+                if (watched) classes.Add("anime-detail-episode-watched");
+                if (isFuture) classes.Add("anime-detail-episode-future");
+                // When season tabs are present, hide rows that aren't in the
+                // active season. Single-season views skip this filter so all
+                // rows render directly.
+                if (hasMultipleSeasons && (v.season > 0 ? v.season : 1) != defaultSeason)
+                    classes.Add("anime-detail-episode-hidden");
+
+                var description = !string.IsNullOrEmpty(v.overview) ? v.overview : v.description;
+
+                <li class="@string.Join(" ", classes)"
+                    data-episode-num="@v.episode"
+                    data-season-num="@(v.season > 0 ? v.season : 1)">
+                    <div class="anime-detail-episode-thumb-wrap">
+                        @if (!string.IsNullOrEmpty(v.thumbnail))
                         {
-                            <span class="anime-detail-episode-released">@v.released.Substring(0, Math.Min(10, v.released.Length))</span>
+                            <img class="anime-detail-episode-thumb" src="@v.thumbnail" alt="" loading="lazy" />
                         }
-                    </div>
-                    @if (watched)
-                    {
-                        @* Inline check icon for already-watched episodes. *@
-                        <span class="anime-detail-episode-check" aria-label="Watched">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                                <polyline points="20 6 9 17 4 12"></polyline>
+                        else
+                        {
+                            <div class="anime-detail-episode-thumb anime-detail-episode-thumb-placeholder"></div>
+                        }
+                        @* Play-diamond glyph overlay — same on every row,
+                           gives the row a Stremio-style visual anchor even
+                           when the thumbnail is missing or generic. *@
+                        <span class="anime-detail-episode-play" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                <path d="M12 4l8 8-8 8-8-8z"></path>
                             </svg>
                         </span>
-                    }
+                        @if (watched)
+                        {
+                            @* Yellow "eye" badge in top-right of the thumbnail
+                               for already-watched episodes. Stremio's
+                               equivalent is the amber/yellow bookmark — same
+                               function: at-a-glance "I've seen this". *@
+                            <span class="anime-detail-episode-eye" aria-label="Watched">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                </svg>
+                            </span>
+                        }
+                    </div>
+                    <div class="anime-detail-episode-body">
+                        <div class="anime-detail-episode-row">
+                            <span class="anime-detail-episode-title">
+                                @v.episode. @(string.IsNullOrEmpty(v.title) ? $"Episode {v.episode}" : v.title)
+                            </span>
+                            @if (!string.IsNullOrEmpty(v.released))
+                            {
+                                <span class="anime-detail-episode-date @(isFuture ? "anime-detail-episode-date-future" : "")">
+                                    @v.released[..Math.Min(10, v.released.Length)]
+                                </span>
+                            }
+                        </div>
+                        @if (!string.IsNullOrEmpty(description))
+                        {
+                            <p class="anime-detail-episode-desc">@description</p>
+                        }
+                    </div>
                 </li>
             }
         </ol>

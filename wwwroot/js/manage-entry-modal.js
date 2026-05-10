@@ -526,13 +526,15 @@
         if (replaced !== text) stateEl.textContent = replaced;
     }
 
-    // Click interception. Three hooks live on the document:
+    // Click interception. Four hooks live on the document:
     //   1. button.library-card-plus inside a card → +1 quick-action.
     //      preventDefault + stopPropagation so the parent anchor doesn't
     //      navigate to the detail page on this click.
-    //   2. li.anime-detail-episode inside a click-enabled list → quick-
+    //   2. button.season-tab on the detail page → switch which season's
+    //      episodes are visible. Pure DOM-toggle, no fetch.
+    //   3. li.anime-detail-episode inside a click-enabled list → quick-
     //      mark-watched: bumps progress to that episode's number.
-    //   3. [data-open-modal] anywhere (typically the Edit button on the
+    //   4. [data-open-modal] anywhere (typically the Edit button on the
     //      /anime/{id} detail page) → open the modal for that meta id.
     //
     // Cards themselves are <a href="/anime/{id}"> and click-navigate to the
@@ -546,6 +548,12 @@
             e.stopPropagation();
             var owningCard = plusBtn.closest('a.library-card[data-meta-id]');
             if (owningCard) bumpProgress(plusBtn, owningCard);
+            return;
+        }
+        var seasonTab = e.target.closest && e.target.closest('button.season-tab[data-season-num]');
+        if (seasonTab) {
+            e.preventDefault();
+            switchSeason(seasonTab);
             return;
         }
         var episodeRow = e.target.closest && e.target.closest('li.anime-detail-episode[data-episode-num]');
@@ -565,6 +573,30 @@
                       /* card */ null);
         }
     });
+
+    // Season tab toggle — pure DOM swap. Updates the active class on the
+    // tab strip and shows/hides episode rows by data-season-num. Doesn't
+    // refetch anything; the full episode list is server-rendered in one
+    // <ol> and the tabs just filter visibility.
+    function switchSeason(tab) {
+        var seasonNum = tab.getAttribute('data-season-num');
+        if (!seasonNum) return;
+        var nav = tab.closest('.season-tabs');
+        var list = document.querySelector('ol.anime-detail-episodes');
+        if (!nav || !list) return;
+        // Active class on tabs
+        Array.prototype.forEach.call(nav.querySelectorAll('.season-tab'), function (t) {
+            var isActive = t === tab;
+            t.classList.toggle('season-tab-active', isActive);
+            t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+        // Show/hide rows
+        list.setAttribute('data-active-season', seasonNum);
+        Array.prototype.forEach.call(list.querySelectorAll('li.anime-detail-episode'), function (li) {
+            var rowSeason = li.getAttribute('data-season-num');
+            li.classList.toggle('anime-detail-episode-hidden', rowSeason !== seasonNum);
+        });
+    }
 
     closeBtn.addEventListener('click', closeModal);
     cancelBtn.addEventListener('click', closeModal);
