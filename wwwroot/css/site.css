@@ -2487,17 +2487,83 @@ body.modal-open {
     color: #9ca3af;
 }
 
+/* Badges row: score + airing status, side by side. Wraps to the next line
+   on narrow viewports rather than squishing. */
+.anime-detail-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+}
+
 .anime-detail-score {
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    align-self: flex-start;
     padding: 0.2rem 0.65rem;
     background: rgba(0, 0, 0, 0.5);
     border-radius: 999px;
     color: #fbbf24;
     font-size: 0.85rem;
     font-weight: 600;
+}
+
+/* Airing-status pill — same shape as the score badge, colour-coded by
+   state. Cobalt + pulsing dot for "Airing" (live signal); grey for
+   "Finished"; amber for "On hiatus" / "Not yet aired"; red for
+   "Cancelled". */
+.anime-detail-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.2rem 0.7rem;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    color: #ccc;
+    font-size: 0.82rem;
+    font-weight: 500;
+}
+
+.anime-detail-status-airing {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.4);
+    color: #93c5fd;
+}
+
+.anime-detail-status-finished {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: #aaa;
+}
+
+.anime-detail-status-on-hiatus,
+.anime-detail-status-not-yet-aired {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.35);
+    color: #fbbf24;
+}
+
+.anime-detail-status-cancelled {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+}
+
+/* Pulsing live dot on the Airing badge — reuses the existing reduced-
+   motion sweep so users with motion sensitivity see a static dot. */
+.anime-detail-status-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #3B82F6;
+    animation: airing-pulse 2s ease-in-out infinite;
+}
+
+@keyframes airing-pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5); }
+    50%      { opacity: 0.6; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0); }
 }
 
 .anime-detail-genres {

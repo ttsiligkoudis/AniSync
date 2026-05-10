@@ -117,6 +117,52 @@ namespace AnimeList
         };
 
         /// <summary>
+        /// Per-service airing-status string → user-facing label. AniList's
+        /// MediaStatus enum (FINISHED / RELEASING / NOT_YET_RELEASED /
+        /// CANCELLED / HIATUS) shares values with what we want to render;
+        /// MAL uses "finished_airing" / "currently_airing" / "not_yet_aired";
+        /// Kitsu uses "finished" / "current" / "tba" / "unreleased".
+        /// All three normalised here. Returns null for empty/unknown.
+        /// </summary>
+        public static string NormalizeAirStatus(string raw) => raw?.ToUpperInvariant() switch
+        {
+            "RELEASING" or "CURRENTLY_AIRING" or "CURRENT"        => "Airing",
+            "FINISHED" or "FINISHED_AIRING"                        => "Finished",
+            "NOT_YET_RELEASED" or "NOT_YET_AIRED" or "TBA"
+                or "UPCOMING" or "UNRELEASED"                      => "Not yet aired",
+            "CANCELLED"                                            => "Cancelled",
+            "HIATUS"                                               => "On hiatus",
+            null or ""                                             => null,
+            _                                                      => raw,
+        };
+
+        /// <summary>
+        /// AniList's MediaSource enum → user-facing label, framed as
+        /// "Manga adaptation" / "Original" / "Light novel adaptation" /
+        /// etc. so the detail-page info row reads naturally.
+        /// </summary>
+        public static string NormalizeSource(string raw) => raw?.ToUpperInvariant() switch
+        {
+            "ORIGINAL"       => "Original",
+            "MANGA"          => "Manga adaptation",
+            "LIGHT_NOVEL"    => "Light novel adaptation",
+            "VISUAL_NOVEL"   => "Visual novel adaptation",
+            "VIDEO_GAME"     => "Video game adaptation",
+            "NOVEL"          => "Novel adaptation",
+            "DOUJINSHI"      => "Doujinshi adaptation",
+            "ANIME"          => "Anime adaptation",
+            "WEB_NOVEL"      => "Web novel adaptation",
+            "LIVE_ACTION"    => "Live action adaptation",
+            "GAME"           => "Game adaptation",
+            "COMIC"          => "Comic adaptation",
+            "MULTIMEDIA_PROJECT" => "Multimedia project",
+            "PICTURE_BOOK"   => "Picture book adaptation",
+            "OTHER"          => null,
+            null or ""       => null,
+            _                => raw,
+        };
+
+        /// <summary>
         /// Returns the AniList MediaSeason string and year for the given season option.
         /// </summary>
         public static (string Season, int Year) GetSeasonAndYear(string seasonOption)

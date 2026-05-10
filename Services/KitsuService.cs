@@ -368,6 +368,11 @@ namespace AnimeList.Services
                 episodes = episodeCount > 0 ? episodeCount : null,
                 year = releaseYear,
                 format = NormalizeFormat(subtype),
+                // Kitsu surfaces "status" via attributes (current / finished /
+                // tba / unreleased / upcoming). No equivalent of AniList's
+                // `source` enum on Kitsu so source stays null — the view's
+                // info row gracefully omits.
+                airStatus = NormalizeAirStatus(SafeGet<string>(entry, "attributes", "status")),
             };
 
             var youtubeId = SafeGet<string>(entry, "attributes", "youtubeVideoId");

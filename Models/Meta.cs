@@ -39,6 +39,14 @@ namespace AnimeList.Models
         public int? year { get; set; }
         public string format { get; set; }
 
+        // Display-ready airing status ("Airing" / "Finished" / "Hiatus" /
+        // "Cancelled" / "Not Yet Released") and source-material label
+        // ("Manga adaptation" / "Original" / "Novel adaptation" / etc.).
+        // Populated on the detail-side per-service Meta builder; null on
+        // catalog responses where the data isn't fetched.
+        public string airStatus { get; set; }
+        public string source { get; set; }
+
         // User's watched-episode count for THIS entry, populated only when the
         // catalog response naturally includes list-status data (i.e. user-list
         // queries like Currently Watching / Completed; null on Trending /

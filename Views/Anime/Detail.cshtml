@@ -116,15 +116,33 @@
                 if (!string.IsNullOrEmpty(a.format)) infoBits.Add(a.format);
                 if (a.episodes is int eps && eps > 0) infoBits.Add($"{eps} ep{(eps > 1 ? "s" : "")}");
                 if (a.year is int yr && yr > 0) infoBits.Add(yr.ToString());
+                if (!string.IsNullOrEmpty(a.source)) infoBits.Add(a.source);
             }
             @if (infoBits.Count > 0)
             {
                 <div class="anime-detail-info">@string.Join(" · ", infoBits)</div>
             }
-            @if (a.score is double sc && sc > 0)
-            {
-                <div class="anime-detail-score">★ @sc.ToString("0.0")</div>
-            }
+            @* Score (community) + airing status side by side. The status pill
+               color-shifts on "Airing" / "On hiatus" / "Cancelled" so the
+               state reads at a glance — Stremio-style "currently airing"
+               cue without a separate "next episode in N days" widget. *@
+            <div class="anime-detail-badges">
+                @if (a.score is double sc && sc > 0)
+                {
+                    <span class="anime-detail-score">★ @sc.ToString("0.0")</span>
+                }
+                @if (!string.IsNullOrEmpty(a.airStatus))
+                {
+                    var statusKey = a.airStatus.ToLowerInvariant().Replace(" ", "-");
+                    <span class="anime-detail-status anime-detail-status-@statusKey">
+                        @if (a.airStatus == "Airing")
+                        {
+                            <span class="anime-detail-status-dot" aria-hidden="true"></span>
+                        }
+                        @a.airStatus
+                    </span>
+                }
+            </div>
             @if (studios.Count > 0)
             {
                 <div class="anime-detail-studios">

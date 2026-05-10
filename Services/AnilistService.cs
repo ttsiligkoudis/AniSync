@@ -374,6 +374,8 @@ namespace AnimeList.Services
                     Media(id: $id) {
                         id
                         format
+                        status
+                        source
                         averageScore
                         seasonYear
                         title {
@@ -472,6 +474,8 @@ namespace AnimeList.Services
                 episodes = (int?)result.episodes,
                 year = (int?)result.seasonYear,
                 format = NormalizeFormat((string)result.format),
+                airStatus = NormalizeAirStatus((string)result.status),
+                source = NormalizeSource((string)result.source),
             };
 
             if (result.trailer != null && result.trailer.site == "youtube")
