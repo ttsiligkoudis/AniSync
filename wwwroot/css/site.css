@@ -2619,6 +2619,53 @@ body.modal-open {
     color: #777;
 }
 
+/* Inline checkmark on already-watched rows. Cobalt to match the user-state
+   accent palette; flex-shrink:0 so it never shrinks if the title is long. */
+.anime-detail-episode-check {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(59, 130, 246, 0.18);
+    color: #60a5fa;
+    margin-left: 0.4rem;
+}
+
+/* Click-to-mark-watched affordance — only when the parent <ol> declares
+   data-can-edit. Hover lift + cursor:pointer signals interactivity;
+   touch devices keep cursor:default but get the same handler via the
+   document-level click listener. */
+ol.anime-detail-episodes[data-can-edit="true"] .anime-detail-episode {
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+ol.anime-detail-episodes[data-can-edit="true"] .anime-detail-episode:hover {
+    background: rgba(59, 130, 246, 0.08);
+    border-color: rgba(59, 130, 246, 0.35);
+}
+
+/* Already-watched rows are visually de-emphasised so the user's eye
+   tracks toward the next-up unwatched episode. The title gets a softer
+   colour but stays legible — they can still re-read the list. */
+.anime-detail-episode-watched .anime-detail-episode-title {
+    color: #888;
+}
+
+.anime-detail-episode-watched .anime-detail-episode-thumb {
+    opacity: 0.55;
+}
+
+/* Disabled state while a save round-trip is in flight — prevents the
+   user from queueing multiple progress jumps that would race each other. */
+ol.anime-detail-episodes-busy {
+    pointer-events: none;
+    opacity: 0.7;
+}
+
 /* External link list (Streaming, Studio, etc.). */
 .anime-detail-link-list {
     list-style: none;
