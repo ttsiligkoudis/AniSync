@@ -215,7 +215,14 @@ body.drawer-open .drawer-backdrop {
     flex: 1;
 }
 
-.nav-drawer-nav a {
+/* Bootstrap 5's `a { color: #0d6efd; text-decoration: underline }`
+   beats nothing on specificity but does kick in on :visited (where
+   our previous rules left a hole — the cobalt browser link colour
+   then leaked through after navigation). Pin every state to grey
+   explicitly so visited drawer items stay neutral with the rest. */
+.nav-drawer-nav a,
+.nav-drawer-nav a:link,
+.nav-drawer-nav a:visited {
     padding: 0.85rem 0.5rem;
     color: #ccc;
     text-decoration: none;
@@ -225,14 +232,16 @@ body.drawer-open .drawer-backdrop {
     transition: background 0.15s, color 0.15s;
 }
 
-.nav-drawer-nav a:hover {
+.nav-drawer-nav a:hover,
+.nav-drawer-nav a:focus {
     background: rgba(255, 255, 255, 0.05);
     color: #fff;
     text-decoration: none;
 }
 
 .nav-drawer-nav a.active {
-    color: #3B82F6;
+    color: #fff;
+    background: rgba(255, 255, 255, 0.06);
 }
 
 .nav-drawer-footer {
@@ -264,23 +273,32 @@ body.drawer-open .drawer-backdrop {
     text-decoration: none;
 }
 
-.nav-drawer-cta-primary {
+/* Pin colour across :link/:visited too — Bootstrap's `a` rule was
+   leaking through on visited links and rendering the Sign-in label
+   in cobalt against the cobalt button (essentially invisible). */
+.nav-drawer-cta-primary,
+.nav-drawer-cta-primary:link,
+.nav-drawer-cta-primary:visited {
     background: #3B82F6;
     color: #fff;
 }
 
-.nav-drawer-cta-primary:hover {
+.nav-drawer-cta-primary:hover,
+.nav-drawer-cta-primary:focus {
     background: #2563eb;
     color: #fff;
 }
 
-.nav-drawer-cta-secondary {
+.nav-drawer-cta-secondary,
+.nav-drawer-cta-secondary:link,
+.nav-drawer-cta-secondary:visited {
     background: transparent;
     border: 1px solid rgba(255, 255, 255, 0.18);
     color: #ccc;
 }
 
-.nav-drawer-cta-secondary:hover {
+.nav-drawer-cta-secondary:hover,
+.nav-drawer-cta-secondary:focus {
     border-color: rgba(255, 255, 255, 0.3);
     color: #fff;
 }
@@ -298,7 +316,9 @@ body.drawer-open .drawer-backdrop {
     z-index: 50;
 }
 
-.bottom-nav-item {
+.bottom-nav-item,
+.bottom-nav-item:link,
+.bottom-nav-item:visited {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -318,7 +338,7 @@ body.drawer-open .drawer-backdrop {
 }
 
 .bottom-nav-item.active {
-    color: #3B82F6;
+    color: #fff;
 }
 
 .bottom-nav-label {
@@ -680,17 +700,32 @@ body.modal-open {
     margin-bottom: 0.5rem;
 }
 
-.site-logo {
-    font-size: 1.4rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    color: #fff;
+/* Site brand mark — wraps an <img> of /logo.png. Bootstrap 5's
+   `a { color: #0d6efd; text-decoration: underline }` was bleeding
+   through and rendering the previous text-based logo as a default
+   browser link (cobalt + underlined), so we now use an image and
+   neutralise the inherited link styling explicitly on every state
+   the anchor goes through (link / visited / hover / focus). */
+.site-logo,
+.site-logo:link,
+.site-logo:visited,
+.site-logo:hover,
+.site-logo:focus {
+    display: inline-flex;
+    align-items: center;
+    color: inherit;
+    text-decoration: none;
     margin: 0;
-    text-transform: uppercase;
 }
 
-.site-logo .accent {
-    color: #3B82F6;
+.site-logo img {
+    height: 32px;
+    width: auto;
+    display: block;
+}
+
+.nav-drawer-header .site-logo img {
+    height: 36px;
 }
 
 /* Install-app pill in the site header. Hidden by default; pwa-install.js
