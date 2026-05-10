@@ -63,6 +63,21 @@ namespace AnimeList.Controllers
                 ?? new TokenData { anime_service = AnimeService.Kitsu };
             var animeService = tokenData.anime_service;
 
+            // Honour the user's "Group anime seasons" toggle. When ungrouped,
+            // we want the resolved anime.id to stay as the native per-cour id
+            // (anilist:269, etc.) so the manage-entry modal — which keys off
+            // the rendered card's data-meta-id — opens with that native id and
+            // BuildSeasonsAsync's native-id short-circuit hides the season
+            // dropdown. Anonymous visitors get the default-grouped behaviour.
+            string uid = null;
+            if (!tokenData.anonymousUser)
+            {
+                var (resolvedUid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                uid = resolvedUid;
+            }
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var groupSeasons = configuration?.disableSeasonGrouping != true;
+
             // Resolve cross-service ids (imdb:/tmdb:) to the user's primary's
             // native id so we can hit the right per-service endpoint with rich
             // detail data. Falls back to first-mapping pick if there's no
@@ -76,34 +91,34 @@ namespace AnimeList.Controllers
                     anime = await _tmdbService.GetAnimeByIdAsync(id, tokenData);
                 else if (id.StartsWith(kitsuPrefix))
                 {
-                    anime = await _kitsuService.GetAnimeByIdAsync(id, tokenData, groupSeasons: true);
+                    anime = await _kitsuService.GetAnimeByIdAsync(id, tokenData, groupSeasons: groupSeasons);
                     if (anime == null)
                     {
                         var mapping = await _mappingService.GetKitsuMapping(id);
                         if (mapping?.AnilistId != null)
-                            anime = await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData, groupSeasons: true);
+                            anime = await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData, groupSeasons: groupSeasons);
                     }
                 }
                 else if (id.StartsWith(anilistPrefix))
                 {
-                    anime = await _anilistService.GetAnimeByIdAsync(id, tokenData, groupSeasons: true);
+                    anime = await _anilistService.GetAnimeByIdAsync(id, tokenData, groupSeasons: groupSeasons);
                     if (anime == null)
                     {
                         var mapping = await _mappingService.GetAnilistMapping(id);
                         if (mapping?.KitsuId != null)
-                            anime = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData, groupSeasons: true);
+                            anime = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData, groupSeasons: groupSeasons);
                     }
                 }
                 else if (id.StartsWith(malPrefix))
                 {
-                    anime = await _malService.GetAnimeByIdAsync(id, tokenData, groupSeasons: true);
+                    anime = await _malService.GetAnimeByIdAsync(id, tokenData, groupSeasons: groupSeasons);
                     if (anime == null)
                     {
                         var mapping = await _mappingService.GetMalMapping(id);
                         if (mapping?.AnilistId != null)
-                            anime = await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData, groupSeasons: true);
+                            anime = await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData, groupSeasons: groupSeasons);
                         else if (mapping?.KitsuId != null)
-                            anime = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData, groupSeasons: true);
+                            anime = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData, groupSeasons: groupSeasons);
                     }
                 }
             }
