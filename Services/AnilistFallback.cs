@@ -330,39 +330,28 @@ namespace AnimeList.Services
                 return cached;
             }
 
-            // Three separate Page queries — one count per stat. We aliased
-            // them into a single request originally for a round-trip win,
-            // but AniList silently degrades multi-Page documents (the
-            // pageInfo.total of every alias collapses to the 5000 hard-cap
-            // because the filter args don't bind across aliases the way
-            // single-Page queries bind). Splitting into three sequential
-            // hits is slower but the 24h cache means it's a once-a-day
-            // cost.
-            //
-            // Definitions:
-            //   currentlyAiring: status RELEASING this season + year.
-            //   totalThisSeason: every anime indexed for this season + year
-            //     (including continuing ongoing series).
-            //   newThisSeason: subset of totalThisSeason that's RELEASING or
-            //     NOT_YET_RELEASED — proxy for "premiering this season"
-            //     since AniList doesn't have a direct "is sequel" flag.
+            // Earlier attempts derived the three counts from
+            // `Page.pageInfo.total` of three separately-filtered Page
+            // queries, but AniList's pageInfo.total reliably collapses to
+            // the 5000 hard-cap whenever filter args are present (even on
+            // a single-Page document). Switching to a list-walk: pull the
+            // season's whole media list (~50–200 entries), each carrying
+            // its `status`, and bucket client-side. perPage:50 means
+            // 1–4 page fetches per call, gated by the 24h cache.
             try
             {
-                var airing = await CountSeasonMediaAsync(season, year, "status: RELEASING,");
-                var newThis = await CountSeasonMediaAsync(season, year, "status_in: [RELEASING, NOT_YET_RELEASED],");
-                var total = await CountSeasonMediaAsync(season, year, "");
-
-                // Only cache non-zero successful results so a transient blip
-                // (sandbox blocks GraphQL / rate-limit / 5xx) doesn't lock
-                // in zeros for 24 hours.
-                if (total > 0)
+                var stats = await FetchSeasonStatsAsync(season, year);
+                if (stats.totalThisSeason > 0)
                 {
-                    _cache.Set(cacheKey, (airing, newThis, total), new MemoryCacheEntryOptions
+                    // Only cache successful results so a transient blip
+                    // (sandbox blocks GraphQL / rate-limit / 5xx) doesn't
+                    // lock in zeros for 24 hours.
+                    _cache.Set(cacheKey, stats, new MemoryCacheEntryOptions
                     {
                         AbsoluteExpirationRelativeToNow = SeasonStatsCacheDuration,
                     });
                 }
-                return (airing, newThis, total);
+                return stats;
             }
             catch (Exception ex)
             {
@@ -371,33 +360,53 @@ namespace AnimeList.Services
             }
         }
 
-        private async Task<int> CountSeasonMediaAsync(string season, int year, string statusFilter)
+        private async Task<(int currentlyAiring, int newThisSeason, int totalThisSeason)> FetchSeasonStatsAsync(string season, int year)
         {
-            var requestBody = SerializeObject(new
-            {
-                query = $@"
-                    query ($season: MediaSeason, $seasonYear: Int) {{
-                        Page(page: 1, perPage: 1) {{
-                            pageInfo {{ total }}
-                            media(season: $season, seasonYear: $seasonYear, {statusFilter} type: ANIME) {{ id }}
-                        }}
-                    }}",
-                variables = new { season, seasonYear = year }
-            });
+            int total = 0;
+            int airing = 0;
+            int newThis = 0;
+            int page = 1;
 
-            var data = await PostJsonAsync(requestBody);
-            var total = (int?)data?.Page?.pageInfo?.total ?? 0;
-            if (total >= 5000)
+            while (true)
             {
-                // 5000 is AniList's documented Page.pageInfo.total hard-cap.
-                // A current-season query should match ~50–200 entries; hitting
-                // the cap means the filters didn't bind (upstream change /
-                // outage). Treat as failure so we don't cache nonsense.
-                Console.Error.WriteLine(
-                    $"[AnilistFallback] season-stats hit 5000 cap (season={season} year={year} filter='{statusFilter}')");
-                return 0;
+                var requestBody = SerializeObject(new
+                {
+                    query = @"
+                        query ($page: Int, $season: MediaSeason, $seasonYear: Int) {
+                            Page(page: $page, perPage: 50) {
+                                pageInfo { hasNextPage }
+                                media(season: $season, seasonYear: $seasonYear, type: ANIME) {
+                                    status
+                                }
+                            }
+                        }",
+                    variables = new { page, season, seasonYear = year }
+                });
+
+                var data = await PostJsonAsync(requestBody);
+                var mediaArr = data?.Page?.media;
+                if (mediaArr == null) return (0, 0, 0);
+
+                foreach (var m in mediaArr)
+                {
+                    total++;
+                    var status = (string)m.status;
+                    // RELEASING counts as both "airing now" and "new this season".
+                    // NOT_YET_RELEASED counts only as "new this season" (premieres
+                    // later in the calendar season). FINISHED/CANCELLED/HIATUS
+                    // are still in the season's catalog but neither airing nor
+                    // newly-arriving — only counted into the total.
+                    if (status == "RELEASING") { airing++; newThis++; }
+                    else if (status == "NOT_YET_RELEASED") { newThis++; }
+                }
+
+                var hasNext = (bool?)data?.Page?.pageInfo?.hasNextPage ?? false;
+                if (!hasNext) break;
+                page++;
+                if (page > 20) break; // safety: ~1000 entries is well past any real season
             }
-            return total;
+
+            return (airing, newThis, total);
         }
     }
 }
