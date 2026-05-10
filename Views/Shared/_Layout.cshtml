@@ -43,6 +43,10 @@
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/AniSync.styles.css" asp-append-version="true" />
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
+    @* Load loader.js early (right after jQuery) so the fetch wrap and
+       jQuery ajax hooks are in place before any other script can fire
+       an HTTP request. *@
+    <script src="~/js/loader.js" asp-append-version="true"></script>
 </head>
 <body class="@ViewData["BodyClass"]">
     @* Persistent site chrome: slide-in drawer + mobile bottom-nav are lifted
@@ -234,6 +238,13 @@
        (anonymous users can't trigger the modal but other future actions
        might fire toasts). The container is positioned fixed via site.css. *@
     <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+    @* Global request loader. Single instance, hidden by default; loader.js
+       reveals it whenever a fetch() / $.ajax() call is in flight (with a
+       150ms grace delay so fast responses don't flash the spinner). *@
+    <div id="global-loader-overlay" class="loader-overlay" aria-hidden="true" role="status">
+        <div class="loader-spinner" aria-label="Loading"></div>
+    </div>
 
     <script src="~/js/toast.js" asp-append-version="true" defer></script>
     <script src="~/js/pwa-install.js" asp-append-version="true" defer></script>
