@@ -100,34 +100,6 @@
         <div class="anime-detail-backdrop" style="background-image: url('@a.background');"></div>
         <div class="anime-detail-backdrop-shade"></div>
     }
-    @if (canEdit)
-    {
-        @* Pencil icon, absolute-positioned top-right of the hero card.
-           Replaces the previous "Edit entry" CTA — the action is the
-           same (opens the manage-entry modal via the data-open-modal
-           hook intercepted by manage-entry-modal.js), the button just
-           tucks out of the way so the hero reads as content, not chrome. *@
-        <button type="button" class="anime-detail-edit-btn"
-                data-open-modal data-meta-id="@a.id" data-meta-name="@a.name"
-                aria-label="Edit entry">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
-                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 20h9"></path>
-                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-            </svg>
-        </button>
-    }
-    else if (!Model.AnonymousUser)
-    {
-        <a class="anime-detail-edit-btn" href="@Url.Action("Configure", "Home")"
-           aria-label="Configure to edit">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
-                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 20h9"></path>
-                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-            </svg>
-        </a>
-    }
     <div class="anime-detail-hero-body">
         @if (!string.IsNullOrEmpty(a.poster))
         {
@@ -173,6 +145,17 @@
                         @a.airStatus
                     </span>
                 }
+                @* User-state pill — three render shapes:
+                     1. Logged-in user with a list entry → cobalt pill
+                        ("Watching · Ep 2/24") with a trailing pencil icon;
+                        whole pill clicks through to the manage-entry modal.
+                     2. Logged-in user with NO entry for this anime → "Add
+                        to List" pill with a trailing plus icon, same
+                        click target so the modal handles the create flow.
+                     3. Anonymous viewer → pill omitted entirely (the modal
+                        wouldn't open and there's no "you" to talk about).
+                   data-open-modal is the global hook intercepted by
+                   manage-entry-modal.js. *@
                 @if (Model.Entry != null)
                 {
                     var statusLabel = PrettyStatus(Model.AnimeService, Model.Entry.Status);
@@ -187,17 +170,16 @@
                     if (Model.Entry.UserScore is double us && us > 0) userBits.Add($"Your score: {us.ToString("0.0")}");
                     if (userBits.Count > 0)
                     {
-                        @* When the user can edit, render as a button that
-                           opens the manage-entry modal — same code path as
-                           the pencil icon. data-open-modal is the global
-                           hook intercepted by manage-entry-modal.js. The
-                           button keeps the .anime-detail-user-state class
-                           so the cobalt-pill styling carries over verbatim. *@
                         if (canEdit)
                         {
                             <button type="button" class="anime-detail-user-state"
                                     data-open-modal data-meta-id="@a.id" data-meta-name="@a.name">
-                                @string.Join(" · ", userBits)
+                                <span>@string.Join(" · ", userBits)</span>
+                                <svg class="anime-detail-user-state-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
+                                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M12 20h9"></path>
+                                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                                </svg>
                             </button>
                         }
                         else
@@ -205,6 +187,18 @@
                             <span class="anime-detail-user-state">@string.Join(" · ", userBits)</span>
                         }
                     }
+                }
+                else if (canEdit)
+                {
+                    <button type="button" class="anime-detail-user-state"
+                            data-open-modal data-meta-id="@a.id" data-meta-name="@a.name">
+                        <span>Add to List</span>
+                        <svg class="anime-detail-user-state-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
+                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M12 5v14"></path>
+                            <path d="M5 12h14"></path>
+                        </svg>
+                    </button>
                 }
             </div>
             @if (studios.Count > 0)
@@ -472,3 +466,29 @@
         </ul>
     </section>
 }
+
+@* Synopsis collapse/expand toggle. Inlined here (rather than in
+   manage-entry-modal.js) so it works for anonymous viewers too — that
+   script bails early when the modal DOM isn't present, which used to
+   silently disable the toggle for logged-out users. *@
+<script>
+    (function () {
+        document.addEventListener('click', function (e) {
+            var btn = e.target.closest && e.target.closest('button.anime-detail-synopsis-toggle');
+            if (!btn) return;
+            e.preventDefault();
+            var wrap = btn.closest('.anime-detail-synopsis-wrap');
+            if (!wrap) return;
+            var collapsed = wrap.getAttribute('data-collapsed') === 'true';
+            if (collapsed) {
+                wrap.removeAttribute('data-collapsed');
+                btn.textContent = 'Show less';
+                btn.setAttribute('aria-expanded', 'true');
+            } else {
+                wrap.setAttribute('data-collapsed', 'true');
+                btn.textContent = 'Show more';
+                btn.setAttribute('aria-expanded', 'false');
+            }
+        });
+    })();
+</script>
