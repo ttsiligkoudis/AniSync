@@ -622,6 +622,11 @@ namespace AnimeList.Controllers
                     progress = entry?.Progress ?? 0,
                     totalEpisodes = entry?.TotalEpisodes,
                     score = entry?.Score,
+                    notes = entry?.Notes,
+                    rewatchCount = entry?.RewatchCount ?? 0,
+                    // ISO-8601 yyyy-MM-dd strings so they slot directly into <input type="date">.
+                    startedAt = entry?.StartedAt?.ToString("yyyy-MM-dd"),
+                    finishedAt = entry?.FinishedAt?.ToString("yyyy-MM-dd"),
                 });
             }
             catch (Exception ex)

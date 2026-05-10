@@ -145,6 +145,26 @@
                         <label class="entry-modal-label" for="entry-modal-score">Score</label>
                         <input id="entry-modal-score" type="number" name="score" min="0" max="10" step="0.1" class="entry-modal-input" placeholder="0–10" />
                     </div>
+                    @* Started + Finished dates side-by-side on wider viewports
+                       so they don't burn vertical space in the modal. *@
+                    <div class="entry-modal-field-row">
+                        <div class="entry-modal-field">
+                            <label class="entry-modal-label" for="entry-modal-started">Started</label>
+                            <input id="entry-modal-started" type="date" name="startedAt" class="entry-modal-input" />
+                        </div>
+                        <div class="entry-modal-field">
+                            <label class="entry-modal-label" for="entry-modal-finished">Finished</label>
+                            <input id="entry-modal-finished" type="date" name="finishedAt" class="entry-modal-input" />
+                        </div>
+                    </div>
+                    <div class="entry-modal-field">
+                        <label class="entry-modal-label" for="entry-modal-rewatch">Rewatches</label>
+                        <input id="entry-modal-rewatch" type="number" name="rewatchCount" min="0" class="entry-modal-input" placeholder="0" />
+                    </div>
+                    <div class="entry-modal-field">
+                        <label class="entry-modal-label" for="entry-modal-notes">Notes</label>
+                        <textarea id="entry-modal-notes" name="notes" rows="3" class="entry-modal-textarea" placeholder="Personal notes about this entry…"></textarea>
+                    </div>
                     <div class="entry-modal-error" hidden></div>
                     <div class="entry-modal-actions">
                         <button type="button" class="entry-modal-cancel">Cancel</button>

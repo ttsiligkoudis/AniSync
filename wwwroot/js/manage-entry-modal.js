@@ -25,6 +25,10 @@
     var progressInput = modal.querySelector('#entry-modal-progress');
     var totalEl = modal.querySelector('.entry-modal-total');
     var scoreInput = modal.querySelector('#entry-modal-score');
+    var startedInput = modal.querySelector('#entry-modal-started');
+    var finishedInput = modal.querySelector('#entry-modal-finished');
+    var rewatchInput = modal.querySelector('#entry-modal-rewatch');
+    var notesInput = modal.querySelector('#entry-modal-notes');
     var cancelBtn = modal.querySelector('.entry-modal-cancel');
     var closeBtn = modal.querySelector('.entry-modal-close');
     var saveBtn = formEl.querySelector('.entry-modal-save');
@@ -102,6 +106,10 @@
                     totalEl.hidden = true;
                 }
                 scoreInput.value = data.score || '';
+                startedInput.value = data.startedAt || '';
+                finishedInput.value = data.finishedAt || '';
+                rewatchInput.value = data.rewatchCount || 0;
+                notesInput.value = data.notes || '';
                 loadingEl.hidden = true;
                 formEl.hidden = false;
             })
@@ -166,6 +174,13 @@
             status: statusSelect.value,
             progress: parseInt(progressInput.value || '0', 10),
             score: scoreInput.value ? parseFloat(scoreInput.value) : null,
+            // Date inputs serialise to "yyyy-MM-dd" or empty string when unset.
+            // The server's ParseDate treats empty/invalid as null, so empty
+            // strings here are equivalent to "no date set".
+            startedAt: startedInput.value || null,
+            finishedAt: finishedInput.value || null,
+            rewatchCount: rewatchInput.value ? parseInt(rewatchInput.value, 10) : null,
+            notes: notesInput.value || null,
         };
 
         fetch('/api/library/entry/save', {

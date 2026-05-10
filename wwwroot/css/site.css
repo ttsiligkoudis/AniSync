@@ -396,7 +396,8 @@ body.modal-open {
 }
 
 .entry-modal-select,
-.entry-modal-input {
+.entry-modal-input,
+.entry-modal-textarea {
     padding: 0.55rem 0.75rem;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -408,13 +409,38 @@ body.modal-open {
     transition: border-color 0.15s, background-color 0.15s;
 }
 
+.entry-modal-textarea {
+    resize: vertical;
+    min-height: 4.5rem;
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+
+/* Date inputs: invert the native indicator on dark backgrounds so the
+   calendar icon doesn't render as a black-on-black blob in WebKit. */
+.entry-modal-input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(0.7);
+    cursor: pointer;
+}
+
+.entry-modal-field-row {
+    display: flex;
+    gap: 0.6rem;
+}
+
+.entry-modal-field-row .entry-modal-field {
+    flex: 1;
+    min-width: 0;
+}
+
 .entry-modal-select option {
     background: #111;
     color: #e0e0e0;
 }
 
 .entry-modal-select:focus,
-.entry-modal-input:focus {
+.entry-modal-input:focus,
+.entry-modal-textarea:focus {
     border-color: #3B82F6;
     background-color: rgba(255, 255, 255, 0.07);
 }
