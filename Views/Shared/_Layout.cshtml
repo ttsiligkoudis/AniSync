@@ -25,6 +25,19 @@
        Referer. no-referrer is the strictest setting — same protection applied to
        the Swagger UI page in Program.cs. *@
     <meta name="referrer" content="no-referrer" />
+    @* PWA manifest + iOS / Android install hints. The manifest declares
+       icons, start_url, theme_color etc.; Chromium uses it (plus an
+       active service worker, registered by pwa-install.js) to decide
+       install eligibility. theme-color paints the OS chrome (Android
+       address bar, standalone-mode title bar) the same dark shade as
+       the page so the seam disappears. apple-touch-icon is iOS Safari's
+       fallback "Add to Home Screen" icon (it ignores the manifest). *@
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0A0A0A" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="AniSync" />
     <title>AniSync</title>
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
@@ -70,6 +83,23 @@
         <main role="main" style="min-height: 100vh;">
             <header class="site-header">
                 <a class="site-logo" href="/">Ani<span class="accent">Sync</span></a>
+                @* Install pill — hidden by default, revealed by
+                   pwa-install.js once the browser fires
+                   beforeinstallprompt (Chromium / Edge / Android Chrome)
+                   and we've confirmed the page isn't already running in
+                   standalone mode. iOS Safari users see a separate
+                   one-time toast instead, since iOS doesn't expose an
+                   install event. *@
+                <button class="pwa-install-btn" type="button" data-pwa-install hidden
+                        aria-label="Install AniSync">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
+                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 3v12"></path>
+                        <path d="M7 10l5 5 5-5"></path>
+                        <path d="M5 21h14"></path>
+                    </svg>
+                    <span>Install</span>
+                </button>
                 <button class="hamburger-btn" aria-label="Open menu"
                         onclick="document.body.classList.toggle('drawer-open')">
                     <span></span><span></span><span></span>
@@ -202,6 +232,7 @@
     <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
 
     <script src="~/js/toast.js" asp-append-version="true" defer></script>
+    <script src="~/js/pwa-install.js" asp-append-version="true" defer></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>
