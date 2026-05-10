@@ -304,5 +304,58 @@ namespace AnimeList.Services
             var content = await response.Content.ReadAsStringAsync();
             return DeserializeObject<dynamic>(content)?.data;
         }
+
+        public async Task<(int currentlyAiring, int newThisSeason, int totalThisSeason)> GetSeasonStatsAsync()
+        {
+            // Single aliased GraphQL call — three Page queries each request
+            // perPage:1 + pageInfo.total so we get the count without paying
+            // for a result set. AniList's Page.pageInfo.total returns the
+            // matching count regardless of perPage.
+            //
+            // Definitions:
+            //   currentlyAiring: status RELEASING this season + year.
+            //   totalThisSeason: every anime indexed for this season + year
+            //     (including continuing ongoing series).
+            //   newThisSeason: subset of totalThisSeason that's RELEASING or
+            //     NOT_YET_RELEASED — proxy for "premiering this season"
+            //     since AniList doesn't have a direct "is sequel" flag.
+            //     Excludes shows that already FINISHED earlier this
+            //     calendar season but were tagged with the season anyway
+            //     (rare but exists for short re-airs).
+            var (season, year) = GetSeasonAndYear(SeasonCurrent);
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($season: MediaSeason, $year: Int) {
+                        airing: Page(perPage: 1) {
+                            pageInfo { total }
+                            media(season: $season, seasonYear: $year, status: RELEASING, type: ANIME) { id }
+                        }
+                        newThis: Page(perPage: 1) {
+                            pageInfo { total }
+                            media(season: $season, seasonYear: $year, status_in: [RELEASING, NOT_YET_RELEASED], type: ANIME) { id }
+                        }
+                        total: Page(perPage: 1) {
+                            pageInfo { total }
+                            media(season: $season, seasonYear: $year, type: ANIME) { id }
+                        }
+                    }",
+                variables = new { season, year }
+            });
+
+            try
+            {
+                var data = await PostJsonAsync(requestBody);
+                if (data == null) return (0, 0, 0);
+                var airing = (int?)data.airing?.pageInfo?.total ?? 0;
+                var newThis = (int?)data.newThis?.pageInfo?.total ?? 0;
+                var total = (int?)data.total?.pageInfo?.total ?? 0;
+                return (airing, newThis, total);
+            }
+            catch
+            {
+                return (0, 0, 0);
+            }
+        }
     }
 }

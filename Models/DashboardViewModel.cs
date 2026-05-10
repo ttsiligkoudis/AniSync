@@ -35,5 +35,12 @@ namespace AnimeList.Models
         // there are multiple contributors. Empty for anonymous / not-logged-in
         // users, single-element for users with no linked accounts.
         public List<string> ContributingServices { get; set; } = [];
+
+        // Seasonal aggregate counts surfaced on the dashboard's "This Season"
+        // strip — same numbers regardless of the viewer's auth state, since
+        // they describe the whole AniList catalog rather than the user's list.
+        public int SeasonCurrentlyAiring { get; set; }
+        public int SeasonNewThis { get; set; }
+        public int SeasonTotal { get; set; }
     }
 }
