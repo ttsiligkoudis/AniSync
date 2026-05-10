@@ -322,26 +322,22 @@ namespace AnimeList.Services
             // AnilistFallback is registered as Scoped, but IMemoryCache is
             // the singleton so the cache survives across requests despite
             // this service's per-request lifetime.
-            //
-            // The :v2 suffix bumps the key to invalidate the previous
-            // version's bug-tainted 5000-cap entries — when the query was
-            // declared with a `$year` variable but referenced as
-            // `seasonYear: $year`, the binding silently failed on AniList's
-            // side and every cell maxed out at the 5000 hard-cap. The v2
-            // query renames to `$seasonYear` to match the existing seasonal
-            // catalog query in AnilistService, which is known-correct.
             var (season, year) = GetSeasonAndYear(SeasonCurrent);
-            var cacheKey = $"anilist:season-stats:v2:{season}:{year}";
+            var cacheKey = $"anilist:season-stats:{season}:{year}";
 
             if (_cache.TryGetValue<(int, int, int)>(cacheKey, out var cached))
             {
                 return cached;
             }
 
-            // Single aliased GraphQL call — three Page queries each request
-            // perPage:1 + pageInfo.total so we get the count without paying
-            // for a result set. AniList's Page.pageInfo.total returns the
-            // matching count regardless of perPage.
+            // Three separate Page queries — one count per stat. We aliased
+            // them into a single request originally for a round-trip win,
+            // but AniList silently degrades multi-Page documents (the
+            // pageInfo.total of every alias collapses to the 5000 hard-cap
+            // because the filter args don't bind across aliases the way
+            // single-Page queries bind). Splitting into three sequential
+            // hits is slower but the 24h cache means it's a once-a-day
+            // cost.
             //
             // Definitions:
             //   currentlyAiring: status RELEASING this season + year.
@@ -350,44 +346,11 @@ namespace AnimeList.Services
             //   newThisSeason: subset of totalThisSeason that's RELEASING or
             //     NOT_YET_RELEASED — proxy for "premiering this season"
             //     since AniList doesn't have a direct "is sequel" flag.
-            //     Excludes shows that already FINISHED earlier this
-            //     calendar season but were tagged with the season anyway
-            //     (rare but exists for short re-airs).
-            var requestBody = SerializeObject(new
-            {
-                query = @"
-                    query ($season: MediaSeason, $seasonYear: Int) {
-                        airing: Page(perPage: 1) {
-                            pageInfo { total }
-                            media(season: $season, seasonYear: $seasonYear, status: RELEASING, type: ANIME) { id }
-                        }
-                        newThis: Page(perPage: 1) {
-                            pageInfo { total }
-                            media(season: $season, seasonYear: $seasonYear, status_in: [RELEASING, NOT_YET_RELEASED], type: ANIME) { id }
-                        }
-                        total: Page(perPage: 1) {
-                            pageInfo { total }
-                            media(season: $season, seasonYear: $seasonYear, type: ANIME) { id }
-                        }
-                    }",
-                variables = new { season, seasonYear = year }
-            });
-
             try
             {
-                var data = await PostJsonAsync(requestBody);
-                if (data == null) return (0, 0, 0);
-                var airing = (int?)data.airing?.pageInfo?.total ?? 0;
-                var newThis = (int?)data.newThis?.pageInfo?.total ?? 0;
-                var total = (int?)data.total?.pageInfo?.total ?? 0;
-
-                // Sanity guard: AniList caps Page.pageInfo.total at 5000 when
-                // a query matches >5000 entries (typically because filters
-                // failed to bind). Current-season anime never exceed ~150;
-                // a 5000 here means the upstream returned the unfiltered
-                // catalog. Don't cache that — return zeros so the view
-                // hides the strip and the next request retries fresh.
-                if (total >= 5000) return (0, 0, 0);
+                var airing = await CountSeasonMediaAsync(season, year, "status: RELEASING,");
+                var newThis = await CountSeasonMediaAsync(season, year, "status_in: [RELEASING, NOT_YET_RELEASED],");
+                var total = await CountSeasonMediaAsync(season, year, "");
 
                 // Only cache non-zero successful results so a transient blip
                 // (sandbox blocks GraphQL / rate-limit / 5xx) doesn't lock
@@ -401,10 +364,40 @@ namespace AnimeList.Services
                 }
                 return (airing, newThis, total);
             }
-            catch
+            catch (Exception ex)
             {
+                Console.Error.WriteLine($"[AnilistFallback] GetSeasonStatsAsync failed: {ex.Message}");
                 return (0, 0, 0);
             }
+        }
+
+        private async Task<int> CountSeasonMediaAsync(string season, int year, string statusFilter)
+        {
+            var requestBody = SerializeObject(new
+            {
+                query = $@"
+                    query ($season: MediaSeason, $seasonYear: Int) {{
+                        Page(page: 1, perPage: 1) {{
+                            pageInfo {{ total }}
+                            media(season: $season, seasonYear: $seasonYear, {statusFilter} type: ANIME) {{ id }}
+                        }}
+                    }}",
+                variables = new { season, seasonYear = year }
+            });
+
+            var data = await PostJsonAsync(requestBody);
+            var total = (int?)data?.Page?.pageInfo?.total ?? 0;
+            if (total >= 5000)
+            {
+                // 5000 is AniList's documented Page.pageInfo.total hard-cap.
+                // A current-season query should match ~50–200 entries; hitting
+                // the cap means the filters didn't bind (upstream change /
+                // outage). Treat as failure so we don't cache nonsense.
+                Console.Error.WriteLine(
+                    $"[AnilistFallback] season-stats hit 5000 cap (season={season} year={year} filter='{statusFilter}')");
+                return 0;
+            }
+            return total;
         }
     }
 }
