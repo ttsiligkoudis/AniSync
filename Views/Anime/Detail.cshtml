@@ -123,10 +123,12 @@
             {
                 <div class="anime-detail-info">@string.Join(" · ", infoBits)</div>
             }
-            @* Score (community) + airing status side by side. The status pill
-               color-shifts on "Airing" / "On hiatus" / "Cancelled" so the
-               state reads at a glance — Stremio-style "currently airing"
-               cue without a separate "next episode in N days" widget. *@
+            @* Score (community) + airing status + user-state side by side.
+               The status pill color-shifts on "Airing" / "On hiatus" /
+               "Cancelled" so the state reads at a glance. The user-state
+               pill (cobalt-tinted) folds into the same row so the viewer's
+               personal status reads as one of the at-a-glance facts about
+               the show, not as an orphan badge below the tag list. *@
             <div class="anime-detail-badges">
                 @if (a.score is double sc && sc > 0)
                 {
@@ -142,6 +144,23 @@
                         }
                         @a.airStatus
                     </span>
+                }
+                @if (Model.Entry != null)
+                {
+                    var statusLabel = PrettyStatus(Model.AnimeService, Model.Entry.Status);
+                    var userBits = new List<string>();
+                    if (!string.IsNullOrEmpty(statusLabel)) userBits.Add(statusLabel);
+                    if (Model.Entry.Progress > 0)
+                    {
+                        userBits.Add(Model.Entry.TotalEpisodes is int t && t > 0
+                            ? $"Ep {Model.Entry.Progress} / {t}"
+                            : $"Ep {Model.Entry.Progress}");
+                    }
+                    if (Model.Entry.UserScore is double us && us > 0) userBits.Add($"Your score: {us.ToString("0.0")}");
+                    if (userBits.Count > 0)
+                    {
+                        <span class="anime-detail-user-state">@string.Join(" · ", userBits)</span>
+                    }
                 }
             </div>
             @if (studios.Count > 0)
@@ -184,29 +203,6 @@
                     }
                 </div>
             }
-            @* User-state panel — only renders when the user is logged in
-               AND has a tracking entry for this anime. Shows a compact
-               summary of their progress / status / their personal score.
-               Distinct visual treatment (cobalt-tinted) so it reads as
-               "you" data, separate from the database / community stats
-               above. *@
-            @if (Model.Entry != null)
-            {
-                var statusLabel = PrettyStatus(Model.AnimeService, Model.Entry.Status);
-                var userBits = new List<string>();
-                if (!string.IsNullOrEmpty(statusLabel)) userBits.Add(statusLabel);
-                if (Model.Entry.Progress > 0)
-                {
-                    userBits.Add(Model.Entry.TotalEpisodes is int t && t > 0
-                        ? $"Ep {Model.Entry.Progress} / {t}"
-                        : $"Ep {Model.Entry.Progress}");
-                }
-                if (Model.Entry.UserScore is double us && us > 0) userBits.Add($"Your score: {us.ToString("0.0")}");
-
-                <div class="anime-detail-user-state">
-                    @string.Join(" · ", userBits)
-                </div>
-            }
             <div class="anime-detail-actions">
                 @if (canEdit)
                 {
@@ -232,10 +228,13 @@
 
 @if (!string.IsNullOrEmpty(a.description))
 {
-    @* Long AniList synopses run 500+ words; clamp to ~5 lines and offer an
-       expand toggle. The data-collapsed attribute keys the CSS line-clamp
-       and the JS toggle below; short synopses skip the toggle entirely. *@
-    var isLongSynopsis = a.description.Length > 300;
+    @* Long AniList synopses run 500+ words; clamp to ~3 lines on collapse
+       so "Show more" is meaningful (a 5-line clamp left most synopses
+       reading as fully visible — the expand button felt redundant). The
+       data-collapsed attribute keys the CSS line-clamp and the JS toggle
+       below; short synopses (under ~3 lines worth of text) skip the
+       toggle entirely. *@
+    var isLongSynopsis = a.description.Length > 180;
     <section class="anime-detail-section">
         <h2 class="anime-detail-section-title">Synopsis</h2>
         <div class="anime-detail-synopsis-wrap" @(isLongSynopsis ? "data-collapsed=\"true\"" : "")>
@@ -368,7 +367,13 @@
                     <div class="anime-detail-episode-thumb-wrap">
                         @if (!string.IsNullOrEmpty(v.thumbnail))
                         {
-                            <img class="anime-detail-episode-thumb" src="@v.thumbnail" alt="" loading="lazy" />
+                            @* onerror: when the thumbnail URL 404s (common for
+                               unaired future episodes — Cinemeta sets a stub
+                               URL before art exists), drop the broken-image
+                               glyph and let the wrap fall back to the placeholder
+                               treatment (play-diamond on dark). *@
+                            <img class="anime-detail-episode-thumb" src="@v.thumbnail" alt="" loading="lazy"
+                                 onerror="this.parentNode.classList.add('anime-detail-episode-thumb-failed');this.remove();" />
                         }
                         else
                         {

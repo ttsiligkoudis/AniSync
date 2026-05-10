@@ -2639,19 +2639,21 @@ a.stats-cell-link:hover {
     margin-top: 0.5rem;
 }
 
-/* Compact user-state panel below the genres — "Watching · Ep 5/12 · Your
-   score: 8.0". Cobalt-tinted to read as personal data, distinct from the
-   neutral-grey community info row above. */
+/* User-state chip living inside the badges row alongside score + air
+   status — "Watching · Ep 5/12 · Your score: 8.0". Cobalt-tinted to
+   read as personal data, distinct from the neutral score/status pills
+   in the same row. */
 .anime-detail-user-state {
-    margin-top: 0.4rem;
-    padding: 0.45rem 0.85rem;
-    background: rgba(59, 130, 246, 0.1);
-    border: 1px solid rgba(59, 130, 246, 0.25);
-    border-radius: 0.6rem;
+    display: inline-flex;
+    align-items: center;
+    padding: 0.3rem 0.7rem;
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 999px;
     color: #c4daff;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     font-weight: 500;
-    align-self: flex-start;
+    line-height: 1.2;
 }
 
 .anime-detail-section {
@@ -2686,12 +2688,14 @@ a.stats-cell-link:hover {
     margin: 0;
 }
 
-/* Collapsed long-synopsis state: clamp to ~5 lines, gradient-fade the
-   bottom edge so the cut-off feels intentional. JS toggles
-   data-collapsed on the wrapper when the user clicks "Show more". */
+/* Collapsed long-synopsis state: clamp to ~3 lines, gradient-fade the
+   bottom edge so the cut-off feels intentional. 3 lines is short enough
+   that "Show more" is obviously meaningful (5 lines left most synopses
+   reading as fully visible). JS toggles data-collapsed on the wrapper
+   when the user clicks "Show more". */
 .anime-detail-synopsis-wrap[data-collapsed="true"] .anime-detail-synopsis {
     display: -webkit-box;
-    -webkit-line-clamp: 5;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
     -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent 100%);
@@ -2805,8 +2809,19 @@ a.stats-cell-link:hover {
     display: block;
 }
 
-.anime-detail-episode-thumb-placeholder {
-    background: rgba(255, 255, 255, 0.04);
+/* Placeholder + broken-thumb fallback. Subtle diagonal stripes over a
+   slightly-tinted base read as "no art yet" rather than "image broken",
+   and the play-diamond overlay (already painted on every wrap) lands
+   centred on top so the row stays visually anchored. .thumb-failed is
+   added by the img onerror handler when the URL fails to load. */
+.anime-detail-episode-thumb-placeholder,
+.anime-detail-episode-thumb-wrap.anime-detail-episode-thumb-failed {
+    background:
+        repeating-linear-gradient(
+            135deg,
+            rgba(255, 255, 255, 0.025) 0 6px,
+            rgba(255, 255, 255, 0.05) 6px 12px),
+        rgba(255, 255, 255, 0.03);
 }
 
 /* Centred play-diamond glyph — visual anchor that mirrors Stremio's
