@@ -31,6 +31,7 @@
     var seasonSelect = modal.querySelector('#entry-modal-season');
     var statusSelect = modal.querySelector('#entry-modal-status');
     var progressInput = modal.querySelector('#entry-modal-progress');
+    var progressField = modal.querySelector('[data-progress-field]');
     var totalEl = modal.querySelector('.entry-modal-total');
     var scoreInput = modal.querySelector('#entry-modal-score');
     var startedInput = modal.querySelector('#entry-modal-started');
@@ -240,6 +241,12 @@
                     progressInput.removeAttribute('max');
                     totalEl.hidden = true;
                 }
+                // Hide the Episodes-Watched field for movies / single-episode
+                // entries — there's nothing to count and the status dropdown
+                // alone is meaningful (Completed = watched, anything else =
+                // not). The save handler maps the hidden field's progress
+                // from status: completed -> 1, else -> 0.
+                progressField.hidden = data.totalEpisodes === 1;
                 scoreInput.value = data.score || '';
                 startedInput.value = data.startedAt || '';
                 finishedInput.value = data.finishedAt || '';
@@ -721,9 +728,20 @@
         saveBtn.disabled = true;
         errorEl.hidden = true;
 
-        var newProgress = parseInt(progressInput.value || '0', 10);
         var newStatus = statusSelect.value;
         var totalForCard = parseInt(progressInput.max, 10) || null;
+        // For movies / single-episode entries the progress field is hidden
+        // and meaningless to read from. Derive progress from status instead:
+        // Completed -> 1 (the only "episode"), anything else -> 0. All three
+        // services use a status string that lowercases to "completed", so a
+        // single check covers AniList ("COMPLETED"), MAL ("completed"), and
+        // Kitsu ("completed").
+        var newProgress;
+        if (progressField.hidden) {
+            newProgress = newStatus && newStatus.toLowerCase() === 'completed' ? 1 : 0;
+        } else {
+            newProgress = parseInt(progressInput.value || '0', 10);
+        }
 
         var payload = {
             id: activeEntryId,
