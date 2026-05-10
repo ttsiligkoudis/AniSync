@@ -410,8 +410,18 @@
                     </div>
                     <div class="anime-detail-episode-body">
                         <div class="anime-detail-episode-row">
+                            @{
+                                // Cinemeta puts the episode title in `name`;
+                                // some other code paths populate `title`
+                                // instead (AniList streamingEpisodes,
+                                // service-native fallbacks). Prefer name,
+                                // fall through to title, finally "Episode N".
+                                var episodeTitle = !string.IsNullOrEmpty(v.name) ? v.name
+                                    : !string.IsNullOrEmpty(v.title) ? v.title
+                                    : $"Episode {v.episode}";
+                            }
                             <span class="anime-detail-episode-title">
-                                @v.episode. @(string.IsNullOrEmpty(v.title) ? $"Episode {v.episode}" : v.title)
+                                @v.episode. @episodeTitle
                             </span>
                             @if (!string.IsNullOrEmpty(v.released))
                             {
