@@ -190,6 +190,15 @@ namespace AnimeList.Services
             var mediaType = (string)json["media_type"];
             var isMovie = IsMovieFormat(mediaType);
 
+            // Mirror the catalog Meta builder so /anime/{id} renders consistent
+            // hero chrome — score badge, "TV · 13 eps · 2026" info row.
+            var meanScore = (double?)json["mean"];
+            var episodeCount = (int?)json["num_episodes"];
+            int? releaseYear = null;
+            var startSeason = json["start_season"];
+            if (startSeason != null && startSeason.Type != JTokenType.Null)
+                releaseYear = (int?)startSeason["year"];
+
             var anime = new Meta((string)json["synopsis"])
             {
                 id = externalId,
@@ -203,6 +212,10 @@ namespace AnimeList.Services
                     .Select(g => (string)g["name"])
                     .Where(n => !string.IsNullOrEmpty(n))
                     .ToList(),
+                score = meanScore > 0 ? Math.Round(meanScore.Value, 1) : (double?)null,
+                episodes = episodeCount > 0 ? episodeCount : null,
+                year = releaseYear,
+                format = NormalizeFormat(mediaType),
             };
 
             // Trailer: try MAL's own `videos` first (rare but present on some titles), then

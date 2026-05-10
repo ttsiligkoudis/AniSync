@@ -453,13 +453,17 @@
             });
     }
 
-    // Card click interception. Targets only <a class="library-card"> elements
-    // that carry a data-meta-id (the link variant; inert anonymous cards are
-    // <div>s and don't match). Falls back to default navigation if the data
-    // attribute is missing — keeps the JS as progressive enhancement.
-    // The +1 button inside the card is handled first — its click event
-    // bubbles up through the anchor, but stopPropagation here keeps the
-    // parent anchor's default-prevented click from also opening the modal.
+    // Click interception. Two hooks live on the document:
+    //   1. button.library-card-plus inside a card → +1 quick-action.
+    //      preventDefault + stopPropagation so the parent anchor doesn't
+    //      navigate to the detail page on this click.
+    //   2. [data-open-modal] anywhere (typically the Edit button on the
+    //      /anime/{id} detail page) → open the modal for that meta id.
+    //
+    // Cards themselves are <a href="/anime/{id}"> and click-navigate to the
+    // detail page by default — no JS interception. The modal is reserved
+    // for explicit edit-intent actions (Edit button, +1 quick-action) so
+    // the card surface stays predictable.
     document.addEventListener('click', function (e) {
         var plusBtn = e.target.closest && e.target.closest('button.library-card-plus');
         if (plusBtn) {
@@ -469,10 +473,13 @@
             if (owningCard) bumpProgress(plusBtn, owningCard);
             return;
         }
-        var card = e.target.closest && e.target.closest('a.library-card[data-meta-id]');
-        if (!card) return;
-        e.preventDefault();
-        openModal(card.getAttribute('data-meta-id'), card.getAttribute('data-meta-name'), card);
+        var modalTrigger = e.target.closest && e.target.closest('[data-open-modal][data-meta-id]');
+        if (modalTrigger) {
+            e.preventDefault();
+            openModal(modalTrigger.getAttribute('data-meta-id'),
+                      modalTrigger.getAttribute('data-meta-name'),
+                      /* card */ null);
+        }
     });
 
     closeBtn.addEventListener('click', closeModal);
@@ -555,14 +562,10 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data && data.success) {
-                    showToast('Saved');
-
-                    // Optimistic in-place card update — no page reload, scroll
-                    // position preserved. If the new status no longer matches
-                    // the page's list filter (e.g. user moved Watching →
-                    // Completed while viewing the Watching tab), fade-and-
-                    // remove the card. Otherwise refresh the progress badge.
                     if (cardForUpdate) {
+                        // Card-context save — optimistic in-place update +
+                        // toast inline. Scroll position preserved.
+                        showToast('Saved');
                         var filter = getPageListFilter();
                         var stays = statusBelongsHere(serviceForUpdate, newStatus, filter);
                         if (!stays) {
@@ -570,12 +573,19 @@
                         } else {
                             refreshCardProgress(cardForUpdate, newProgress, totalForCard);
                         }
+                        adjustStatsForTransition(serviceForUpdate, originalStatusForUpdate, newStatus, totalForCard);
+                        closeModal();
+                    } else {
+                        // No card → modal opened from the detail page Edit
+                        // button (or any future non-card entry point). The
+                        // page's user-state panel / hero meta / etc. would
+                        // go stale if we just close. Reload so it catches
+                        // up with server state; queue the toast through
+                        // sessionStorage so it survives the navigation.
+                        try { sessionStorage.setItem('anisync-toast', 'Saved'); }
+                        catch (e) { /* private-browsing — toast is best-effort */ }
+                        window.location.reload();
                     }
-                    // Keep the dashboard stats panel in sync with the bucket
-                    // transition. No-op on /library / /discover where the
-                    // panel doesn't exist.
-                    adjustStatsForTransition(serviceForUpdate, originalStatusForUpdate, newStatus, totalForCard);
-                    closeModal();
                 } else {
                     showError('Save failed. Try again.');
                     saveBtn.disabled = false;

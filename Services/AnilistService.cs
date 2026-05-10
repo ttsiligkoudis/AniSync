@@ -374,6 +374,8 @@ namespace AnimeList.Services
                     Media(id: $id) {
                         id
                         format
+                        averageScore
+                        seasonYear
                         title {
                             english
                             romaji
@@ -458,6 +460,13 @@ namespace AnimeList.Services
                 poster = result.coverImage.large,
                 genres = result.genres.ToObject<List<string>>(),
                 background = result.bannerImage,
+                // Same fields the catalog Meta builder populates so /anime/{id}
+                // and the cards render consistent chrome (community score
+                // badge, format · X eps · year info row).
+                score = result.averageScore != null ? Math.Round((double)result.averageScore / 10, 1) : (double?)null,
+                episodes = (int?)result.episodes,
+                year = (int?)result.seasonYear,
+                format = NormalizeFormat((string)result.format),
             };
 
             if (result.trailer != null && result.trailer.site == "youtube")

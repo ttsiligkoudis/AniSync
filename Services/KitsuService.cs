@@ -335,6 +335,25 @@ namespace AnimeList.Services
                 }
             }
 
+            // Mirror the catalog Meta builder so /anime/{id} renders consistent
+            // hero chrome — score badge, "TV · 13 eps · 2026" info row.
+            // averageRating is a 0-100 string, scaled to 0-10. startDate is
+            // "YYYY-MM-DD" so the leading 4 chars are the year. episodeCount
+            // and subtype are direct attribute reads.
+            double? scoreParsed = null;
+            var ratingStr = SafeGet<string>(entry, "attributes", "averageRating");
+            if (!string.IsNullOrEmpty(ratingStr) &&
+                double.TryParse(ratingStr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ratingNum))
+                scoreParsed = Math.Round(ratingNum / 10, 1);
+
+            int? releaseYear = null;
+            var startDateStr = SafeGet<string>(entry, "attributes", "startDate");
+            if (!string.IsNullOrEmpty(startDateStr) && startDateStr.Length >= 4 &&
+                int.TryParse(startDateStr[..4], out var y))
+                releaseYear = y;
+
+            var episodeCount = SafeGet<int?>(entry, "attributes", "episodeCount");
+
             var anime = new Meta(SafeGet<string>(entry, "attributes", "description"))
             {
                 id = externalId,
@@ -345,6 +364,10 @@ namespace AnimeList.Services
                              ?? SafeGet<string>(entry, "attributes", "coverImage", "large")
                              ?? SafeGet<string>(entry, "attributes", "posterImage", "original"),
                 genres = categoryTitles.Count > 0 ? categoryTitles : null,
+                score = scoreParsed,
+                episodes = episodeCount > 0 ? episodeCount : null,
+                year = releaseYear,
+                format = NormalizeFormat(subtype),
             };
 
             var youtubeId = SafeGet<string>(entry, "attributes", "youtubeVideoId");
