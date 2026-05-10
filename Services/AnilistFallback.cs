@@ -318,12 +318,20 @@ namespace AnimeList.Services
         {
             // Cache key includes season + year so the entry naturally
             // invalidates when AniList moves to the next season — the
-            // OLD entry just sits dead in cache until eviction. AnilistFallback
-            // is registered as Scoped, but IMemoryCache is the singleton so
-            // the cache survives across requests despite this service's
-            // per-request lifetime.
+            // OLD entry just sits dead in cache until eviction.
+            // AnilistFallback is registered as Scoped, but IMemoryCache is
+            // the singleton so the cache survives across requests despite
+            // this service's per-request lifetime.
+            //
+            // The :v2 suffix bumps the key to invalidate the previous
+            // version's bug-tainted 5000-cap entries — when the query was
+            // declared with a `$year` variable but referenced as
+            // `seasonYear: $year`, the binding silently failed on AniList's
+            // side and every cell maxed out at the 5000 hard-cap. The v2
+            // query renames to `$seasonYear` to match the existing seasonal
+            // catalog query in AnilistService, which is known-correct.
             var (season, year) = GetSeasonAndYear(SeasonCurrent);
-            var cacheKey = $"anilist:season-stats:{season}:{year}";
+            var cacheKey = $"anilist:season-stats:v2:{season}:{year}";
 
             if (_cache.TryGetValue<(int, int, int)>(cacheKey, out var cached))
             {
@@ -348,21 +356,21 @@ namespace AnimeList.Services
             var requestBody = SerializeObject(new
             {
                 query = @"
-                    query ($season: MediaSeason, $year: Int) {
+                    query ($season: MediaSeason, $seasonYear: Int) {
                         airing: Page(perPage: 1) {
                             pageInfo { total }
-                            media(season: $season, seasonYear: $year, status: RELEASING, type: ANIME) { id }
+                            media(season: $season, seasonYear: $seasonYear, status: RELEASING, type: ANIME) { id }
                         }
                         newThis: Page(perPage: 1) {
                             pageInfo { total }
-                            media(season: $season, seasonYear: $year, status_in: [RELEASING, NOT_YET_RELEASED], type: ANIME) { id }
+                            media(season: $season, seasonYear: $seasonYear, status_in: [RELEASING, NOT_YET_RELEASED], type: ANIME) { id }
                         }
                         total: Page(perPage: 1) {
                             pageInfo { total }
-                            media(season: $season, seasonYear: $year, type: ANIME) { id }
+                            media(season: $season, seasonYear: $seasonYear, type: ANIME) { id }
                         }
                     }",
-                variables = new { season, year }
+                variables = new { season, seasonYear = year }
             });
 
             try
@@ -373,10 +381,17 @@ namespace AnimeList.Services
                 var newThis = (int?)data.newThis?.pageInfo?.total ?? 0;
                 var total = (int?)data.total?.pageInfo?.total ?? 0;
 
-                // Only cache non-zero results so a transient upstream blip
+                // Sanity guard: AniList caps Page.pageInfo.total at 5000 when
+                // a query matches >5000 entries (typically because filters
+                // failed to bind). Current-season anime never exceed ~150;
+                // a 5000 here means the upstream returned the unfiltered
+                // catalog. Don't cache that — return zeros so the view
+                // hides the strip and the next request retries fresh.
+                if (total >= 5000) return (0, 0, 0);
+
+                // Only cache non-zero successful results so a transient blip
                 // (sandbox blocks GraphQL / rate-limit / 5xx) doesn't lock
-                // in zeros for 24 hours. Zeros are returned to the caller
-                // for this one render but the next request retries fresh.
+                // in zeros for 24 hours.
                 if (total > 0)
                 {
                     _cache.Set(cacheKey, (airing, newThis, total), new MemoryCacheEntryOptions
