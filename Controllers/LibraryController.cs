@@ -160,6 +160,77 @@ namespace AnimeList.Controllers
                 return parsed;
             return ListType.Current;
         }
+
+        /// <summary>
+        /// Returns just the poster-grid HTML for the requested filter combo, so
+        /// filter-search.js can swap the results pane in place instead of
+        /// triggering a full page reload when the user clicks Search / changes
+        /// the genre dropdown. Mirrors Index's data-fetch verbatim — same
+        /// per-service dispatch, same search-relevance re-rank, same cache
+        /// bypass behaviour. Anonymous users are bounced (the JS shouldn't
+        /// hit this for them, but defend in depth).
+        /// </summary>
+        [Route("/library/page")]
+        public async Task<IActionResult> Page(string list = null, string search = null, string genre = null, bool nocache = false)
+        {
+            var tokenData = await _tokenService.GetAccessTokenAsync();
+            if (tokenData == null || tokenData.anonymousUser)
+                return Unauthorized();
+
+            var hasSearch = !string.IsNullOrWhiteSpace(search);
+            var hasGenre = !string.IsNullOrWhiteSpace(genre);
+            var activeList = ParseListType(list);
+            var labels = new Dictionary<ListType, string>
+            {
+                [ListType.Current]   = "Watching",
+                [ListType.Completed] = "Completed",
+                [ListType.Planning]  = "Planning",
+                [ListType.Paused]    = "Paused",
+                [ListType.Dropped]   = "Dropped",
+                [ListType.Repeating] = "Rewatching",
+            };
+
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+
+            var listForCall = hasSearch ? ListType.Search : activeList;
+            const bool groupSeasonsForCall = false;
+
+            async Task<List<Meta>> FetchActiveListAsync() => tokenData.anime_service switch
+            {
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
+            };
+
+            var metas = hasGenre
+                ? await FetchActiveListAsync()
+                : await _listCache.GetOrFetchAsync(tokenData, listForCall, groupSeasonsForCall,
+                    FetchActiveListAsync, bypassCache: nocache);
+
+            if (hasSearch && metas?.Count > 0)
+            {
+                var normalisedQuery = NormalizeTitle(search);
+                const double minScore = 0.4;
+                metas = metas
+                    .Select(m => (meta: m, score: ScoreMatch(normalisedQuery, m.name)))
+                    .Where(x => x.score >= minScore)
+                    .OrderByDescending(x => x.score)
+                    .Select(x => x.meta)
+                    .ToList();
+            }
+
+            var activeLabel = labels[activeList];
+            return PartialView("_PosterGrid", new PosterGridViewModel
+            {
+                Items = metas ?? [],
+                ConfigUid = uid,
+                EmptyMessage = hasSearch
+                    ? $"No matches for \"{search.Trim()}\"."
+                    : hasGenre
+                        ? $"No {genre.Trim().ToLower()} anime in your {activeLabel} list."
+                        : $"Nothing in your {activeLabel} list on {tokenData.anime_service}.",
+            });
+        }
     }
 
     /// <summary>

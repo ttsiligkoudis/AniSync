@@ -146,11 +146,12 @@ namespace AnimeList.Controllers
         /// list, so the scroll handler simply doesn't fire on search pages.
         /// </summary>
         [Route("/discover/page")]
-        public async Task<IActionResult> Page(string list, string genre = null, string skip = null, string season = null)
+        public async Task<IActionResult> Page(string list, string genre = null, string skip = null, string season = null, string search = null, bool fullPane = false)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync()
                 ?? new TokenData { anime_service = AnimeService.Kitsu };
 
+            var hasSearch = !string.IsNullOrWhiteSpace(search);
             var activeList = ParseListType(list);
 
             string uid = null;
@@ -160,22 +161,58 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
+            // Search runs as ListType.Search across the full anime database;
+            // matches the addon-side branch. Pagination scroll calls don't
+            // pass a search term so this stays the existing per-tab dispatch.
+            var listForCall = hasSearch ? ListType.Search : activeList;
             const bool groupSeasonsForCall = false;
             var metas = tokenData.anime_service switch
             {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, activeList, skip: skip, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, activeList, skip: skip, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, activeList, skip: skip, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season),
             };
 
-            return PartialView("_PosterGrid", new PosterGridViewModel
+            if (hasSearch && metas?.Count > 0)
+            {
+                var normalisedQuery = NormalizeTitle(search);
+                const double minScore = 0.4;
+                metas = metas
+                    .Select(m => (meta: m, score: ScoreMatch(normalisedQuery, m.name)))
+                    .Where(x => x.score >= minScore)
+                    .OrderByDescending(x => x.score)
+                    .Select(x => x.meta)
+                    .ToList();
+            }
+
+            var labels = new Dictionary<ListType, string>
+            {
+                [ListType.Trending_Desc] = "Trending",
+                [ListType.Seasonal]      = "Seasonal",
+                [ListType.Airing]        = "Airing",
+            };
+            var activeLabel = labels.TryGetValue(activeList, out var l) ? l : "anime";
+            var hasGenre = !string.IsNullOrWhiteSpace(genre);
+
+            var gridModel = new PosterGridViewModel
             {
                 Items = metas ?? [],
                 ConfigUid = uid,
-                // Empty-message stays null — when the next page is empty the
-                // JS just drops the sentinel and stops fetching; we don't
-                // render the "couldn't load" placeholder mid-scroll.
-            });
+                // Empty-message stays null for infinite-scroll appends (no
+                // skip = initial call; with skip = pagination chunk where an
+                // empty page just stops the observer). fullPane callers
+                // (filter-search.js Search-button swap) want the same empty
+                // copy the server-rendered Index path uses.
+                EmptyMessage = fullPane
+                    ? (hasSearch
+                        ? $"No matches for \"{search.Trim()}\"."
+                        : hasGenre
+                            ? $"No {genre.Trim().ToLower()} anime in {activeLabel.ToLower()} right now."
+                            : $"Couldn't load {activeLabel.ToLower()} anime — try again later.")
+                    : null,
+            };
+
+            return PartialView("_PosterGrid", gridModel);
         }
 
         private static ListType ParseListType(string raw)
