@@ -3,9 +3,12 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
-# Local environment files (docker-compose reads these for dev-cert passwords
-# and similar per-developer values; commit .env.example instead).
-.env
+# Local environment files (docker-compose reads .env for the dev-cert PFX
+# password). Glob catches .env, .env.example, .env.local, etc. — none of
+# them are needed live; production termination of TLS is handled at the
+# edge proxy. docker-compose.yml has its own fallback default for the
+# variable, so the file is purely an opt-in convenience.
+.env*
 
 # User-specific files
 *.rsuser

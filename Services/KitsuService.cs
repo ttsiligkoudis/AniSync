@@ -32,12 +32,13 @@ namespace AnimeList.Services
             _logger = logger;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null)
         {
             // Kitsu has no native airing-schedule endpoint; delegate to the AniList fallback
-            // and translate ids back to Kitsu for downstream meta/manage flows.
+            // and translate ids back to Kitsu for downstream meta/manage flows. genre
+            // threads through so Airing-by-genre swaps to the RELEASING+genre query.
             if (list == ListType.Airing)
-                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.Kitsu, skip);
+                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.Kitsu, skip, genre);
 
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu);
             var isUserList = !list.HasValue || _userLists.Contains(list.Value);
@@ -59,7 +60,7 @@ namespace AnimeList.Services
             // First page is sequential — for the fetch-all path we need its meta.count to
             // fan out the remaining pages in parallel.
             var firstSkip = fetchAll ? "0" : skip;
-            var firstUrl = BuildListUrl(tokenData, list, firstSkip, resolvedAnimeId, genre, search, sort, isUserList);
+            var firstUrl = BuildListUrl(tokenData, list, firstSkip, resolvedAnimeId, genre, search, sort, isUserList, season);
             var firstPage = await FetchKitsuPageAsync(firstUrl, tokenData);
             if (firstPage == null) return [];
 
@@ -80,7 +81,7 @@ namespace AnimeList.Services
                     var tasks = new List<Task<JObject>>();
                     for (int offset = CatalogPageSize; offset < totalCount.Value; offset += CatalogPageSize)
                     {
-                        var url = BuildListUrl(tokenData, list, offset.ToString(), resolvedAnimeId, genre, search, sort, isUserList);
+                        var url = BuildListUrl(tokenData, list, offset.ToString(), resolvedAnimeId, genre, search, sort, isUserList, season);
                         tasks.Add(FetchWithSemaphoreAsync(url, tokenData, sem));
                     }
 
@@ -99,7 +100,7 @@ namespace AnimeList.Services
                     int offset = CatalogPageSize;
                     while (true)
                     {
-                        var url = BuildListUrl(tokenData, list, offset.ToString(), resolvedAnimeId, genre, search, sort, isUserList);
+                        var url = BuildListUrl(tokenData, list, offset.ToString(), resolvedAnimeId, genre, search, sort, isUserList, season);
                         var page = await FetchKitsuPageAsync(url, tokenData);
                         if (page == null) break;
 
@@ -852,7 +853,7 @@ namespace AnimeList.Services
             return SafeGet<int?>(json, "data", "attributes", "episodeCount");
         }
 
-        private string BuildListUrl(TokenData tokenData, ListType? list, string skip, string resolvedAnimeId, string genre, string search, string sort, bool isUserList)
+        private string BuildListUrl(TokenData tokenData, ListType? list, string skip, string resolvedAnimeId, string genre, string search, string sort, bool isUserList, string season = null)
         {
             string url;
 
@@ -864,9 +865,21 @@ namespace AnimeList.Services
             }
             else if (list == ListType.Seasonal)
             {
-                var (season, year) = GetSeasonAndYear(genre ?? SeasonCurrent);
+                // Explicit `season` ("Spring 2026") wins; otherwise the
+                // Stremio addon's `genre`-as-season legacy ("This Season" /
+                // "Next Season" / "Previous Season"); otherwise current.
+                // Real genre values layer filter[categories] on top.
+                var seasonSelector = !string.IsNullOrEmpty(season)
+                    ? season
+                    : (!string.IsNullOrEmpty(genre) && SeasonOptions.Contains(genre) ? genre : SeasonCurrent);
+                var (resolvedSeason, year) = GetSeasonAndYear(seasonSelector);
+                var realGenre = (!string.IsNullOrEmpty(genre) && !SeasonOptions.Contains(genre)) ? genre : null;
                 var sortValue = string.IsNullOrEmpty(sort) ? "-userCount" : SortToKitsu(sort);
-                url = $"{_kitsuApi}/anime?sort={sortValue}&filter[season]={season.ToLowerInvariant()}&filter[seasonYear]={year}&include=categories";
+                url = $"{_kitsuApi}/anime?sort={sortValue}&filter[season]={resolvedSeason.ToLowerInvariant()}&filter[seasonYear]={year}&include=categories";
+                if (!string.IsNullOrEmpty(realGenre))
+                {
+                    url += $"&filter[categories]={Uri.EscapeDataString(realGenre.ToLowerInvariant().Replace(" ", "-"))}";
+                }
             }
             else if (list == ListType.Search)
             {

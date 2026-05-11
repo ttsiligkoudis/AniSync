@@ -56,7 +56,7 @@ namespace AnimeList.Controllers
         ];
 
         [Route("/discover")]
-        public async Task<IActionResult> Index(string list = null, string search = null, string genre = null)
+        public async Task<IActionResult> Index(string list = null, string search = null, string genre = null, string season = null)
         {
             // Anonymous fresh-visit: GetAccessTokenAsync returns null. Synthesise an
             // anonymous TokenData with the Kitsu default so the per-service dispatch
@@ -91,9 +91,9 @@ namespace AnimeList.Controllers
             const bool groupSeasonsForCall = false;
             var metas = tokenData.anime_service switch
             {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
             };
 
             // Same 0.4-threshold relevance re-rank CatalogController applies on the
@@ -110,6 +110,14 @@ namespace AnimeList.Controllers
                     .ToList();
             }
 
+            // Season dropdown drives only the Seasonal list type. Default is
+            // the current season label so the picker reads "Spring 2026"
+            // out of the box rather than blank. The picker options span the
+            // last 10 years + the upcoming season.
+            var resolvedSeason = !string.IsNullOrWhiteSpace(season)
+                ? season.Trim()
+                : CurrentSeasonLabel();
+
             return View(new DiscoverViewModel
             {
                 ConfigUid = uid,
@@ -120,7 +128,53 @@ namespace AnimeList.Controllers
                 Search = hasSearch ? search.Trim() : null,
                 Genre = hasGenre ? genre.Trim() : null,
                 AvailableGenres = PopularGenres,
+                Season = resolvedSeason,
+                AvailableSeasons = BuildSeasonalDropdownOptions(),
                 Items = metas ?? [],
+            });
+        }
+
+        /// <summary>
+        /// Partial-HTML pagination endpoint driving the infinite-scroll on
+        /// /discover. Same auth + service resolution as <see cref="Index"/>
+        /// — but returns only the next chunk of poster cards (via the
+        /// shared _PosterGrid partial) so the client can append them to
+        /// the existing grid without rerendering the chrome around it.
+        ///
+        /// Search mode is excluded here on purpose — search results are
+        /// already a single-shot relevance-ranked slice, not a paginated
+        /// list, so the scroll handler simply doesn't fire on search pages.
+        /// </summary>
+        [Route("/discover/page")]
+        public async Task<IActionResult> Page(string list, string genre = null, string skip = null, string season = null)
+        {
+            var tokenData = await _tokenService.GetAccessTokenAsync()
+                ?? new TokenData { anime_service = AnimeService.Kitsu };
+
+            var activeList = ParseListType(list);
+
+            string uid = null;
+            if (!tokenData.anonymousUser)
+            {
+                var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                uid = resolved;
+            }
+
+            const bool groupSeasonsForCall = false;
+            var metas = tokenData.anime_service switch
+            {
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, activeList, skip: skip, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, activeList, skip: skip, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, activeList, skip: skip, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
+            };
+
+            return PartialView("_PosterGrid", new PosterGridViewModel
+            {
+                Items = metas ?? [],
+                ConfigUid = uid,
+                // Empty-message stays null — when the next page is empty the
+                // JS just drops the sentinel and stops fetching; we don't
+                // render the "couldn't load" placeholder mid-scroll.
             });
         }
 
@@ -157,6 +211,11 @@ namespace AnimeList.Controllers
         // view renders an "× clear" pill alongside the genre dropdown when set.
         public string Genre { get; set; }
         public IReadOnlyList<string> AvailableGenres { get; set; } = [];
+        // Active season label ("Spring 2026") — only meaningful when the active
+        // list type is Seasonal. Always populated (current season is the fall-
+        // back) so the dropdown can preselect the correct option.
+        public string Season { get; set; }
+        public IReadOnlyList<string> AvailableSeasons { get; set; } = [];
         public List<Meta> Items { get; set; } = [];
     }
 }

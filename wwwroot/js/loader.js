@@ -72,9 +72,23 @@
     // fetch wrap. Capture the original via .bind so calls keep the
     // expected `this` (window). The .finally hook fires for both
     // fulfilled and rejected promises so we never leak the counter.
+    //
+    // Opt-out: pass init.skipLoader = true to bypass the counter for
+    // high-frequency / interactive requests where flashing the spinner
+    // would be noisy (typeahead search, autosave, polling). The flag is
+    // stripped from init before reaching origFetch so the browser doesn't
+    // emit it as part of any request shape.
     if (typeof window.fetch === 'function') {
         var origFetch = window.fetch.bind(window);
         window.fetch = function (input, init) {
+            var skipLoader = init && init.skipLoader === true;
+            if (skipLoader) {
+                // Shallow-clone init so we can remove the non-standard key
+                // without mutating the caller's options object.
+                var cleaned = Object.assign({}, init);
+                delete cleaned.skipLoader;
+                return origFetch(input, cleaned);
+            }
             beginRequest();
             var p = origFetch(input, init);
             // .finally is supported everywhere we care about (Chromium 63+,

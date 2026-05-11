@@ -28,8 +28,21 @@ namespace AnimeList.Services
             _cache = cache;
         }
 
-        public async Task<List<Meta>> GetAiringScheduleAsync(AnimeService translateTo, string skip = null)
+        public async Task<List<Meta>> GetAiringScheduleAsync(AnimeService translateTo, string skip = null, string genre = null)
         {
+            // Genre branch: AniList's airingSchedules query has no genre
+            // filter, so when the caller wants to slice "airing" by genre we
+            // swap to the Media(status: RELEASING, genre: $genre) shape. Same
+            // user-facing intent — "show me what's airing in Action" — just
+            // sourced from currently-airing anime rather than the upcoming-
+            // episode schedule. Results lose per-episode air dates because
+            // there's no schedule attached to a status-based fetch; the cards
+            // still carry the show's full metadata.
+            if (!string.IsNullOrEmpty(genre))
+            {
+                return await GetCurrentlyAiringByGenreAsync(translateTo, skip, genre);
+            }
+
             var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
 
             var requestBody = SerializeObject(new
@@ -81,6 +94,63 @@ namespace AnimeList.Services
                 var description = BuildAiringDescription((string)media.description, episode, airingAt);
 
                 result.Add(new Meta(description)
+                {
+                    id = externalId,
+                    type = IsMovieFormat((string)media.format) ? MetaType.movie.ToString() : MetaType.series.ToString(),
+                    name = name,
+                    poster = (string)media.coverImage?.large,
+                });
+            }
+
+            return result;
+        }
+
+        // "Airing + genre" fallback path. Uses Media(status: RELEASING, genre)
+        // because airingSchedules can't be sliced per-genre. Sort by popularity
+        // so the most-watched currently-airing shows in the genre lead.
+        private async Task<List<Meta>> GetCurrentlyAiringByGenreAsync(AnimeService translateTo, string skip, string genre)
+        {
+            var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
+
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($page: Int, $perPage: Int, $genre: String) {
+                        Page(page: $page, perPage: $perPage) {
+                            media(type: ANIME, status: RELEASING, genre: $genre, sort: POPULARITY_DESC) {
+                                id
+                                format
+                                title { english romaji }
+                                coverImage { large }
+                                description
+                            }
+                        }
+                    }",
+                variables = new { page, perPage = PageSize, genre }
+            });
+
+            var data = await PostJsonAsync(requestBody);
+            var mediaArr = data?.Page?.media;
+            if (mediaArr == null) return [];
+
+            await _mappingService.EnsureLoadedAsync();
+
+            var seen = new HashSet<string>();
+            var result = new List<Meta>();
+            foreach (var media in mediaArr)
+            {
+                var anilistId = (int?)media.id;
+                if (!anilistId.HasValue) continue;
+
+                var externalId = await ResolveExternalIdAsync(anilistId.Value, translateTo);
+                if (!seen.Add(externalId)) continue;
+
+                var name = string.IsNullOrEmpty((string)media.title?.english)
+                    ? (string)media.title?.romaji
+                    : (string)media.title?.english;
+                if (string.IsNullOrEmpty(name)) continue;
+
+                result.Add(new Meta((string)media.description)
                 {
                     id = externalId,
                     type = IsMovieFormat((string)media.format) ? MetaType.movie.ToString() : MetaType.series.ToString(),

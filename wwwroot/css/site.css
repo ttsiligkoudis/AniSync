@@ -122,7 +122,10 @@ body.anime-detail-page .anime-detail-hero {
         /* Push the right cluster (install pill + auth CTA) flush right,
            independent of whether the install pill is currently visible
            — the pill carries its own margin-left:auto for the mobile
-           case but is hidden by default, so we can't rely on it. */
+           case but is hidden by default, so we can't rely on it. The
+           .site-search element between the nav and right cluster picks
+           up the same job at narrow viewports where the inline nav
+           isn't rendered. */
         margin-right: auto;
     }
 
@@ -891,6 +894,161 @@ body.modal-open {
 .pwa-ios-hint-close:hover {
     background: rgba(255, 255, 255, 0.08);
     color: #fff;
+}
+
+/* ── Global anime search (site-header) ── */
+/* Sits between the inline desktop nav (or right after the logo on mobile)
+   and the install / auth cluster. flex:1 + max-width:320px lets it grow
+   to fill the available header space, capped so it doesn't sprawl on a
+   wide viewport. position:relative is the anchor for the absolutely-
+   positioned dropdown below. */
+.site-search {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    max-width: 320px;
+    margin: 0;
+}
+
+.site-search-icon {
+    position: absolute;
+    left: 0.85rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #777;
+    pointer-events: none;
+    display: inline-flex;
+}
+
+.site-search-input {
+    width: 100%;
+    padding: 0.45rem 0.85rem 0.45rem 2.25rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    color: #e0e0e0;
+    font-size: 0.85rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s, background 0.15s;
+    /* Hide the native clear "x" Chromium adds to type=search; the dropdown
+       interactions (Esc, click-outside) are the canonical clear path. */
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.site-search-input::-webkit-search-cancel-button,
+.site-search-input::-webkit-search-decoration {
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.site-search-input::placeholder {
+    color: #777;
+}
+
+.site-search-input:focus {
+    border-color: rgba(59, 130, 246, 0.5);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.site-search-input:focus + .site-search-results,
+.site-search-input:focus ~ .site-search-results {
+    /* No-op rule reserved for any future focus-state styling on the
+       dropdown — keeps the cascade pattern consistent with .site-search-icon
+       which already targets sibling input state. */
+}
+
+/* Dropdown anchored just below the input. The 6px offset keeps it visually
+   detached from the input border so the boundary reads clearly. z-index sits
+   under the loader / modal overlays (200+) but above page content. */
+.site-search-results {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    background: #161616;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.75rem;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    max-height: 360px;
+    overflow-y: auto;
+    z-index: 90;
+}
+
+.site-search-results[hidden] {
+    display: none;
+}
+
+.site-search-result,
+.site-search-result:link,
+.site-search-result:visited {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.75rem;
+    color: #e0e0e0;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 0.85rem;
+    transition: background 0.1s, color 0.1s;
+}
+
+.site-search-result:last-child {
+    border-bottom: none;
+}
+
+.site-search-result:hover,
+.site-search-result:focus {
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+    text-decoration: none;
+}
+
+.site-search-result-poster {
+    width: 32px;
+    height: 44px;
+    border-radius: 0.25rem;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.site-search-result-poster-placeholder {
+    /* Matches the dimensions of the real <img> variant so missing-poster
+       rows don't reflow the dropdown. */
+}
+
+.site-search-result-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.site-search-status {
+    padding: 0.75rem 0.85rem;
+    color: #999;
+    font-size: 0.85rem;
+    text-align: center;
+}
+
+/* Mobile cap a touch narrower so a 360-414px header doesn't force the
+   hamburger to overflow. */
+@media (max-width: 480px) {
+    .site-search {
+        max-width: 240px;
+    }
+
+    .site-search-input {
+        padding-left: 2rem;
+        font-size: 0.8rem;
+    }
+
+    .site-search-icon {
+        left: 0.65rem;
+    }
 }
 
 .site-header-badge {
@@ -2547,11 +2705,129 @@ a.stats-cell-link:hover {
     color: #e0e0e0;
 }
 
+/* Combined filter bar — replaces the old separate .library-search + .genre-
+   picker forms. Single <form> with search input + genre <select> + (on
+   /discover/seasonal) season <select> + an explicit Search button. None
+   of the inputs auto-submit; the submit button is the only commit path,
+   so the user can dial in multiple filters and apply them in one round-
+   trip. flex-wrap allows graceful stacking on narrow viewports. */
+.filter-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    width: 100%;
+    margin: 0.4rem 0;
+}
+
+.filter-bar-search {
+    flex: 1 1 240px;
+    min-width: 0;
+    padding: 0.55rem 0.95rem;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1.5rem;
+    color: #e0e0e0;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.filter-bar-search::placeholder { color: #777; }
+
+.filter-bar-search:focus {
+    border-color: #3B82F6;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.filter-bar-select {
+    flex: 0 0 auto;
+    padding: 0.5rem 2.5rem 0.5rem 0.95rem;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1.5rem;
+    color: #e0e0e0;
+    font-size: 0.9rem;
+    font-family: inherit;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    /* Same inline chevron as .genre-picker-select so the two pickers in
+       the row read as a matched pair. */
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%23999' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='1,1 6,7 11,1'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    cursor: pointer;
+    transition: border-color 0.15s, background-color 0.15s;
+}
+
+.filter-bar-select:focus {
+    border-color: #3B82F6;
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.filter-bar-select option {
+    background: #0A0A0A;
+    color: #e0e0e0;
+}
+
+/* Primary submit — cobalt-filled pill so it reads as the commit affordance
+   alongside the muted-grey filter inputs. */
+.filter-bar-submit {
+    flex: 0 0 auto;
+    padding: 0.55rem 1.2rem;
+    background: #3B82F6;
+    border: 0;
+    border-radius: 1.5rem;
+    color: #fff;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.filter-bar-submit:hover,
+.filter-bar-submit:focus {
+    background: #2563eb;
+}
+
+.filter-bar-clear {
+    color: #999;
+    font-size: 0.85rem;
+    text-decoration: none;
+    flex-shrink: 0;
+}
+
+.filter-bar-clear:hover {
+    color: #fff;
+    text-decoration: underline;
+}
+
 .library-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 1rem;
     width: 100%;
+}
+
+/* Wrapper around the discover grid that the infinite-scroll JS reads its
+   bookkeeping off (data-list / data-genre / data-skip). Block-level so the
+   sentinel below it sits at the natural bottom of the grid in the page
+   flow — IntersectionObserver fires when the sentinel scrolls into the
+   viewport's pre-load margin. */
+.discover-paginator {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Invisible 1px sentinel — gives IntersectionObserver a real layout box
+   to track. Doesn't need to be visible, just present in flow at the
+   bottom of the grid so the observer trips when the user scrolls there. */
+.discover-sentinel {
+    width: 100%;
+    height: 1px;
+    pointer-events: none;
 }
 
 /* Horizontal-scroll variant of .library-grid — used on the dashboard's

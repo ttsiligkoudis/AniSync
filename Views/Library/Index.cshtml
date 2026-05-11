@@ -14,33 +14,73 @@
     };
 
     var hasSearch = !string.IsNullOrEmpty(Model.Search);
+    var hasGenre = !string.IsNullOrEmpty(Model.Genre);
     var activeLabel = labels[Model.ActiveList];
+    var activeListSlug = Model.ActiveList.ToString().ToLower();
 
-    // Title reflects the active tab / search state so browser history rows
-    // for "Library > Completed" and "Library > Search" are distinguishable.
     ViewData["Title"] = hasSearch
         ? $"Search: {Model.Search} · Library"
-        : $"{activeLabel} · Library";
+        : hasGenre
+            ? $"{Model.Genre} · {activeLabel} · Library"
+            : $"{activeLabel} · Library";
 }
 
-<p class="page-subtitle">
-    @if (hasSearch)
+@* List-type tabs lead the page (Watching / Completed / Planning / Paused /
+   Dropped / Rewatching). Each is an anchor — clicking refreshes the page
+   with the selected list. Active genre flows through so switching from
+   Watching → Completed keeps the genre filter applied. *@
+<nav class="library-tabs" role="tablist" aria-label="Library lists">
+    @foreach (var t in Model.Tabs)
     {
-        <text>Search results · @Model.AnimeService</text>
+        var isActive = t == Model.ActiveList;
+        var values = new RouteValueDictionary { ["list"] = t.ToString().ToLower() };
+        if (hasGenre) values["genre"] = Model.Genre;
+        <a class="library-tab @(isActive ? "library-tab-active" : "")"
+           href="@Url.Action("Index", "Library", values)"
+           role="tab"
+           aria-selected="@(isActive ? "true" : "false")">
+            @labels[t]
+        </a>
     }
-    else
+</nav>
+
+@* Combined filter form: search input + genre dropdown + explicit Search
+   button. Nothing auto-submits — user picks their filters then commits
+   them all at once. The hidden `list` input keeps the active tab pinned
+   through submissions. *@
+<form method="get" action="@Url.Action("Index", "Library")" class="filter-bar" role="search">
+    <input type="hidden" name="list" value="@activeListSlug" />
+
+    <input type="search"
+           name="search"
+           value="@Model.Search"
+           placeholder="Search anime…"
+           class="filter-bar-search"
+           autocomplete="off" />
+
+    <select name="genre" class="filter-bar-select" aria-label="Genre">
+        <option value="">All genres</option>
+        @foreach (var g in Model.AvailableGenres)
+        {
+            <option value="@g" selected="@(Model.Genre == g)">@g</option>
+        }
+    </select>
+
+    <button type="submit" class="filter-bar-submit">Search</button>
+
+    @if (hasSearch || hasGenre)
     {
-        <text>@activeLabel on @Model.AnimeService</text>
+        <a class="filter-bar-clear" href="@Url.Action("Index", "Library", new { list = activeListSlug })">Clear</a>
     }
-    <span class="library-back">·
-        <a href="@Url.Action("Index", "Home")">back to dashboard</a>
-    </span>
-    @* Force-refresh: same ?nocache=1 escape hatch the dashboard exposes. Hidden
-       during search since search results aren't cached anyway. *@
+
+    @* Force-refresh ?nocache=1 — same escape hatch the dashboard exposes.
+       Sits at the end of the filter row so it doesn't compete visually with
+       the primary Search action. Hidden during search since search results
+       aren't cached anyway. *@
     @if (!hasSearch)
     {
         <a class="dashboard-refresh-btn library-refresh-btn"
-           href="@Url.Action("Index", "Library", new { list = Model.ActiveList.ToString().ToLower(), nocache = true })"
+           href="@Url.Action("Index", "Library", new { list = activeListSlug, nocache = true })"
            title="Refresh list — bypass the 10 min cache"
            aria-label="Refresh list">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -49,43 +89,7 @@
             </svg>
         </a>
     }
-</p>
-
-@* Search input. Server-rendered <form> targeting the same page — submitting
-   navigates to /library?search=... and the controller branches into search mode.
-   Empty submit clears the search. The active list tab isn't preserved across
-   search because the two are mutually exclusive in the controller; clearing
-   search returns to the default tab (Watching). *@
-<form method="get" action="@Url.Action("Index", "Library")" class="library-search">
-    <input type="search"
-           name="search"
-           value="@Model.Search"
-           placeholder="Search anime…"
-           class="library-search-input"
-           autocomplete="off" />
-    @if (hasSearch)
-    {
-        <a class="library-search-clear" href="@Url.Action("Index", "Library")">Clear</a>
-    }
 </form>
-
-@* Tab strip — hidden during search since search results span every list type
-   and the visual cue would be misleading. *@
-@if (!hasSearch)
-{
-    <nav class="library-tabs" role="tablist">
-        @foreach (var t in Model.Tabs)
-        {
-            var isActive = t == Model.ActiveList;
-            <a class="library-tab @(isActive ? "library-tab-active" : "")"
-               href="@Url.Action("Index", "Library", new { list = t.ToString().ToLower() })"
-               role="tab"
-               aria-selected="@(isActive ? "true" : "false")">
-                @labels[t]
-            </a>
-        }
-    </nav>
-}
 
 @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
 {
@@ -93,5 +97,7 @@
     ConfigUid = Model.ConfigUid,
     EmptyMessage = hasSearch
         ? $"No matches for \"{Model.Search}\"."
-        : $"Nothing in your {activeLabel} list on {Model.AnimeService}.",
+        : hasGenre
+            ? $"No {Model.Genre.ToLower()} anime in your {activeLabel} list."
+            : $"Nothing in your {activeLabel} list on {Model.AnimeService}.",
 })

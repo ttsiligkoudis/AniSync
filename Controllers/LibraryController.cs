@@ -50,8 +50,19 @@ namespace AnimeList.Controllers
             ListType.Repeating,
         ];
 
+        // Mirrors DiscoverController.PopularGenres — hand-curated common
+        // anime genres surfaced in the picker. Duplicated rather than shared
+        // out so the two controllers stay independently editable; the list
+        // is small enough that drift is unlikely to bite.
+        private static readonly string[] PopularGenres =
+        [
+            "Action", "Adventure", "Comedy", "Drama", "Slice of Life",
+            "Romance", "Fantasy", "Sci-Fi", "Mystery", "Psychological",
+            "Sports", "Supernatural", "Music", "Horror", "Thriller",
+        ];
+
         [Route("/library")]
-        public async Task<IActionResult> Index(string list = null, string search = null, bool nocache = false)
+        public async Task<IActionResult> Index(string list = null, string search = null, string genre = null, bool nocache = false)
         {
             // Session-based identity. /library has no path-config — it's pure web app.
             // Anonymous visitors and not-logged-in sessions get bounced to the dashboard
@@ -62,6 +73,7 @@ namespace AnimeList.Controllers
                 return RedirectToAction("Index", "Home");
 
             var hasSearch = !string.IsNullOrWhiteSpace(search);
+            var hasGenre = !string.IsNullOrWhiteSpace(genre);
 
             // Parse the ?list= query param; default to Current and silently coerce
             // unknown / non-user-list values rather than 400'ing — keeps shareable URLs
@@ -95,13 +107,22 @@ namespace AnimeList.Controllers
             // non-cacheable) so the same call shape handles both modes.
             async Task<List<Meta>> FetchActiveListAsync() => tokenData.anime_service switch
             {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
             };
 
-            var metas = await _listCache.GetOrFetchAsync(tokenData, listForCall, groupSeasonsForCall,
-                FetchActiveListAsync, bypassCache: nocache);
+            // Bypass the per-user list cache when a genre filter is active —
+            // UserListCache keys on (uid, service, listType, groupSeasons) and
+            // doesn't differentiate by genre, so a cached "Current+ungrouped"
+            // result would leak into "Current+ungrouped+Action" and vice
+            // versa. The filtering happens post-fetch inside the service
+            // calls anyway, so the unfiltered cache stays correct for the
+            // common (no-genre) case.
+            var metas = hasGenre
+                ? await FetchActiveListAsync()
+                : await _listCache.GetOrFetchAsync(tokenData, listForCall, groupSeasonsForCall,
+                    FetchActiveListAsync, bypassCache: nocache);
 
             // Re-rank search results by Utils.ScoreMatch with the same 0.4 threshold
             // CatalogController applies — keeps the relevance ordering consistent
@@ -125,6 +146,8 @@ namespace AnimeList.Controllers
                 ActiveList = activeList,
                 Tabs = UserListTypes,
                 Search = hasSearch ? search.Trim() : null,
+                Genre = hasGenre ? genre.Trim() : null,
+                AvailableGenres = PopularGenres,
                 Items = metas ?? [],
             });
         }
@@ -153,6 +176,11 @@ namespace AnimeList.Controllers
         // The active search term, or null when the page is in tab-list mode. The
         // view renders a search-results header (and hides the tabs) when this is set.
         public string Search { get; set; }
+        // Active genre filter (e.g. "Action"), or null when all genres show. Same
+        // shape as DiscoverViewModel — the picker is rendered with the same form
+        // pattern, preserved across list-tab navigation and search submissions.
+        public string Genre { get; set; }
+        public IReadOnlyList<string> AvailableGenres { get; set; } = [];
         public List<Meta> Items { get; set; } = [];
     }
 }

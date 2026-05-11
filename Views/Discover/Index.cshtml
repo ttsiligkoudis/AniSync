@@ -20,111 +20,130 @@
     var hasSearch = !string.IsNullOrEmpty(Model.Search);
     var hasGenre = !string.IsNullOrEmpty(Model.Genre);
     var activeLabel = labels[Model.ActiveList];
+    var activeSlug = slugs[Model.ActiveList];
+    var isSeasonal = Model.ActiveList == ListType.Seasonal;
 
     // Distinguish browser-history rows: "Search: foo · Discover" vs "Action ·
     // Discover" vs "Trending · Discover".
     ViewData["Title"] = hasSearch ? $"Search: {Model.Search} · Discover"
         : hasGenre ? $"{Model.Genre} · Discover"
+        : isSeasonal ? $"{Model.Season} · Discover"
         : $"{activeLabel} · Discover";
 }
 
-<p class="page-subtitle">
-    @if (hasSearch)
+@* List-type tabs lead the page (Trending / Seasonal / Airing). Each is an
+   anchor — clicking refreshes the page with the selected list type. The
+   active filters (genre / season / search) flow through as query params so
+   switching tabs doesn't reset what the user has dialled in. *@
+<nav class="library-tabs" role="tablist" aria-label="Discover lists">
+    @foreach (var t in Model.Tabs)
     {
-        <text>Search results</text>
+        var isActive = t == Model.ActiveList;
+        // Preserve genre + season + search across list-tab clicks. Season only
+        // makes sense when the destination tab is Seasonal — drop it otherwise
+        // so the URL stays clean for Trending/Airing.
+        var values = new RouteValueDictionary { ["list"] = slugs[t] };
+        if (hasGenre) values["genre"] = Model.Genre;
+        if (hasSearch) values["search"] = Model.Search;
+        if (t == ListType.Seasonal && !string.IsNullOrEmpty(Model.Season)) values["season"] = Model.Season;
+        <a class="library-tab @(isActive ? "library-tab-active" : "")"
+           href="@Url.Action("Index", "Discover", values)"
+           role="tab"
+           aria-selected="@(isActive ? "true" : "false")">
+            @labels[t]
+        </a>
     }
-    else if (hasGenre)
-    {
-        <text>@Model.Genre anime</text>
-    }
-    else
-    {
-        <text>@activeLabel anime</text>
-    }
-    @if (!Model.AnonymousUser)
-    {
-        <text>· via @Model.AnimeService</text>
-    }
-    <span class="library-back">·
-        <a href="@Url.Action("Index", "Home")">back to dashboard</a>
-    </span>
-</p>
+</nav>
 
-@* Same search-form pattern as /library — server-rendered, navigates on submit.
-   The genre filter is preserved through search submission via a hidden input
-   so the user can search WITHIN a genre. The list tab is dropped because
-   search is mutually exclusive with the tab navigation. *@
-<form method="get" action="@Url.Action("Index", "Discover")" class="library-search">
+@* Combined filter form. Search input + genre dropdown + (when Seasonal)
+   season dropdown + an explicit Search button. Nothing auto-submits — the
+   user picks their filters, then clicks Search to apply them all at once.
+   The form's hidden `list` input keeps the active tab pinned through
+   submissions so the user stays on Seasonal/Trending/Airing as they
+   filter. *@
+<form method="get" action="@Url.Action("Index", "Discover")" class="filter-bar" role="search">
+    <input type="hidden" name="list" value="@activeSlug" />
+
     <input type="search"
            name="search"
            value="@Model.Search"
            placeholder="Search anime…"
-           class="library-search-input"
+           class="filter-bar-search"
            autocomplete="off" />
-    @if (hasGenre)
+
+    <select name="genre" class="filter-bar-select" aria-label="Genre">
+        <option value="">All genres</option>
+        @foreach (var g in Model.AvailableGenres)
+        {
+            <option value="@g" selected="@(Model.Genre == g)">@g</option>
+        }
+    </select>
+
+    @if (isSeasonal)
     {
-        <input type="hidden" name="genre" value="@Model.Genre" />
+        <select name="season" class="filter-bar-select" aria-label="Season">
+            @foreach (var s in Model.AvailableSeasons)
+            {
+                <option value="@s" selected="@(Model.Season == s)">@s</option>
+            }
+        </select>
     }
-    @if (hasSearch)
+
+    <button type="submit" class="filter-bar-submit">Search</button>
+
+    @if (hasSearch || hasGenre)
     {
-        <a class="library-search-clear" href="@(hasGenre ? Url.Action("Index", "Discover", new { genre = Model.Genre }) : Url.Action("Index", "Discover"))">Clear</a>
+        @* "Clear" drops search + genre but keeps the list-tab (and the
+           current season, when applicable). Resets the page to the default
+           view for the chosen list type. *@
+        var clearValues = new RouteValueDictionary { ["list"] = activeSlug };
+        if (isSeasonal && !string.IsNullOrEmpty(Model.Season)) clearValues["season"] = Model.Season;
+        <a class="filter-bar-clear" href="@Url.Action("Index", "Discover", clearValues)">Clear</a>
     }
 </form>
 
-@* Genre picker — native <select> with a JS-free auto-submit via onchange.
-   Hidden during search because search results already span all genres and
-   the picker would be confusingly orthogonal there. The current list type
-   is preserved across genre changes so the user can browse e.g. "Trending
-   Action" or "Seasonal Romance" — the controller passes both ?list= and
-   ?genre= through to the per-service catalog query. *@
-@if (!hasSearch)
-{
-    <form method="get" action="@Url.Action("Index", "Discover")" class="genre-picker">
-        <input type="hidden" name="list" value="@slugs[Model.ActiveList]" />
-        <select name="genre" onchange="this.form.submit()" class="genre-picker-select" aria-label="Genre">
-            <option value="">All genres</option>
-            @foreach (var g in Model.AvailableGenres)
-            {
-                <option value="@g" selected="@(Model.Genre == g)">@g</option>
-            }
-        </select>
-        @if (hasGenre)
-        {
-            <a class="library-search-clear"
-               href="@Url.Action("Index", "Discover", new { list = slugs[Model.ActiveList] })">Clear genre</a>
-        }
-    </form>
+@{
+    var posterGridModel = new AnimeList.Models.PosterGridViewModel
+    {
+        Items = Model.Items,
+        ConfigUid = Model.ConfigUid,
+        EmptyMessage = hasSearch
+            ? $"No matches for \"{Model.Search}\"."
+            : hasGenre
+                ? $"No {Model.Genre.ToLower()} anime in {activeLabel.ToLower()} right now."
+                : $"Couldn't load {activeLabel.ToLower()} anime — try again later.",
+    };
 }
 
-@if (!hasSearch)
+@if (hasSearch || Model.Items.Count == 0)
 {
-    <nav class="library-tabs" role="tablist">
-        @foreach (var t in Model.Tabs)
-        {
-            var isActive = t == Model.ActiveList;
-            // Preserve the active genre across tab clicks so switching from
-            // Trending → Seasonal keeps the genre filter applied rather than
-            // dropping back to all genres.
-            var tabRouteValues = hasGenre
-                ? (object)new { list = slugs[t], genre = Model.Genre }
-                : new { list = slugs[t] };
-            <a class="library-tab @(isActive ? "library-tab-active" : "")"
-               href="@Url.Action("Index", "Discover", tabRouteValues)"
-               role="tab"
-               aria-selected="@(isActive ? "true" : "false")">
-                @labels[t]
-            </a>
-        }
-    </nav>
+    @* Search results aren't paginated upstream (single-shot relevance rank)
+       and an empty grid has nothing to paginate from, so render the bare
+       partial without the infinite-scroll plumbing in either case. *@
+    @await Html.PartialAsync("_PosterGrid", posterGridModel)
+}
+else
+{
+    @* Wrapper carries the bookkeeping the discover-pagination.js needs:
+       data-list (slug), data-genre (active filter), data-season (when on
+       the Seasonal tab so paginated chunks fetch the same calendar window),
+       data-skip (count already rendered server-side). The sentinel inside
+       is what IntersectionObserver watches — when it scrolls into the
+       viewport's pre-load margin we fetch the next chunk via
+       /discover/page and append. *@
+    <div class="discover-paginator"
+         data-list="@activeSlug"
+         data-genre="@Model.Genre"
+         data-season="@(isSeasonal ? Model.Season : null)"
+         data-skip="@Model.Items.Count">
+        @await Html.PartialAsync("_PosterGrid", posterGridModel)
+        <div class="discover-sentinel" aria-hidden="true"></div>
+    </div>
 }
 
-@await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
-{
-    Items = Model.Items,
-    ConfigUid = Model.ConfigUid,
-    EmptyMessage = hasSearch
-        ? $"No matches for \"{Model.Search}\"."
-        : hasGenre
-            ? $"No {Model.Genre.ToLower()} anime in {activeLabel.ToLower()} right now."
-            : $"Couldn't load {activeLabel.ToLower()} anime — try again later.",
-})
+@section Scripts {
+    @if (!hasSearch && Model.Items.Count > 0)
+    {
+        <script src="~/js/discover-pagination.js" asp-append-version="true" defer></script>
+    }
+}

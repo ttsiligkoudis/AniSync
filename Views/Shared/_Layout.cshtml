@@ -121,6 +121,36 @@
                     <a href="@Url.Action("Configure", "Home")" class="@(activeNav == "configure" ? "active" : "")">Account</a>
                     <a href="@Url.Action("Stremio", "Home")" class="@(activeNav == "stremio" ? "active" : "")">Stremio addon</a>
                 </nav>
+                @* Global anime search. Lives in the layout so every page has it.
+                   Fires /api/v1/match once the query reaches 3 characters with a
+                   ~250ms debounce; results dropdown renders absolutely below the
+                   input. role=combobox + aria-* attributes describe the
+                   typeahead pattern for screen readers. JS lives in
+                   wwwroot/js/site-search.js. *@
+                <form class="site-search" role="search" autocomplete="off"
+                      onsubmit="return false;" aria-label="Search anime">
+                    <span class="site-search-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
+                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="7"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                    </span>
+                    <input class="site-search-input"
+                           type="search"
+                           placeholder="Search anime…"
+                           role="combobox"
+                           aria-controls="site-search-results"
+                           aria-expanded="false"
+                           aria-autocomplete="list"
+                           spellcheck="false"
+                           autocorrect="off"
+                           autocapitalize="off" />
+                    <div class="site-search-results"
+                         id="site-search-results"
+                         role="listbox"
+                         hidden></div>
+                </form>
                 @* Install pill — hidden by default, revealed by
                    pwa-install.js once the browser fires
                    beforeinstallprompt (Chromium / Edge / Android Chrome)
@@ -300,6 +330,7 @@
 
     <script src="~/js/toast.js" asp-append-version="true" defer></script>
     <script src="~/js/pwa-install.js" asp-append-version="true" defer></script>
+    <script src="~/js/site-search.js" asp-append-version="true" defer></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>

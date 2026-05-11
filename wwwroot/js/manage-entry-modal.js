@@ -567,16 +567,11 @@
             if (owningCard) bumpProgress(plusBtn, owningCard);
             return;
         }
-        var seasonTab = e.target.closest && e.target.closest('button.season-tab[data-season-num]');
-        if (seasonTab) {
-            e.preventDefault();
-            switchSeason(seasonTab);
-            return;
-        }
-        // Synopsis toggle handler used to live here; moved to an inline
-        // script in Views/Anime/Detail.cshtml so it works for anonymous
-        // viewers too (this script bails early when the modal DOM isn't
-        // present).
+        // Season-tab + synopsis toggle handlers used to live here; both
+        // moved to an inline script in Views/Anime/Detail.cshtml so they
+        // work for anonymous viewers too. This whole script bails at the
+        // top when the modal DOM isn't present, which would have left
+        // season-tab clicks inert on anonymous detail pages.
         var episodeRow = e.target.closest && e.target.closest('li.anime-detail-episode[data-episode-num]');
         if (episodeRow) {
             var list = episodeRow.closest('ol.anime-detail-episodes[data-can-edit="true"]');
@@ -594,30 +589,6 @@
                       /* card */ null);
         }
     });
-
-    // Season tab toggle — pure DOM swap. Updates the active class on the
-    // tab strip and shows/hides episode rows by data-season-num. Doesn't
-    // refetch anything; the full episode list is server-rendered in one
-    // <ol> and the tabs just filter visibility.
-    function switchSeason(tab) {
-        var seasonNum = tab.getAttribute('data-season-num');
-        if (!seasonNum) return;
-        var nav = tab.closest('.season-tabs');
-        var list = document.querySelector('ol.anime-detail-episodes');
-        if (!nav || !list) return;
-        // Active class on tabs
-        Array.prototype.forEach.call(nav.querySelectorAll('.season-tab'), function (t) {
-            var isActive = t === tab;
-            t.classList.toggle('season-tab-active', isActive);
-            t.setAttribute('aria-selected', isActive ? 'true' : 'false');
-        });
-        // Show/hide rows
-        list.setAttribute('data-active-season', seasonNum);
-        Array.prototype.forEach.call(list.querySelectorAll('li.anime-detail-episode'), function (li) {
-            var rowSeason = li.getAttribute('data-season-num');
-            li.classList.toggle('anime-detail-episode-hidden', rowSeason !== seasonNum);
-        });
-    }
 
     closeBtn.addEventListener('click', closeModal);
     cancelBtn.addEventListener('click', closeModal);

@@ -15,8 +15,14 @@ namespace AnimeList.Services.Interfaces
         /// Fetches the next set of airing episodes (sorted by air time, ascending). Each result's
         /// id is rewritten to the most stable form available for the requested service:
         /// IMDb &gt; TMDB &gt; service-native &gt; AniList fallback.
+        ///
+        /// When <paramref name="genre"/> is non-empty, the upcoming-episode schedule query
+        /// (which has no genre dimension on AniList) is swapped for a "currently airing
+        /// anime in that genre" query — same semantic intent ("show me what's airing"),
+        /// just sourced from <c>Media(status: RELEASING, genre: $genre)</c> instead of
+        /// <c>airingSchedules</c>.
         /// </summary>
-        Task<List<Meta>> GetAiringScheduleAsync(AnimeService translateTo, string skip = null);
+        Task<List<Meta>> GetAiringScheduleAsync(AnimeService translateTo, string skip = null, string genre = null);
 
         /// <summary>
         /// Fetches up to 25 recommendations for an AniList anime id. Each recommendation is

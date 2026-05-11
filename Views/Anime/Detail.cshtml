@@ -650,6 +650,45 @@
             }
         });
 
+        // ── Season tab switch ─────────────────────────────────────────
+        // Pure DOM-toggle, no fetch — the full episode list ships in one
+        // <ol> with each row carrying data-season-num, and the tabs just
+        // flip which rows are visible. Lives here (not in
+        // manage-entry-modal.js) so anonymous viewers can still navigate
+        // multi-season franchises; that script early-returns when the
+        // modal DOM isn't present.
+        document.addEventListener('click', function (e) {
+            var tab = e.target.closest && e.target.closest('button.season-tab[data-season-num]');
+            if (!tab) return;
+            e.preventDefault();
+
+            var seasonNum = tab.getAttribute('data-season-num');
+            if (!seasonNum) return;
+
+            var nav = tab.closest('.season-tabs');
+            var list = document.querySelector('ol.anime-detail-episodes');
+            if (!nav || !list) return;
+
+            // Active class + aria-selected on every tab in the strip.
+            Array.prototype.forEach.call(
+                nav.querySelectorAll('.season-tab'),
+                function (t) {
+                    var isActive = t === tab;
+                    t.classList.toggle('season-tab-active', isActive);
+                    t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                });
+
+            // Update data-active-season and toggle per-row visibility. The
+            // CSS class .anime-detail-episode-hidden does the actual hide.
+            list.setAttribute('data-active-season', seasonNum);
+            Array.prototype.forEach.call(
+                list.querySelectorAll('li.anime-detail-episode'),
+                function (li) {
+                    var rowSeason = li.getAttribute('data-season-num');
+                    li.classList.toggle('anime-detail-episode-hidden', rowSeason !== seasonNum);
+                });
+        });
+
         // ── Trailer lazy-embed ────────────────────────────────────────
         //
         // Click → swap thumbnail for a youtube-nocookie iframe (privacy-

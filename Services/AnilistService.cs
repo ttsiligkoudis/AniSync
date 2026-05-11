@@ -61,7 +61,7 @@ namespace AnimeList.Services
             await EnsureSuccessOrThrow(response, "AniList", op);
         }
 
-        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null, string search = null, string sort = null)
+        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null, string search = null, string sort = null, string season = null)
         {
             var requestBody = string.Empty;
 
@@ -171,16 +171,34 @@ namespace AnimeList.Services
             }
             else if (list == ListType.Seasonal)
             {
+                // Two season-selector inputs flow in here:
+                //   1. An explicit `season` param ("Spring 2026" style) from
+                //      the web app's Discover season dropdown — takes
+                //      precedence when set.
+                //   2. The legacy `genre`-as-season-keyword overload used by
+                //      the Stremio addon's catalog extras ("This Season" /
+                //      "Next Season" / "Previous Season").
+                // Anything else in `genre` is a real genre filter that
+                // layers on top of the resolved (season, year).
+                var seasonSelector = !string.IsNullOrEmpty(season)
+                    ? season
+                    : (!string.IsNullOrEmpty(genre) && SeasonOptions.Contains(genre) ? genre : SeasonCurrent);
+                var (seasonValue, year) = GetSeasonAndYear(seasonSelector);
+                var realGenre = (!string.IsNullOrEmpty(genre) && !SeasonOptions.Contains(genre)) ? genre : null;
+                var hasGenreFilter = !string.IsNullOrEmpty(realGenre);
+
                 var page = int.TryParse(skip, out var skipInt) ? (skipInt / CatalogPageSize) + 1 : 1;
-                var (season, year) = GetSeasonAndYear(genre ?? SeasonCurrent);
                 var sortValue = string.IsNullOrEmpty(sort) ? "POPULARITY_DESC" : SortToAnilist(sort);
+
+                var genreVarDecl = hasGenreFilter ? ", $genre: String" : string.Empty;
+                var genreArg = hasGenreFilter ? ", genre: $genre" : string.Empty;
 
                 requestBody = SerializeObject(new
                 {
                     query = $@"
-                    query ($page: Int, $perPage: Int, $season: MediaSeason, $seasonYear: Int, $sort: [MediaSort]) {{
+                    query ($page: Int, $perPage: Int, $season: MediaSeason, $seasonYear: Int, $sort: [MediaSort]{genreVarDecl}) {{
                         Page (page: $page, perPage: $perPage) {{
-                            media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: $sort) {{
+                            media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: $sort{genreArg}) {{
                                 id
                                 format
                                 episodes
@@ -197,7 +215,9 @@ namespace AnimeList.Services
                             }}
                         }}
                     }}",
-                    variables = new { page, perPage = CatalogPageSize, season, seasonYear = year, sort = new[] { sortValue } }
+                    variables = hasGenreFilter
+                        ? (object)new { page, perPage = CatalogPageSize, season = seasonValue, seasonYear = year, sort = new[] { sortValue }, genre = realGenre }
+                        : new { page, perPage = CatalogPageSize, season = seasonValue, seasonYear = year, sort = new[] { sortValue } }
                 });
             }
             else
@@ -242,14 +262,16 @@ namespace AnimeList.Services
             return requestBody;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null)
         {
-            // Airing schedule is shared between services and lives in the cross-service helper
+            // Airing schedule is shared between services and lives in the cross-service helper.
+            // genre threads through so the Discover page's "Airing + Action" filter swaps
+            // the upcoming-episode schedule for a currently-airing-in-genre listing.
             if (list == ListType.Airing)
-                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.Anilist, skip);
+                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.Anilist, skip, genre);
 
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
-            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, search, sort);
+            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, search, sort, season);
 
             var data = await PostGraphQLAsync(requestBody, tokenData);
             if (data == null) return [];

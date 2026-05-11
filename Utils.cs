@@ -164,9 +164,35 @@ namespace AnimeList
 
         /// <summary>
         /// Returns the AniList MediaSeason string and year for the given season option.
+        /// Accepts:
+        ///   - The Stremio-addon keyword set: "This Season" / "Next Season" /
+        ///     "Previous Season" (resolved relative to UTC now).
+        ///   - An explicit "Spring 2026" style label (case-insensitive on the
+        ///     season word; year must parse as int). Used by the web app's
+        ///     Discover season picker.
+        ///   - Anything unrecognised (or null/empty) falls through to the
+        ///     current season — keeps the behaviour stable for callers that
+        ///     pass through user input that isn't a season string at all.
         /// </summary>
         public static (string Season, int Year) GetSeasonAndYear(string seasonOption)
         {
+            // Explicit "Spring 2026" parsing path. Comes first so an arbitrary
+            // season-and-year doesn't get demoted by the relative-keyword
+            // switch below.
+            if (!string.IsNullOrWhiteSpace(seasonOption))
+            {
+                var parts = seasonOption.Trim().Split(' ', 2,
+                    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length == 2 && int.TryParse(parts[1], out var parsedYear))
+                {
+                    var seasonUpper = parts[0].ToUpperInvariant();
+                    if (seasonUpper is "WINTER" or "SPRING" or "SUMMER" or "FALL")
+                    {
+                        return (seasonUpper, parsedYear);
+                    }
+                }
+            }
+
             var now = DateTime.UtcNow;
             int offset = seasonOption switch
             {
@@ -200,6 +226,67 @@ namespace AnimeList
             };
 
             return (season, year);
+        }
+
+        /// <summary>
+        /// Builds the season-picker dropdown options for the web app's
+        /// Discover/Seasonal view. Returns labels like "Summer 2026", "Spring
+        /// 2026", … walking backwards N years from the next season ahead of
+        /// today. Descending order so the most-recent entries sit at the top
+        /// of the dropdown; index 0 is one season ahead of "now" so users
+        /// can preview the upcoming season's lineup, index 1 is the current
+        /// season (the natural preselect).
+        /// </summary>
+        public static IReadOnlyList<string> BuildSeasonalDropdownOptions(int yearsBack = 10)
+        {
+            var now = DateTime.UtcNow;
+            int currentIdx = (now.Month - 1) / 3;
+            int currentYear = now.Year;
+
+            // Start one season AHEAD so the upcoming-season entry leads the
+            // dropdown — matches how an AniList user would expect to find
+            // "Summer 2026" while we're still mid-Spring.
+            int idx = currentIdx + 1;
+            int year = currentYear;
+            if (idx > 3) { idx -= 4; year++; }
+
+            // yearsBack * 4 seasons covers the rolling history window, plus
+            // one for the leading next-season entry.
+            int total = yearsBack * 4 + 1;
+            var result = new List<string>(total);
+            for (int i = 0; i < total; i++)
+            {
+                string name = idx switch
+                {
+                    0 => "Winter",
+                    1 => "Spring",
+                    2 => "Summer",
+                    3 => "Fall",
+                    _ => "Winter",
+                };
+                result.Add($"{name} {year}");
+                idx--;
+                if (idx < 0) { idx = 3; year--; }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Returns the "Spring 2026"-shaped label for the current real-world
+        /// season — the natural preselect value for the seasonal dropdown.
+        /// </summary>
+        public static string CurrentSeasonLabel()
+        {
+            var (seasonUpper, year) = GetSeasonAndYear(SeasonCurrent);
+            string name = seasonUpper switch
+            {
+                "WINTER" => "Winter",
+                "SPRING" => "Spring",
+                "SUMMER" => "Summer",
+                "FALL" => "Fall",
+                _ => "Winter",
+            };
+            return $"{name} {year}";
         }
 
 #if DEBUG

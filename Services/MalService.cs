@@ -59,11 +59,12 @@ namespace AnimeList.Services
             _logger = logger;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null)
         {
             // MAL has no airing schedule endpoint, so use the AniList fallback like Kitsu does.
+            // genre passes through so Airing-by-genre swaps to the RELEASING+genre query.
             if (list == ListType.Airing)
-                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.MyAnimeList, skip);
+                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.MyAnimeList, skip, genre);
 
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.MyAnimeList);
             var isUserList = !list.HasValue || _userLists.Contains(list.Value);
@@ -94,7 +95,7 @@ namespace AnimeList.Services
             while (true)
             {
                 var apiSkip = fetchAll ? apiOffset.ToString() : skip;
-                var url = BuildListUrl(list, apiSkip, genre, search, sort, isUserList, pageSize);
+                var url = BuildListUrl(list, apiSkip, genre, search, sort, isUserList, pageSize, season);
                 var json = await GetJsonAsync(url, tokenData);
                 if (json == null) break;
 
@@ -132,7 +133,16 @@ namespace AnimeList.Services
                     // arg, so filter the response. Skip for Seasonal because the catalog repurposes
                     // the `genre` extra as a season selector ("This Season" / "Next Season" / etc.)
                     // and matching that against an anime's genres array would zero out the catalog.
-                    if (list != ListType.Seasonal && !string.IsNullOrEmpty(genre) && !MatchesGenre(node, genre))
+                    // Genre is a real filter for every list type EXCEPT when
+                    // it's the Stremio season-selector overload on Seasonal
+                    // ("This Season" / "Next Season" / "Previous Season"). In
+                    // that one case it's not a genre at all, so skip the
+                    // filter — otherwise the post-fetch loop would reject
+                    // every entry for not having a genre called "This Season".
+                    var isSeasonSelector = list == ListType.Seasonal
+                        && !string.IsNullOrEmpty(genre)
+                        && SeasonOptions.Contains(genre);
+                    if (!isSeasonSelector && !string.IsNullOrEmpty(genre) && !MatchesGenre(node, genre))
                         continue;
 
                     var meta = await BuildMetaAsync(node, listStatus, groupSeasons);
@@ -549,7 +559,7 @@ namespace AnimeList.Services
             };
         }
 
-        private string BuildListUrl(ListType? list, string skip, string genre, string search, string sort, bool isUserList, int pageSize)
+        private string BuildListUrl(ListType? list, string skip, string genre, string search, string sort, bool isUserList, int pageSize, string season = null)
         {
             string url;
             var offset = int.TryParse(skip, out var s) ? s : 0;
@@ -571,8 +581,16 @@ namespace AnimeList.Services
             }
             else if (list == ListType.Seasonal)
             {
-                var (season, year) = GetSeasonAndYear(genre ?? SeasonCurrent);
-                var seasonLower = season.ToLowerInvariant();
+                // Same dual-input shape AnilistService uses: explicit
+                // `season` ("Spring 2026") wins over the Stremio legacy
+                // `genre`-as-season overload ("This Season" / "Next Season"
+                // / "Previous Season"); anything else in `genre` is a real
+                // genre filter applied client-side via MatchesGenre below.
+                var seasonSelector = !string.IsNullOrEmpty(season)
+                    ? season
+                    : (!string.IsNullOrEmpty(genre) && SeasonOptions.Contains(genre) ? genre : SeasonCurrent);
+                var (resolvedSeason, year) = GetSeasonAndYear(seasonSelector);
+                var seasonLower = resolvedSeason.ToLowerInvariant();
                 // Default to popularity-descending (matching AniList POPULARITY_DESC and
                 // Kitsu -userCount) so the catalog leads with the season's biggest titles.
                 var sortValue = string.IsNullOrEmpty(sort) ? "anime_num_list_users" : SeasonalSortToMal(sort);
