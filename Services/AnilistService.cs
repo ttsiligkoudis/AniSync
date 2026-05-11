@@ -58,20 +58,7 @@ namespace AnimeList.Services
                 return null;
             }
             var content = await response.Content.ReadAsStringAsync();
-            var parsed = DeserializeObject<dynamic>(content);
-            if (parsed?.data == null)
-            {
-                // AniList returns 200 with `{ errors: [...], data: null }` for
-                // some failure modes that don't warrant a non-2xx (invalid
-                // token on a public query, soft rate-limit, etc.). Log a
-                // snippet of the body so we can tell those apart.
-                _logger.LogWarning(
-                    "AnilistService.PostGraphQLAsync 200 with null data: hasToken={HasToken} body={Body}",
-                    !string.IsNullOrWhiteSpace(tokenData?.access_token),
-                    content?.Length > 500 ? content[..500] : content);
-                return null;
-            }
-            return parsed.data;
+            return DeserializeObject<dynamic>(content)?.data;
         }
 
         // Posts a GraphQL mutation and surfaces non-success responses via
