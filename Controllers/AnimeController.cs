@@ -202,7 +202,7 @@ namespace AnimeList.Controllers
             // already came from the cross-service mapping, so we reuse it — no
             // extra mapping round-trip needed.
             var related = sourceLinks.AnilistId.HasValue
-                ? await TryGetRelatedAsync(sourceLinks.AnilistId.Value)
+                ? await TryGetRelatedAsync(sourceLinks.AnilistId.Value, animeService)
                 : [];
 
             // Augment anime.links with AniList-sourced supplementary metadata
@@ -234,9 +234,9 @@ namespace AnimeList.Controllers
             });
         }
 
-        private async Task<List<Meta>> TryGetRelatedAsync(int anilistId)
+        private async Task<List<Meta>> TryGetRelatedAsync(int anilistId, AnimeService translateTo)
         {
-            try { return await _anilistFallback.GetRelatedAsync(anilistId); }
+            try { return await _anilistFallback.GetRelatedAsync(anilistId, translateTo); }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "AnimeController.Detail: related fetch failed for anilist {Id}.", anilistId);

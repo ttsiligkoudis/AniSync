@@ -231,8 +231,10 @@ namespace AnimeList.Services
             List<Meta> Related,
             List<Link> SupplementaryLinks);
 
-        public async Task<List<Meta>> GetRecommendationMetasAsync(int anilistId)
-            => (await FetchSidedataAsync(anilistId)).Recommendations;
+        public async Task<List<Meta>> GetRecommendationMetasAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist)
+            => await TranslateMetaIdsAsync(
+                CloneMetas((await FetchSidedataAsync(anilistId)).Recommendations),
+                translateTo);
 
         private async Task<AnilistSidedata> FetchSidedataAsync(int anilistId)
         {
@@ -688,7 +690,7 @@ namespace AnimeList.Services
             return (airing, newThis, total);
         }
 
-        public async Task<List<Meta>> GetNewEpisodesTodayAsync()
+        public async Task<List<Meta>> GetNewEpisodesTodayAsync(AnimeService translateTo = AnimeService.Anilist)
         {
             // Bound the query to [today 00:00 UTC, tomorrow 00:00 UTC) using
             // AniList's airingAt_greater / airingAt_lesser unix-timestamp
@@ -709,7 +711,12 @@ namespace AnimeList.Services
 
             if (_cache.TryGetValue<List<Meta>>(cacheKey, out var cached) && cached != null)
             {
-                return cached;
+                // Cache stores anilist:N ids (one entry per day, shared
+                // across every viewer). Translate per-call into the
+                // requesting service's native id space so a MAL/Kitsu
+                // primary's clicks resolve directly. CloneMetas first so
+                // the cached list itself doesn't get mutated.
+                return await TranslateMetaIdsAsync(CloneMetas(cached), translateTo);
             }
 
             try
@@ -793,7 +800,10 @@ namespace AnimeList.Services
                         AbsoluteExpiration = new DateTimeOffset(todayUtc.AddDays(1), TimeSpan.Zero),
                     });
                 }
-                return result;
+                // Same translate-on-return contract as the cache-hit path so
+                // the caller's primary determines the id-space regardless of
+                // whether this call populated or read the cache.
+                return await TranslateMetaIdsAsync(CloneMetas(result), translateTo);
             }
             catch (Exception ex)
             {
@@ -802,8 +812,49 @@ namespace AnimeList.Services
             }
         }
 
-        public async Task<List<Meta>> GetRelatedAsync(int anilistId)
-            => (await FetchSidedataAsync(anilistId)).Related;
+        public async Task<List<Meta>> GetRelatedAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist)
+            => await TranslateMetaIdsAsync(
+                CloneMetas((await FetchSidedataAsync(anilistId)).Related),
+                translateTo);
+
+        // Sidedata is cached in-memory; we Clone the metas before
+        // translation so the per-call native-id translation doesn't mutate
+        // the cached list (which would leak across viewers with different
+        // primary services).
+        private static List<Meta> CloneMetas(List<Meta> source)
+        {
+            if (source == null || source.Count == 0) return [];
+            var copy = new List<Meta>(source.Count);
+            foreach (var m in source)
+            {
+                copy.Add(new Meta
+                {
+                    id = m.id,
+                    name = m.name,
+                    poster = m.poster,
+                    type = m.type,
+                    score = m.score,
+                    episodes = m.episodes,
+                    year = m.year,
+                    format = m.format,
+                });
+            }
+            return copy;
+        }
+
+        public async Task<List<Meta>> TranslateMetaIdsAsync(List<Meta> metas, AnimeService translateTo)
+        {
+            if (metas == null || metas.Count == 0) return metas;
+            if (translateTo == AnimeService.Anilist) return metas;
+            await _mappingService.EnsureLoadedAsync();
+            foreach (var meta in metas)
+            {
+                if (string.IsNullOrEmpty(meta?.id) || !meta.id.StartsWith(anilistPrefix)) continue;
+                if (!int.TryParse(meta.id[anilistPrefix.Length..], out var anilistId)) continue;
+                meta.id = await ResolveNativeIdAsync(anilistId, translateTo);
+            }
+            return metas;
+        }
 
         public async Task<List<Link>> GetSupplementaryLinksAsync(int anilistId)
             => (await FetchSidedataAsync(anilistId)).SupplementaryLinks;
@@ -862,7 +913,14 @@ namespace AnimeList.Services
                     format = NormalizeFormat((string)media.format),
                 });
             }
-            return result;
+            // Sort by the display name we just built (english title, falling
+            // back to romaji) so the result order matches what the user
+            // actually reads on the cards. Library does the same; consistency
+            // between browse surfaces lets the user predict where a specific
+            // anime will be in the grid.
+            return result
+                .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         public async Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null)
@@ -875,7 +933,7 @@ namespace AnimeList.Services
                 query = @"
                     query ($page: Int, $perPage: Int, $tag: String) {
                         Page(page: $page, perPage: $perPage) {
-                            media(type: ANIME, tag: $tag, sort: POPULARITY_DESC) {
+                            media(type: ANIME, tag: $tag, sort: TITLE_ROMAJI) {
                                 id
                                 format
                                 episodes
@@ -904,7 +962,7 @@ namespace AnimeList.Services
                     query ($id: Int, $page: Int, $perPage: Int) {
                         Staff(id: $id) {
                             name { full }
-                            staffMedia(type: ANIME, sort: POPULARITY_DESC, page: $page, perPage: $perPage) {
+                            staffMedia(type: ANIME, sort: TITLE_ROMAJI, page: $page, perPage: $perPage) {
                                 edges {
                                     node {
                                         id
@@ -949,7 +1007,7 @@ namespace AnimeList.Services
                     query ($id: Int, $page: Int, $perPage: Int) {
                         Studio(id: $id) {
                             name
-                            media(sort: POPULARITY_DESC, page: $page, perPage: $perPage) {
+                            media(sort: TITLE_ROMAJI, page: $page, perPage: $perPage) {
                                 edges {
                                     node {
                                         id

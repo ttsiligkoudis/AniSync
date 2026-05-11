@@ -41,7 +41,7 @@ namespace AnimeList.Services.Interfaces
         /// space (anilist:N); the detail page's controller resolves
         /// cross-service via the mapping when the user clicks a card.
         /// </summary>
-        Task<List<Meta>> GetRecommendationMetasAsync(int anilistId);
+        Task<List<Meta>> GetRecommendationMetasAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist);
 
         /// <summary>
         /// Fetches the legal-streaming destinations (Crunchyroll, Netflix, …) for an AniList
@@ -75,7 +75,7 @@ namespace AnimeList.Services.Interfaces
         /// shelf rotates cleanly when the calendar day changes (rather than
         /// after a fixed 24-hour window from first fetch).
         /// </summary>
-        Task<List<Meta>> GetNewEpisodesTodayAsync();
+        Task<List<Meta>> GetNewEpisodesTodayAsync(AnimeService translateTo = AnimeService.Anilist);
 
         /// <summary>
         /// Prequels and sequels for an AniList anime id, sorted by air year
@@ -86,7 +86,19 @@ namespace AnimeList.Services.Interfaces
         /// _PosterGrid scroll variant. Cached 24h per anilist id since
         /// relations are essentially static metadata.
         /// </summary>
-        Task<List<Meta>> GetRelatedAsync(int anilistId);
+        Task<List<Meta>> GetRelatedAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist);
+
+        /// <summary>
+        /// Walks a list of Meta and replaces every anilist:N id with the
+        /// equivalent kitsu:N / mal:N native id when the mapping table has
+        /// one for the requested service. Anime without a matching mapping
+        /// keep their anilist:N id (the detail-page route handles it; the
+        /// only thing the user loses is in-app Manage Entry on those rows).
+        /// Used to translate results from <see cref="IAnilistService"/>
+        /// calls that don't natively know the user's primary service
+        /// (HomeController's popular-by-season shelves).
+        /// </summary>
+        Task<List<Meta>> TranslateMetaIdsAsync(List<Meta> metas, AnimeService translateTo);
 
         /// <summary>
         /// AniList-sourced supplementary <see cref="Link"/> entries (Tag,

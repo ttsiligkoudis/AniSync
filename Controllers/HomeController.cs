@@ -154,9 +154,15 @@ public class HomeController : Controller
         // and the /api/v1/discover endpoint serve — same upstream query, same
         // POPULARITY_DESC default sort — wrapped in a 24h IMemoryCache here
         // so the dashboard doesn't pay an AniList round-trip on every visit.
-        var popularThisSeasonTask = GetPopularBySeasonAsync(SeasonCurrent);
-        var mostAnticipatedTask = GetPopularBySeasonAsync(SeasonNext);
-        var newEpisodesTodayTask = _anilistFallback.GetNewEpisodesTodayAsync();
+        // Translate dashboard-shelf ids into the viewer's primary id space
+        // (mal:N / kitsu:N when mapped, anilist:N as fallback) so card
+        // clicks land on the user's primary's detail-page id rather than
+        // bouncing through a cross-service id resolve. Anonymous and
+        // AniList-primary viewers get an effective no-op translation.
+        var primaryService = tokenData?.anime_service ?? AnimeService.Anilist;
+        var popularThisSeasonTask = GetPopularBySeasonAsync(SeasonCurrent, primaryService);
+        var mostAnticipatedTask = GetPopularBySeasonAsync(SeasonNext, primaryService);
+        var newEpisodesTodayTask = _anilistFallback.GetNewEpisodesTodayAsync(primaryService);
         await Task.WhenAll(seasonStatsTask, popularThisSeasonTask, mostAnticipatedTask, newEpisodesTodayTask);
 
         var (seasonAiring, seasonNew, seasonTotal) = await seasonStatsTask;
@@ -206,37 +212,51 @@ public class HomeController : Controller
     // (season, year) tuple so the entry naturally rotates when AniList moves
     // to the next quarterly season; non-empty results only so a transient
     // upstream blip doesn't lock in an empty shelf for 24h.
-    private async Task<List<Meta>> GetPopularBySeasonAsync(string seasonOption)
+    private async Task<List<Meta>> GetPopularBySeasonAsync(string seasonOption, AnimeService translateTo = AnimeService.Anilist)
     {
         var (season, year) = GetSeasonAndYear(seasonOption);
         var cacheKey = $"dashboard:popular-by-season:{season}:{year}";
 
+        List<Meta> top;
         if (_dashboardCache.TryGetValue<List<Meta>>(cacheKey, out var cached) && cached != null)
-            return cached;
-
-        try
         {
-            var list = await _anilistService.GetAnimeListAsync(
-                tokenData: null,
-                list: ListType.Seasonal,
-                genre: seasonOption,
-                groupSeasons: false);
-
-            var top = list?.Take(15).ToList() ?? [];
-
-            if (top.Count > 0)
+            top = cached;
+        }
+        else
+        {
+            try
             {
-                _dashboardCache.Set(cacheKey, top, new MemoryCacheEntryOptions
+                var list = await _anilistService.GetAnimeListAsync(
+                    tokenData: null,
+                    list: ListType.Seasonal,
+                    genre: seasonOption,
+                    groupSeasons: false);
+
+                top = list?.Take(15).ToList() ?? [];
+
+                if (top.Count > 0)
                 {
-                    AbsoluteExpirationRelativeToNow = PopularBySeasonCacheDuration,
-                });
+                    _dashboardCache.Set(cacheKey, top, new MemoryCacheEntryOptions
+                    {
+                        AbsoluteExpirationRelativeToNow = PopularBySeasonCacheDuration,
+                    });
+                }
             }
-            return top;
+            catch
+            {
+                top = [];
+            }
         }
-        catch
+
+        // Cache stores the anilist:N-keyed list, shared across every viewer.
+        // Translate ids per-call so a MAL / Kitsu primary's clicks land on
+        // their service-native detail page. Anonymous + AniList primaries
+        // skip the lookup inside TranslateMetaIdsAsync.
+        return await _anilistFallback.TranslateMetaIdsAsync(top.Select(m => new Meta
         {
-            return [];
-        }
+            id = m.id, name = m.name, poster = m.poster, type = m.type,
+            score = m.score, episodes = m.episodes, year = m.year, format = m.format,
+        }).ToList(), translateTo);
     }
 
     // Wraps FetchListAsync in a try/catch so a single provider rate-limiting
