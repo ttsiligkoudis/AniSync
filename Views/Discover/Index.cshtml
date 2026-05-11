@@ -143,6 +143,11 @@
              data-season="@(isSeasonal ? Model.Season : null)"
              data-skip="@Model.Items.Count">
             @await Html.PartialAsync("_PosterGrid", posterGridModel)
+            @* paginator-loader is hidden by default; discover-pagination.js
+               reveals it while the next chunk is in flight. *@
+            <div class="paginator-loader" hidden aria-hidden="true">
+                <div class="paginator-loader-spinner"></div>
+            </div>
             <div class="discover-sentinel" aria-hidden="true"></div>
         </div>
     }

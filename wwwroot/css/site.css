@@ -2830,6 +2830,33 @@ a.stats-cell-link:hover {
     pointer-events: none;
 }
 
+/* Inline paginator loader — small centered spinner that sits between the
+   grid and the sentinel. Pagination JS toggles its [hidden] attribute on
+   loadMore start / completion so the user gets a visible "loading more"
+   cue while the next chunk is in flight. Less jarring than the full-
+   viewport loader-overlay scrim, which we explicitly opt out of for
+   continuous-scroll fetches. */
+.paginator-loader {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 1.5rem 0;
+}
+
+.paginator-loader[hidden] {
+    display: none;
+}
+
+.paginator-loader-spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid rgba(255, 255, 255, 0.12);
+    border-top-color: #3B82F6;
+    border-radius: 50%;
+    animation: loader-spin 0.8s linear infinite;
+}
+
 /* Horizontal-scroll variant of .library-grid — used on the dashboard's
    Continue Watching shelf and (eventually) other StreamD-style row surfaces.
    Cards inside get a fixed min-width so the row scrolls rather than shrinking

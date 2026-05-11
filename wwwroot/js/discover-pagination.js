@@ -19,6 +19,7 @@
 
     var grid = paginator.querySelector('.library-grid');
     var sentinel = paginator.querySelector('.discover-sentinel');
+    var loader = paginator.querySelector('.paginator-loader');
     if (!grid || !sentinel) return;
 
     var list = paginator.getAttribute('data-list');
@@ -52,7 +53,13 @@
         if (sentinel && sentinel.parentNode) {
             sentinel.parentNode.removeChild(sentinel);
         }
+        if (loader && loader.parentNode) {
+            loader.parentNode.removeChild(loader);
+        }
     }
+
+    function showLoader() { if (loader) loader.hidden = false; }
+    function hideLoader() { if (loader) loader.hidden = true; }
 
     function appendCards(html) {
         // The /discover/page partial renders <div class="library-grid">…
@@ -91,17 +98,19 @@
     function loadMore() {
         if (loading || done) return;
         loading = true;
+        showLoader();
 
         var params = 'list=' + encodeURIComponent(list)
             + '&skip=' + skip;
         if (genre) params += '&genre=' + encodeURIComponent(genre);
         if (season) params += '&season=' + encodeURIComponent(season);
 
+        // skipLoader: true bypasses the global full-screen loader-overlay —
+        // we render the inline paginator-loader (above) instead so scrolling
+        // gets a calm in-flow cue rather than the page-wide scrim.
         fetch('/discover/page?' + params, {
             credentials: 'same-origin',
             headers: { 'Accept': 'text/html' },
-            // Bypass the global loader spinner — pagination scrolling is
-            // continuous, the inline grid growing is the honest indicator.
             skipLoader: true
         })
             .then(function (r) { return r.ok ? r.text() : null; })
@@ -118,7 +127,7 @@
                 }
             })
             .catch(function () { /* swallow — sentinel stays, user can scroll back up and retry by re-scrolling */ })
-            .finally(function () { loading = false; });
+            .finally(function () { loading = false; hideLoader(); });
     }
 
     // rootMargin: 400px → load the next page before the sentinel enters

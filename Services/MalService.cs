@@ -722,8 +722,28 @@ namespace AnimeList.Services
 
         private static string ExtractTitle(JObject anime)
         {
-            return SafeGet<string>(anime, "alternative_titles", "en")
-                ?? (string)anime["title"];
+            // Preferred-to-fallback chain. en is the English-localised
+            // title, title is MAL's canonical (often romaji), ja is the
+            // Japanese script, synonyms[0] is the broadest catch — some
+            // user-list entries come back with all three primary fields
+            // empty and only a synonyms array attached, which is what
+            // produced the title-less cards on /library.
+            var en = SafeGet<string>(anime, "alternative_titles", "en");
+            if (!string.IsNullOrWhiteSpace(en)) return en;
+            var canonical = (string)anime["title"];
+            if (!string.IsNullOrWhiteSpace(canonical)) return canonical;
+            var ja = SafeGet<string>(anime, "alternative_titles", "ja");
+            if (!string.IsNullOrWhiteSpace(ja)) return ja;
+            var synonyms = anime["alternative_titles"]?["synonyms"] as JArray;
+            if (synonyms != null)
+            {
+                foreach (var s in synonyms)
+                {
+                    var v = (string)s;
+                    if (!string.IsNullOrWhiteSpace(v)) return v;
+                }
+            }
+            return null;
         }
 
         public async Task<List<AnimeEntry>> GetUserListEntriesAsync(TokenData tokenData)
