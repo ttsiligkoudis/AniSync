@@ -66,12 +66,13 @@ namespace AnimeList.Models
 
         public string ServiceDisplay => IsAnilist ? "AniList" : IsMal ? "MyAnimeList" : "Kitsu";
 
-        // The Configuration model stores three flags as inverse-sense ("hide…", "disable…")
-        // so default-zero installs keep the pre-feature behaviour. The configure UI exposes
-        // them as positive toggles, so flip the bit here once.
+        // hideManageEntry / disableAutoTrack are inverse-sense — flip them so the
+        // configure UI can render positive toggles ("Manage Entry on" / "Auto-track on").
+        // enableSeasonGrouping is already positive-sense (default OFF for new users),
+        // so it passes through unchanged.
         public bool ShowManageEntry => !Configuration.hideManageEntry;
         public bool AutoTrackProgress => !Configuration.disableAutoTrack;
-        public bool GroupSeasons => !Configuration.disableSeasonGrouping;
+        public bool GroupSeasons => Configuration.enableSeasonGrouping;
 
         public Dictionary<AnimeService, LinkedToken> LinkedByService =>
             LinkedTokens.ToDictionary(t => t.Service, t => t);

@@ -59,5 +59,37 @@ namespace AnimeList.Services.Interfaces
         /// pulling a media result set per query.
         /// </summary>
         Task<(int currentlyAiring, int newThisSeason, int totalThisSeason)> GetSeasonStatsAsync();
+
+        /// <summary>
+        /// Anime with an episode airing during the current UTC day (00:00 –
+        /// 23:59 UTC). One row per anime — multiple cours of the same show
+        /// dropping in the same day collapse to a single card. Slim
+        /// <see cref="Meta"/> shape compatible with the dashboard's
+        /// scroll-row _PosterGrid. Cached until the next UTC midnight so the
+        /// shelf rotates cleanly when the calendar day changes (rather than
+        /// after a fixed 24-hour window from first fetch).
+        /// </summary>
+        Task<List<Meta>> GetNewEpisodesTodayAsync();
+
+        /// <summary>
+        /// Prequels and sequels for an AniList anime id, sorted by air year
+        /// ascending so the carousel reads chronologically (story-order
+        /// approximation — for the rare case where a prequel airs after its
+        /// sequel, year-asc still groups them adjacent to the source anime).
+        /// Returns slim <see cref="Meta"/> objects compatible with
+        /// _PosterGrid scroll variant. Cached 24h per anilist id since
+        /// relations are essentially static metadata.
+        /// </summary>
+        Task<List<Meta>> GetRelatedAsync(int anilistId);
+
+        /// <summary>
+        /// AniList-sourced supplementary <see cref="Link"/> entries (Tag,
+        /// Studio, director, writer, Composer, Artist, Producer, Staff) for
+        /// an anime id. Used by the detail page to augment pages loaded via
+        /// non-AniList services (Kitsu / MAL primaries) whose own GetAnimeByIdAsync
+        /// doesn't surface this metadata richness. Cached 24h per anilist id —
+        /// staff / studio / tag data is essentially immutable.
+        /// </summary>
+        Task<List<Link>> GetSupplementaryLinksAsync(int anilistId);
     }
 }

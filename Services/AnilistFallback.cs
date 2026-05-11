@@ -149,24 +149,61 @@ namespace AnimeList.Services
             return result;
         }
 
+        // The three public per-anime side-data fetchers (recommendations,
+        // relations, supplementary links) all hit the same Media(id) root on
+        // AniList. Fetching them separately meant up to three GraphQL
+        // round-trips per detail render plus three independent cache entries.
+        // FetchSidedataAsync collapses them into one combined query with one
+        // cache entry; the three public methods below project off the cached
+        // record so the call shape (and any caller logic) stays unchanged.
+        private sealed record AnilistSidedata(
+            List<Meta> Recommendations,
+            List<Meta> Related,
+            List<Link> SupplementaryLinks);
+
         public async Task<List<Meta>> GetRecommendationMetasAsync(int anilistId)
+            => (await FetchSidedataAsync(anilistId)).Recommendations;
+
+        private async Task<AnilistSidedata> FetchSidedataAsync(int anilistId)
         {
-            // Same query shape as the authenticated AnilistService meta-detail
-            // recommendations subselection — coverImage + format + episodes +
-            // averageScore + seasonYear so the carousel cards have the full
-            // chrome (poster + score badge + format/eps/year info row). ids
-            // stay in anilist:N space; AnimeController.Detail's mapping path
-            // resolves them to the user's primary on click.
-            var requestBody = SerializeObject(new
+            var cacheKey = $"anilist:sidedata:{anilistId}";
+            if (_cache.TryGetValue<AnilistSidedata>(cacheKey, out var cached) && cached != null)
+                return cached;
+
+            var empty = new AnilistSidedata([], [], []);
+
+            try
             {
-                query = @"
-                    query ($id: Int) {
-                        Media(id: $id, type: ANIME) {
-                            recommendations(sort: RATING_DESC, perPage: 15) {
-                                edges {
-                                    node {
-                                        mediaRecommendation {
+                // One combined query: recommendations + relations + tags +
+                // studios + staff. All five subselections share the same
+                // Media(id) root so AniList resolves them in one go; the
+                // complexity-budget cost is well within their 500 ceiling.
+                var requestBody = SerializeObject(new
+                {
+                    query = @"
+                        query ($id: Int) {
+                            Media(id: $id, type: ANIME) {
+                                recommendations(sort: RATING_DESC, perPage: 15) {
+                                    edges {
+                                        node {
+                                            mediaRecommendation {
+                                                id
+                                                format
+                                                episodes
+                                                averageScore
+                                                seasonYear
+                                                title { english romaji }
+                                                coverImage { large }
+                                            }
+                                        }
+                                    }
+                                }
+                                relations {
+                                    edges {
+                                        relationType
+                                        node {
                                             id
+                                            type
                                             format
                                             episodes
                                             averageScore
@@ -176,14 +213,47 @@ namespace AnimeList.Services
                                         }
                                     }
                                 }
+                                tags { name rank isAdult }
+                                studios { edges { isMain node { name siteUrl } } }
+                                staff { edges { role node { name { full } siteUrl } } }
                             }
-                        }
-                    }",
-                variables = new { id = anilistId }
-            });
+                        }",
+                    variables = new { id = anilistId }
+                });
 
-            var data = await PostJsonAsync(requestBody);
-            var edges = data?.Media?.recommendations?.edges;
+                var data = await PostJsonAsync(requestBody);
+                var media = data?.Media;
+                if (media == null) return empty;
+
+                var sidedata = new AnilistSidedata(
+                    Recommendations: ParseRecommendations(media),
+                    Related: ParseRelated(media),
+                    SupplementaryLinks: ParseSupplementaryLinks(media));
+
+                // Only cache when at least one bucket is non-empty so a
+                // transient AniList blip / rate-limit / 5xx doesn't lock in
+                // an empty record for 24h.
+                if (sidedata.Recommendations.Count > 0
+                    || sidedata.Related.Count > 0
+                    || sidedata.SupplementaryLinks.Count > 0)
+                {
+                    _cache.Set(cacheKey, sidedata, new MemoryCacheEntryOptions
+                    {
+                        AbsoluteExpirationRelativeToNow = SeasonStatsCacheDuration,
+                    });
+                }
+                return sidedata;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[AnilistFallback] FetchSidedataAsync failed: {ex.Message}");
+                return empty;
+            }
+        }
+
+        private static List<Meta> ParseRecommendations(dynamic media)
+        {
+            var edges = media?.recommendations?.edges;
             if (edges == null) return [];
 
             var result = new List<Meta>();
@@ -214,6 +284,104 @@ namespace AnimeList.Services
                     format = NormalizeFormat((string)rec.format),
                 });
             }
+            return result;
+        }
+
+        private static List<Meta> ParseRelated(dynamic media)
+        {
+            var edges = media?.relations?.edges;
+            if (edges == null) return [];
+
+            var result = new List<Meta>();
+            foreach (var edge in edges)
+            {
+                var relationType = (string)edge.relationType;
+                if (relationType != "PREQUEL" && relationType != "SEQUEL") continue;
+
+                var node = edge.node;
+                if (node == null) continue;
+                if ((string)node.type != "ANIME") continue;
+
+                var relId = (int?)node.id;
+                if (!relId.HasValue) continue;
+
+                var name = string.IsNullOrEmpty((string)node.title?.english)
+                    ? (string)node.title?.romaji
+                    : (string)node.title?.english;
+                if (string.IsNullOrEmpty(name)) continue;
+
+                result.Add(new Meta
+                {
+                    id = $"{anilistPrefix}{relId.Value}",
+                    name = name,
+                    poster = (string)node.coverImage?.large,
+                    type = IsMovieFormat((string)node.format)
+                        ? MetaType.movie.ToString()
+                        : MetaType.series.ToString(),
+                    score = node.averageScore != null
+                        ? Math.Round((double)node.averageScore / 10, 1)
+                        : (double?)null,
+                    episodes = (int?)node.episodes,
+                    year = (int?)node.seasonYear,
+                    format = NormalizeFormat((string)node.format),
+                });
+            }
+
+            // Chronological-ish ordering so the carousel reads as a timeline.
+            return result.OrderBy(m => m.year ?? int.MaxValue).ToList();
+        }
+
+        private static List<Link> ParseSupplementaryLinks(dynamic media)
+        {
+            var result = new List<Link>();
+
+            if (media?.tags != null)
+            {
+                foreach (var tag in media.tags)
+                {
+                    if ((bool?)tag.isAdult == true) continue;
+                    var rank = (int?)tag.rank ?? 0;
+                    if (rank < 50) continue;
+                    var name = (string)tag.name;
+                    if (string.IsNullOrEmpty(name)) continue;
+                    result.Add(new Link
+                    {
+                        name = name,
+                        category = "Tag",
+                        url = $"https://anilist.co/search/anime?genres={Uri.EscapeDataString(name)}",
+                    });
+                }
+            }
+
+            if (media?.studios?.edges != null)
+            {
+                foreach (var edge in media.studios.edges)
+                {
+                    if ((bool?)edge.isMain != true) continue;
+                    var name = (string)edge.node?.name;
+                    var siteUrl = (string)edge.node?.siteUrl;
+                    if (string.IsNullOrEmpty(name)) continue;
+                    result.Add(new Link { name = name, category = "Studio", url = siteUrl });
+                }
+            }
+
+            if (media?.staff?.edges != null)
+            {
+                foreach (var edge in media.staff.edges)
+                {
+                    var role = (string)edge.role;
+                    var name = (string)edge.node?.name?.full;
+                    var siteUrl = (string)edge.node?.siteUrl;
+                    if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(role)) continue;
+                    result.Add(new Link
+                    {
+                        name = name,
+                        category = StaffRoleToCategory(role),
+                        url = siteUrl,
+                    });
+                }
+            }
+
             return result;
         }
 
@@ -407,6 +575,139 @@ namespace AnimeList.Services
             }
 
             return (airing, newThis, total);
+        }
+
+        public async Task<List<Meta>> GetNewEpisodesTodayAsync()
+        {
+            // Bound the query to [today 00:00 UTC, tomorrow 00:00 UTC) using
+            // AniList's airingAt_greater / airingAt_lesser unix-timestamp
+            // filters. Yes UTC fuzzes the edges for viewers far from GMT —
+            // a JST user just past midnight UTC sees a fresh "today" already
+            // populated with their early-morning JST airings — but it keeps
+            // the server-side cache key unambiguous and the boundary
+            // consistent for every visitor regardless of where they connect
+            // from.
+            var todayUtc = DateTime.UtcNow.Date;
+            var startUnix = new DateTimeOffset(todayUtc, TimeSpan.Zero).ToUnixTimeSeconds();
+            var endUnix = new DateTimeOffset(todayUtc.AddDays(1), TimeSpan.Zero).ToUnixTimeSeconds();
+
+            // Key on the UTC date so the entry auto-rotates at midnight; old
+            // day's entry just sits dead until eviction. The 'until end of
+            // day' expiration below means at most one upstream call per day.
+            var cacheKey = $"anilist:new-episodes-today:{todayUtc:yyyy-MM-dd}";
+
+            if (_cache.TryGetValue<List<Meta>>(cacheKey, out var cached) && cached != null)
+            {
+                return cached;
+            }
+
+            try
+            {
+                var requestBody = SerializeObject(new
+                {
+                    query = @"
+                        query ($startUnix: Int, $endUnix: Int, $page: Int) {
+                            Page(page: $page, perPage: 50) {
+                                pageInfo { hasNextPage }
+                                airingSchedules(airingAt_greater: $startUnix, airingAt_lesser: $endUnix, sort: TIME) {
+                                    airingAt
+                                    episode
+                                    media {
+                                        id
+                                        format
+                                        episodes
+                                        averageScore
+                                        seasonYear
+                                        title { english romaji }
+                                        coverImage { large }
+                                    }
+                                }
+                            }
+                        }",
+                    variables = new { startUnix, endUnix, page = 1 }
+                });
+
+                var data = await PostJsonAsync(requestBody);
+                var schedules = data?.Page?.airingSchedules;
+                if (schedules == null) return [];
+
+                // Multiple schedules can hit on the same anime in one day
+                // (cours overlapping, special + main, etc.) — dedupe by
+                // anilist id and keep the earliest airing time on the day.
+                var seen = new HashSet<int>();
+                var result = new List<Meta>();
+                foreach (var sched in schedules)
+                {
+                    var media = sched.media;
+                    if (media == null) continue;
+
+                    var anilistId = (int?)media.id;
+                    if (!anilistId.HasValue || !seen.Add(anilistId.Value)) continue;
+
+                    var name = string.IsNullOrEmpty((string)media.title?.english)
+                        ? (string)media.title?.romaji
+                        : (string)media.title?.english;
+                    if (string.IsNullOrEmpty(name)) continue;
+
+                    result.Add(new Meta
+                    {
+                        // Stay in anilist:N space so AnimeController.Detail
+                        // can resolve to the user's primary on click — same
+                        // pattern as the other dashboard shelves.
+                        id = $"{anilistPrefix}{anilistId.Value}",
+                        name = name,
+                        poster = (string)media.coverImage?.large,
+                        type = IsMovieFormat((string)media.format)
+                            ? MetaType.movie.ToString()
+                            : MetaType.series.ToString(),
+                        score = media.averageScore != null
+                            ? Math.Round((double)media.averageScore / 10, 1)
+                            : (double?)null,
+                        episodes = (int?)media.episodes,
+                        year = (int?)media.seasonYear,
+                        format = NormalizeFormat((string)media.format),
+                    });
+                }
+
+                if (result.Count > 0)
+                {
+                    // Pin expiration to the next UTC midnight so the cache
+                    // holds for exactly today rather than a rolling 24h
+                    // window. A fetch at 23:00 UTC caches for 1h; a fetch
+                    // at 01:00 UTC caches for ~23h. Either way, the next
+                    // midnight wipes it and a fresh fetch builds tomorrow's
+                    // shelf.
+                    _cache.Set(cacheKey, result, new MemoryCacheEntryOptions
+                    {
+                        AbsoluteExpiration = new DateTimeOffset(todayUtc.AddDays(1), TimeSpan.Zero),
+                    });
+                }
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[AnilistFallback] GetNewEpisodesTodayAsync failed: {ex.Message}");
+                return [];
+            }
+        }
+
+        public async Task<List<Meta>> GetRelatedAsync(int anilistId)
+            => (await FetchSidedataAsync(anilistId)).Related;
+
+        public async Task<List<Link>> GetSupplementaryLinksAsync(int anilistId)
+            => (await FetchSidedataAsync(anilistId)).SupplementaryLinks;
+
+        // Mirrors AnilistService.StaffRoleToCategory — keeps the augmented
+        // page's link categories identical to a native AniList load.
+        private static string StaffRoleToCategory(string role)
+        {
+            var r = role.ToLowerInvariant();
+            if (r.Contains("director")) return "director";
+            if (r.Contains("writ") || r.Contains("script") || r.Contains("creator")) return "writer";
+            if (r.Contains("composer") || r.Contains("music")) return "Composer";
+            if (r.Contains("character design") || r.Contains("art")) return "Artist";
+            if (r.Contains("producer")) return "Producer";
+            return "Staff";
         }
     }
 }

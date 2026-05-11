@@ -38,7 +38,16 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="AniSync" />
-    <title>AniSync</title>
+    @{
+        // Per-page title set via ViewData["Title"]; falls back to the plain
+        // app name on pages that don't bother (errors, splash). Browser
+        // history / bookmarks / tab labels pick up <title>, so giving each
+        // page a unique title is what makes the history view in the screenshot
+        // legible ("Re:ZERO · AniSync" instead of fifteen rows of "AniSync").
+        var pageTitle = ViewData["Title"]?.ToString();
+        var fullTitle = string.IsNullOrEmpty(pageTitle) ? "AniSync" : $"{pageTitle} · AniSync";
+    }
+    <title>@fullTitle</title>
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/AniSync.styles.css" asp-append-version="true" />
@@ -66,7 +75,13 @@
         </div>
         <nav class="nav-drawer-nav">
             <a href="/" class="@(activeNav == "home" ? "active" : "")">Home</a>
-            <a href="/library" class="@(activeNav == "library" ? "active" : "")">My Library</a>
+            @* My Library requires an authenticated non-anonymous session — the
+               page just bounces back to / for anonymous visitors, so we omit
+               the link entirely rather than offering a dead-end navigation. *@
+            @if (layoutLoggedIn)
+            {
+                <a href="/library" class="@(activeNav == "library" ? "active" : "")">My Library</a>
+            }
             <a href="/discover" class="@(activeNav == "discover" ? "active" : "")">Discover</a>
             <a href="@Url.Action("Configure", "Home")" class="@(activeNav == "configure" ? "active" : "")">Account</a>
             <a href="@Url.Action("Stremio", "Home")" class="@(activeNav == "stremio" ? "active" : "")">Stremio addon</a>
@@ -92,6 +107,20 @@
                 <a class="site-logo" href="/" aria-label="AniSync home">
                     <img src="/logo.png" alt="AniSync" />
                 </a>
+                @* Inline desktop nav — mirrors the slide-in drawer's links.
+                   Hidden under 992px (lg) where the hamburger takes over.
+                   Same href + active-class logic as the drawer so adding a
+                   route here means updating both. *@
+                <nav class="site-header-nav" aria-label="Primary">
+                    <a href="/" class="@(activeNav == "home" ? "active" : "")">Home</a>
+                    @if (layoutLoggedIn)
+                    {
+                        <a href="/library" class="@(activeNav == "library" ? "active" : "")">My Library</a>
+                    }
+                    <a href="/discover" class="@(activeNav == "discover" ? "active" : "")">Discover</a>
+                    <a href="@Url.Action("Configure", "Home")" class="@(activeNav == "configure" ? "active" : "")">Account</a>
+                    <a href="@Url.Action("Stremio", "Home")" class="@(activeNav == "stremio" ? "active" : "")">Stremio addon</a>
+                </nav>
                 @* Install pill — hidden by default, revealed by
                    pwa-install.js once the browser fires
                    beforeinstallprompt (Chromium / Edge / Android Chrome)
@@ -109,6 +138,17 @@
                     </svg>
                     <span>Install</span>
                 </button>
+                @* Desktop-only auth CTA — replaces what the drawer footer
+                   exposes on mobile (Sign in / Disconnect). Hidden under
+                   992px; the drawer keeps surfacing it on mobile. *@
+                @if (layoutLoggedIn)
+                {
+                    <a class="site-header-cta site-header-cta-secondary" href="@Url.Action("Logout", "Auth")">Disconnect</a>
+                }
+                else
+                {
+                    <a class="site-header-cta site-header-cta-primary" href="@Url.Action("Configure", "Home")">Sign in</a>
+                }
                 <button class="hamburger-btn" aria-label="Open menu"
                         onclick="document.body.classList.toggle('drawer-open')">
                     <span></span><span></span><span></span>
@@ -130,12 +170,17 @@
             </svg>
             <span class="bottom-nav-label">Home</span>
         </a>
-        <a href="/library" class="bottom-nav-item @(activeNav == "library" ? "active" : "")" aria-label="Library">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
-            </svg>
-            <span class="bottom-nav-label">Library</span>
-        </a>
+        @* Library tab omitted for anonymous users — the page just redirects
+           them back to /, so the cell would be a dead end on the bottom nav. *@
+        @if (layoutLoggedIn)
+        {
+            <a href="/library" class="bottom-nav-item @(activeNav == "library" ? "active" : "")" aria-label="Library">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span class="bottom-nav-label">Library</span>
+            </a>
+        }
         <a href="/discover" class="bottom-nav-item @(activeNav == "discover" ? "active" : "")" aria-label="Discover">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="11" cy="11" r="8"></circle>

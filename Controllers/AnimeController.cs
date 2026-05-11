@@ -21,6 +21,7 @@ namespace AnimeList.Controllers
         private readonly IAnimeMappingService _mappingService;
         private readonly IConfigStore _configStore;
         private readonly IFillerListService _fillerListService;
+        private readonly IAnilistFallback _anilistFallback;
         private readonly ILogger<AnimeController> _logger;
 
         public AnimeController(
@@ -32,6 +33,7 @@ namespace AnimeList.Controllers
             IAnimeMappingService mappingService,
             IConfigStore configStore,
             IFillerListService fillerListService,
+            IAnilistFallback anilistFallback,
             ILogger<AnimeController> logger)
         {
             _tokenService = tokenService;
@@ -42,6 +44,7 @@ namespace AnimeList.Controllers
             _mappingService = mappingService;
             _configStore = configStore;
             _fillerListService = fillerListService;
+            _anilistFallback = anilistFallback;
             _logger = logger;
         }
 
@@ -63,20 +66,22 @@ namespace AnimeList.Controllers
                 ?? new TokenData { anime_service = AnimeService.Kitsu };
             var animeService = tokenData.anime_service;
 
-            // Honour the user's "Group anime seasons" toggle. When ungrouped,
-            // we want the resolved anime.id to stay as the native per-cour id
-            // (anilist:269, etc.) so the manage-entry modal — which keys off
-            // the rendered card's data-meta-id — opens with that native id and
-            // BuildSeasonsAsync's native-id short-circuit hides the season
-            // dropdown. Anonymous visitors get the default-grouped behaviour.
+            // Resolve the row's UID for logged-in users so the entry-fetch
+            // path below can hit the user's tracker with the right identity.
+            // Anonymous viewers get null, which is fine — the entry block is
+            // gated on !anonymousUser anyway.
             string uid = null;
             if (!tokenData.anonymousUser)
             {
                 var (resolvedUid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
                 uid = resolvedUid;
             }
-            var configuration = await GetConfigByUidAsync(uid, _configStore);
-            var groupSeasons = configuration?.disableSeasonGrouping != true;
+            // /anime/{id} is always ungrouped — the enableSeasonGrouping pref
+            // now only governs Stremio's catalog / meta endpoints. The detail
+            // page is the destination for a single-cour card, so resolving the
+            // requested id natively (instead of the IMDb-collapsed franchise
+            // id) is what the user expects.
+            const bool groupSeasons = false;
 
             // Resolve cross-service ids (imdb:/tmdb:) to the user's primary's
             // native id so we can hit the right per-service endpoint with rich
@@ -182,6 +187,41 @@ namespace AnimeList.Controllers
                 }
             }
 
+            // Cross-service links surfaced in the hero ("Open on AniList / MAL /
+            // Kitsu / IMDb"). The mapping lookup is keyed on the anime's own id —
+            // whichever service the page was loaded against, the same row of the
+            // mapping dataset carries the sibling-service ids and the imdb tt id
+            // when known. Best-effort: missing mapping = no links rendered, which
+            // is the correct degradation for entries outside the curated dataset.
+            var sourceLinks = await BuildSourceLinksAsync(anime.id);
+
+            // Prequel + sequel carousel. Driven off the anime's AniList id since
+            // AniList's GraphQL is the only upstream that exposes explicit
+            // PREQUEL / SEQUEL relations. For pages loaded against a non-anilist
+            // id (kitsu: / mal: / tt…), the AnilistId surfaced by sourceLinks
+            // already came from the cross-service mapping, so we reuse it — no
+            // extra mapping round-trip needed.
+            var related = sourceLinks.AnilistId.HasValue
+                ? await TryGetRelatedAsync(sourceLinks.AnilistId.Value)
+                : [];
+
+            // Augment anime.links with AniList-sourced supplementary metadata
+            // (Tag / Studio / director / writer / Composer / Artist / Producer /
+            // Staff) when the page was loaded via a non-AniList service. The
+            // KitsuService and MalService GetAnimeByIdAsync paths don't surface
+            // this richness, so kitsu: / mal: pages would otherwise show no
+            // Tag / Staff / director sections. anime.id (post-fetch) reflects
+            // which service actually built the meta — including the Kitsu →
+            // AniList fallback path inside the dispatch above — so the
+            // !anilistPrefix check correctly skips the augment when AniList
+            // already populated everything.
+            if (sourceLinks.AnilistId.HasValue
+                && !string.IsNullOrEmpty(anime.id)
+                && !anime.id.StartsWith(anilistPrefix))
+            {
+                await AugmentLinksFromAnilistAsync(anime, sourceLinks.AnilistId.Value);
+            }
+
             return View(new AnimeDetailViewModel
             {
                 Anime = anime,
@@ -189,7 +229,125 @@ namespace AnimeList.Controllers
                 AnonymousUser = tokenData.anonymousUser,
                 ConfigUid = uid,
                 Entry = entry,
+                SourceLinks = sourceLinks,
+                Related = related,
             });
+        }
+
+        private async Task<List<Meta>> TryGetRelatedAsync(int anilistId)
+        {
+            try { return await _anilistFallback.GetRelatedAsync(anilistId); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AnimeController.Detail: related fetch failed for anilist {Id}.", anilistId);
+                return [];
+            }
+        }
+
+        private async Task AugmentLinksFromAnilistAsync(Meta anime, int anilistId)
+        {
+            try
+            {
+                var supplementary = await _anilistFallback.GetSupplementaryLinksAsync(anilistId);
+                if (supplementary == null || supplementary.Count == 0) return;
+
+                anime.links ??= [];
+
+                // Dedupe by (category, name) so a Studio the service already
+                // surfaced (Kitsu has some studio links) doesn't render twice
+                // alongside the AniList copy. Case-insensitive name compare
+                // since "Mappa" / "MAPPA" are the same studio.
+                var existing = new HashSet<(string, string)>(
+                    anime.links
+                        .Where(l => !string.IsNullOrEmpty(l.name))
+                        .Select(l => (l.category ?? string.Empty, l.name.ToLowerInvariant())));
+
+                foreach (var link in supplementary)
+                {
+                    if (string.IsNullOrEmpty(link.name)) continue;
+                    var key = (link.category ?? string.Empty, link.name.ToLowerInvariant());
+                    if (existing.Add(key))
+                        anime.links.Add(link);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AnimeController.Detail: link augment failed for anilist {Id}.", anilistId);
+            }
+        }
+
+        private async Task<AnimeSourceLinks> BuildSourceLinksAsync(string animeId)
+        {
+            var links = new AnimeSourceLinks();
+            if (string.IsNullOrEmpty(animeId)) return links;
+
+            try
+            {
+                // 1. Seed from the self id when it's in a service-native id
+                //    space. The detail page now always renders ungrouped so
+                //    anime.id arrives in the native space; the IMDb / TMDB
+                //    branches stay for direct deep-links (e.g. when Stremio's
+                //    grouped-cour card hands the user to /anime/tt5311514).
+                AnimeIdMapping mapping = null;
+                if (animeId.StartsWith(anilistPrefix)
+                    && int.TryParse(animeId[anilistPrefix.Length..], out var aId))
+                {
+                    links.AnilistId = aId;
+                    mapping = await _mappingService.GetAnilistMapping(animeId);
+                }
+                else if (animeId.StartsWith(malPrefix)
+                    && int.TryParse(animeId[malPrefix.Length..], out var mId))
+                {
+                    links.MalId = mId;
+                    mapping = await _mappingService.GetMalMapping(animeId);
+                }
+                else if (animeId.StartsWith(kitsuPrefix)
+                    && int.TryParse(animeId[kitsuPrefix.Length..], out var kId))
+                {
+                    links.KitsuId = kId;
+                    mapping = await _mappingService.GetKitsuMapping(animeId);
+                }
+                else if (animeId.StartsWith(imdbPrefix))
+                {
+                    // imdbPrefix is "tt" — the same shape IMDb itself uses.
+                    // GetImdbMapping returns one entry per cour, ordered by
+                    // season; take the first since that's what ResolveGroupedId
+                    // collapses every cour to anyway. ImdbId is set
+                    // unconditionally below from this id so the IMDb chip
+                    // always renders on the grouped-cours code path.
+                    links.ImdbId = animeId;
+                    var imdbMappings = await _mappingService.GetImdbMapping(animeId);
+                    mapping = imdbMappings.FirstOrDefault();
+                }
+                else if (animeId.StartsWith(tmdbPrefix))
+                {
+                    var tmdbMappings = await _mappingService.GetTmdbMapping(animeId);
+                    mapping = tmdbMappings.FirstOrDefault();
+                }
+
+                // 2. Enrich with sibling ids from the cross-service mapping.
+                //    ??= means a sibling id from the mapping fills in only
+                //    when we don't already have one — so the prefix-derived
+                //    self id (when present) wins over the mapping's
+                //    sometimes-stale duplicate, but the IMDb-grouped code
+                //    path still gets all four chips from the mapping alone.
+                if (mapping != null)
+                {
+                    links.AnilistId ??= mapping.AnilistId;
+                    links.MalId ??= mapping.MalId;
+                    links.KitsuId ??= mapping.KitsuId;
+                    if (string.IsNullOrEmpty(links.ImdbId)
+                        && !string.IsNullOrEmpty(mapping.ImdbId)
+                        && mapping.ImdbId.StartsWith("tt"))
+                        links.ImdbId = mapping.ImdbId;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "BuildSourceLinks failed (id={Id}).", animeId);
+            }
+
+            return links;
         }
 
         // For imdb: ids, look up the cross-service mapping and translate to a
@@ -278,6 +436,30 @@ namespace AnimeList.Controllers
         // not-yet-tracked entries, or transient fetch failures (the hero
         // gracefully omits the user-state panel when this is null).
         public EntryViewState Entry { get; set; }
+        // Cross-service links surfaced in the hero so users can jump to the
+        // anime's page on AniList / MAL / Kitsu / IMDb. Resolved from the
+        // shared AnimeIdMapping dataset — entries missing from the mapping
+        // (e.g. obscure shows, donghua) simply omit the corresponding link.
+        public AnimeSourceLinks SourceLinks { get; set; } = new();
+
+        // Prequels + sequels for this anime, ordered chronologically by air
+        // year. Driven off AniList's explicit PREQUEL/SEQUEL relations
+        // (not the IMDb-mapping "same cours" grouping, which is a different
+        // concept). Empty for anime AniList doesn't index or that simply
+        // have no prequel/sequel entries.
+        public List<Meta> Related { get; set; } = [];
+    }
+
+    /// <summary>
+    /// Resolved external-site identifiers for the anime currently being viewed.
+    /// All fields nullable; null means "no mapping found, don't render that link".
+    /// </summary>
+    public class AnimeSourceLinks
+    {
+        public int? AnilistId { get; set; }
+        public int? MalId { get; set; }
+        public int? KitsuId { get; set; }
+        public string ImdbId { get; set; }
     }
 
     /// <summary>

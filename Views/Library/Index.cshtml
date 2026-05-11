@@ -15,6 +15,12 @@
 
     var hasSearch = !string.IsNullOrEmpty(Model.Search);
     var activeLabel = labels[Model.ActiveList];
+
+    // Title reflects the active tab / search state so browser history rows
+    // for "Library > Completed" and "Library > Search" are distinguishable.
+    ViewData["Title"] = hasSearch
+        ? $"Search: {Model.Search} · Library"
+        : $"{activeLabel} · Library";
 }
 
 <p class="page-subtitle">
@@ -29,6 +35,20 @@
     <span class="library-back">·
         <a href="@Url.Action("Index", "Home")">back to dashboard</a>
     </span>
+    @* Force-refresh: same ?nocache=1 escape hatch the dashboard exposes. Hidden
+       during search since search results aren't cached anyway. *@
+    @if (!hasSearch)
+    {
+        <a class="dashboard-refresh-btn library-refresh-btn"
+           href="@Url.Action("Index", "Library", new { list = Model.ActiveList.ToString().ToLower(), nocache = true })"
+           title="Refresh list — bypass the 10 min cache"
+           aria-label="Refresh list">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg>
+        </a>
+    }
 </p>
 
 @* Search input. Server-rendered <form> targeting the same page — submitting

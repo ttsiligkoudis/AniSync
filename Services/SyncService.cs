@@ -10,17 +10,19 @@ namespace AnimeList.Services
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
         private readonly ITokenService _tokenService;
+        private readonly IUserListCache _listCache;
         private readonly ILogger<SyncService> _logger;
 
         public SyncService(IConfigStore configStore, IAnilistService anilistService,
             IKitsuService kitsuService, IMalService malService, ITokenService tokenService,
-            ILogger<SyncService> logger)
+            IUserListCache listCache, ILogger<SyncService> logger)
         {
             _configStore = configStore;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
             _tokenService = tokenService;
+            _listCache = listCache;
             _logger = logger;
         }
 
@@ -151,6 +153,12 @@ namespace AnimeList.Services
                             targetStatus, score, notes, rewatchCount, startedAt, finishedAt);
                         break;
                 }
+                // Drop any cached list state we have for this linked tracker so a
+                // dashboard render driven by that account (multi-link union, or the
+                // user logging in as the linked identity) reflects the fan-out
+                // write. Scrobble-only paths route through here, so this is the
+                // sole invalidation point that covers webhook writes.
+                _listCache.Invalidate(target.TokenData);
             }
             catch (UnauthorizedAccessException ex)
             {
@@ -185,6 +193,7 @@ namespace AnimeList.Services
                         await _malService.DeleteAnimeEntryAsync(target.TokenData, animeId, season);
                         break;
                 }
+                _listCache.Invalidate(target.TokenData);
             }
             catch (UnauthorizedAccessException ex)
             {

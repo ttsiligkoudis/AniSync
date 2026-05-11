@@ -47,6 +47,7 @@
 
     if (a == null)
     {
+        ViewData["Title"] = "Anime not found";
         <div class="page-header">
             <h1 class="page-title">Anime not found</h1>
             <p class="page-subtitle">We couldn't pull metadata for this anime — it may be missing from the cross-service mapping or the upstream is temporarily down.</p>
@@ -57,6 +58,10 @@
         </div>
         return;
     }
+
+    // Surface the anime name as the page title so browser history / bookmarks /
+    // tab labels show the show being viewed instead of a generic "AniSync".
+    ViewData["Title"] = a.name;
 
     var canEdit = !Model.AnonymousUser && !string.IsNullOrEmpty(Model.ConfigUid);
 
@@ -229,6 +234,67 @@
                     }
                 </div>
             }
+            @{
+                var sl = Model.SourceLinks;
+                var hasAnySource = sl != null &&
+                    (sl.AnilistId.HasValue || sl.MalId.HasValue
+                     || sl.KitsuId.HasValue || !string.IsNullOrEmpty(sl.ImdbId));
+            }
+            @if (hasAnySource)
+            {
+                @* External source chips — one per service the anime resolves to
+                   in the cross-service mapping dataset. Each chip is brand-coloured
+                   so the row reads as a recognisable row of provider marks rather
+                   than a generic link list. Opens in a new tab; rel=noreferrer
+                   stops the Config UID (when present in the current URL) leaking
+                   to the third-party site via the Referer header. *@
+                <div class="anime-detail-sources" aria-label="Open on external sites">
+                    @if (sl.AnilistId.HasValue)
+                    {
+                        <a class="source-chip source-chip-anilist"
+                           href="https://anilist.co/anime/@sl.AnilistId"
+                           target="_blank" rel="noreferrer noopener"
+                           aria-label="Open on AniList">
+                            <span class="source-chip-mark" aria-hidden="true">A</span>
+                            <span class="source-chip-label">AniList</span>
+                        </a>
+                    }
+                    @if (sl.MalId.HasValue)
+                    {
+                        <a class="source-chip source-chip-mal"
+                           href="https://myanimelist.net/anime/@sl.MalId"
+                           target="_blank" rel="noreferrer noopener"
+                           aria-label="Open on MyAnimeList">
+                            <span class="source-chip-mark" aria-hidden="true">M</span>
+                            <span class="source-chip-label">MyAnimeList</span>
+                        </a>
+                    }
+                    @if (sl.KitsuId.HasValue)
+                    {
+                        <a class="source-chip source-chip-kitsu"
+                           href="https://kitsu.io/anime/@sl.KitsuId"
+                           target="_blank" rel="noreferrer noopener"
+                           aria-label="Open on Kitsu">
+                            <span class="source-chip-mark" aria-hidden="true">K</span>
+                            <span class="source-chip-label">Kitsu</span>
+                        </a>
+                    }
+                    @if (!string.IsNullOrEmpty(sl.ImdbId))
+                    {
+                        @* IMDb is the only chip that's "mark-only" — the mark
+                           badge already spells out "IMDb", so a trailing
+                           "IMDb" label would just duplicate it. Saves width
+                           on mobile where every pixel helps the row stay on
+                           one line. *@
+                        <a class="source-chip source-chip-imdb"
+                           href="https://www.imdb.com/title/@sl.ImdbId/"
+                           target="_blank" rel="noreferrer noopener"
+                           aria-label="Open on IMDb">
+                            <span class="source-chip-mark" aria-hidden="true">IMDb</span>
+                        </a>
+                    }
+                </div>
+            }
         </div>
     </div>
 </section>
@@ -259,17 +325,26 @@
 {
     var trailer = a.trailerStreams[0];
     var trailerUrl = $"https://www.youtube.com/watch?v={trailer.ytId}";
-    @* YouTube thumbnail-with-play-overlay card. hqdefault is the safest
-       URL — always exists on YouTube (vs maxresdefault which 404s for
-       some videos). Click → opens YouTube in a new tab; we don't embed
-       the iframe to avoid the privacy + load-cost of YouTube's player. *@
+    @* Lazy-loaded YouTube embed. hqdefault is the safest thumbnail URL —
+       always exists (vs maxresdefault which 404s for some videos). The
+       initial render is just a thumbnail card with zero YouTube weight; on
+       click the JS below swaps the inner content for a youtube-nocookie
+       iframe. When a video's uploader has embedding disabled (or the
+       network blocks the player), YouTube serves its own in-frame error
+       page with a "Watch video on YouTube" click-through baked in — so we
+       don't need to build a fallback affordance ourselves.
+
+       data-yt-id feeds the script; the href stays on the anchor as a
+       no-JS fallback (browsers with JS disabled still get to YouTube
+       via a normal click). *@
     <section class="anime-detail-section">
         <h2 class="anime-detail-section-title">Trailer</h2>
         <a class="anime-detail-trailer-card"
            href="@trailerUrl"
            target="_blank"
            rel="noreferrer noopener"
-           aria-label="Watch trailer on YouTube">
+           aria-label="Play trailer"
+           data-yt-id="@trailer.ytId">
             <img src="https://img.youtube.com/vi/@trailer.ytId/hqdefault.jpg"
                  alt="" loading="lazy"
                  class="anime-detail-trailer-thumb" />
@@ -320,9 +395,33 @@
     // Treat each row's air date relative to today so we can amber-tint
     // future dates and skip the watched check on unaired episodes.
     var today = DateTime.UtcNow.Date;
-    <section class="anime-detail-section">
-        <h2 class="anime-detail-section-title">Episodes <span class="anime-detail-section-count">(@a.videos.Count)</span></h2>
+    @* Episodes section. Wrapped in .anime-detail-episodes-wrap so the
+       collapse / expand JS can toggle a single class on it and the inner
+       body's height + season tabs respond together.
+         - data-collapsed: when present, the body is hidden via CSS (max-
+           height: 0 + overflow: hidden + visibility: hidden). Default is
+           expanded for parity with how the section currently behaves.
+         - .anime-detail-episodes-body: caps the body's max-height so long-
+           running shows (One Piece, Detective Conan, …) don't push the
+           Recommended carousel and external-link sections far below the
+           fold. Short shows (≤ ~8 eps) fit naturally without scrolling
+           because max-height only kicks in when the content overflows. *@
+    <section class="anime-detail-section anime-detail-episodes-wrap">
+        <div class="anime-detail-episodes-header">
+            <h2 class="anime-detail-section-title">Episodes <span class="anime-detail-section-count">(@a.videos.Count)</span></h2>
+            <button type="button" class="anime-detail-episodes-toggle"
+                    aria-expanded="true"
+                    aria-controls="anime-detail-episodes-body">
+                <span class="anime-detail-episodes-toggle-label">Collapse</span>
+                <svg class="anime-detail-episodes-toggle-icon" viewBox="0 0 24 24" width="14" height="14"
+                     fill="none" stroke="currentColor" stroke-width="2.2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+            </button>
+        </div>
 
+        <div class="anime-detail-episodes-body" id="anime-detail-episodes-body">
         @if (hasMultipleSeasons)
         {
             @* Horizontally-scrollable season tab strip. Each tab carries a
@@ -438,6 +537,27 @@
                 </li>
             }
         </ol>
+        </div>
+    </section>
+}
+
+@if (Model.Related.Count > 0)
+{
+    @* Prequels + sequels carousel. Driven off AniList's explicit PREQUEL /
+       SEQUEL relations (sourced via the anime's anilist id, which is set
+       on Model.SourceLinks even when the page was loaded against a
+       kitsu: / mal: id). Sits above the generic Recommended shelf because
+       franchise continuations are tighter to the current anime than
+       "you might also like" picks. Same _PosterGrid scroll variant the
+       Recommended carousel uses, so the chrome stays consistent. *@
+    <section class="anime-detail-section">
+        <h2 class="anime-detail-section-title">Related</h2>
+        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+        {
+            Items = Model.Related,
+            ConfigUid = Model.ConfigUid,
+            Variant = "scroll",
+        })
     </section>
 }
 
@@ -477,12 +597,13 @@
     </section>
 }
 
-@* Synopsis collapse/expand toggle. Inlined here (rather than in
-   manage-entry-modal.js) so it works for anonymous viewers too — that
-   script bails early when the modal DOM isn't present, which used to
-   silently disable the toggle for logged-out users. *@
+@* Synopsis collapse/expand toggle + trailer lazy-embed. Inlined here
+   (rather than in manage-entry-modal.js) so they work for anonymous
+   viewers too — that script bails early when the modal DOM isn't
+   present, which used to silently disable these for logged-out users. *@
 <script>
     (function () {
+        // ── Synopsis collapse/expand ──────────────────────────────────
         document.addEventListener('click', function (e) {
             var btn = e.target.closest && e.target.closest('button.anime-detail-synopsis-toggle');
             if (!btn) return;
@@ -499,6 +620,101 @@
                 btn.textContent = 'Show more';
                 btn.setAttribute('aria-expanded', 'false');
             }
+        });
+
+        // ── Episodes collapse/expand ──────────────────────────────────
+        // Single handler driving the whole .anime-detail-episodes-wrap
+        // section: a click on the toggle flips data-collapsed on the wrap
+        // (CSS handles the hide), rewrites the button label between
+        // "Collapse" / "Expand", and flips aria-expanded for screen
+        // readers. Section is default expanded — the toggle exists for
+        // long-running shows (One Piece, etc.) where the user wants to
+        // jump to recommendations / external links without scrolling
+        // through 1,100 rows.
+        document.addEventListener('click', function (e) {
+            var btn = e.target.closest && e.target.closest('button.anime-detail-episodes-toggle');
+            if (!btn) return;
+            e.preventDefault();
+            var wrap = btn.closest('.anime-detail-episodes-wrap');
+            if (!wrap) return;
+            var collapsed = wrap.getAttribute('data-collapsed') === 'true';
+            var label = btn.querySelector('.anime-detail-episodes-toggle-label');
+            if (collapsed) {
+                wrap.removeAttribute('data-collapsed');
+                if (label) label.textContent = 'Collapse';
+                btn.setAttribute('aria-expanded', 'true');
+            } else {
+                wrap.setAttribute('data-collapsed', 'true');
+                if (label) label.textContent = 'Expand';
+                btn.setAttribute('aria-expanded', 'false');
+            }
+        });
+
+        // ── Trailer lazy-embed ────────────────────────────────────────
+        //
+        // Click → swap thumbnail for a youtube-nocookie iframe (privacy-
+        // light embed domain; no cookies until playback). Loading the
+        // YouTube embed itself takes ~500 KB-1 MB, so we never load it
+        // until the user opts in.
+        //
+        // When a video's uploader has embedding disabled, or when a
+        // network firewall blocks the player, YouTube renders its own
+        // in-frame error page with a "Watch video on YouTube" link baked
+        // in — so we don't try to detect failure ourselves and trust
+        // YouTube's UI to provide the click-through.
+        document.addEventListener('click', function (e) {
+            var card = e.target.closest && e.target.closest('.anime-detail-trailer-card[data-yt-id]');
+            if (!card) return;
+            // The original <a target="_blank"> stays on the anchor as a
+            // no-JS fallback; preventDefault hands the click entirely to
+            // this handler when JS is available.
+            e.preventDefault();
+
+            var ytId = card.getAttribute('data-yt-id');
+            if (!ytId) return;
+
+            // Idempotent: a re-click on a card that's already swapped to an
+            // iframe is a no-op (the iframe keeps playing).
+            if (card.querySelector('iframe')) return;
+
+            var iframe = document.createElement('iframe');
+            iframe.className = 'anime-detail-trailer-iframe';
+            iframe.allow = 'accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen';
+            // The page-level <meta name="referrer" content="no-referrer"> in
+            // _Layout.cshtml strips the Referer on every outbound request to
+            // protect the Config UID from leaking via the URL. That same
+            // policy makes YouTube's embed player serve "error 153 — video
+            // player configuration error" because it can't identify the
+            // embedding domain. Override on this iframe only: 'origin' sends
+            // just "https://this-host/" (no path / query), which satisfies
+            // YouTube's domain check without exposing anything from the URL
+            // that could leak the UID. The wider page policy stays untouched.
+            iframe.referrerPolicy = 'origin';
+            iframe.setAttribute('allowfullscreen', '');
+            iframe.title = 'Trailer';
+            // autoplay=1: the user already pressed "play" on our thumbnail, so
+            //   starting playback inline matches their intent (no extra click).
+            // rel=0: limit "up next" recommendations to the same channel so
+            //   the trailer doesn't end on unrelated suggestions.
+            // modestbranding=1: drop the big YouTube watermark; the player
+            //   still shows it briefly at the start but the persistent badge
+            //   is gone.
+            iframe.src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(ytId)
+                + '?autoplay=1&rel=0&modestbranding=1';
+
+            // Wipe the thumbnail / play overlay / shade and mount the iframe
+            // in the same card so the existing 16:9 aspect-ratio + border-
+            // radius styling carries through. The classList swap signals to
+            // CSS that we're past hover-affordance territory.
+            card.innerHTML = '';
+            card.appendChild(iframe);
+            card.classList.add('anime-detail-trailer-playing');
+            // The card is no longer a "go to YouTube" link, so neutralise
+            // the anchor semantics. Keeping the <a> element avoids re-laying
+            // out the section, which would otherwise jolt the page.
+            card.removeAttribute('href');
+            card.removeAttribute('target');
+            card.style.cursor = 'default';
         });
     })();
 </script>

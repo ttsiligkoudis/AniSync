@@ -35,12 +35,12 @@ main {
     margin: 0 auto;
     /* Mobile-first: full viewport width with horizontal padding + tall bottom
        padding to clear the fixed bottom-nav (plus iOS home-indicator inset).
-       Page-class body selectors (.library-page, .anime-detail-page) widen
-       max-width below — default cap suits dashboard / configure where
-       form/text content reads better narrow. */
+       Desktop cap is 1280px so every page shares the same side gaps —
+       Library / Discover always wanted the room, and the dashboard /
+       configure pages now match instead of squeezing to 760px. */
     padding: 1.25rem 1rem calc(7.5rem + env(safe-area-inset-bottom, 0px));
     width: 100%;
-    max-width: 760px;
+    max-width: 1280px;
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
@@ -53,40 +53,17 @@ main {
     }
 }
 
-/* Library + Discover use the full grid width; ample horizontal space lets
-   more poster cards fit per row at desktop sizes. */
-body.library-page main {
-    max-width: 1280px;
-}
-
-/* Detail page needs room for the hero (poster + meta side-by-side at
-   desktop sizes) but stays readable for synopsis blocks. */
-body.anime-detail-page main {
-    max-width: 1100px;
-}
-
-/* Detail-page section sizing:
-     - Hero (poster + meta) and recommendations row use the full 1100px
-       main — extra width benefits the side-by-side hero layout and
-       fits more cards per shelf row.
-     - Everything else (synopsis, episode list, external links) caps at
-       760px so long-line reading isn't unpleasant on a wide monitor. */
+/* Detail-page sections all share the main column's width — no per-section
+   cap, so Synopsis, Episodes, Related, Recommended, the Tag / Staff /
+   Studio link groups, and the trailer card all line up flush left and
+   right. The synopsis paragraph carries its own inner max-width (in the
+   .anime-detail-synopsis rule below) so long-line reading stays
+   comfortable even though its parent section spans full width. */
 body.anime-detail-page .anime-detail-section {
-    max-width: 760px;
-    margin-left: auto;
-    margin-right: auto;
+    width: 100%;
 }
 
 body.anime-detail-page .anime-detail-hero {
-    max-width: 100%;
-}
-
-/* The recommendations carousel sits inside an .anime-detail-section that
-   contains a .poster-scroll-row; the :has() selector lets that one
-   section bypass the 760px cap. Modern-browser-only feature; older
-   browsers would just see the carousel capped at 760px which isn't
-   broken, just less spacious. */
-body.anime-detail-page .anime-detail-section:has(.poster-scroll-row) {
     max-width: 100%;
 }
 
@@ -124,6 +101,96 @@ body.anime-detail-page .anime-detail-section:has(.poster-scroll-row) {
     margin: 0;
 }
 
+/* ── Inline desktop nav (lives in .site-header) ── */
+/* Hidden on mobile / tablet — the hamburger + drawer below take over.
+   At ≥992px we flip: nav links inline, hamburger gone, drawer becomes
+   dead weight (no trigger ever sets body.drawer-open). */
+.site-header-nav {
+    display: none;
+}
+
+.site-header-cta {
+    display: none;
+}
+
+@media (min-width: 992px) {
+    .site-header-nav {
+        display: flex;
+        align-items: center;
+        gap: 0.15rem;
+        margin-left: 1.25rem;
+        /* Push the right cluster (install pill + auth CTA) flush right,
+           independent of whether the install pill is currently visible
+           — the pill carries its own margin-left:auto for the mobile
+           case but is hidden by default, so we can't rely on it. */
+        margin-right: auto;
+    }
+
+    .site-header-nav a,
+    .site-header-nav a:link,
+    .site-header-nav a:visited {
+        padding: 0.45rem 0.8rem;
+        color: #ccc;
+        text-decoration: none;
+        font-size: 0.92rem;
+        font-weight: 500;
+        border-radius: 0.5rem;
+        transition: background 0.15s, color 0.15s;
+    }
+
+    .site-header-nav a:hover,
+    .site-header-nav a:focus {
+        background: rgba(255, 255, 255, 0.05);
+        color: #fff;
+        text-decoration: none;
+    }
+
+    .site-header-nav a.active {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.06);
+    }
+
+    .site-header-cta {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.4rem 0.95rem;
+        border-radius: 999px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-decoration: none;
+        transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+
+    .site-header-cta-primary,
+    .site-header-cta-primary:link,
+    .site-header-cta-primary:visited {
+        background: #3B82F6;
+        color: #fff;
+    }
+
+    .site-header-cta-primary:hover,
+    .site-header-cta-primary:focus {
+        background: #2563eb;
+        color: #fff;
+        text-decoration: none;
+    }
+
+    .site-header-cta-secondary,
+    .site-header-cta-secondary:link,
+    .site-header-cta-secondary:visited {
+        background: transparent;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        color: #ccc;
+    }
+
+    .site-header-cta-secondary:hover,
+    .site-header-cta-secondary:focus {
+        border-color: rgba(255, 255, 255, 0.3);
+        color: #fff;
+        text-decoration: none;
+    }
+}
+
 /* ── Hamburger trigger (in site-header) ── */
 .hamburger-btn {
     display: flex;
@@ -136,6 +203,17 @@ body.anime-detail-page .anime-detail-section:has(.poster-scroll-row) {
     border: 0;
     cursor: pointer;
     flex-shrink: 0;
+}
+
+/* Hide the hamburger on viewports wide enough to render the inline desktop
+   nav — the drawer it toggles is the mobile alternative to that same nav,
+   so showing both at the same time is redundant chrome. Sits below the base
+   rule on purpose: source-order has to win since the media-query specificity
+   alone equals the base rule's. */
+@media (min-width: 992px) {
+    .hamburger-btn {
+        display: none;
+    }
 }
 
 .hamburger-btn span {
@@ -2108,6 +2186,19 @@ body.modal-open {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    /* Adds breathing room between consecutive shelves on the dashboard. The
+       parent <main> already has a flex gap that handles the major rhythm
+       (1.25rem mobile / 1.5rem desktop) — this margin layers on top so
+       discovery shelves don't crowd each other when several render in a
+       row (This Season → Popular this Season → Most Anticipated → Your
+       stats → Continue Watching). */
+    margin-bottom: 0.75rem;
+}
+
+@media (min-width: 768px) {
+    .dashboard-section {
+        margin-bottom: 1.25rem;
+    }
 }
 
 .dashboard-section-header {
@@ -2124,21 +2215,93 @@ body.modal-open {
     margin: 0;
 }
 
-.dashboard-section-link {
+/* Section-header "View all" link. Was cobalt blue + an inline → glyph;
+   now matches the rest of the app's accessory-text palette (the same grey
+   used by .dashboard-section-link-muted, page subtitles, etc.) so the
+   header reads as a quiet wayfinder rather than competing visually with
+   the section title or the poster cards below. The SVG arrow scales
+   independently of the label font-size so we can bump just the chevron
+   without making the whole label bulky. */
+.dashboard-section-link,
+.dashboard-section-link:link,
+.dashboard-section-link:visited {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
     font-size: 0.85rem;
-    color: #3B82F6;
+    color: #999;
+    text-decoration: none;
+    transition: color 0.15s;
+}
+
+.dashboard-section-link:hover,
+.dashboard-section-link:focus {
+    color: #fff;
     text-decoration: none;
 }
 
-.dashboard-section-link:hover {
-    text-decoration: underline;
+.dashboard-section-link-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    transition: transform 0.15s;
+}
+
+.dashboard-section-link:hover .dashboard-section-link-icon,
+.dashboard-section-link:focus .dashboard-section-link-icon {
+    transform: translateX(2px);
 }
 
 /* Muted variant of the section-header accessory link — used for "via <service>"
-   in the stats header where the label is informational, not clickable. */
+   in the stats header where the label is informational, not clickable.
+   Shares the same grey as the active link so the row reads consistently. */
 .dashboard-section-link-muted {
     font-size: 0.8rem;
+    color: #999;
+}
+
+/* Grouping wrapper around the muted attribution + the refresh icon so they
+   sit side-by-side on the trailing edge of the section header. */
+.dashboard-section-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+}
+
+/* Force-refresh icon button — surfaces the ?nocache=1 escape hatch for users
+   whose stats look wrong after an out-of-band write. Kept small and muted
+   so it doesn't distract from the stats themselves; only the hover state
+   highlights it. */
+.dashboard-refresh-btn,
+.dashboard-refresh-btn:link,
+.dashboard-refresh-btn:visited {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
     color: #777;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    text-decoration: none;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.dashboard-refresh-btn:hover,
+.dashboard-refresh-btn:focus {
+    color: #fff;
+    border-color: rgba(59, 130, 246, 0.4);
+    background: rgba(59, 130, 246, 0.12);
+    text-decoration: none;
+}
+
+/* Library variant sits inline inside the page-subtitle line; nudge it up a
+   hair so the icon centres against the text baseline. */
+.library-refresh-btn {
+    margin-left: 0.5rem;
+    vertical-align: middle;
+    transform: translateY(-1px);
 }
 
 /* Stats strip — flex-wrap row of 2-4 cells (Watching / Completed always; Hours
@@ -2533,6 +2696,15 @@ a.stats-cell-link:hover {
    on touch devices (no :hover) it stays visible because there's no hover
    trigger to reveal it. The button is inside an <a> so the click handler
    in JS calls preventDefault() to stop the parent anchor from navigating. */
+/* Hide the +1 quick-action button on every poster card. The Razor render,
+   the data-meta-progress / data-meta-status attribute plumbing, and the
+   click handler in manage-entry-modal.js are all still in place — remove
+   this single rule to bring the button back visible across every poster
+   grid (Library / Discover / dashboard Continue Watching shelf). */
+.library-card-plus {
+    display: none !important;
+}
+
 .library-card-plus {
     position: absolute;
     right: 6px;
@@ -2846,6 +3018,150 @@ a.stats-cell-link:hover {
     margin-top: 0.5rem;
 }
 
+/* ── External source chips (AniList / MAL / Kitsu / IMDb) ── */
+/* Sits in the hero just under the genre chips. Each chip is brand-coloured
+   so the row reads as a row of provider marks at a glance — same shape /
+   size as a genre chip but with the service's own brand fill instead of
+   the generic cobalt-tinted background. The leading "mark" badge is a
+   bold one-letter glyph (or "IMDb" for the only multi-letter mark) on a
+   slightly-darker surface so it reads as a discrete logo-token even at
+   16px high. Real provider logos would need bespoke SVGs and licensing
+   consideration, so we go letter-mark for now. */
+.anime-detail-sources {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-top: 0.5rem;
+}
+
+.source-chip,
+.source-chip:link,
+.source-chip:visited {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.12rem 0.55rem 0.12rem 0.18rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.35;
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: transform 0.15s, box-shadow 0.15s, filter 0.15s;
+}
+
+.source-chip:hover,
+.source-chip:focus {
+    text-decoration: none;
+    transform: translateY(-1px);
+    filter: brightness(1.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.source-chip-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 0.3rem;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.35);
+    font-size: 0.65rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+}
+
+/* Mobile compression: at narrow viewports the AniList + MyAnimeList + Kitsu
+   + IMDb row would wrap to a second line even after the global shrink, so
+   tighten a touch more so all four fit on one line down to ~360px-wide
+   phones. Anything narrower than that and a wrap is fine — the row is
+   still informational, not load-bearing. */
+@media (max-width: 480px) {
+    .source-chip,
+    .source-chip:link,
+    .source-chip:visited {
+        font-size: 0.68rem;
+        padding: 0.1rem 0.45rem 0.1rem 0.14rem;
+        gap: 0.25rem;
+    }
+
+    .source-chip-mark {
+        min-width: 16px;
+        height: 16px;
+        padding: 0 0.28rem;
+        font-size: 0.6rem;
+    }
+}
+
+/* AniList — official brand cobalt. Light text on the saturated cobalt
+   background reads as the AniList page header itself. */
+.source-chip-anilist,
+.source-chip-anilist:link,
+.source-chip-anilist:visited {
+    background: #02A9FF;
+    color: #fff;
+}
+
+/* MyAnimeList — official brand navy. */
+.source-chip-mal,
+.source-chip-mal:link,
+.source-chip-mal:visited {
+    background: #2E51A2;
+    color: #fff;
+}
+
+/* Kitsu — official brand orange-red (their "Kitsu" wordmark colour). */
+.source-chip-kitsu,
+.source-chip-kitsu:link,
+.source-chip-kitsu:visited {
+    background: #F75239;
+    color: #fff;
+}
+
+/* IMDb — signature gold/yellow. Dark text on yellow matches IMDb's own
+   header treatment and stays readable at chip size. */
+.source-chip-imdb,
+.source-chip-imdb:link,
+.source-chip-imdb:visited {
+    background: #F5C518;
+    color: #1a1a1a;
+}
+
+.source-chip-imdb .source-chip-mark {
+    background: rgba(0, 0, 0, 0.18);
+    color: #1a1a1a;
+    /* "IMDb" is wider than the single-letter marks on the other chips, so
+       its mark badge stays a touch larger and pads out enough to read
+       comfortably even at the mobile font-size tier. */
+    font-size: 0.6rem;
+    padding: 0 0.35rem;
+}
+
+/* The base .source-chip padding (left 0.18rem / right 0.55rem) was tuned
+   for the mark+label pairing. IMDb is the only mark-only chip, so it
+   needs symmetric padding to keep the badge visually centered instead
+   of hugging the left edge. */
+.source-chip-imdb,
+.source-chip-imdb:link,
+.source-chip-imdb:visited {
+    padding: 0.12rem 0.18rem;
+    justify-content: center;
+}
+
+@media (max-width: 480px) {
+    .source-chip-imdb,
+    .source-chip-imdb:link,
+    .source-chip-imdb:visited {
+        padding: 0.1rem 0.14rem;
+    }
+
+    .source-chip-imdb .source-chip-mark {
+        font-size: 0.56rem;
+        padding: 0 0.28rem;
+    }
+}
+
 /* User-state chip living inside the badges row alongside score + air
    status — "Watching · Ep 5/12 · Your score: 8.0". Cobalt-tinted to
    read as personal data, distinct from the neutral score/status pills
@@ -2981,6 +3297,103 @@ button.anime-detail-user-state:hover {
 .season-tab-active:hover {
     background: #3B82F6;
     color: #fff;
+}
+
+/* Episode-section header with the collapse / expand control. The
+   .anime-detail-section-title above this had `margin: 0 0 0.6rem` to
+   leave room for the list below; in this header context we need it to
+   sit on the baseline with the toggle button, so override the bottom
+   margin to 0 and let .anime-detail-episodes-header own the spacing
+   (via the body's own padding / wrap-level gap). */
+.anime-detail-episodes-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.6rem;
+}
+
+.anime-detail-episodes-header .anime-detail-section-title {
+    margin: 0;
+}
+
+/* The toggle button itself — quiet grey to match the dashboard's
+   "View all" / "via X" accessory styling. Chevron flips via a CSS
+   transform when the section is collapsed. */
+.anime-detail-episodes-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.25rem 0.5rem;
+    background: transparent;
+    border: 0;
+    color: #999;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: 0.4rem;
+    transition: color 0.15s, background 0.15s;
+}
+
+.anime-detail-episodes-toggle:hover,
+.anime-detail-episodes-toggle:focus-visible {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.anime-detail-episodes-toggle-icon {
+    transition: transform 0.2s;
+}
+
+/* Collapsed state: rotate the chevron 180° so it points up (Stremio
+   pattern: chevron-down = expanded, chevron-up = "expand me"). */
+.anime-detail-episodes-wrap[data-collapsed="true"] .anime-detail-episodes-toggle-icon {
+    transform: rotate(-180deg);
+}
+
+/* Episode body: caps the list at ~600px tall so long-running shows
+   don't dominate the page. overflow-y:auto only kicks in when the
+   content overflows (~7-8 rows fit before scroll), so 12-episode
+   shows render naturally without a visible scrollbar. Negative side-
+   margins compensate for the inner padding-right we add to keep the
+   list edge clear of the scrollbar gutter on Chromium. */
+.anime-detail-episodes-body {
+    max-height: 600px;
+    overflow-y: auto;
+    padding-right: 0.35rem;
+    /* Custom thin scrollbar so the inner scroll doesn't feel like a
+       second OS chrome glued onto the page. Falls back to the platform
+       default on browsers without -webkit-scrollbar support. */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.anime-detail-episodes-body::-webkit-scrollbar {
+    width: 8px;
+}
+
+.anime-detail-episodes-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.anime-detail-episodes-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+}
+
+.anime-detail-episodes-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+/* Collapsed state: cap the body at 0 height. We keep `display` intact
+   (don't switch to display:none) so the chevron's CSS transition stays
+   visible and the DOM stays addressable for screen readers/automation.
+   overflow:hidden hides the clipped content; padding-right is reset
+   so the scrollbar gutter doesn't peek through. */
+.anime-detail-episodes-wrap[data-collapsed="true"] .anime-detail-episodes-body {
+    max-height: 0;
+    overflow: hidden;
+    padding-right: 0;
 }
 
 /* ── Episode list (Stremio-shaped) ── */
@@ -3169,12 +3582,17 @@ ol.anime-detail-episodes-busy {
 /* Trailer thumbnail-with-play-overlay card. Clickable, links out to
    YouTube; hover slightly lifts + brightens the play glyph so the
    click affordance feels intentional. Aspect-ratio 16:9 matches the
-   thumbnail, max-width caps it on desktop where main is 1100px. */
+   thumbnail, max-width keeps it compact on the page-wide section
+   without dominating the layout — ~560px reads as a "preview" card
+   rather than a hero player. margin: 0 auto centres it within its
+   full-width section so the card doesn't hug the left edge with empty
+   space to its right. */
 .anime-detail-trailer-card {
     position: relative;
     display: block;
     width: 100%;
-    max-width: 720px;
+    max-width: 560px;
+    margin: 0 auto;
     aspect-ratio: 16 / 9;
     border-radius: 0.85rem;
     overflow: hidden;
@@ -3205,6 +3623,25 @@ ol.anime-detail-episodes-busy {
 .anime-detail-trailer-card:hover .anime-detail-trailer-thumb {
     filter: saturate(1);
     transform: scale(1.03);
+}
+
+/* Embedded iframe fills the same 16:9 card. The parent already carries
+   aspect-ratio + overflow:hidden + border-radius, so we just stretch the
+   iframe to 100% and remove the chrome on the playing state. */
+.anime-detail-trailer-iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+}
+
+/* Once playback starts the card stops being a clickable affordance — kill
+   the hover lift / shadow we use on the thumbnail variant so the player
+   doesn't jiggle when the cursor passes over. */
+.anime-detail-trailer-card.anime-detail-trailer-playing,
+.anime-detail-trailer-card.anime-detail-trailer-playing:hover {
+    transform: none;
+    box-shadow: none;
 }
 
 /* Soft dark shade overlay so the play glyph reads on bright thumbnails

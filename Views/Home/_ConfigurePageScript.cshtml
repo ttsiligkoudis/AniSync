@@ -107,7 +107,9 @@
         flags3 |= inverseBitFor('#showManageEntry', initialFlags3, 0x04);
         flags3 |= inverseBitFor('#autoTrackProgress', initialFlags3, 0x08);
         flags3 |= bitFor('#discoverOnlyAiring',     initialFlags3, 0x10);
-        flags3 |= inverseBitFor('#groupSeasons',    initialFlags3, 0x20);
+        // enableSeasonGrouping is positive-sense (1 = grouping ON, 0 = OFF default),
+        // so the bit follows the checkbox state directly — no inversion.
+        flags3 |= bitFor('#groupSeasons',           initialFlags3, 0x20);
 
         return { flags1: flags1, flags2: flags2, flags3: flags3 };
     }

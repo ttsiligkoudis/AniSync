@@ -42,5 +42,20 @@ namespace AnimeList.Models
         public int SeasonCurrentlyAiring { get; set; }
         public int SeasonNewThis { get; set; }
         public int SeasonTotal { get; set; }
+
+        // Top-15 popular slices for the current and next seasons, sorted by
+        // AniList's POPULARITY_DESC. Same poster-grid Meta shape the
+        // detail-page Recommended carousel uses, so the view can drop them
+        // into the existing _PosterGrid scroll-row partial. Empty list means
+        // the upstream blip'd or the season has no entries yet — view hides
+        // the shelf in that case.
+        public List<Meta> PopularThisSeason { get; set; } = [];
+        public List<Meta> MostAnticipated { get; set; } = [];
+
+        // Anime with at least one episode airing during today's UTC window.
+        // One row per show (multi-cour drops collapse into a single card).
+        // Cached server-side until the next UTC midnight so the shelf only
+        // hits AniList once per calendar day.
+        public List<Meta> NewEpisodesToday { get; set; } = [];
     }
 }

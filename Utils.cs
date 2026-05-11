@@ -464,7 +464,7 @@ namespace AnimeList
         /// route (Library / Discover / dashboard) where there's no URL config blob to
         /// decode, only a UID resolved via <see cref="IConfigStore.FindUidByIdentityAsync"/>.
         /// Reads the same flag bytes ResolveConfigAsync would and applies them, so toggles
-        /// like <c>disableSeasonGrouping</c> propagate to the web app's catalog renders
+        /// like <c>enableSeasonGrouping</c> propagate to the web app's catalog renders
         /// just like they do to the addon's path-config endpoints.
         /// Returns null when uid is missing or empty (anonymous visitors).
         /// </summary>
@@ -505,7 +505,7 @@ namespace AnimeList
             cfg.hideManageEntry = (flags3 & 0x04) != 0;
             cfg.disableAutoTrack = (flags3 & 0x08) != 0;
             cfg.discoverOnlyAiring = (flags3 & 0x10) != 0;
-            cfg.disableSeasonGrouping = (flags3 & 0x20) != 0;
+            cfg.enableSeasonGrouping = (flags3 & 0x20) != 0;
         }
 
         /// <summary>
@@ -545,7 +545,7 @@ namespace AnimeList
             if (cfg.hideManageEntry)        f3 |= 0x04;
             if (cfg.disableAutoTrack)       f3 |= 0x08;
             if (cfg.discoverOnlyAiring)     f3 |= 0x10;
-            if (cfg.disableSeasonGrouping)  f3 |= 0x20;
+            if (cfg.enableSeasonGrouping)   f3 |= 0x20;
 
             return (f1, f2, f3);
         }

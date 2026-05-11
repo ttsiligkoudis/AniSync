@@ -49,11 +49,11 @@ namespace AnimeList.Controllers
                     return new JsonResult(new { metas = ExpiredMetas() });
                 }
 
-                // The "Group anime seasons" toggle defaults ON (disableSeasonGrouping=false);
-                // when the user opts out, services emit their native id per cour instead of
-                // collapsing a franchise via the IMDb/TMDB cross-service mapping.
+                // The "Group anime seasons" toggle defaults OFF (enableSeasonGrouping=false);
+                // when the user opts in, services collapse a franchise's cours via the IMDb/
+                // TMDB cross-service mapping instead of emitting each cour's native id.
                 var configuration = await ResolveConfigAsync(config, _configStore);
-                var groupSeasons = configuration?.disableSeasonGrouping != true;
+                var groupSeasons = configuration?.enableSeasonGrouping == true;
 
                 // Search always runs with groupSeasons=false so the per-service dedup
                 // doesn't rewrite a movie's name to the shortest among entries that

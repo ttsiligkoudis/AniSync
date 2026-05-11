@@ -1,6 +1,7 @@
 @model ConfigureViewModel
 @{
     ViewData["ActiveNav"] = "configure";
+    ViewData["Title"] = "Account";
     // linkedByService is recomputed on every Model.LinkedByService access, so
     // cache it once here for the picker + the Linked Accounts loop to share.
     // (stremioStr / cfg moved to Stremio.cshtml along with the addon sections.)
@@ -173,39 +174,12 @@
         </section>
     }
 
-    @* Site preferences — settings that affect both the addon catalog
-       (Stremio side) AND the web app's catalogs (Library / Discover /
-       dashboard). The toggle is also rendered on /stremio so users
-       editing addon settings don't have to bounce here for it; both
-       pages bind to the same #groupSeasons input id. *@
-    @if (!Model.AnonymousUser)
-    {
-        <section class="section-card">
-            <span class="section-title">Site preferences</span>
-            <p class="section-description">
-                Settings that affect both the website catalogs and the Stremio
-                addon. Save commits every toggle on this page to your account.
-            </p>
-
-            <div class="streams-grid">
-                <div class="stream-option">
-                    <div class="option-name-wrap">
-                        <span class="option-name">Group anime seasons</span>
-                        <span class="option-name-sub">Collapse multi-cour franchises into a single catalog card. Off shows every cour separately.</span>
-                    </div>
-                    <label class="switch">
-                        <input type="checkbox" id="groupSeasons" @(Model.GroupSeasons ? "checked" : "") />
-                        <span class="slider"></span>
-                    </label>
-                </div>
-            </div>
-
-            <div class="btn-action-row">
-                <button id="savePreferencesBtn" type="button" class="btn-primary-action btn-login">Save</button>
-                <span id="savePreferencesStatus" class="save-preferences-status" aria-live="polite"></span>
-            </div>
-        </section>
-    }
+    @* Site preferences section removed — its only toggle ("Group anime
+       seasons") was migrated to Stremio-only behaviour and the matching
+       input lives on /stremio. The section + its Save button are hidden
+       rather than rebuilt from scratch when a new site-only pref shows
+       up — add the section markup back with the new toggle inside when
+       that happens. *@
 
     @* Stremio-addon-specific config (catalogs, streams, install URL,
        scrobble webhook) used to live inline below this line; it's now

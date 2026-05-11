@@ -203,6 +203,13 @@ builder.Services.AddSingleton<IAniSkipService, AniSkipService>();
 // request, and AnimeFillerList scrapes are expensive enough that we really want
 // them cached for days, not seconds.
 builder.Services.AddSingleton<IFillerListService, FillerListService>();
+// Per-user list cache used by the dashboard + library web-app pages. Singleton
+// so the cache outlives individual requests — invalidation happens explicitly
+// on every save/delete (controller-side) and every linked-secondary fan-out
+// write (SyncService-side), with a 10-minute TTL backstop for cross-channel
+// writes (Plex/Jellyfin scrobble webhooks, edits made on the provider's own
+// website, etc.).
+builder.Services.AddSingleton<IUserListCache, UserListCache>();
 
 var app = builder.Build();
 

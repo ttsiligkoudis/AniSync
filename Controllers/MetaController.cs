@@ -17,9 +17,10 @@ namespace AnimeList.Controllers
         private readonly ISyncService _syncService;
         private readonly IFillerListService _fillerListService;
         private readonly IConfigStore _configStore;
+        private readonly IUserListCache _listCache;
         private readonly ILogger<MetaController> _logger;
 
-        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService, ISyncService syncService, IFillerListService fillerListService, IConfigStore configStore, ILogger<MetaController> logger)
+        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService, ISyncService syncService, IFillerListService fillerListService, IConfigStore configStore, IUserListCache listCache, ILogger<MetaController> logger)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
@@ -31,6 +32,7 @@ namespace AnimeList.Controllers
             _syncService = syncService;
             _fillerListService = fillerListService;
             _configStore = configStore;
+            _listCache = listCache;
             _logger = logger;
         }
 
@@ -40,7 +42,7 @@ namespace AnimeList.Controllers
             // Mirror CatalogController so meta.id stays in the same id space the
             // catalog emitted — clicking through to a card opens the matching detail.
             var configuration = await ResolveConfigAsync(config, _configStore);
-            var groupSeasons = configuration?.disableSeasonGrouping != true;
+            var groupSeasons = configuration?.enableSeasonGrouping == true;
 
             dynamic result = null;
 
@@ -543,6 +545,10 @@ namespace AnimeList.Controllers
                     // Mirror the delete to every linked secondary account. Best-effort: per-target
                     // failures inside SyncService are swallowed so the primary delete still wins.
                     await _syncService.FanOutDeleteAsync(tokenData, request.Id, request.Season);
+                    // Primary's cached lists are now stale — drop them so the next dashboard /
+                    // library render reflects the delete. Linked-secondary caches are flushed
+                    // inside SyncService.FanOutDeleteAsync as each target write succeeds.
+                    _listCache.Invalidate(tokenData);
                     return new JsonResult(new { success = true });
                 }
 
@@ -571,6 +577,7 @@ namespace AnimeList.Controllers
                 await _syncService.FanOutSaveAsync(tokenData, request.Id, request.Season, request.Progress,
                     request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
 
+                _listCache.Invalidate(tokenData);
                 return new JsonResult(new { success = true });
             }
             catch (Exception ex)
@@ -686,6 +693,7 @@ namespace AnimeList.Controllers
                             break;
                     }
                     await _syncService.FanOutDeleteAsync(tokenData, request.Id, request.Season);
+                    _listCache.Invalidate(tokenData);
                     return new JsonResult(new { success = true });
                 }
 
@@ -712,6 +720,7 @@ namespace AnimeList.Controllers
                 await _syncService.FanOutSaveAsync(tokenData, request.Id, request.Season, request.Progress,
                     request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
 
+                _listCache.Invalidate(tokenData);
                 return new JsonResult(new { success = true });
             }
             catch (Exception ex)

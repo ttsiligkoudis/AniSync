@@ -105,10 +105,54 @@ namespace AnimeList.Models
         public string type => "Trailer";
     }
 
-    public class TrailerStream(dynamic id, dynamic title)
+    public class TrailerStream
     {
-        public string title { get; set; } = title;
-        public string ytId { get; set; } = id;
+        public string title { get; set; }
+        public string ytId { get; set; }
+
+        public TrailerStream(dynamic id, dynamic title)
+        {
+            this.title = title;
+            this.ytId = ExtractYouTubeId((string)id);
+        }
+
+        // AniList sometimes hands us trailer.id with stray query parameters
+        // appended ("ZrQoGBYHzIU&source_ve_path=MTc4NDI0" instead of the bare
+        // 11-char video id). Plugging that into youtube.com/embed/{id} yields a
+        // malformed embed URL that YouTube rejects with "error 153 — video
+        // player configuration error". Other providers (MAL / Kitsu / TMDB)
+        // generally hand us a clean id, but normalising here means every
+        // upstream gets the same defence and we don't have to chase each
+        // service's quirks individually.
+        //
+        // Order of attempts:
+        //   1. Fast path — already an exact 11-char id-shaped string. No regex.
+        //   2. Anchored match: an 11-char id preceded by a YouTube-URL
+        //      separator (=, /, ?, &) and not abutting another id char on
+        //      either side. Handles ?v=, /embed/, /shorts/, youtu.be/, etc.
+        //   3. Greedy fallback: first 11-char id-char run anywhere in the
+        //      string. Catches the AniList "id with junk after" shape.
+        //   4. Give up and return the original — keeps the legacy fallback
+        //      semantics so a future format we haven't anticipated still
+        //      produces *some* href to YouTube even if the embed fails.
+        private static string ExtractYouTubeId(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return raw;
+
+            if (raw.Length == 11 && raw.All(IsYouTubeIdChar))
+                return raw;
+
+            var anchored = System.Text.RegularExpressions.Regex.Match(
+                raw, @"(?:^|[?&/=])([A-Za-z0-9_-]{11})(?:[^A-Za-z0-9_-]|$)");
+            if (anchored.Success) return anchored.Groups[1].Value;
+
+            var loose = System.Text.RegularExpressions.Regex.Match(
+                raw, @"[A-Za-z0-9_-]{11}");
+            return loose.Success ? loose.Value : raw;
+        }
+
+        private static bool IsYouTubeIdChar(char c) =>
+            char.IsLetterOrDigit(c) || c == '_' || c == '-';
     }
 
     public class Video

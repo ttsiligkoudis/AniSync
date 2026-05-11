@@ -1,6 +1,7 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json;
 using System.Diagnostics;
 
@@ -18,6 +19,14 @@ public class HomeController : Controller
     private readonly IKitsuService _kitsuService;
     private readonly IMalService _malService;
     private readonly IAnilistFallback _anilistFallback;
+    private readonly IUserListCache _listCache;
+    private readonly IMemoryCache _dashboardCache;
+
+    // Day-stale rankings are indistinguishable from live ones for the
+    // popularity shelves — same TTL the seasonal-stats cache uses inside
+    // AnilistFallback. Kept private here because only the dashboard's
+    // popular-by-season helper needs it.
+    private static readonly TimeSpan PopularBySeasonCacheDuration = TimeSpan.FromHours(24);
 
     public HomeController(
         ITokenService tokenService,
@@ -25,7 +34,9 @@ public class HomeController : Controller
         IAnilistService anilistService,
         IKitsuService kitsuService,
         IMalService malService,
-        IAnilistFallback anilistFallback)
+        IAnilistFallback anilistFallback,
+        IUserListCache listCache,
+        IMemoryCache dashboardCache)
     {
         _tokenService = tokenService;
         _configStore = configStore;
@@ -33,6 +44,8 @@ public class HomeController : Controller
         _kitsuService = kitsuService;
         _malService = malService;
         _anilistFallback = anilistFallback;
+        _listCache = listCache;
+        _dashboardCache = dashboardCache;
     }
 
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
@@ -41,7 +54,7 @@ public class HomeController : Controller
         return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
     }
 
-    public async Task<IActionResult> Index()
+    public async Task<IActionResult> Index(bool nocache = false)
     {
         // The dashboard is the front door for the web app: anonymous visitors see
         // login CTAs, signed-in users see navigation tiles plus a small slice of
@@ -93,17 +106,20 @@ public class HomeController : Controller
                 contributingNames.Add(lt.Service.ToString());
             }
 
-            // Honour the user's "Group anime seasons" toggle so the dashboard
-            // slice matches what /library renders for the same identity.
-            var dashboardConfig = await GetConfigByUidAsync(uid, _configStore);
-            var groupSeasons = dashboardConfig?.disableSeasonGrouping != true;
+            // Site UI is always ungrouped — the enableSeasonGrouping pref now
+            // only governs Stremio's catalog / meta endpoints. On the dashboard
+            // we always want each cour visible as its own card so Continue
+            // Watching matches what the user sees in /library.
+            const bool groupSeasons = false;
 
             // Fan-out fetches: 2 lists × N services in parallel. SafeFetchListAsync
             // wraps each call in a try/catch so one provider rate-limiting or
             // returning a 5xx doesn't abort the whole stats panel — that provider
-            // just contributes zero entries to the union.
-            var watchingTasks = contributingTokens.Select(t => SafeFetchListAsync(t, ListType.Current, groupSeasons)).ToList();
-            var completedTasks = contributingTokens.Select(t => SafeFetchListAsync(t, ListType.Completed, groupSeasons)).ToList();
+            // just contributes zero entries to the union. Results are served from
+            // the per-user list cache (10 min TTL) when present; ?nocache=1 forces
+            // a refresh, which the dashboard's "Refresh" button uses.
+            var watchingTasks = contributingTokens.Select(t => SafeFetchListAsync(t, ListType.Current, groupSeasons, nocache)).ToList();
+            var completedTasks = contributingTokens.Select(t => SafeFetchListAsync(t, ListType.Completed, groupSeasons, nocache)).ToList();
             await Task.WhenAll(watchingTasks.Concat(completedTasks));
 
             var dedupedWatching = new Dictionary<string, Meta>(StringComparer.Ordinal);
@@ -170,12 +186,25 @@ public class HomeController : Controller
                 .ToList();
         }
 
-        // Seasonal stats apply to every visitor (anonymous + logged-in)
-        // since they describe the whole AniList catalog, not the user's
-        // list. Fired alongside the user-specific list fetches earlier
-        // when present, or stand-alone for anonymous renders. Failures
-        // swallow into zeros — the view hides the strip when total is 0.
-        var (seasonAiring, seasonNew, seasonTotal) = await _anilistFallback.GetSeasonStatsAsync();
+        // Seasonal stats + popularity shelves apply to every visitor
+        // (anonymous + logged-in) since they describe the whole AniList
+        // catalog, not the user's list. All three calls run in parallel —
+        // the popularity shelves hit a different sort/perPage of the same
+        // GraphQL endpoint as the stats query and are independently 24h-
+        // cached by AnilistFallback. Failures swallow into empty results
+        // and the view hides the corresponding shelves.
+        var seasonStatsTask = _anilistFallback.GetSeasonStatsAsync();
+        // Re-uses the same _anilistService.GetAnimeListAsync(ListType.Seasonal,
+        // genre: "This Season" / "Next Season") path the public Discover page
+        // and the /api/v1/discover endpoint serve — same upstream query, same
+        // POPULARITY_DESC default sort — wrapped in a 24h IMemoryCache here
+        // so the dashboard doesn't pay an AniList round-trip on every visit.
+        var popularThisSeasonTask = GetPopularBySeasonAsync(SeasonCurrent);
+        var mostAnticipatedTask = GetPopularBySeasonAsync(SeasonNext);
+        var newEpisodesTodayTask = _anilistFallback.GetNewEpisodesTodayAsync();
+        await Task.WhenAll(seasonStatsTask, popularThisSeasonTask, mostAnticipatedTask, newEpisodesTodayTask);
+
+        var (seasonAiring, seasonNew, seasonTotal) = await seasonStatsTask;
 
         return View(new DashboardViewModel
         {
@@ -191,6 +220,9 @@ public class HomeController : Controller
             SeasonCurrentlyAiring = seasonAiring,
             SeasonNewThis = seasonNew,
             SeasonTotal = seasonTotal,
+            PopularThisSeason = popularThisSeasonTask.Result,
+            MostAnticipated = mostAnticipatedTask.Result,
+            NewEpisodesToday = newEpisodesTodayTask.Result,
         });
     }
 
@@ -210,12 +242,63 @@ public class HomeController : Controller
         return metas ?? [];
     }
 
+    // Cache-wrapping helper around the existing AnilistService catalog path.
+    // Dispatches the same query the public Discover page uses — POPULARITY_DESC
+    // sort over the season's media list — and slices to the top 15 for the
+    // dashboard shelf. groupSeasons=false keeps each result's id in the
+    // anilist:N space so AnimeController.Detail can resolve it per-user via
+    // the cross-service mapping on click. Cache key includes the resolved
+    // (season, year) tuple so the entry naturally rotates when AniList moves
+    // to the next quarterly season; non-empty results only so a transient
+    // upstream blip doesn't lock in an empty shelf for 24h.
+    private async Task<List<Meta>> GetPopularBySeasonAsync(string seasonOption)
+    {
+        var (season, year) = GetSeasonAndYear(seasonOption);
+        var cacheKey = $"dashboard:popular-by-season:{season}:{year}";
+
+        if (_dashboardCache.TryGetValue<List<Meta>>(cacheKey, out var cached) && cached != null)
+            return cached;
+
+        try
+        {
+            var list = await _anilistService.GetAnimeListAsync(
+                tokenData: null,
+                list: ListType.Seasonal,
+                genre: seasonOption,
+                groupSeasons: false);
+
+            var top = list?.Take(15).ToList() ?? [];
+
+            if (top.Count > 0)
+            {
+                _dashboardCache.Set(cacheKey, top, new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = PopularBySeasonCacheDuration,
+                });
+            }
+            return top;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     // Cross-provider variant: catches per-service exceptions so one rate-limited
     // or 5xx'd provider doesn't abort the whole stats panel. The other providers
     // still contribute their data; the failing one contributes an empty list.
-    private async Task<List<Meta>> SafeFetchListAsync(TokenData tokenData, ListType listType, bool groupSeasons = true)
+    // Goes through IUserListCache so repeat visits (Home → Library → Home) reuse
+    // the same fetch result for up to 10 minutes; bypassCache=true skips the
+    // cached entry and refreshes it from upstream.
+    private async Task<List<Meta>> SafeFetchListAsync(TokenData tokenData, ListType listType,
+        bool groupSeasons = true, bool bypassCache = false)
     {
-        try { return await FetchListAsync(tokenData, listType, groupSeasons); }
+        try
+        {
+            return await _listCache.GetOrFetchAsync(tokenData, listType, groupSeasons,
+                () => FetchListAsync(tokenData, listType, groupSeasons),
+                bypassCache);
+        }
         catch { return []; }
     }
 

@@ -40,6 +40,7 @@ namespace AnimeList.Controllers
         private readonly IConfigStore _configStore;
         private readonly ISyncService _syncService;
         private readonly IAnimeMappingService _mappingService;
+        private readonly IUserListCache _listCache;
         private readonly ILogger<UserApiController> _logger;
 
         public UserApiController(
@@ -50,6 +51,7 @@ namespace AnimeList.Controllers
             IConfigStore configStore,
             ISyncService syncService,
             IAnimeMappingService mappingService,
+            IUserListCache listCache,
             ILogger<UserApiController> logger)
         {
             _tokenService = tokenService;
@@ -59,6 +61,7 @@ namespace AnimeList.Controllers
             _configStore = configStore;
             _syncService = syncService;
             _mappingService = mappingService;
+            _listCache = listCache;
             _logger = logger;
         }
 
@@ -210,6 +213,7 @@ namespace AnimeList.Controllers
                             break;
                     }
                     await _syncService.FanOutDeleteAsync(tokenData, id, season);
+                    _listCache.Invalidate(tokenData);
                     return new JsonResult(new SaveEntryResponse(true, tokenData.anime_service.ToString(), Removed: true));
                 }
 
@@ -235,6 +239,7 @@ namespace AnimeList.Controllers
                 await _syncService.FanOutSaveAsync(tokenData, id, season, request.Progress,
                     translatedStatus, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
 
+                _listCache.Invalidate(tokenData);
                 return new JsonResult(new SaveEntryResponse(true, tokenData.anime_service.ToString(), Removed: null));
             }
             catch (UnauthorizedAccessException ex)
@@ -279,6 +284,7 @@ namespace AnimeList.Controllers
                         break;
                 }
                 await _syncService.FanOutDeleteAsync(tokenData, id, season);
+                _listCache.Invalidate(tokenData);
                 return new JsonResult(new SaveEntryResponse(true, tokenData.anime_service.ToString(), null));
             }
             catch (UnauthorizedAccessException ex)
@@ -385,6 +391,11 @@ namespace AnimeList.Controllers
                         results.Add(new BulkSaveResult(entry.Id, false, null, ex.Message));
                     }
                 }
+
+                // One invalidation for the whole bulk run — every entry potentially
+                // touches a different list type, so the per-entry blast radius
+                // already covers all six list types via the all-types nuke.
+                if (ok > 0) _listCache.Invalidate(tokenData);
 
                 return new JsonResult(new BulkSaveResponse(
                     Primary: tokenData.anime_service.ToString(),

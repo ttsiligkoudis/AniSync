@@ -46,11 +46,25 @@
                     : $"Ep {meta.progress!.Value}")
                 : null;
 
+            // Razor suppresses attributes whose value is null but emits them
+            // with an empty value when the value is "" — null-coalesce so
+            // the data-* attributes are absent when there's no entry, instead
+            // of present-but-empty (which would still flip on the +1 button's
+            // visibility check). Building these as string?s also keeps Razor
+            // from HTML-encoding the value's framing quotes the way the old
+            // @($"...") expressions did — that emitted
+            // `data-meta-status=&quot;current&quot;`, which the browser parsed
+            // as an unquoted value of `"current"` with literal quote characters,
+            // breaking the +1 quick-action.
+            string entryStatusAttr = string.IsNullOrEmpty(meta.entryStatus) ? null : meta.entryStatus;
+            string progressAttr = meta.progress.HasValue ? meta.progress.Value.ToString() : null;
+            string totalAttr = (meta.episodes is int totalE && totalE > 0) ? totalE.ToString() : null;
+
             <a class="library-card" href="@detailHref" title="@meta.name"
                data-meta-id="@meta.id" data-meta-name="@meta.name"
-               @(string.IsNullOrEmpty(meta.entryStatus) ? "" : $"data-meta-status=\"{meta.entryStatus}\"")
-               @(meta.progress.HasValue ? $"data-meta-progress=\"{meta.progress.Value}\"" : "")
-               @(meta.episodes is int totalE && totalE > 0 ? $"data-meta-total=\"{totalE}\"" : "")>
+               data-meta-status="@entryStatusAttr"
+               data-meta-progress="@progressAttr"
+               data-meta-total="@totalAttr">
                 <div class="library-card-poster-wrap">
                     @if (!string.IsNullOrEmpty(meta.poster))
                     {

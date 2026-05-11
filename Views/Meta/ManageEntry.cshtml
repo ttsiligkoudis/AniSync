@@ -5,6 +5,7 @@
     var isMal = Model.AnimeService == AnimeService.MyAnimeList;
     var isSeries = Model.Type == MetaType.series.ToString();
     var hasSeasons = Model.Seasons?.Count > 0;
+    ViewData["Title"] = string.IsNullOrEmpty(Model.Name) ? "Manage entry" : $"Edit {Model.Name}";
 }
 
 <div class="manage-entry-page">

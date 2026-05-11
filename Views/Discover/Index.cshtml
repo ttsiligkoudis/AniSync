@@ -20,6 +20,12 @@
     var hasSearch = !string.IsNullOrEmpty(Model.Search);
     var hasGenre = !string.IsNullOrEmpty(Model.Genre);
     var activeLabel = labels[Model.ActiveList];
+
+    // Distinguish browser-history rows: "Search: foo · Discover" vs "Action ·
+    // Discover" vs "Trending · Discover".
+    ViewData["Title"] = hasSearch ? $"Search: {Model.Search} · Discover"
+        : hasGenre ? $"{Model.Genre} · Discover"
+        : $"{activeLabel} · Discover";
 }
 
 <p class="page-subtitle">

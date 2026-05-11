@@ -19,19 +19,22 @@ namespace AnimeList.Controllers
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
         private readonly IConfigStore _configStore;
+        private readonly IUserListCache _listCache;
 
         public LibraryController(
             ITokenService tokenService,
             IAnilistService anilistService,
             IKitsuService kitsuService,
             IMalService malService,
-            IConfigStore configStore)
+            IConfigStore configStore,
+            IUserListCache listCache)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
             _configStore = configStore;
+            _listCache = listCache;
         }
 
         // The six list types the user-list catalogs map to. Trending/Seasonal/Airing
@@ -48,7 +51,7 @@ namespace AnimeList.Controllers
         ];
 
         [Route("/library")]
-        public async Task<IActionResult> Index(string list = null, string search = null)
+        public async Task<IActionResult> Index(string list = null, string search = null, bool nocache = false)
         {
             // Session-based identity. /library has no path-config — it's pure web app.
             // Anonymous visitors and not-logged-in sessions get bounced to the dashboard
@@ -71,26 +74,34 @@ namespace AnimeList.Controllers
             // detail of the link href.
             var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
 
-            // Honour the user's "Group anime seasons" toggle (disableSeasonGrouping
-            // bit) so the web-app library matches what the addon catalog shows on
-            // Stremio. Defaults to grouped (toggle ON) when no flags are stored.
-            var configuration = await GetConfigByUidAsync(uid, _configStore);
-            var groupSeasonsFromConfig = configuration?.disableSeasonGrouping != true;
-
-            // Search runs as ListType.Search across the full anime database (mirrors
-            // the addon's /catalog/.../Search behaviour); the active tab is ignored
-            // while a search query is present. groupSeasons=false here too, matching
-            // CatalogController's search branch — collapsing seasons in search rewrites
-            // titles to the shortest variant which is wrong for "find this specific
-            // anime" intent. Same dispatch table either way.
+            // Library is always ungrouped — the enableSeasonGrouping pref now
+            // only governs Stremio's catalog / meta endpoints. The site
+            // surfaces every cour as its own row so "what's in my Watching
+            // list" reads honestly; the addon-only toggle is for the Stremio
+            // discovery shelf where collapsing cours to one card is the
+            // expected Stremio-side behaviour.
+            //
+            // Search ran with groupSeasons=false even under the old "honour
+            // the toggle" code (collapsing seasons rewrites titles to the
+            // shortest variant which fights the "find this specific anime"
+            // intent), so the dispatch is now uniformly ungrouped regardless
+            // of search mode.
             var listForCall = hasSearch ? ListType.Search : activeList;
-            var groupSeasonsForCall = !hasSearch && groupSeasonsFromConfig;
-            var metas = tokenData.anime_service switch
+            const bool groupSeasonsForCall = false;
+
+            // The per-service dispatch lambda — captured by GetOrFetchAsync so the
+            // upstream call only fires on cache miss / bypass. Search paths skip
+            // the cache automatically (UserListCache treats ListType.Search as
+            // non-cacheable) so the same call shape handles both modes.
+            async Task<List<Meta>> FetchActiveListAsync() => tokenData.anime_service switch
             {
                 AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
                 AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
                 _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, groupSeasons: groupSeasonsForCall),
             };
+
+            var metas = await _listCache.GetOrFetchAsync(tokenData, listForCall, groupSeasonsForCall,
+                FetchActiveListAsync, bypassCache: nocache);
 
             // Re-rank search results by Utils.ScoreMatch with the same 0.4 threshold
             // CatalogController applies — keeps the relevance ordering consistent

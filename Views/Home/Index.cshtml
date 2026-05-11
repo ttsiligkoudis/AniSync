@@ -1,6 +1,7 @@
 @model AnimeList.Models.DashboardViewModel
 @{
     ViewData["ActiveNav"] = "home";
+    ViewData["Title"] = "Dashboard";
     var tokenData = Model.TokenData;
     var isLoggedIn = tokenData != null;
     var anonymousUser = tokenData?.anonymousUser ?? false;
@@ -51,7 +52,13 @@
     <section class="dashboard-section">
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">This Season</h2>
-            <a class="dashboard-section-link" href="/discover?list=seasonal">View all →</a>
+            <a class="dashboard-section-link" href="/discover?list=seasonal">
+                <span>View all</span>
+                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                    <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+            </a>
         </div>
         <div class="stats-strip">
             <a class="stats-cell stats-cell-link" href="/discover?list=airing" aria-label="Currently airing anime">
@@ -87,6 +94,78 @@
     </section>
 }
 
+@* New episodes airing today. Day-bounded slice of the AniList airing
+   schedule, deduped to one card per show. Cached server-side until the
+   next UTC midnight so the shelf rotates with the calendar day rather
+   than 24h-rolling. Hidden when the upstream returned empty (transient
+   AniList failure, or genuinely no episodes airing today in the AniList
+   schedule). *@
+@if (Model.NewEpisodesToday.Count > 0)
+{
+    <section class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h2 class="dashboard-section-title">New Episodes Today</h2>
+            <span class="dashboard-section-link-muted">Refreshes daily</span>
+        </div>
+        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+        {
+            Items = Model.NewEpisodesToday,
+            ConfigUid = Model.ConfigUid,
+            Variant = "scroll",
+        })
+    </section>
+}
+
+@* Popular-this-season + most-anticipated shelves. Same horizontal-scroll
+   _PosterGrid the anime detail page's Recommended carousel uses, so the
+   card chrome (poster + score + format / episodes / year info row) is
+   identical across surfaces. Rendered for every visitor — the underlying
+   AniList data is public; logged-in users get per-card Manage Entry
+   hand-off via ConfigUid the same way Continue Watching does. *@
+@if (Model.PopularThisSeason.Count > 0)
+{
+    <section class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h2 class="dashboard-section-title">Most Popular this Season</h2>
+            <a class="dashboard-section-link" href="/discover?list=seasonal">
+                <span>View all</span>
+                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                    <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+            </a>
+        </div>
+        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+        {
+            Items = Model.PopularThisSeason,
+            ConfigUid = Model.ConfigUid,
+            Variant = "scroll",
+        })
+    </section>
+}
+
+@if (Model.MostAnticipated.Count > 0)
+{
+    <section class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h2 class="dashboard-section-title">Most Anticipated</h2>
+            <a class="dashboard-section-link" href="/discover?list=seasonal">
+                <span>View all</span>
+                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                    <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+            </a>
+        </div>
+        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+        {
+            Items = Model.MostAnticipated,
+            ConfigUid = Model.ConfigUid,
+            Variant = "scroll",
+        })
+    </section>
+}
+
 @* Stats strip: two big counts (Watching / Completed) plus a top-genres chip
    row. Only renders for logged-in non-anonymous users with at least one
    completed entry — without that, the genre breakdown would be empty and
@@ -106,7 +185,24 @@
         }
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">Your stats</h2>
-            <span class="dashboard-section-link-muted">@statsAttribution</span>
+            <span class="dashboard-section-actions">
+                <span class="dashboard-section-link-muted">@statsAttribution</span>
+                @* Force-refresh button: re-renders the dashboard with ?nocache=1
+                   which tells the controller to bypass the 10-minute per-user
+                   list cache and refetch directly from upstream. Use sparingly —
+                   most edits invalidate the cache automatically; this exists for
+                   when an out-of-band write (scrobble, edit on the provider's
+                   own website) made the stats look wrong. *@
+                <a class="dashboard-refresh-btn"
+                   href="@Url.Action("Index", "Home", new { nocache = true })"
+                   title="Refresh stats — bypass the 10 min cache"
+                   aria-label="Refresh stats">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                    </svg>
+                </a>
+            </span>
         </div>
         @* 4-cell stats strip: Watching · Completed · Hours · Mean Score. Wraps
            to 2x2 on narrow viewports via flex-wrap. Per-cell soft-coloured icon
@@ -190,7 +286,13 @@
     <section class="dashboard-section">
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">Continue watching</h2>
-            <a class="dashboard-section-link" href="/library">View all →</a>
+            <a class="dashboard-section-link" href="/library">
+                <span>View all</span>
+                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                    <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+            </a>
         </div>
         @* Horizontal-scroll variant rather than the wrapping grid — matches the
            StreamD "shelf" pattern where the dashboard surfaces multiple short
