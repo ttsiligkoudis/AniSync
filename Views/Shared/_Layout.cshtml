@@ -328,8 +328,20 @@
         <div class="loader-spinner" aria-label="Loading"></div>
     </div>
 
+    @* Back-to-top button — fixed bottom-right, hidden by default. scroll-top.js
+       reveals it once the page has scrolled past a threshold and smooth-scrolls
+       back to the top on click. Single instance for the whole site. *@
+    <button id="scroll-top-btn" class="scroll-top-btn" type="button"
+            aria-label="Scroll to top" hidden>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+             stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="18 15 12 9 6 15"></polyline>
+        </svg>
+    </button>
+
     <script src="~/js/toast.js" asp-append-version="true" defer></script>
     <script src="~/js/pwa-install.js" asp-append-version="true" defer></script>
+    <script src="~/js/scroll-top.js" asp-append-version="true" defer></script>
     <script src="~/js/site-search.js" asp-append-version="true" defer></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     @await RenderSectionAsync("Scripts", required: false)
