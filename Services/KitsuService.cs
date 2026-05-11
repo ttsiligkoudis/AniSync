@@ -883,7 +883,22 @@ namespace AnimeList.Services
             }
             else if (list == ListType.Search)
             {
+                // Search layers genre + season filters on top of the text
+                // search so the form's combined intent ("Naruto in Action
+                // this season") is honoured. Kitsu's JSON:API accepts the
+                // same filter[categories] / filter[season] / filter[seasonYear]
+                // segments the Seasonal branch above uses.
                 url = $"{_kitsuApi}/anime?include=categories&filter[text]={Uri.EscapeDataString(search ?? string.Empty)}";
+                var hasSearchGenre = !string.IsNullOrEmpty(genre) && !SeasonOptions.Contains(genre);
+                if (hasSearchGenre)
+                {
+                    url += $"&filter[categories]={Uri.EscapeDataString(genre.ToLowerInvariant().Replace(" ", "-"))}";
+                }
+                if (!string.IsNullOrEmpty(season))
+                {
+                    var (searchSeason, searchYear) = GetSeasonAndYear(season);
+                    url += $"&filter[season]={searchSeason.ToLowerInvariant()}&filter[seasonYear]={searchYear}";
+                }
             }
             else
             {

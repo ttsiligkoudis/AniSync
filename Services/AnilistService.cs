@@ -69,29 +69,65 @@ namespace AnimeList.Services
             {
                 var page = int.TryParse(skip, out var skipInt) ? (skipInt / CatalogPageSize) + 1 : 1;
 
+                // Genre + season are optional layered filters on the same Page
+                // query. The combined intent ("show me Naruto results in
+                // Action this season") matters because the form preserves
+                // every filter across submissions; ignoring genre/season
+                // when search was set would silently drop the user's other
+                // picks. Stitch the GraphQL signature dynamically so we only
+                // declare variables we'll actually pass.
+                var hasGenre = !string.IsNullOrEmpty(genre);
+                var hasSeason = !string.IsNullOrEmpty(season);
+                string seasonValue = null;
+                int seasonYear = 0;
+                if (hasSeason)
+                {
+                    var (sv, y) = GetSeasonAndYear(season);
+                    seasonValue = sv;
+                    seasonYear = y;
+                }
+
+                var genreVarDecl  = hasGenre  ? ", $genre: String"                       : string.Empty;
+                var genreArg      = hasGenre  ? ", genre: $genre"                        : string.Empty;
+                var seasonVarDecl = hasSeason ? ", $season: MediaSeason, $seasonYear: Int" : string.Empty;
+                var seasonArg     = hasSeason ? ", season: $season, seasonYear: $seasonYear" : string.Empty;
+
+                var variables = new JObject
+                {
+                    ["search"] = search ?? string.Empty,
+                    ["page"] = page,
+                    ["perPage"] = CatalogPageSize,
+                };
+                if (hasGenre) variables["genre"] = genre;
+                if (hasSeason)
+                {
+                    variables["season"] = seasonValue;
+                    variables["seasonYear"] = seasonYear;
+                }
+
                 requestBody = SerializeObject(new
                 {
-                    query = @"
-                    query ($search: String, $page: Int, $perPage: Int) {
-                        Page (page: $page, perPage: $perPage) {
-                            media(search: $search, type: ANIME) {
+                    query = $@"
+                    query ($search: String, $page: Int, $perPage: Int{genreVarDecl}{seasonVarDecl}) {{
+                        Page (page: $page, perPage: $perPage) {{
+                            media(search: $search, type: ANIME{genreArg}{seasonArg}) {{
                                 id
                                 format
                                 episodes
                                 averageScore
                                 seasonYear
-                                title {
+                                title {{
                                     english
                                     romaji
-                                }
-                                coverImage {
+                                }}
+                                coverImage {{
                                     large
-                                }
+                                }}
                                 description
-                            }
-                        }
-                    }",
-                    variables = new { search = search ?? string.Empty, page, perPage = CatalogPageSize }
+                            }}
+                        }}
+                    }}",
+                    variables,
                 });
             }
             else if (!list.HasValue || _userLists.Contains(list.Value))

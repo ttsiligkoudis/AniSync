@@ -145,6 +145,22 @@ namespace AnimeList.Services
                     if (!isSeasonSelector && !string.IsNullOrEmpty(genre) && !MatchesGenre(node, genre))
                         continue;
 
+                    // Season post-filter for Search — MAL's /anime?q= endpoint
+                    // has no server-side season filter, so when the form
+                    // combines "search + season" we trim the response
+                    // client-side. Compares the entry's start_season to the
+                    // resolved (season, year) pair.
+                    if (list == ListType.Search && !string.IsNullOrEmpty(season))
+                    {
+                        var (wantedSeason, wantedYear) = GetSeasonAndYear(season);
+                        var entryStart = node["start_season"];
+                        var entrySeason = (string)entryStart?["season"];
+                        var entryYear = (int?)entryStart?["year"];
+                        if (entryYear != wantedYear ||
+                            !string.Equals(entrySeason, wantedSeason, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                    }
+
                     var meta = await BuildMetaAsync(node, listStatus, groupSeasons);
                     if (meta == null) continue;
 
