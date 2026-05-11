@@ -6,16 +6,29 @@
 //
 // Strategy:
 //   - Install: precache a tiny static-asset shell (CSS, JS, icons,
-//     manifest) so the next launch paints something even on a flaky
-//     connection. Bumping CACHE_VERSION evicts the old cache cleanly.
+//     manifest, logo) so the next launch paints a styled page even on
+//     a flaky / no-connection device. Bumping CACHE_VERSION evicts the
+//     old cache cleanly.
 //   - Fetch: network-first for everything; only fall back to cache for
 //     same-origin GETs whose response is also in the precache list.
+//     ignoreSearch:true on the cache lookup so Razor's
+//     asp-append-version "?v=<hash>" suffix still matches the bare
+//     cache key — otherwise the offline render came back unstyled
+//     because /css/site.css?v=abc never matched the cached
+//     /css/site.css entry.
 //     POSTs / API calls / cross-origin requests pass through verbatim.
-const CACHE_VERSION = 'anisync-shell-v1';
+const CACHE_VERSION = 'anisync-shell-v2';
 const SHELL_ASSETS = [
     '/',
     '/css/site.css',
+    '/lib/bootstrap/dist/css/bootstrap.min.css',
+    '/lib/jquery/dist/jquery.min.js',
+    '/js/loader.js',
+    '/js/toast.js',
+    '/js/pwa-install.js',
+    '/js/scroll-top.js',
     '/manifest.webmanifest',
+    '/logo.png',
     '/icons/icon-192.png',
     '/icons/icon-512.png',
 ];
@@ -52,8 +65,13 @@ self.addEventListener('fetch', function (event) {
 
     event.respondWith(
         fetch(req).catch(function () {
-            return caches.match(req).then(function (cached) {
-                return cached || caches.match('/');
+            // ignoreSearch:true so versioned URLs (?v=hash from
+            // asp-append-version) match the unversioned cache keys.
+            // Falls through to the precached "/" shell when the
+            // specific request isn't in cache (typical offline
+            // navigation to an uncached route).
+            return caches.match(req, { ignoreSearch: true }).then(function (cached) {
+                return cached || caches.match('/', { ignoreSearch: true });
             });
         })
     );
