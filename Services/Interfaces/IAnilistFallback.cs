@@ -97,5 +97,31 @@ namespace AnimeList.Services.Interfaces
         /// staff / studio / tag data is essentially immutable.
         /// </summary>
         Task<List<Link>> GetSupplementaryLinksAsync(int anilistId);
+
+        /// <summary>
+        /// Anonymous browse of every anime tagged with <paramref name="tag"/>,
+        /// sorted by popularity desc. Skip / pagination uses the same offset
+        /// convention discover-pagination follows (skip = number of cards
+        /// already rendered). Translates each result's id into the requested
+        /// service's id space so card clicks land on the user's primary's
+        /// detail page rather than AniList's.
+        /// </summary>
+        Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null);
+
+        /// <summary>
+        /// Browse a staff member's filmography — every anime they're
+        /// credited on, sorted by popularity desc. Returns the staff's
+        /// display name alongside the media list so the page header can
+        /// render "Anime by Hayao Miyazaki" without an extra round-trip.
+        /// Name is null when the staff id doesn't resolve.
+        /// </summary>
+        Task<(string Name, List<Meta> Items)> GetStaffMediaAsync(int staffId, AnimeService translateTo, string skip = null);
+
+        /// <summary>
+        /// Browse a studio's catalog — every anime the studio produced,
+        /// sorted by popularity desc. Returns the studio's name with the
+        /// media list for the same reason GetStaffMediaAsync does.
+        /// </summary>
+        Task<(string Name, List<Meta> Items)> GetStudioMediaAsync(int studioId, AnimeService translateTo, string skip = null);
     }
 }

@@ -19,6 +19,7 @@
 
     var hasSearch = !string.IsNullOrEmpty(Model.Search);
     var hasGenre = !string.IsNullOrEmpty(Model.Genre);
+    var hasTag = !string.IsNullOrEmpty(Model.Tag);
     var activeLabel = labels[Model.ActiveList];
     var activeSlug = slugs[Model.ActiveList];
     var isSeasonal = Model.ActiveList == ListType.Seasonal;
@@ -26,11 +27,29 @@
     // Distinguish browser-history rows: "Search: foo · Discover" vs "Action ·
     // Discover" vs "Trending · Discover".
     ViewData["Title"] = hasSearch ? $"Search: {Model.Search} · Discover"
+        : hasTag ? $"#{Model.Tag} · Discover"
         : hasGenre ? $"{Model.Genre} · Discover"
         : isSeasonal ? $"{Model.Season} · Discover"
         : $"{activeLabel} · Discover";
 }
 
+@if (hasTag)
+{
+    @* Tag-browse mode lights up when the user followed a Tag chip on a
+       detail page. Suppresses the list-tab strip (tag results don't pivot
+       on Trending / Seasonal / Airing — they're a flat popularity rank
+       across every anime carrying the tag) and renders a header pill with
+       a Clear link back to the default Discover view. *@
+    <header class="page-header">
+        <p class="page-subtitle">Tag</p>
+        <h1 class="page-title">@Model.Tag</h1>
+        <p><a class="filter-bar-clear" href="@Url.Action("Index", "Discover")">Clear tag</a></p>
+    </header>
+}
+
+@if (hasTag) { <!-- list tabs / filter form hidden in tag-browse mode --> }
+else
+{
 @* List-type tabs lead the page (Trending / Seasonal / Airing). Each is an
    anchor — clicking refreshes the page with the selected list type. The
    active filters (genre / season / search) flow through as query params so
@@ -101,6 +120,7 @@
         <a class="filter-bar-clear" href="@Url.Action("Index", "Discover", clearValues)">Clear</a>
     }
 </form>
+}
 
 @{
     var posterGridModel = new AnimeList.Models.PosterGridViewModel
@@ -109,9 +129,11 @@
         ConfigUid = Model.ConfigUid,
         EmptyMessage = hasSearch
             ? $"No matches for \"{Model.Search}\"."
-            : hasGenre
-                ? $"No {Model.Genre.ToLower()} anime in {activeLabel.ToLower()} right now."
-                : $"Couldn't load {activeLabel.ToLower()} anime — try again later.",
+            : hasTag
+                ? $"No anime found with the tag \"{Model.Tag}\"."
+                : hasGenre
+                    ? $"No {Model.Genre.ToLower()} anime in {activeLabel.ToLower()} right now."
+                    : $"Couldn't load {activeLabel.ToLower()} anime — try again later.",
     };
 }
 
@@ -141,6 +163,7 @@
              data-list="@activeSlug"
              data-genre="@Model.Genre"
              data-season="@(isSeasonal ? Model.Season : null)"
+             data-tag="@Model.Tag"
              data-skip="@Model.Items.Count">
             @await Html.PartialAsync("_PosterGrid", posterGridModel)
             @* paginator-loader is hidden by default; discover-pagination.js

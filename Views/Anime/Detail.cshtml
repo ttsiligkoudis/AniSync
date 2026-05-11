@@ -208,13 +208,20 @@
             </div>
             @if (studios.Count > 0)
             {
+                @* Hero "By X" — links to the in-app /studio/{id} browse page
+                   when the AniList studio id is known, otherwise falls back
+                   to the external AniList URL the link was created with. *@
                 <div class="anime-detail-studios">
                     By
                     @for (var i = 0; i < studios.Count; i++)
                     {
                         var s = studios[i];
                         if (i > 0) { <text>, </text> }
-                        if (!string.IsNullOrEmpty(s.url))
+                        if (s.anilistId.HasValue)
+                        {
+                            <a href="@($"/studio/{s.anilistId.Value}")" class="anime-detail-studio-link">@s.name</a>
+                        }
+                        else if (!string.IsNullOrEmpty(s.url))
                         {
                             <a href="@s.url" class="anime-detail-studio-link" target="_blank" rel="noreferrer noopener">@s.name</a>
                         }
@@ -227,10 +234,12 @@
             }
             @if (a.genres?.Count > 0)
             {
+                @* Genre chips link into /discover?genre=X so a tap surfaces
+                   more anime sharing the genre rather than bouncing to AniList. *@
                 <div class="anime-detail-genres">
                     @foreach (var g in a.genres.Take(8))
                     {
-                        <span class="genre-chip">@g</span>
+                        <a class="genre-chip" href="@($"/discover?genre={Uri.EscapeDataString(g)}")">@g</a>
                     }
                 </div>
             }
@@ -580,6 +589,36 @@
     </section>
 }
 
+@functions {
+    // Builds an in-app href for a Link based on its category, or returns
+    // null when the link doesn't map (e.g. a tag link without an id, or a
+    // category we don't have a browse route for). Callers fall back to the
+    // external url + target=_blank in that case.
+    private static string InternalHrefFor(AnimeList.Models.Link link)
+    {
+        if (link == null) return null;
+        var cat = link.category?.ToLowerInvariant();
+        if (cat == "tag")
+        {
+            return string.IsNullOrEmpty(link.name)
+                ? null
+                : $"/discover?tag={Uri.EscapeDataString(link.name)}";
+        }
+        if (cat == "studio")
+        {
+            return link.anilistId.HasValue ? $"/studio/{link.anilistId.Value}" : null;
+        }
+        // Staff roles get categorised by StaffRoleToCategory ("Director",
+        // "Composer", "Artist", "Producer", "Staff") — all route to the
+        // same /staff/{id} page.
+        if (cat is "staff" or "director" or "composer" or "artist" or "producer" or "writer")
+        {
+            return link.anilistId.HasValue ? $"/staff/{link.anilistId.Value}" : null;
+        }
+        return null;
+    }
+}
+
 @foreach (var group in linksByCategory)
 {
     <section class="anime-detail-section">
@@ -587,11 +626,21 @@
         <ul class="anime-detail-link-list">
             @foreach (var link in group)
             {
-                <li>
-                    <a class="anime-detail-link" href="@link.url" target="_blank" rel="noreferrer noopener">
-                        @link.name
-                    </a>
-                </li>
+                var internalHref = InternalHrefFor(link);
+                if (!string.IsNullOrEmpty(internalHref))
+                {
+                    <li>
+                        <a class="anime-detail-link" href="@internalHref">@link.name</a>
+                    </li>
+                }
+                else
+                {
+                    <li>
+                        <a class="anime-detail-link" href="@link.url" target="_blank" rel="noreferrer noopener">
+                            @link.name
+                        </a>
+                    </li>
+                }
             }
         </ul>
     </section>

@@ -182,12 +182,21 @@
 {
     <section class="dashboard-section stats-section">
         @{
-            // "via X" when only the primary contributed; "across X + Y, Z" when
-            // linked secondaries also fed in. Communicates that the stats are
-            // a unioned (deduped) view rather than a single-service slice.
-            var statsAttribution = Model.ContributingServices.Count > 1
-                ? $"across {Model.ContributingServices[0]} + {Model.ContributingServices.Count - 1} linked"
-                : $"via {serviceLabel}";
+            // Stats come from AniList's User.statistics GraphQL regardless of
+            // which provider the user picked as their primary — that's where
+            // the dashboard sources count + mean + minutesWatched from.
+            // ContributingServices[0] is the actual source service (always
+            // "Anilist" today; the list shape leaves room for a future
+            // multi-source aggregation), so use it instead of the primary's
+            // service label to keep the attribution honest.
+            var statsSourceLabel = Model.ContributingServices.Count > 0
+                ? Model.ContributingServices[0]
+                : "Anilist";
+            // "Anilist" → "AniList" for display, matching the service's own
+            // branding. Other service names already display naturally.
+            if (string.Equals(statsSourceLabel, "Anilist", StringComparison.OrdinalIgnoreCase))
+                statsSourceLabel = "AniList";
+            var statsAttribution = $"via {statsSourceLabel}";
         }
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">Your stats</h2>

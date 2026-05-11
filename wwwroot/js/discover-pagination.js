@@ -25,6 +25,7 @@
     var list = paginator.getAttribute('data-list');
     var genre = paginator.getAttribute('data-genre') || '';
     var season = paginator.getAttribute('data-season') || '';
+    var tag = paginator.getAttribute('data-tag') || '';
     var skip = parseInt(paginator.getAttribute('data-skip') || '0', 10);
     if (!list) return;
 
@@ -104,6 +105,7 @@
             + '&skip=' + skip;
         if (genre) params += '&genre=' + encodeURIComponent(genre);
         if (season) params += '&season=' + encodeURIComponent(season);
+        if (tag) params += '&tag=' + encodeURIComponent(tag);
 
         // skipLoader: true bypasses the global full-screen loader-overlay —
         // we render the inline paginator-loader (above) instead so scrolling

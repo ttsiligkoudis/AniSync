@@ -448,6 +448,7 @@ namespace AnimeList.Services
                         description,
                         genres,
                         tags {
+                            id
                             name
                             rank
                             isAdult
@@ -455,13 +456,14 @@ namespace AnimeList.Services
                         studios {
                             edges {
                                 isMain
-                                node { name siteUrl }
+                                node { id name siteUrl }
                             }
                         },
                         staff(sort: RELEVANCE, perPage: 10) {
                             edges {
                                 role
                                 node {
+                                    id
                                     name { full }
                                     siteUrl
                                 }
@@ -580,7 +582,12 @@ namespace AnimeList.Services
                     {
                         name = name,
                         category = "Tag",
-                        url = $"https://anilist.co/search/anime?genres={Uri.EscapeDataString(name)}"
+                        // Detail-page chip wires this directly into the
+                        // in-app /discover?tag= filter, so the external url
+                        // is only used as a fallback for any service path
+                        // that doesn't expose an AniList tag link.
+                        url = $"https://anilist.co/search/anime?genres={Uri.EscapeDataString(name)}",
+                        anilistId = (long?)tag.id,
                     });
                 }
             }
@@ -593,7 +600,13 @@ namespace AnimeList.Services
                     var name = (string)edge.node?.name;
                     var siteUrl = (string)edge.node?.siteUrl;
                     if (string.IsNullOrEmpty(name)) continue;
-                    anime.links.Add(new Link { name = name, category = "Studio", url = siteUrl });
+                    anime.links.Add(new Link
+                    {
+                        name = name,
+                        category = "Studio",
+                        url = siteUrl,
+                        anilistId = (long?)edge.node?.id,
+                    });
                 }
             }
 
@@ -608,7 +621,13 @@ namespace AnimeList.Services
 
                     // Map to Stremio's standard link categories where the role is recognisable
                     var category = StaffRoleToCategory(role);
-                    anime.links.Add(new Link { name = name, category = category, url = siteUrl });
+                    anime.links.Add(new Link
+                    {
+                        name = name,
+                        category = category,
+                        url = siteUrl,
+                        anilistId = (long?)edge.node?.id,
+                    });
                 }
             }
 
