@@ -73,11 +73,19 @@ namespace AnimeList.Controllers
                 // Search splits into separate series + movie catalogs in the manifest
                 // so Stremio renders two result rows. The upstream search hit returns
                 // both — filter by the route's metaType so each row carries only the
-                // matching shape.
+                // matching shape. Case-insensitive equality defends against a
+                // service builder that ever sets type to "Series" / "Movie" instead
+                // of the lowercase canonical form.
+                var preFilterCount = metas?.Count ?? 0;
                 if (listType == ListType.Search && (metaType == MetaType.series || metaType == MetaType.movie))
                 {
                     var typeName = metaType.ToString();
-                    metas = metas.Where(m => m.type == typeName).ToList();
+                    metas = metas
+                        .Where(m => string.Equals(m.type, typeName, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    _logger.LogInformation(
+                        "Catalog search filter: type={MetaType} kept {Kept} of {Total} metas (service={Service}, search={Search}).",
+                        typeName, metas.Count, preFilterCount, animeService, search);
                 }
 
                 // Re-rank Search results by the shared Utils.ScoreMatch — same
