@@ -981,7 +981,6 @@ namespace AnimeList.Services
                                     meanScore
                                     minutesWatched
                                     statuses { status count }
-                                    genres { genre count }
                                 }
                             }
                         }
@@ -1018,20 +1017,7 @@ namespace AnimeList.Services
             var minutes = (int?)anime.minutesWatched ?? 0;
             var hours = minutes / 60;
 
-            var topGenres = new List<(string Genre, int Count)>();
-            if (anime.genres != null)
-            {
-                foreach (var g in anime.genres)
-                {
-                    var name = (string)g.genre;
-                    var count = (int?)g.count ?? 0;
-                    if (!string.IsNullOrEmpty(name) && count > 0)
-                        topGenres.Add((name, count));
-                    if (topGenres.Count >= 5) break;
-                }
-            }
-
-            return new AnilistUserStats(watching, completed, hours, meanScore, topGenres);
+            return new AnilistUserStats(watching, completed, hours, meanScore);
         }
 
         public async Task<List<AnimeEntry>> GetUserListEntriesAsync(TokenData tokenData)

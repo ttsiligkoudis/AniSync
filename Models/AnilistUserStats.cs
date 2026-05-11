@@ -11,6 +11,5 @@ namespace AnimeList.Models
         int Watching,
         int Completed,
         int TotalHoursWatched,
-        double? MeanScore,
-        List<(string Genre, int Count)> TopGenres);
+        double? MeanScore);
 }

@@ -129,6 +129,18 @@ namespace AnimeList.Controllers
             }
 
             metas ??= [];
+            // Alphabetical sort on non-search list views — keeps pagination
+            // deterministic so /library/page?skip=N hits the same page the
+            // user sees in the rendered grid. Search keeps its relevance
+            // ranking (sorted by ScoreMatch above) since alphabetical ordering
+            // would bury the obvious matches under "Aharen-san" / "Akira" /
+            // etc.
+            if (!hasSearch)
+            {
+                metas = metas
+                    .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
             var total = metas.Count;
             // Search is single-shot (already relevance-ranked, small slice on
             // the server) so we render the whole result; non-search list views
@@ -218,6 +230,15 @@ namespace AnimeList.Controllers
             }
 
             metas ??= [];
+            // Same alphabetical sort as Index so scroll-appended chunks line
+            // up with the order the user sees server-rendered. Search keeps
+            // its ScoreMatch ordering applied above.
+            if (!hasSearch)
+            {
+                metas = metas
+                    .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
             var total = metas.Count;
 
             // Slice for the requested window. fullPane swaps land back at the

@@ -75,7 +75,6 @@ public class HomeController : Controller
         int completedTotal = 0;
         int totalHoursWatched = 0;
         double? meanScore = null;
-        List<(string genre, int count)> topGenres = [];
         List<string> contributingNames = [];
 
         // Continue-watching + stats surfaces only fire for non-anonymous logged-in
@@ -138,7 +137,6 @@ public class HomeController : Controller
                 completedTotal = stats.Completed;
                 totalHoursWatched = stats.TotalHoursWatched;
                 meanScore = stats.MeanScore;
-                topGenres = stats.TopGenres;
                 contributingNames.Add(AnimeService.Anilist.ToString());
             }
         }
@@ -173,7 +171,6 @@ public class HomeController : Controller
             CompletedTotal = completedTotal,
             TotalHoursWatched = totalHoursWatched,
             MeanScore = meanScore,
-            TopGenres = topGenres,
             ContributingServices = contributingNames,
             SeasonCurrentlyAiring = seasonAiring,
             SeasonNewThis = seasonNew,
