@@ -862,7 +862,14 @@ namespace AnimeList.Services
                     format = NormalizeFormat((string)media.format),
                 });
             }
-            return result;
+            // Sort by the display name we just built (english title, falling
+            // back to romaji) so the result order matches what the user
+            // actually reads on the cards. Library does the same; consistency
+            // between browse surfaces lets the user predict where a specific
+            // anime will be in the grid.
+            return result
+                .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         public async Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null)
@@ -875,7 +882,7 @@ namespace AnimeList.Services
                 query = @"
                     query ($page: Int, $perPage: Int, $tag: String) {
                         Page(page: $page, perPage: $perPage) {
-                            media(type: ANIME, tag: $tag, sort: POPULARITY_DESC) {
+                            media(type: ANIME, tag: $tag, sort: TITLE_ROMAJI) {
                                 id
                                 format
                                 episodes
@@ -904,7 +911,7 @@ namespace AnimeList.Services
                     query ($id: Int, $page: Int, $perPage: Int) {
                         Staff(id: $id) {
                             name { full }
-                            staffMedia(type: ANIME, sort: POPULARITY_DESC, page: $page, perPage: $perPage) {
+                            staffMedia(type: ANIME, sort: TITLE_ROMAJI, page: $page, perPage: $perPage) {
                                 edges {
                                     node {
                                         id
@@ -949,7 +956,7 @@ namespace AnimeList.Services
                     query ($id: Int, $page: Int, $perPage: Int) {
                         Studio(id: $id) {
                             name
-                            media(sort: POPULARITY_DESC, page: $page, perPage: $perPage) {
+                            media(sort: TITLE_ROMAJI, page: $page, perPage: $perPage) {
                                 edges {
                                     node {
                                         id
