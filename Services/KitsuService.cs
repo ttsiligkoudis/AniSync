@@ -481,7 +481,10 @@ namespace AnimeList.Services
                     // richer per-rec shape. Kept separate from the Link-flavoured
                     // fallback above because the addon JSON path consumes Links
                     // and the web app's carousel consumes Metas. Best-effort.
-                    var recMetas = await _anilistFallback.GetRecommendationMetasAsync(mapping.AnilistId.Value);
+                    // translateTo: Kitsu — recommendation cards under a
+                    // Kitsu-primary detail page should hand off to /anime/kitsu:N
+                    // when the mapping has a kitsu id, anilist:N otherwise.
+                    var recMetas = await _anilistFallback.GetRecommendationMetasAsync(mapping.AnilistId.Value, AnimeService.Kitsu);
                     anime.recommendations.AddRange(recMetas);
                 }
                 catch
