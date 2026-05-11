@@ -18,6 +18,7 @@ namespace AnimeList.Controllers
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
+        private readonly IAnilistFallback _anilistFallback;
         private readonly IConfigStore _configStore;
 
         public DiscoverController(
@@ -25,12 +26,14 @@ namespace AnimeList.Controllers
             IAnilistService anilistService,
             IKitsuService kitsuService,
             IMalService malService,
+            IAnilistFallback anilistFallback,
             IConfigStore configStore)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
+            _anilistFallback = anilistFallback;
             _configStore = configStore;
         }
 
@@ -56,7 +59,7 @@ namespace AnimeList.Controllers
         ];
 
         [Route("/discover")]
-        public async Task<IActionResult> Index(string list = null, string search = null, string genre = null, string season = null)
+        public async Task<IActionResult> Index(string list = null, string search = null, string genre = null, string season = null, string tag = null)
         {
             // Anonymous fresh-visit: GetAccessTokenAsync returns null. Synthesise an
             // anonymous TokenData with the Kitsu default so the per-service dispatch
@@ -70,6 +73,7 @@ namespace AnimeList.Controllers
 
             var hasSearch = !string.IsNullOrWhiteSpace(search);
             var hasGenre = !string.IsNullOrWhiteSpace(genre);
+            var hasTag = !string.IsNullOrWhiteSpace(tag);
             var activeList = ParseListType(list);
 
             // Resolve the row's UID for logged-in users so per-card Manage Entry links
@@ -89,12 +93,25 @@ namespace AnimeList.Controllers
             // umbrella entry.
             var listForCall = hasSearch ? ListType.Search : activeList;
             const bool groupSeasonsForCall = false;
-            var metas = tokenData.anime_service switch
+            // Tag is an AniList-native filter — MAL/Kitsu don't expose an
+            // equivalent — so when a tag is requested we route through
+            // AnilistFallback's anonymous browse regardless of the viewer's
+            // primary service. Cards still translate ids into the user's
+            // primary's space so Manage Entry / detail-page hand-offs work.
+            List<Meta> metas;
+            if (hasTag)
             {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
-            };
+                metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service);
+            }
+            else
+            {
+                metas = tokenData.anime_service switch
+                {
+                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
+                    _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
+                };
+            }
 
             // Same 0.4-threshold relevance re-rank CatalogController applies on the
             // Stremio side — keeps web-app search behaviour consistent with the addon.
@@ -130,6 +147,7 @@ namespace AnimeList.Controllers
                 AvailableGenres = PopularGenres,
                 Season = resolvedSeason,
                 AvailableSeasons = BuildSeasonalDropdownOptions(),
+                Tag = hasTag ? tag.Trim() : null,
                 Items = metas ?? [],
             });
         }
@@ -146,7 +164,7 @@ namespace AnimeList.Controllers
         /// list, so the scroll handler simply doesn't fire on search pages.
         /// </summary>
         [Route("/discover/page")]
-        public async Task<IActionResult> Page(string list, string genre = null, string skip = null, string season = null, string search = null, bool fullPane = false)
+        public async Task<IActionResult> Page(string list, string genre = null, string skip = null, string season = null, string search = null, string tag = null, bool fullPane = false)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync()
                 ?? new TokenData { anime_service = AnimeService.Kitsu };
@@ -166,12 +184,23 @@ namespace AnimeList.Controllers
             // pass a search term so this stays the existing per-tab dispatch.
             var listForCall = hasSearch ? ListType.Search : activeList;
             const bool groupSeasonsForCall = false;
-            var metas = tokenData.anime_service switch
+            var hasTag = !string.IsNullOrWhiteSpace(tag);
+            List<Meta> metas;
+            if (hasTag)
             {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season),
-            };
+                // Mirror Index's tag-routing: tag filtering goes through the
+                // AniList anonymous browse regardless of primary.
+                metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service, skip);
+            }
+            else
+            {
+                metas = tokenData.anime_service switch
+                {
+                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season),
+                    _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season),
+                };
+            }
 
             if (hasSearch && metas?.Count > 0)
             {
@@ -248,6 +277,11 @@ namespace AnimeList.Controllers
         // view renders an "× clear" pill alongside the genre dropdown when set.
         public string Genre { get; set; }
         public IReadOnlyList<string> AvailableGenres { get; set; } = [];
+        // AniList-native tag filter — engaged when the user followed a Tag
+        // chip on a detail page. Routes through AnilistFallback's anonymous
+        // browse regardless of the user's primary, since MAL/Kitsu don't
+        // expose an equivalent.
+        public string Tag { get; set; }
         // Active season label ("Spring 2026") — only meaningful when the active
         // list type is Seasonal. Always populated (current season is the fall-
         // back) so the dropdown can preselect the correct option.

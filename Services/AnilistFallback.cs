@@ -779,5 +779,171 @@ namespace AnimeList.Services
             if (r.Contains("producer")) return "Producer";
             return "Staff";
         }
+
+        // Shared poster builder for tag / staff / studio browse queries —
+        // same shape: each entry has id + format + title + coverImage +
+        // averageScore + seasonYear + episodes. Translates ids into the
+        // requested service's id space so card clicks land on the user's
+        // primary's detail page.
+        private async Task<List<Meta>> BuildBrowseMetasAsync(dynamic mediaArr, AnimeService translateTo)
+        {
+            if (mediaArr == null) return [];
+            await _mappingService.EnsureLoadedAsync();
+            var seen = new HashSet<string>();
+            var result = new List<Meta>();
+            foreach (var media in mediaArr)
+            {
+                var anilistId = (int?)media.id;
+                if (!anilistId.HasValue) continue;
+
+                var externalId = await ResolveExternalIdAsync(anilistId.Value, translateTo);
+                if (!seen.Add(externalId)) continue;
+
+                var name = string.IsNullOrEmpty((string)media.title?.english)
+                    ? (string)media.title?.romaji
+                    : (string)media.title?.english;
+                if (string.IsNullOrEmpty(name)) continue;
+
+                result.Add(new Meta((string)media.description)
+                {
+                    id = externalId,
+                    type = IsMovieFormat((string)media.format) ? MetaType.movie.ToString() : MetaType.series.ToString(),
+                    name = name,
+                    poster = (string)media.coverImage?.large,
+                    score = media.averageScore != null
+                        ? Math.Round((double)media.averageScore / 10, 1)
+                        : (double?)null,
+                    episodes = (int?)media.episodes,
+                    year = (int?)media.seasonYear,
+                    format = NormalizeFormat((string)media.format),
+                });
+            }
+            return result;
+        }
+
+        public async Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null)
+        {
+            if (string.IsNullOrWhiteSpace(tag)) return [];
+            var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
+
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($page: Int, $perPage: Int, $tag: String) {
+                        Page(page: $page, perPage: $perPage) {
+                            media(type: ANIME, tag: $tag, sort: POPULARITY_DESC) {
+                                id
+                                format
+                                episodes
+                                averageScore
+                                seasonYear
+                                title { english romaji }
+                                coverImage { large }
+                                description
+                            }
+                        }
+                    }",
+                variables = new { page, perPage = PageSize, tag },
+            });
+
+            var data = await PostJsonAsync(requestBody);
+            return await BuildBrowseMetasAsync(data?.Page?.media, translateTo);
+        }
+
+        public async Task<(string Name, List<Meta> Items)> GetStaffMediaAsync(int staffId, AnimeService translateTo, string skip = null)
+        {
+            var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
+
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($id: Int, $page: Int, $perPage: Int) {
+                        Staff(id: $id) {
+                            name { full }
+                            staffMedia(type: ANIME, sort: POPULARITY_DESC, page: $page, perPage: $perPage) {
+                                edges {
+                                    node {
+                                        id
+                                        format
+                                        episodes
+                                        averageScore
+                                        seasonYear
+                                        title { english romaji }
+                                        coverImage { large }
+                                        description
+                                    }
+                                }
+                            }
+                        }
+                    }",
+                variables = new { id = staffId, page, perPage = PageSize },
+            });
+
+            var data = await PostJsonAsync(requestBody);
+            var staff = data?.Staff;
+            if (staff == null) return (null, []);
+
+            var name = (string)staff.name?.full;
+            // Flatten edges → node array so BuildBrowseMetasAsync can reuse
+            // the same shape it uses for the tag / studio paths.
+            var nodes = new List<dynamic>();
+            if (staff.staffMedia?.edges != null)
+            {
+                foreach (var edge in staff.staffMedia.edges)
+                    if (edge.node != null) nodes.Add(edge.node);
+            }
+            return (name, await BuildBrowseMetasAsync(nodes, translateTo));
+        }
+
+        public async Task<(string Name, List<Meta> Items)> GetStudioMediaAsync(int studioId, AnimeService translateTo, string skip = null)
+        {
+            var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
+
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($id: Int, $page: Int, $perPage: Int) {
+                        Studio(id: $id) {
+                            name
+                            media(sort: POPULARITY_DESC, page: $page, perPage: $perPage) {
+                                edges {
+                                    node {
+                                        id
+                                        type
+                                        format
+                                        episodes
+                                        averageScore
+                                        seasonYear
+                                        title { english romaji }
+                                        coverImage { large }
+                                        description
+                                    }
+                                }
+                            }
+                        }
+                    }",
+                variables = new { id = studioId, page, perPage = PageSize },
+            });
+
+            var data = await PostJsonAsync(requestBody);
+            var studio = data?.Studio;
+            if (studio == null) return (null, []);
+
+            var name = (string)studio.name;
+            var nodes = new List<dynamic>();
+            if (studio.media?.edges != null)
+            {
+                foreach (var edge in studio.media.edges)
+                {
+                    if (edge.node == null) continue;
+                    // Studio.media returns Manga + Anime mixed. Filter to
+                    // anime-only on the client since the GraphQL Studio.media
+                    // arg list doesn't expose a type filter directly.
+                    if ((string)edge.node.type != "ANIME") continue;
+                    nodes.Add(edge.node);
+                }
+            }
+            return (name, await BuildBrowseMetasAsync(nodes, translateTo));
+        }
     }
 }

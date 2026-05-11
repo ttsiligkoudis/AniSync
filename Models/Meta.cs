@@ -183,6 +183,14 @@ namespace AnimeList.Models
         public string name { get; set; }
         public string category { get; set; }
         public string url { get; set; }
+
+        // AniList numeric id for tag / staff / studio links. Populated by the
+        // AniList per-service builder so the detail page can wire chip clicks
+        // to internal routes (/staff/{id}, /studio/{id}, /discover?tag=X)
+        // instead of always bouncing to AniList. Null on services that
+        // don't expose ids (Kitsu/MAL minimal metadata), in which case the
+        // chip falls back to the external url.
+        public long? anilistId { get; set; }
     }
 
     /// <summary>
