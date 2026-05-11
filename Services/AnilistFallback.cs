@@ -526,6 +526,39 @@ namespace AnimeList.Services
             return $"{anilistPrefix}{anilistId}";
         }
 
+        /// <summary>
+        /// Browse-flavour id resolution — prefers the primary's NATIVE id
+        /// (kitsu:N / mal:N / anilist:N) over the cross-service imdb/tmdb
+        /// groupers. The browse routes (/discover?tag=, /staff/{id},
+        /// /studio/{id}) want each card to hand off to /anime/{id} with the
+        /// user's primary's per-cour id so Manage Entry resolves directly
+        /// instead of bouncing through an imdb-mapped franchise umbrella.
+        /// Falls back to anilist:N when the requested service has no
+        /// matching id on the mapping row.
+        /// </summary>
+        private async Task<string> ResolveNativeIdAsync(int anilistId, AnimeService translateTo)
+        {
+            // AniList primary (or anonymous, which defaults to Kitsu but
+            // could just as well land back on AniList ids) — no lookup
+            // needed, we already have the anilist id.
+            if (translateTo == AnimeService.Anilist)
+                return $"{anilistPrefix}{anilistId}";
+
+            var mapping = await _mappingService.GetAnilistMapping($"{anilistPrefix}{anilistId}");
+
+            if (translateTo == AnimeService.Kitsu && mapping?.KitsuId != null)
+                return $"{kitsuPrefix}{mapping.KitsuId}";
+            if (translateTo == AnimeService.MyAnimeList && mapping?.MalId != null)
+                return $"{malPrefix}{mapping.MalId}";
+
+            // No native mapping → ship the AniList id. The detail-page
+            // controller already handles cross-service id resolution, so
+            // /anime/anilist:N still renders for a Kitsu user; they just
+            // won't be able to Manage Entry on it (which is the correct
+            // outcome anyway, since the anime isn't on their service).
+            return $"{anilistPrefix}{anilistId}";
+        }
+
         private static string BuildAiringDescription(string raw, int? episode, long? airingAtUnix)
         {
             var prefix = string.Empty;
@@ -783,8 +816,11 @@ namespace AnimeList.Services
         // Shared poster builder for tag / staff / studio browse queries —
         // same shape: each entry has id + format + title + coverImage +
         // averageScore + seasonYear + episodes. Translates ids into the
-        // requested service's id space so card clicks land on the user's
-        // primary's detail page.
+        // requested service's NATIVE id (kitsu:N / mal:N / anilist:N), not
+        // the imdb/tmdb cross-service groupers — clicks should land on the
+        // user's primary's per-cour detail page so Manage Entry resolves
+        // directly. AniList id is the fallback when no native mapping
+        // exists for the requested service.
         private async Task<List<Meta>> BuildBrowseMetasAsync(dynamic mediaArr, AnimeService translateTo)
         {
             if (mediaArr == null) return [];
@@ -796,7 +832,7 @@ namespace AnimeList.Services
                 var anilistId = (int?)media.id;
                 if (!anilistId.HasValue) continue;
 
-                var externalId = await ResolveExternalIdAsync(anilistId.Value, translateTo);
+                var externalId = await ResolveNativeIdAsync(anilistId.Value, translateTo);
                 if (!seen.Add(externalId)) continue;
 
                 var name = string.IsNullOrEmpty((string)media.title?.english)
