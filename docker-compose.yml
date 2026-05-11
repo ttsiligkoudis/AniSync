@@ -1,0 +1,28 @@
+services:
+  anisync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: anisync:local
+    container_name: anisync
+    # IPv4-only host bindings. Docker Desktop on Windows otherwise dual-binds
+    # 0.0.0.0 + [::] and the IPv6 forwarder intermittently fails to complete
+    # the TCP handshake, so Chrome (which resolves "localhost" to ::1 first)
+    # hangs with ERR_CONNECTION_RESET while curl http://127.0.0.1:5070/ works
+    # fine. Explicitly prefixing 127.0.0.1: stops Docker from publishing on
+    # [::], so every client falls through to the IPv4 mapping.
+    ports:
+      - "127.0.0.1:5071:8081"
+      - "127.0.0.1:5070:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: "https://+:8081;http://+:8080"
+      ASPNETCORE_Kestrel__Certificates__Default__Path: /https/aspnetapp.pfx
+      ASPNETCORE_Kestrel__Certificates__Default__Password: ${ASPNETCORE_HTTPS_PASSWORD:-anisync}
+      ANISYNC_DATA_DIR: /data
+    volumes:
+      - anisync-data:/data
+      - ~/.aspnet/https:/https:ro
+
+volumes:
+  anisync-data:
