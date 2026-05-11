@@ -26,13 +26,15 @@
         '/library': {
             paneId: 'library-results-pane',
             pageEndpoint: '/library/page',
-            paginationScript: null,
+            paginationScript: '/js/library-pagination.js',
+            paginatorSelector: '.library-paginator',
             indexPath: '/library',
         },
         '/discover': {
             paneId: 'discover-results-pane',
             pageEndpoint: '/discover/page',
             paginationScript: '/js/discover-pagination.js',
+            paginatorSelector: '.discover-paginator',
             indexPath: '/discover',
         },
     };
@@ -59,14 +61,13 @@
     }
 
     function reloadPaginationScript() {
-        // The pagination script self-binds at script-load time against
-        // .discover-paginator on the page. Inserting it twice would normally
-        // cause a duplicate-observer bug, but the script does an early
-        // return when its target wrapper isn't found AND we only re-add it
-        // when the new pane actually rendered a paginator. Use a fresh
-        // <script> element each time so the script body re-runs.
+        // The pagination script self-binds at script-load time against its
+        // paginator wrapper. Re-inject only when the new pane actually
+        // rendered one — the script's own early-return guards against
+        // double-firing, but a re-add when there's nothing to bind to is
+        // wasted work. Cache-bust the src so the script body re-runs.
         if (!config.paginationScript) return;
-        if (!pane.querySelector('.discover-paginator')) return;
+        if (!pane.querySelector(config.paginatorSelector)) return;
         var s = document.createElement('script');
         s.src = config.paginationScript + '?t=' + Date.now();
         document.body.appendChild(s);

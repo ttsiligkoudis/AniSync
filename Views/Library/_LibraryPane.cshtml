@@ -1,0 +1,21 @@
+@model AnimeList.Models.LibraryPaneViewModel
+
+@* Shared results-pane partial used by both the initial /library render and
+   /library/page's fullPane swap. The paginator wrapper is rendered for non-
+   search list views when there's more to fetch; search results render flat
+   since search is single-shot relevance-ranked. *@
+@if (Model.ShowPaginator)
+{
+    <div class="library-paginator"
+         data-list="@Model.ListSlug"
+         data-search="@Model.Search"
+         data-genre="@Model.Genre"
+         data-skip="@Model.Skip">
+        @await Html.PartialAsync("_PosterGrid", Model.Grid)
+        <div class="library-sentinel" aria-hidden="true"></div>
+    </div>
+}
+else
+{
+    @await Html.PartialAsync("_PosterGrid", Model.Grid)
+}

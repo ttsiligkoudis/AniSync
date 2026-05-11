@@ -959,6 +959,81 @@ namespace AnimeList.Services
             catch { return null; }
         }
 
+        public async Task<AnilistUserStats?> GetUserStatsAsync(TokenData tokenData)
+        {
+            if (string.IsNullOrEmpty(tokenData?.access_token) || string.IsNullOrEmpty(tokenData.user_id))
+                return null;
+            if (!int.TryParse(tokenData.user_id, out var userId)) return null;
+
+            // Single GraphQL — no list pagination, no per-entry deserialisation.
+            // statuses[] returns one row per MediaListStatus value the user has
+            // any entries in (CURRENT, COMPLETED, PLANNING, …); we read the
+            // counts for the two the dashboard surfaces. genres[] is already
+            // server-side aggregated and pre-sorted by count desc, so the
+            // top-5 slice is just a Take(5).
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($userId: Int) {
+                        User(id: $userId) {
+                            statistics {
+                                anime {
+                                    meanScore
+                                    minutesWatched
+                                    statuses { status count }
+                                    genres { genre count }
+                                }
+                            }
+                        }
+                    }",
+                variables = new { userId },
+            });
+
+            var data = await PostGraphQLAsync(requestBody, tokenData);
+            var anime = data?.User?.statistics?.anime;
+            if (anime == null) return null;
+
+            int watching = 0;
+            int completed = 0;
+            if (anime.statuses != null)
+            {
+                foreach (var s in anime.statuses)
+                {
+                    var status = (string)s.status;
+                    var count = (int?)s.count ?? 0;
+                    if (status == "CURRENT") watching = count;
+                    else if (status == "COMPLETED") completed = count;
+                }
+            }
+
+            // meanScore comes back 0-100 on AniList; normalise to 0-10 with one
+            // decimal so it matches what the catalog Meta builders emit. Zero
+            // means "user has no rated entries" — surface as null so the view's
+            // "Mean" cell can hide instead of showing a misleading 0.0.
+            var rawMean = (double?)anime.meanScore;
+            double? meanScore = rawMean.HasValue && rawMean.Value > 0
+                ? Math.Round(rawMean.Value / 10, 1)
+                : (double?)null;
+
+            var minutes = (int?)anime.minutesWatched ?? 0;
+            var hours = minutes / 60;
+
+            var topGenres = new List<(string Genre, int Count)>();
+            if (anime.genres != null)
+            {
+                foreach (var g in anime.genres)
+                {
+                    var name = (string)g.genre;
+                    var count = (int?)g.count ?? 0;
+                    if (!string.IsNullOrEmpty(name) && count > 0)
+                        topGenres.Add((name, count));
+                    if (topGenres.Count >= 5) break;
+                }
+            }
+
+            return new AnilistUserStats(watching, completed, hours, meanScore, topGenres);
+        }
+
         public async Task<List<AnimeEntry>> GetUserListEntriesAsync(TokenData tokenData)
         {
             if (string.IsNullOrEmpty(tokenData?.access_token) || string.IsNullOrEmpty(tokenData.user_id))

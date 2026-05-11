@@ -172,7 +172,7 @@
    the strip would feel like a placeholder. v1 will add Hours Watched + Mean
    Score once the per-service queries surface episode counts and per-entry
    scores; v0 sticks to what's already in the existing list-catalog response. *@
-@if (isLoggedIn && !anonymousUser && Model.CompletedTotal > 0)
+@if (isLoggedIn && !anonymousUser && Model.HasStats)
 {
     <section class="dashboard-section stats-section">
         @{
