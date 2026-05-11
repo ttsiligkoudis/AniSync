@@ -128,10 +128,11 @@
    hand-off via ConfigUid the same way Continue Watching does. *@
 @if (Model.PopularThisSeason.Count > 0)
 {
+    var currentSeasonHref = $"/discover?list=seasonal&season={Uri.EscapeDataString(CurrentSeasonLabel())}";
     <section class="dashboard-section">
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">Most Popular this Season</h2>
-            <a class="dashboard-section-link" href="/discover?list=seasonal">
+            <a class="dashboard-section-link" href="@currentSeasonHref">
                 <span>View all</span>
                 <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -150,10 +151,11 @@
 
 @if (Model.MostAnticipated.Count > 0)
 {
+    var nextSeasonHref = $"/discover?list=seasonal&season={Uri.EscapeDataString(NextSeasonLabel())}";
     <section class="dashboard-section">
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">Most Anticipated</h2>
-            <a class="dashboard-section-link" href="/discover?list=seasonal">
+            <a class="dashboard-section-link" href="@nextSeasonHref">
                 <span>View all</span>
                 <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <line x1="5" y1="12" x2="19" y2="12"></line>

@@ -277,7 +277,23 @@ namespace AnimeList
         /// </summary>
         public static string CurrentSeasonLabel()
         {
-            var (seasonUpper, year) = GetSeasonAndYear(SeasonCurrent);
+            return SeasonLabel(SeasonCurrent);
+        }
+
+        /// <summary>
+        /// Same "Spring 2026"-shaped label, but for the immediately-following
+        /// season relative to today's UTC date. Used by the dashboard's
+        /// "Most Anticipated" View-all link so the destination preselects
+        /// the upcoming season the carousel previewed.
+        /// </summary>
+        public static string NextSeasonLabel()
+        {
+            return SeasonLabel(SeasonNext);
+        }
+
+        private static string SeasonLabel(string seasonOption)
+        {
+            var (seasonUpper, year) = GetSeasonAndYear(seasonOption);
             string name = seasonUpper switch
             {
                 "WINTER" => "Winter",
