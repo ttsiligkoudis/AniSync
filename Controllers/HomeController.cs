@@ -19,6 +19,7 @@ public class HomeController : Controller
     private readonly IKitsuService _kitsuService;
     private readonly IMalService _malService;
     private readonly IAnilistFallback _anilistFallback;
+    private readonly IAnimeMappingService _mappingService;
     private readonly IUserListCache _listCache;
     private readonly IMemoryCache _dashboardCache;
 
@@ -35,6 +36,7 @@ public class HomeController : Controller
         IKitsuService kitsuService,
         IMalService malService,
         IAnilistFallback anilistFallback,
+        IAnimeMappingService mappingService,
         IUserListCache listCache,
         IMemoryCache dashboardCache)
     {
@@ -44,6 +46,7 @@ public class HomeController : Controller
         _kitsuService = kitsuService;
         _malService = malService;
         _anilistFallback = anilistFallback;
+        _mappingService = mappingService;
         _listCache = listCache;
         _dashboardCache = dashboardCache;
     }
@@ -122,16 +125,34 @@ public class HomeController : Controller
             var completedTasks = contributingTokens.Select(t => SafeFetchListAsync(t, ListType.Completed, groupSeasons, nocache)).ToList();
             await Task.WhenAll(watchingTasks.Concat(completedTasks));
 
+            // Cross-service dedup: a single anime can live on the user's MAL +
+            // AniList + Kitsu lists simultaneously and emit three different
+            // native ids (mal:N / anilist:N / kitsu:N). Summing the buckets
+            // raw would triple-count it. Resolve each meta to its canonical
+            // AniList-id key (via the mapping service) before adding so the
+            // same anime collapses to one entry regardless of which service
+            // it came from. Entries with no AniList mapping fall back to
+            // their native id — those still inflate cross-service totals,
+            // but the long tail of un-mapped obscure entries is small enough
+            // that this is the right trade-off for accuracy on the common
+            // case.
             var dedupedWatching = new Dictionary<string, Meta>(StringComparer.Ordinal);
             var dedupedCompleted = new Dictionary<string, Meta>(StringComparer.Ordinal);
+            await _mappingService.EnsureLoadedAsync();
             foreach (var task in watchingTasks)
                 foreach (var m in task.Result)
-                    if (!string.IsNullOrEmpty(m.id))
-                        dedupedWatching.TryAdd(m.id, m);
+                {
+                    var key = await CanonicalKeyAsync(m);
+                    if (!string.IsNullOrEmpty(key))
+                        dedupedWatching.TryAdd(key, m);
+                }
             foreach (var task in completedTasks)
                 foreach (var m in task.Result)
-                    if (!string.IsNullOrEmpty(m.id))
-                        dedupedCompleted.TryAdd(m.id, m);
+                {
+                    var key = await CanonicalKeyAsync(m);
+                    if (!string.IsNullOrEmpty(key))
+                        dedupedCompleted.TryAdd(key, m);
+                }
 
             var watching = dedupedWatching.Values.ToList();
             var completed = dedupedCompleted.Values.ToList();
@@ -224,6 +245,18 @@ public class HomeController : Controller
             MostAnticipated = mostAnticipatedTask.Result,
             NewEpisodesToday = newEpisodesTodayTask.Result,
         });
+    }
+
+    // Resolves a Meta to its canonical cross-service key. mal:N / anilist:N
+    // / kitsu:N for the same anime collapse to the same anilist:N key when
+    // the mapping cache has an AniList entry for the native id. Entries
+    // without an AniList mapping fall back to their native id and stay
+    // distinct — long-tail-acceptable trade-off because the dataset is small.
+    private async Task<string> CanonicalKeyAsync(Meta m)
+    {
+        if (string.IsNullOrEmpty(m?.id)) return null;
+        var anilistId = await _mappingService.GetIdByService(m.id, AnimeService.Anilist);
+        return string.IsNullOrEmpty(anilistId) ? m.id : $"{anilistPrefix}{anilistId}";
     }
 
     // Per-service GetAnimeListAsync dispatch — the same shape Library / Discover /
