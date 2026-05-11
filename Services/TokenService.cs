@@ -54,7 +54,29 @@ namespace AnimeList.Services
             {
                 var sessionStr = _httpContextAccessor.HttpContext.Session.GetString("AccessToken");
                 if (!string.IsNullOrEmpty(sessionStr))
+                {
                     tokenData = DeserializeObject<TokenData>(sessionStr);
+                }
+                else
+                {
+                    // Session miss — likely a fly.io redeploy dropped the in-memory
+                    // session store, or the user reopened the installed PWA after a
+                    // long pause. Rehydrate from the persistent UID cookie if one
+                    // is present: GetAsync(uid) reads the per-user row in the
+                    // SQLite config store and gives us back the token data we
+                    // last wrote on login. The session is then re-seeded so the
+                    // rest of the request lifecycle works normally.
+                    var uidCookie = _httpContextAccessor.HttpContext.Request.Cookies[UidCookieName];
+                    if (!string.IsNullOrEmpty(uidCookie))
+                    {
+                        tokenData = await _configStore.GetAsync(uidCookie);
+                        if (tokenData != null)
+                        {
+                            _httpContextAccessor.HttpContext.Session.SetString(
+                                "AccessToken", SerializeObject(tokenData));
+                        }
+                    }
+                }
             }
 
             if (tokenData == null) return null;
@@ -162,6 +184,38 @@ namespace AnimeList.Services
             }
 
             _httpContextAccessor.HttpContext.Session.Remove("AccessToken");
+            ClearPrimaryUidCookie();
+        }
+
+        // Persistent UID cookie. Lives across PWA / browser restarts so the
+        // session can be rehydrated from the SQLite config store in
+        // GetAccessTokenAsync above. 1-year MaxAge is plenty for the
+        // "stays logged in" UX users expect from a tracker app; the
+        // upstream OAuth tokens themselves (AniList ~1y, MAL 31d w/
+        // refresh, Kitsu password-grant w/ refresh) handle their own
+        // renewal cycles independently.
+        private const string UidCookieName = "anisync_uid";
+
+        public void SetPrimaryUidCookie(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return;
+            var ctx = _httpContextAccessor.HttpContext;
+            if (ctx == null) return;
+            ctx.Response.Cookies.Append(UidCookieName, uid, new Microsoft.AspNetCore.Http.CookieOptions
+            {
+                HttpOnly = true,        // out of reach of any in-page JS
+                IsEssential = true,     // can't be suppressed by future consent middleware
+                SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax,
+                Secure = ctx.Request.IsHttps,  // HTTPS-only in prod; permissive for local http dev
+                MaxAge = TimeSpan.FromDays(365),
+            });
+        }
+
+        public void ClearPrimaryUidCookie()
+        {
+            var ctx = _httpContextAccessor.HttpContext;
+            if (ctx == null) return;
+            ctx.Response.Cookies.Delete(UidCookieName);
         }
 
         #region Anilist
