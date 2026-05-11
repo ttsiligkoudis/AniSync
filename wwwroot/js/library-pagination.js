@@ -17,6 +17,7 @@
 
     var grid = paginator.querySelector('.library-grid');
     var sentinel = paginator.querySelector('.library-sentinel');
+    var loader = paginator.querySelector('.paginator-loader');
     if (!grid || !sentinel) return;
 
     var list = paginator.getAttribute('data-list');
@@ -48,6 +49,9 @@
         if (sentinel && sentinel.parentNode) {
             sentinel.parentNode.removeChild(sentinel);
         }
+        if (loader && loader.parentNode) {
+            loader.parentNode.removeChild(loader);
+        }
     }
 
     function appendCards(html) {
@@ -70,14 +74,21 @@
         return added;
     }
 
+    function showLoader() { if (loader) loader.hidden = false; }
+    function hideLoader() { if (loader) loader.hidden = true; }
+
     function loadMore() {
         if (loading || done) return;
         loading = true;
+        showLoader();
 
         var params = 'list=' + encodeURIComponent(list) + '&skip=' + skip;
         if (search) params += '&search=' + encodeURIComponent(search);
         if (genre) params += '&genre=' + encodeURIComponent(genre);
 
+        // skipLoader: true bypasses the global full-screen loader-overlay —
+        // we render the inline paginator-loader (above) instead so scrolling
+        // gets a calm in-flow cue rather than the page-wide scrim.
         fetch('/library/page?' + params, {
             credentials: 'same-origin',
             headers: { 'Accept': 'text/html' },
@@ -94,7 +105,7 @@
                 }
             })
             .catch(function () { /* swallow — user can retry by scrolling */ })
-            .finally(function () { loading = false; });
+            .finally(function () { loading = false; hideLoader(); });
     }
 
     observer = new IntersectionObserver(function (entries) {
