@@ -13,27 +13,23 @@ namespace AnimeList.Models
         public string ConfigUid { get; set; }
         public List<Meta> ContinueWatching { get; set; } = [];
 
-        // Stats panel. Watching/Completed totals come from list-fetch lengths;
-        // TotalHoursWatched is sum(Completed episodes) × 24 min (the typical
-        // TV-anime ep length); MeanScore averages user-rated Completed entries
-        // (skipping unscored ones so the average isn't dragged down by zeros).
-        // Phase 5 of the StreamD refactor surfaces the per-entry score +
-        // episode count from each service's catalog query, which makes hours
-        // and mean computable here without an extra round-trip per entry.
-        // TopGenres is the top 5 genre buckets across Completed — the best
-        // sample of long-run taste (Currently Watching skews to whatever
-        // airing season is in flight).
+        // Stats panel — populated only when the viewer has an AniList token
+        // (primary or linked), since the dashboard now reads stats from
+        // AniList's User.statistics GraphQL rather than computing them
+        // locally over the full Watching + Completed lists. MAL / Kitsu
+        // primaries without an AniList link see the panel hidden (HasStats =
+        // false); they can link AniList from /configure to unlock it.
+        public bool HasStats { get; set; }
         public int WatchingTotal { get; set; }
         public int CompletedTotal { get; set; }
         public int TotalHoursWatched { get; set; }
         public double? MeanScore { get; set; }
         public List<(string genre, int count)> TopGenres { get; set; } = [];
 
-        // Names of the services that contributed data to the stats (primary
-        // first, then any healthy linked secondaries). The view's "via X"
-        // subtitle uses this to communicate "your stats span N accounts" when
-        // there are multiple contributors. Empty for anonymous / not-logged-in
-        // users, single-element for users with no linked accounts.
+        // Names of the services that contributed data to the stats. Stats
+        // are AniList-only now, so this is either ["Anilist"] (panel shown)
+        // or empty (panel hidden). Kept as a list to leave room for a future
+        // multi-source aggregation without breaking the view contract.
         public List<string> ContributingServices { get; set; } = [];
 
         // Seasonal aggregate counts surfaced on the dashboard's "This Season"

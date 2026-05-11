@@ -49,6 +49,17 @@ namespace AnimeList.Services.Interfaces
         /// straight to the sync fan-out.
         /// </summary>
         Task<List<AnimeEntry>> GetUserListEntriesAsync(TokenData tokenData);
+
+        /// <summary>
+        /// Fetches the user's anime statistics (counts per status, mean score, total minutes
+        /// watched, top genres) via AniList's <c>User.statistics</c> GraphQL — a single query
+        /// that's vastly cheaper than fetching the Watching + Completed lists and computing
+        /// these locally. Used by the dashboard "Your stats" panel when the user has an
+        /// AniList token (primary or linked); MAL/Kitsu users see the panel only when they've
+        /// linked an AniList account, because the other providers don't expose an equivalent.
+        /// Returns null if the call fails or the token has no user_id attached.
+        /// </summary>
+        Task<AnilistUserStats?> GetUserStatsAsync(TokenData tokenData);
     }
 }
 

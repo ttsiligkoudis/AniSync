@@ -73,42 +73,40 @@
         <a class="filter-bar-clear" href="@Url.Action("Index", "Library", new { list = activeListSlug })">Clear</a>
     }
 
-    @* Force-refresh ?nocache=1 — same escape hatch the dashboard exposes.
-       Sits at the end of the filter row so it doesn't compete visually with
-       the primary Search action. Hidden during search since search results
-       aren't cached anyway. *@
-    @if (!hasSearch)
-    {
-        <a class="dashboard-refresh-btn library-refresh-btn"
-           href="@Url.Action("Index", "Library", new { list = activeListSlug, nocache = true })"
-           title="Refresh list — bypass the 10 min cache"
-           aria-label="Refresh list">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <polyline points="23 4 23 10 17 10"></polyline>
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-            </svg>
-        </a>
-    }
 </form>
+
+@{
+    var paneModel = new AnimeList.Models.LibraryPaneViewModel
+    {
+        Grid = new AnimeList.Models.PosterGridViewModel
+        {
+            Items = Model.Items,
+            ConfigUid = Model.ConfigUid,
+            EmptyMessage = hasSearch
+                ? $"No matches for \"{Model.Search}\"."
+                : hasGenre
+                    ? $"No {Model.Genre.ToLower()} anime in your {activeLabel} list."
+                    : $"Nothing in your {activeLabel} list on {Model.AnimeService}.",
+        },
+        ShowPaginator = Model.Paginated,
+        ListSlug = activeListSlug,
+        Search = Model.Search,
+        Genre = Model.Genre,
+        Skip = Model.Items.Count,
+    };
+}
 
 @* Submitting the .filter-bar form normally would full-reload the page;
    filter-search.js intercepts the submit, hits /library/page for just
-   the grid HTML, and swaps it into #library-results-pane. The pane id
-   is the contract between the view and the JS — keep the JS in sync
-   if this id changes. *@
+   the pane HTML, and swaps it into #library-results-pane. *@
 <div id="library-results-pane">
-    @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
-    {
-        Items = Model.Items,
-        ConfigUid = Model.ConfigUid,
-        EmptyMessage = hasSearch
-            ? $"No matches for \"{Model.Search}\"."
-            : hasGenre
-                ? $"No {Model.Genre.ToLower()} anime in your {activeLabel} list."
-                : $"Nothing in your {activeLabel} list on {Model.AnimeService}.",
-    })
+    @await Html.PartialAsync("_LibraryPane", paneModel)
 </div>
 
 @section Scripts {
+    @if (Model.Paginated)
+    {
+        <script src="~/js/library-pagination.js" asp-append-version="true" defer></script>
+    }
     <script src="~/js/filter-search.js" asp-append-version="true" defer></script>
 }

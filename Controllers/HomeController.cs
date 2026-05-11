@@ -19,7 +19,6 @@ public class HomeController : Controller
     private readonly IKitsuService _kitsuService;
     private readonly IMalService _malService;
     private readonly IAnilistFallback _anilistFallback;
-    private readonly IAnimeMappingService _mappingService;
     private readonly IUserListCache _listCache;
     private readonly IMemoryCache _dashboardCache;
 
@@ -36,7 +35,6 @@ public class HomeController : Controller
         IKitsuService kitsuService,
         IMalService malService,
         IAnilistFallback anilistFallback,
-        IAnimeMappingService mappingService,
         IUserListCache listCache,
         IMemoryCache dashboardCache)
     {
@@ -46,7 +44,6 @@ public class HomeController : Controller
         _kitsuService = kitsuService;
         _malService = malService;
         _anilistFallback = anilistFallback;
-        _mappingService = mappingService;
         _listCache = listCache;
         _dashboardCache = dashboardCache;
     }
@@ -73,6 +70,7 @@ public class HomeController : Controller
 
         string uid = null;
         List<Meta> continueWatching = [];
+        bool hasStats = false;
         int watchingTotal = 0;
         int completedTotal = 0;
         int totalHoursWatched = 0;
@@ -89,122 +87,60 @@ public class HomeController : Controller
             var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
             uid = resolved;
 
-            // Cross-provider stats: pull the user's Watching + Completed lists
-            // from the primary AND every healthy linked secondary, then dedup
-            // the union by Meta.id. The catalog Meta builders use ResolveGroupedId
-            // with cross-service mapping fallback, so the same anime fetched via
-            // AniList and MAL produces the SAME externalId — which makes
-            // Dictionary<string, Meta> keyed on Meta.id a sufficient dedup
-            // strategy. Users with no linked accounts behave identically to
-            // before (only the primary's lists feed the stats).
-            var contributingTokens = new List<TokenData> { tokenData };
-            contributingNames.Add(tokenData.anime_service.ToString());
-            var linkedTokens = !string.IsNullOrEmpty(uid)
-                ? await _configStore.GetLinkedTokensAsync(uid)
-                : [];
-            foreach (var lt in linkedTokens)
-            {
-                if (lt.NeedsReauth || lt.TokenData == null || lt.TokenData.anonymousUser) continue;
-                contributingTokens.Add(lt.TokenData);
-                contributingNames.Add(lt.Service.ToString());
-            }
-
             // Site UI is always ungrouped — the enableSeasonGrouping pref now
             // only governs Stremio's catalog / meta endpoints. On the dashboard
             // we always want each cour visible as its own card so Continue
             // Watching matches what the user sees in /library.
             const bool groupSeasons = false;
 
-            // Fan-out fetches: 2 lists × N services in parallel. SafeFetchListAsync
-            // wraps each call in a try/catch so one provider rate-limiting or
-            // returning a 5xx doesn't abort the whole stats panel — that provider
-            // just contributes zero entries to the union. Results are served from
-            // the per-user list cache (10 min TTL) when present; ?nocache=1 forces
-            // a refresh, which the dashboard's "Refresh" button uses.
-            var watchingTasks = contributingTokens.Select(t => SafeFetchListAsync(t, ListType.Current, groupSeasons, nocache)).ToList();
-            var completedTasks = contributingTokens.Select(t => SafeFetchListAsync(t, ListType.Completed, groupSeasons, nocache)).ToList();
-            await Task.WhenAll(watchingTasks.Concat(completedTasks));
-
-            // Cross-service dedup: a single anime can live on the user's MAL +
-            // AniList + Kitsu lists simultaneously and emit three different
-            // native ids (mal:N / anilist:N / kitsu:N). Summing the buckets
-            // raw would triple-count it. Resolve each meta to its canonical
-            // AniList-id key (via the mapping service) before adding so the
-            // same anime collapses to one entry regardless of which service
-            // it came from. Entries with no AniList mapping fall back to
-            // their native id — those still inflate cross-service totals,
-            // but the long tail of un-mapped obscure entries is small enough
-            // that this is the right trade-off for accuracy on the common
-            // case.
-            var dedupedWatching = new Dictionary<string, Meta>(StringComparer.Ordinal);
-            var dedupedCompleted = new Dictionary<string, Meta>(StringComparer.Ordinal);
-            await _mappingService.EnsureLoadedAsync();
-            foreach (var task in watchingTasks)
-                foreach (var m in task.Result)
+            // Pick the AniList token (primary or linked) — stats now go
+            // through AniList's User.statistics GraphQL, which is a single
+            // query that's vastly cheaper than fetching the full Watching +
+            // Completed lists. Users without an AniList account see the
+            // stats panel hidden (HasStats = false); they can link AniList
+            // from /configure to unlock it.
+            TokenData anilistTokenForStats = null;
+            if (tokenData.anime_service == AnimeService.Anilist)
+            {
+                anilistTokenForStats = tokenData;
+            }
+            else if (!string.IsNullOrEmpty(uid))
+            {
+                var linkedTokens = await _configStore.GetLinkedTokensAsync(uid);
+                foreach (var lt in linkedTokens)
                 {
-                    var key = await CanonicalKeyAsync(m);
-                    if (!string.IsNullOrEmpty(key))
-                        dedupedWatching.TryAdd(key, m);
+                    if (lt.NeedsReauth || lt.TokenData == null || lt.TokenData.anonymousUser) continue;
+                    if (lt.Service != AnimeService.Anilist) continue;
+                    anilistTokenForStats = lt.TokenData;
+                    break;
                 }
-            foreach (var task in completedTasks)
-                foreach (var m in task.Result)
-                {
-                    var key = await CanonicalKeyAsync(m);
-                    if (!string.IsNullOrEmpty(key))
-                        dedupedCompleted.TryAdd(key, m);
-                }
+            }
 
-            var watching = dedupedWatching.Values.ToList();
-            var completed = dedupedCompleted.Values.ToList();
+            // Fire the AniList stats call alongside the primary's Watching
+            // fetch. Continue Watching still comes from the primary so the
+            // "Ep N / Total" progress is meaningful to the user (per-service
+            // progress differs based on which service they actively update).
+            // Lists are no longer cached — every dashboard hit reflects live
+            // state.
+            var statsTask = anilistTokenForStats != null
+                ? _anilistService.GetUserStatsAsync(anilistTokenForStats)
+                : Task.FromResult<AnilistUserStats?>(null);
+            var watchingTask = SafeFetchListAsync(tokenData, ListType.Current, groupSeasons, /* nocache */ true);
+            await Task.WhenAll(statsTask, watchingTask);
 
-            watchingTotal = watching.Count;
-            completedTotal = completed.Count;
+            continueWatching = watchingTask.Result.Take(ContinueWatchingMaxItems).ToList();
 
-            // Continue Watching uses the PRIMARY's watching list only — it's a
-            // "what to watch next" surface where each card's "Ep N / Total"
-            // progress badge is meaningful to the user, and that signal is per-
-            // provider (the same anime on AniList vs MAL has different progress
-            // depending on which the user is actively updating). Aggregating
-            // across services would either show the union (with possibly stale
-            // progress for whichever service the user doesn't actively update)
-            // or pick one arbitrarily. Keeping it primary-only is the honest
-            // default; users can revisit if it feels wrong.
-            continueWatching = watchingTasks[0].Result.Take(ContinueWatchingMaxItems).ToList();
-
-            // Hours watched: sum of episodes across Completed entries × 24 minutes
-            // (the typical TV-anime episode length — not exact for movies/specials
-            // but the mode for the long-tail dataset). Phase 5 of the StreamD
-            // refactor populates Meta.episodes from each per-service catalog
-            // query, so this works for AniList/MAL/Kitsu users uniformly.
-            const int AvgEpisodeMinutes = 24;
-            var totalMinutes = completed
-                .Where(m => m.episodes is int eps && eps > 0)
-                .Sum(m => m.episodes!.Value * AvgEpisodeMinutes);
-            totalHoursWatched = totalMinutes / 60;
-
-            // Mean score across rated Completed entries. score is normalised
-            // to 0-10 by each service's catalog Meta builder. Skip entries
-            // without a score (user hasn't rated them) — averaging in zeros
-            // would punish unrated entries, which isn't the intent.
-            var scores = completed
-                .Where(m => m.score is double s && s > 0)
-                .Select(m => m.score!.Value)
-                .ToList();
-            if (scores.Count > 0)
-                meanScore = Math.Round(scores.Average(), 1);
-
-            // Top genres from Completed only — Completed is the most representative
-            // sample of the user's taste (Currently Watching skews recency-biased
-            // toward whatever airing season they're in). Bucket-and-rank in memory
-            // since lists are small.
-            topGenres = completed
-                .SelectMany(m => m.genres ?? Enumerable.Empty<string>())
-                .Where(g => !string.IsNullOrWhiteSpace(g))
-                .GroupBy(g => g, StringComparer.OrdinalIgnoreCase)
-                .OrderByDescending(g => g.Count())
-                .Take(5)
-                .Select(g => (g.Key, g.Count()))
-                .ToList();
+            var stats = await statsTask;
+            if (stats != null)
+            {
+                hasStats = true;
+                watchingTotal = stats.Watching;
+                completedTotal = stats.Completed;
+                totalHoursWatched = stats.TotalHoursWatched;
+                meanScore = stats.MeanScore;
+                topGenres = stats.TopGenres;
+                contributingNames.Add(AnimeService.Anilist.ToString());
+            }
         }
 
         // Seasonal stats + popularity shelves apply to every visitor
@@ -232,6 +168,7 @@ public class HomeController : Controller
             TokenData = tokenData,
             ConfigUid = uid,
             ContinueWatching = continueWatching,
+            HasStats = hasStats,
             WatchingTotal = watchingTotal,
             CompletedTotal = completedTotal,
             TotalHoursWatched = totalHoursWatched,
@@ -245,18 +182,6 @@ public class HomeController : Controller
             MostAnticipated = mostAnticipatedTask.Result,
             NewEpisodesToday = newEpisodesTodayTask.Result,
         });
-    }
-
-    // Resolves a Meta to its canonical cross-service key. mal:N / anilist:N
-    // / kitsu:N for the same anime collapse to the same anilist:N key when
-    // the mapping cache has an AniList entry for the native id. Entries
-    // without an AniList mapping fall back to their native id and stay
-    // distinct — long-tail-acceptable trade-off because the dataset is small.
-    private async Task<string> CanonicalKeyAsync(Meta m)
-    {
-        if (string.IsNullOrEmpty(m?.id)) return null;
-        var anilistId = await _mappingService.GetIdByService(m.id, AnimeService.Anilist);
-        return string.IsNullOrEmpty(anilistId) ? m.id : $"{anilistPrefix}{anilistId}";
     }
 
     // Per-service GetAnimeListAsync dispatch — the same shape Library / Discover /
@@ -317,20 +242,18 @@ public class HomeController : Controller
         }
     }
 
-    // Cross-provider variant: catches per-service exceptions so one rate-limited
-    // or 5xx'd provider doesn't abort the whole stats panel. The other providers
-    // still contribute their data; the failing one contributes an empty list.
-    // Goes through IUserListCache so repeat visits (Home → Library → Home) reuse
-    // the same fetch result for up to 10 minutes; bypassCache=true skips the
-    // cached entry and refreshes it from upstream.
+    // Wraps FetchListAsync in a try/catch so a single provider rate-limiting
+    // or 5xx'ing doesn't abort the dashboard render — the empty result just
+    // collapses the Continue Watching shelf rather than crashing the page.
+    // bypassCache is retained for signature compatibility with existing
+    // call sites but is now a no-op; lists are no longer cached on the
+    // dashboard path (every load reflects live state).
     private async Task<List<Meta>> SafeFetchListAsync(TokenData tokenData, ListType listType,
         bool groupSeasons = true, bool bypassCache = false)
     {
         try
         {
-            return await _listCache.GetOrFetchAsync(tokenData, listType, groupSeasons,
-                () => FetchListAsync(tokenData, listType, groupSeasons),
-                bypassCache);
+            return await FetchListAsync(tokenData, listType, groupSeasons);
         }
         catch { return []; }
     }
