@@ -24,7 +24,6 @@ namespace AnimeList.Models
         public int CompletedTotal { get; set; }
         public int TotalHoursWatched { get; set; }
         public double? MeanScore { get; set; }
-        public List<(string genre, int count)> TopGenres { get; set; } = [];
 
         // Names of the services that contributed data to the stats. Stats
         // are AniList-only now, so this is either ["Anilist"] (panel shown)

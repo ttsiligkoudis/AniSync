@@ -61,7 +61,11 @@
             </a>
         </div>
         <div class="stats-strip">
-            <a class="stats-cell stats-cell-link" href="/discover?list=airing" aria-label="Currently airing anime">
+            @* These tiles are informational only — no link target. The
+               equivalent navigation already lives in the Discover tab on
+               the bottom-nav / drawer, so making the tiles tap targets
+               just added an inconsistent path. *@
+            <div class="stats-cell" aria-label="Currently airing anime">
                 <span class="stats-icon stats-icon-blue">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect>
@@ -70,8 +74,8 @@
                 </span>
                 <div class="stats-number">@Model.SeasonCurrentlyAiring</div>
                 <div class="stats-label">Currently Airing</div>
-            </a>
-            <a class="stats-cell stats-cell-link" href="/discover?list=seasonal" aria-label="New this season">
+            </div>
+            <div class="stats-cell" aria-label="New this season">
                 <span class="stats-icon stats-icon-green">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M12 3 L13.5 9 L19 10.5 L13.5 12 L12 18 L10.5 12 L5 10.5 L10.5 9 Z"></path>
@@ -80,8 +84,8 @@
                 </span>
                 <div class="stats-number">@Model.SeasonNewThis</div>
                 <div class="stats-label">New This Season</div>
-            </a>
-            <a class="stats-cell stats-cell-link" href="/discover?list=seasonal" aria-label="Total this season">
+            </div>
+            <div class="stats-cell" aria-label="Total this season">
                 <span class="stats-icon stats-icon-amber">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polygon points="5 3 19 12 5 21 5 3"></polygon>
@@ -89,7 +93,7 @@
                 </span>
                 <div class="stats-number">@Model.SeasonTotal</div>
                 <div class="stats-label">Total This Season</div>
-            </a>
+            </div>
         </div>
     </section>
 }
@@ -262,16 +266,6 @@
                 </div>
             }
         </div>
-        @if (Model.TopGenres.Count > 0)
-        {
-            <div class="genre-chips">
-                <span class="genre-chips-label">Top genres:</span>
-                @foreach (var (genre, _) in Model.TopGenres)
-                {
-                    <span class="genre-chip">@genre</span>
-                }
-            </div>
-        }
     </section>
 }
 
