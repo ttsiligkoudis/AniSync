@@ -43,20 +43,7 @@ namespace AnimeList.Services
             };
             ApplyBearerAuth(request, tokenData);
             var response = await _clientFactory.CreateClient().SendAsync(request);
-            if (!response.IsSuccessStatusCode)
-            {
-                // Log the non-2xx response so a 401 (expired token) or 429
-                // (rate limit) doesn't silently degrade into an empty
-                // search row with no diagnostic trail.
-                string body = null;
-                try { body = await response.Content.ReadAsStringAsync(); } catch { /* best-effort */ }
-                _logger.LogWarning(
-                    "AnilistService.PostGraphQLAsync non-success: status={Status} hasToken={HasToken} body={Body}",
-                    (int)response.StatusCode,
-                    !string.IsNullOrWhiteSpace(tokenData?.access_token),
-                    body?.Length > 500 ? body[..500] : body);
-                return null;
-            }
+            if (!response.IsSuccessStatusCode) return null;
             var content = await response.Content.ReadAsStringAsync();
             return DeserializeObject<dynamic>(content)?.data;
         }
@@ -264,47 +251,15 @@ namespace AnimeList.Services
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
             var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, search, sort);
 
-            // Public discovery queries (Search / Trending / Seasonal) hit the AniList
-            // Page endpoint, which doesn't need auth. Sending a bearer here was
-            // breaking discover-side search whenever the user's stored token had
-            // expired — AniList rejects the whole query with 401 even though the
-            // payload itself is public — so route those calls anonymously. User-
-            // list queries (MediaList / MediaListCollection) still need the bearer.
-            bool isPublicQuery = list == ListType.Trending_Desc
-                              || list == ListType.Seasonal
-                              || list == ListType.Search;
-            var queryTokenData = isPublicQuery ? null : tokenData;
-            var data = await PostGraphQLAsync(requestBody, queryTokenData);
-            if (data == null)
-            {
-                _logger.LogWarning(
-                    "AnilistService.GetAnimeListAsync: PostGraphQLAsync returned null (list={List}, search={Search}, hasToken={HasToken}).",
-                    list, search, !string.IsNullOrWhiteSpace(tokenData?.access_token));
-                return [];
-            }
+            var data = await PostGraphQLAsync(requestBody, tokenData);
+            if (data == null) return [];
 
             IEnumerable<dynamic> result;
 
             bool isUserList = !list.HasValue || _userLists.Contains(list.Value);
 
             if (list == ListType.Trending_Desc || list == ListType.Seasonal || list == ListType.Search)
-            {
-                if (data.Page == null)
-                {
-                    _logger.LogWarning(
-                        "AnilistService.GetAnimeListAsync: data.Page null (list={List}, search={Search}).",
-                        list, search);
-                    return [];
-                }
                 result = data.Page.media;
-                if (result == null)
-                {
-                    _logger.LogWarning(
-                        "AnilistService.GetAnimeListAsync: data.Page.media null (list={List}, search={Search}).",
-                        list, search);
-                    return [];
-                }
-            }
             else if (!string.IsNullOrEmpty(resolvedAnimeId))
                 result = data.MediaList == null ? Array.Empty<dynamic>() : [data.MediaList];
             else
