@@ -340,6 +340,9 @@ public class HomeController : Controller
                 // The config URL is already a per-user bearer token, so trusting it as a
                 // login signal is consistent with the rest of the app.
                 HttpContext.Session.SetString("AccessToken", SerializeObject(tokenData));
+                // Persist the UID so the next request after a redeploy / PWA reopen can
+                // rehydrate the session from the SQLite store via TokenService.
+                _tokenService.SetPrimaryUidCookie(configUid);
             }
             else
             {
@@ -507,6 +510,8 @@ public class HomeController : Controller
         HttpContext.Session.SetString("AccessToken", SerializeObject(backup.tokenData));
 
         var uid = await _configStore.UpsertAsync(backup.tokenData);
+        // Persist UID for session rehydration after restart / PWA reopen.
+        _tokenService.SetPrimaryUidCookie(uid);
         if (backup.flags != null)
             await _configStore.SetFlagsAsync(uid, backup.flags.flags1, backup.flags.flags2, backup.flags.flags3);
 
