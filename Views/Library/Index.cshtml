@@ -91,13 +91,24 @@
     }
 </form>
 
-@await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
-{
-    Items = Model.Items,
-    ConfigUid = Model.ConfigUid,
-    EmptyMessage = hasSearch
-        ? $"No matches for \"{Model.Search}\"."
-        : hasGenre
-            ? $"No {Model.Genre.ToLower()} anime in your {activeLabel} list."
-            : $"Nothing in your {activeLabel} list on {Model.AnimeService}.",
-})
+@* Submitting the .filter-bar form normally would full-reload the page;
+   filter-search.js intercepts the submit, hits /library/page for just
+   the grid HTML, and swaps it into #library-results-pane. The pane id
+   is the contract between the view and the JS — keep the JS in sync
+   if this id changes. *@
+<div id="library-results-pane">
+    @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+    {
+        Items = Model.Items,
+        ConfigUid = Model.ConfigUid,
+        EmptyMessage = hasSearch
+            ? $"No matches for \"{Model.Search}\"."
+            : hasGenre
+                ? $"No {Model.Genre.ToLower()} anime in your {activeLabel} list."
+                : $"Nothing in your {activeLabel} list on {Model.AnimeService}.",
+    })
+</div>
+
+@section Scripts {
+    <script src="~/js/filter-search.js" asp-append-version="true" defer></script>
+}

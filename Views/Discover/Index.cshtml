@@ -115,35 +115,43 @@
     };
 }
 
-@if (hasSearch || Model.Items.Count == 0)
-{
-    @* Search results aren't paginated upstream (single-shot relevance rank)
-       and an empty grid has nothing to paginate from, so render the bare
-       partial without the infinite-scroll plumbing in either case. *@
-    @await Html.PartialAsync("_PosterGrid", posterGridModel)
-}
-else
-{
-    @* Wrapper carries the bookkeeping the discover-pagination.js needs:
-       data-list (slug), data-genre (active filter), data-season (when on
-       the Seasonal tab so paginated chunks fetch the same calendar window),
-       data-skip (count already rendered server-side). The sentinel inside
-       is what IntersectionObserver watches — when it scrolls into the
-       viewport's pre-load margin we fetch the next chunk via
-       /discover/page and append. *@
-    <div class="discover-paginator"
-         data-list="@activeSlug"
-         data-genre="@Model.Genre"
-         data-season="@(isSeasonal ? Model.Season : null)"
-         data-skip="@Model.Items.Count">
+@* #discover-results-pane is the swap target for filter-search.js. The
+   server returns just the inner <div class="library-grid">… (no paginator
+   wrapper) on a Search-button submit and the JS drops it in here; the
+   pagination-aware wrapper below is the initial server-rendered state
+   for the non-search case. *@
+<div id="discover-results-pane">
+    @if (hasSearch || Model.Items.Count == 0)
+    {
+        @* Search results aren't paginated upstream (single-shot relevance rank)
+           and an empty grid has nothing to paginate from, so render the bare
+           partial without the infinite-scroll plumbing in either case. *@
         @await Html.PartialAsync("_PosterGrid", posterGridModel)
-        <div class="discover-sentinel" aria-hidden="true"></div>
-    </div>
-}
+    }
+    else
+    {
+        @* Wrapper carries the bookkeeping the discover-pagination.js needs:
+           data-list (slug), data-genre (active filter), data-season (when on
+           the Seasonal tab so paginated chunks fetch the same calendar window),
+           data-skip (count already rendered server-side). The sentinel inside
+           is what IntersectionObserver watches — when it scrolls into the
+           viewport's pre-load margin we fetch the next chunk via
+           /discover/page and append. *@
+        <div class="discover-paginator"
+             data-list="@activeSlug"
+             data-genre="@Model.Genre"
+             data-season="@(isSeasonal ? Model.Season : null)"
+             data-skip="@Model.Items.Count">
+            @await Html.PartialAsync("_PosterGrid", posterGridModel)
+            <div class="discover-sentinel" aria-hidden="true"></div>
+        </div>
+    }
+</div>
 
 @section Scripts {
     @if (!hasSearch && Model.Items.Count > 0)
     {
         <script src="~/js/discover-pagination.js" asp-append-version="true" defer></script>
     }
+    <script src="~/js/filter-search.js" asp-append-version="true" defer></script>
 }
