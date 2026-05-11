@@ -283,9 +283,9 @@ namespace AnimeList.Services
                                         }
                                     }
                                 }
-                                tags { name rank isAdult }
-                                studios { edges { isMain node { name siteUrl } } }
-                                staff { edges { role node { name { full } siteUrl } } }
+                                tags { id name rank isAdult }
+                                studios { edges { isMain node { id name siteUrl } } }
+                                staff { edges { role node { id name { full } siteUrl } } }
                             }
                         }",
                     variables = new { id = anilistId }
@@ -419,6 +419,7 @@ namespace AnimeList.Services
                         name = name,
                         category = "Tag",
                         url = $"https://anilist.co/search/anime?genres={Uri.EscapeDataString(name)}",
+                        anilistId = (long?)tag.id,
                     });
                 }
             }
@@ -431,7 +432,13 @@ namespace AnimeList.Services
                     var name = (string)edge.node?.name;
                     var siteUrl = (string)edge.node?.siteUrl;
                     if (string.IsNullOrEmpty(name)) continue;
-                    result.Add(new Link { name = name, category = "Studio", url = siteUrl });
+                    result.Add(new Link
+                    {
+                        name = name,
+                        category = "Studio",
+                        url = siteUrl,
+                        anilistId = (long?)edge.node?.id,
+                    });
                 }
             }
 
@@ -448,6 +455,7 @@ namespace AnimeList.Services
                         name = name,
                         category = StaffRoleToCategory(role),
                         url = siteUrl,
+                        anilistId = (long?)edge.node?.id,
                     });
                 }
             }
