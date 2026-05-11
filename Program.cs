@@ -10,7 +10,29 @@ using System.Threading.RateLimiting;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHttpClient();
-builder.Services.AddSession();
+// Persistent session cookie. The default AddSession() emits a "session
+// cookie" with no MaxAge/Expires, which Android (and any browser, but
+// most noticeably the PWA running in standalone mode) discards when the
+// process ends — reopening the installed app then has no cookie to
+// present, so the user lands on the login screen again even though
+// they signed in last night. MaxAge=30d + matching IdleTimeout=30d
+// gives a "stays logged in" experience that lines up with what users
+// expect from any other tracker app.
+//   - IsEssential=true marks the cookie as required for the site to
+//     function so any future consent middleware doesn't suppress it.
+//   - HttpOnly stays true — the access tokens stored server-side
+//     under this session shouldn't be reachable from JS.
+//   - SameSite=Lax (default) is correct: cross-site embeds shouldn't
+//     carry the session, but top-level navigations (OAuth callbacks
+//     from AniList / MAL) need the cookie attached on return.
+builder.Services.AddSession(options =>
+{
+    options.Cookie.Name = ".AniSync.Session";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.IsEssential = true;
+    options.Cookie.MaxAge = TimeSpan.FromDays(30);
+    options.IdleTimeout = TimeSpan.FromDays(30);
+});
 // Stremio's video renderer throws when fields like `released` are present with a
 // null value — it expects either a valid ISO date string or the field absent.
 // Drop nulls globally so any optional Meta / Video field that's unset on the C#
