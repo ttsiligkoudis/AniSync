@@ -92,6 +92,12 @@ public class HomeController : Controller
             // Watching matches what the user sees in /library.
             const bool groupSeasons = false;
 
+            // Honor the "Hide unaired from Watching" site preference. Default off
+            // (matches the dashboard's behaviour before the toggle existed for
+            // the entries the user explicitly moved to Watching).
+            var dashboardConfig = await GetConfigByUidAsync(uid, _configStore);
+            var hideUnreleased = dashboardConfig?.hideUnreleasedFromWatching == true;
+
             // Pick the AniList token (primary or linked) — stats now go
             // through AniList's User.statistics GraphQL, which is a single
             // query that's vastly cheaper than fetching the full Watching +
@@ -124,7 +130,7 @@ public class HomeController : Controller
             var statsTask = anilistTokenForStats != null
                 ? _anilistService.GetUserStatsAsync(anilistTokenForStats)
                 : Task.FromResult<AnilistUserStats?>(null);
-            var watchingTask = SafeFetchListAsync(tokenData, ListType.Current, groupSeasons, /* nocache */ true);
+            var watchingTask = SafeFetchListAsync(tokenData, ListType.Current, groupSeasons, /* nocache */ true, hideUnreleased);
             await Task.WhenAll(statsTask, watchingTask);
 
             continueWatching = watchingTask.Result.Take(ContinueWatchingMaxItems).ToList();
@@ -192,13 +198,13 @@ public class HomeController : Controller
     // without three nested switch expressions. groupSeasons is plumbed through so
     // the dashboard's Continue Watching / stats slice respects the user's
     // "Group anime seasons" toggle the same way the addon catalog does.
-    private async Task<List<Meta>> FetchListAsync(TokenData tokenData, ListType listType, bool groupSeasons = true)
+    private async Task<List<Meta>> FetchListAsync(TokenData tokenData, ListType listType, bool groupSeasons = true, bool hideUnreleased = false)
     {
         var metas = tokenData.anime_service switch
         {
-            AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons),
-            AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons),
-            _                        => await _kitsuService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons),
+            AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased),
+            AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased),
+            _                        => await _kitsuService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased),
         };
         return metas ?? [];
     }
@@ -266,11 +272,11 @@ public class HomeController : Controller
     // call sites but is now a no-op; lists are no longer cached on the
     // dashboard path (every load reflects live state).
     private async Task<List<Meta>> SafeFetchListAsync(TokenData tokenData, ListType listType,
-        bool groupSeasons = true, bool bypassCache = false)
+        bool groupSeasons = true, bool bypassCache = false, bool hideUnreleased = false)
     {
         try
         {
-            return await FetchListAsync(tokenData, listType, groupSeasons);
+            return await FetchListAsync(tokenData, listType, groupSeasons, hideUnreleased);
         }
         catch { return []; }
     }

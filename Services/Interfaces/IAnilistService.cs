@@ -5,7 +5,7 @@ namespace AnimeList.Services.Interfaces
 {
     public interface IAnilistService
     {
-        Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null);
+        Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null, bool hideUnreleased = false);
         Task<Meta> GetAnimeByIdAsync(string id, TokenData tokenData, bool groupSeasons = true);
 
         /// <summary>

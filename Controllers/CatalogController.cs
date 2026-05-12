@@ -54,6 +54,7 @@ namespace AnimeList.Controllers
                 // TMDB cross-service mapping instead of emitting each cour's native id.
                 var configuration = await ResolveConfigAsync(config, _configStore);
                 var groupSeasons = configuration?.enableSeasonGrouping == true;
+                var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
 
                 // Search always runs with groupSeasons=false so the per-service dedup
                 // doesn't rewrite a movie's name to the shortest among entries that
@@ -65,9 +66,9 @@ namespace AnimeList.Controllers
 
                 var metas = animeService switch
                 {
-                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall),
-                    _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall),
+                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                    _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased),
                 };
 
                 // Search splits into separate series + movie catalogs in the manifest

@@ -51,5 +51,11 @@
         // positive-sense so a freshly-built Configuration defaults to "grouping off"
         // without any extra controller-level branching.
         public bool enableSeasonGrouping { get; set; }
+
+        // Hide entries whose upstream status is "not yet aired" from the Currently
+        // Watching catalog on the site and in Stremio. Default off — pre-release
+        // entries manually moved to Watching stay visible unless the user opts in
+        // to filtering them out via the /configure Site Preferences toggle.
+        public bool hideUnreleasedFromWatching { get; set; }
     }
 }
