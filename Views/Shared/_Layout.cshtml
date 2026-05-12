@@ -74,17 +74,44 @@
                     onclick="document.body.classList.remove('drawer-open')">×</button>
         </div>
         <nav class="nav-drawer-nav">
-            <a href="/" class="@(activeNav == "home" ? "active" : "")">Home</a>
+            <a href="/" class="@(activeNav == "home" ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 12L12 3l9 9"></path>
+                    <path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path>
+                </svg>
+                <span class="nav-label">Home</span>
+            </a>
             @* My Library requires an authenticated non-anonymous session — the
                page just bounces back to / for anonymous visitors, so we omit
                the link entirely rather than offering a dead-end navigation. *@
             @if (layoutLoggedIn)
             {
-                <a href="/library" class="@(activeNav == "library" ? "active" : "")">My Library</a>
+                <a href="/library" class="@(activeNav == "library" ? "active" : "")">
+                    <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    <span class="nav-label">My Library</span>
+                </a>
             }
-            <a href="/discover" class="@(activeNav == "discover" ? "active" : "")">Discover</a>
-            <a href="@Url.Action("Configure", "Home")" class="@(activeNav == "configure" ? "active" : "")">Account</a>
-            <a href="@Url.Action("Stremio", "Home")" class="@(activeNav == "stremio" ? "active" : "")">Stremio addon</a>
+            <a href="/discover" class="@(activeNav == "discover" ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <span class="nav-label">Discover</span>
+            </a>
+            @* Settings consolidates the /configure (Account) + /stremio (addon
+               configure) pages; the Stremio link is reachable from the
+               Settings page rather than crowding the top-level nav. The active
+               state lights up for both /configure and /stremio so navigating
+               between them inside Settings keeps the same tab highlighted. *@
+            <a href="@Url.Action("Configure", "Home")" class="@(activeNav == "configure" || activeNav == "stremio" ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+                <span class="nav-label">Settings</span>
+            </a>
         </nav>
         <div class="nav-drawer-footer">
             @if (layoutLoggedIn)
@@ -112,14 +139,40 @@
                    Same href + active-class logic as the drawer so adding a
                    route here means updating both. *@
                 <nav class="site-header-nav" aria-label="Primary">
-                    <a href="/" class="@(activeNav == "home" ? "active" : "")">Home</a>
+                    <a href="/" class="@(activeNav == "home" ? "active" : "")">
+                        <svg class="nav-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M3 12L12 3l9 9"></path>
+                            <path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path>
+                        </svg>
+                        <span class="nav-label">Home</span>
+                    </a>
                     @if (layoutLoggedIn)
                     {
-                        <a href="/library" class="@(activeNav == "library" ? "active" : "")">My Library</a>
+                        <a href="/library" class="@(activeNav == "library" ? "active" : "")">
+                            <svg class="nav-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                            <span class="nav-label">My Library</span>
+                        </a>
                     }
-                    <a href="/discover" class="@(activeNav == "discover" ? "active" : "")">Discover</a>
-                    <a href="@Url.Action("Configure", "Home")" class="@(activeNav == "configure" ? "active" : "")">Account</a>
-                    <a href="@Url.Action("Stremio", "Home")" class="@(activeNav == "stremio" ? "active" : "")">Stremio addon</a>
+                    <a href="/discover" class="@(activeNav == "discover" ? "active" : "")">
+                        <svg class="nav-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <span class="nav-label">Discover</span>
+                    </a>
+                    @* Settings consolidates Account + Stremio addon pages —
+                       same activeNav double-match as the drawer / bottom-nav
+                       so navigating between /configure and /stremio keeps the
+                       tab highlighted. *@
+                    <a href="@Url.Action("Configure", "Home")" class="@(activeNav == "configure" || activeNav == "stremio" ? "active" : "")">
+                        <svg class="nav-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                        <span class="nav-label">Settings</span>
+                    </a>
                 </nav>
                 @* Global anime search. Lives in the layout so every page has it.
                    Fires /api/v1/match once the query reaches 3 characters with a
