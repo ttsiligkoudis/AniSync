@@ -1037,7 +1037,19 @@ else
                     // is usually enough at picker width.
                     var firstLine = (s.title || s.name || '').split('\n')[0];
                     meta.appendChild(el('span', { class: 'episode-stream-title' }, firstLine));
-                    if (s.size) meta.appendChild(el('span', { class: 'episode-stream-size' }, s.size));
+
+                    // Sub-row: size + seeders + language. Each piece is its
+                    // own span so missing fields just drop out instead of
+                    // showing "·" runs with nothing between them.
+                    var sub = el('span', { class: 'episode-stream-sub' });
+                    if (s.size) sub.appendChild(el('span', { class: 'episode-stream-size' }, s.size));
+                    if (typeof s.seeders === 'number' && s.seeders > 0) {
+                        sub.appendChild(el('span', { class: 'episode-stream-seeders' }, '👤 ' + s.seeders));
+                    }
+                    if (s.language) {
+                        sub.appendChild(el('span', { class: 'episode-stream-language' }, s.language));
+                    }
+                    if (sub.childNodes.length > 0) meta.appendChild(sub);
                     btn.appendChild(meta);
 
                     btn.addEventListener('click', function () {

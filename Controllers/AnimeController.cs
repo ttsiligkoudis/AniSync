@@ -343,6 +343,8 @@ namespace AnimeList.Controllers
                     quality = s.Quality,
                     size = s.Size,
                     playable = s.Playable,
+                    seeders = s.Seeders,
+                    language = s.Language,
                 }).ToList();
             }
 
