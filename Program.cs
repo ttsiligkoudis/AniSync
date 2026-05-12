@@ -248,6 +248,13 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
+// Re-execute the pipeline against /notfound for any unhandled 404 — covers
+// bad URLs (no route match) and explicit NotFound() returns alike. Runs in
+// both dev and prod so the friendly page is what users see locally too.
+// Uses re-execute (not redirect) so the original URL stays in the address
+// bar instead of bouncing to /notfound.
+app.UseStatusCodePagesWithReExecute("/notfound");
+
 app.UseResponseCompression();
 app.UseHttpsRedirection();
 app.UseStaticFiles();

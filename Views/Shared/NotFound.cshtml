@@ -1,0 +1,23 @@
+@{
+    ViewData["Title"] = "Page not found";
+    ViewData["BodyClass"] = "library-page";
+}
+
+@*
+    Shared 404 view. Reached two ways:
+      1. Status-code re-execute (Program.cs UseStatusCodePagesWithReExecute)
+         — any unhandled 404 from any controller / static-file miss lands here.
+      2. Direct return from controllers that detect a missing entity at the
+         start of an action (e.g. AnimeController.Detail when the cross-
+         service mapping has no record for the requested id).
+    Mirrors the styling cues from the legacy inline "Anime not found"
+    block: page-header headline, muted explainer, two CTAs side-by-side.
+*@
+<div class="page-header" style="text-align: center;">
+    <h1 class="page-title">Page not found</h1>
+    <p class="page-subtitle">The page you're looking for doesn't exist, or the content is no longer available.</p>
+</div>
+<div class="hero-ctas" style="justify-content: center;">
+    <a class="hero-cta hero-cta-primary" href="/discover">Browse anime</a>
+    <a class="hero-cta hero-cta-secondary" href="/">Dashboard</a>
+</div>

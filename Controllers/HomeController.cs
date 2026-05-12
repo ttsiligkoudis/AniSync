@@ -54,6 +54,22 @@ public class HomeController : Controller
         return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
     }
 
+    /// <summary>
+    /// Generic 404 landing page. Reached two ways: the status-code re-execute
+    /// middleware (Program.cs) reroutes any unhandled 404 here, and controllers
+    /// that detect a missing entity at the top of an action can also return
+    /// View("NotFound") directly. Sets the response status to 404 so the URL
+    /// still reads as "not found" for crawlers and share-link previewers even
+    /// though we return a full HTML body.
+    /// </summary>
+    [Route("/notfound")]
+    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
+    public IActionResult NotFoundPage()
+    {
+        Response.StatusCode = 404;
+        return View("NotFound");
+    }
+
     public async Task<IActionResult> Index(bool nocache = false)
     {
         // The dashboard is the front door for the web app: anonymous visitors see
