@@ -116,7 +116,32 @@
 
         fetchUntilNonEmpty(page + 1)
             .catch(function () { /* swallow — sentinel stays, retry on next scroll */ })
-            .then(function () { loading = false; hideLoader(); });
+            .then(function () {
+                loading = false;
+                hideLoader();
+                // IntersectionObserver only fires on transitions, not on
+                // "still intersecting". On wide screens the 50-tile
+                // grid is short enough that the sentinel can sit inside
+                // the 400px rootMargin even after a successful load —
+                // the observer's already-fired entry won't re-trigger
+                // until the sentinel exits and re-enters the margin.
+                // Re-check after layout settles and kick again so the
+                // grid keeps filling without the user having to scroll.
+                if (!done) {
+                    requestAnimationFrame(kickIfStillVisible);
+                }
+            });
+    }
+
+    function kickIfStillVisible() {
+        if (done || loading || !sentinel) return;
+        var rect = sentinel.getBoundingClientRect();
+        // Mirror the observer's rootMargin so the trigger threshold
+        // stays consistent whether the load was kicked by a scroll
+        // event or by this post-load self-check.
+        if (rect.top < window.innerHeight + 400) {
+            loadMore();
+        }
     }
 
     observer = new IntersectionObserver(function (entries) {
