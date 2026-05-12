@@ -448,10 +448,18 @@
 
                 var description = !string.IsNullOrEmpty(v.overview) ? v.overview : v.description;
 
+                @{
+                    // role/tabindex only when at least one stream source is
+                    // wired up (RD key OR external services). Razor emits
+                    // attribute="" when set to "", or omits it when set to null,
+                    // so this leaves the row inert when both sources are off.
+                    var rowRole = Model.HasStreamSources ? "button" : null;
+                    var rowTabIndex = Model.HasStreamSources ? "0" : null;
+                }
                 <li class="@string.Join(" ", classes)"
                     data-episode-num="@v.episode"
                     data-season-num="@(v.season > 0 ? v.season : 1)"
-                    role="button" tabindex="0">
+                    role="@rowRole" tabindex="@rowTabIndex">
                     <div class="anime-detail-episode-thumb-wrap">
                         @if (!string.IsNullOrEmpty(v.thumbnail))
                         {
@@ -959,6 +967,12 @@ else
     (function () {
         var animeId = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.Anime?.id));
         if (!animeId) return;
+
+        // Server-side gate. When the user has no RD key AND External
+        // services is off there's nothing for the watch page to render,
+        // so we don't wire any click / keyboard activation here.
+        var hasStreamSources = @(Model.HasStreamSources ? "true" : "false");
+        if (!hasStreamSources) return;
 
         var episodesList = document.querySelector('.anime-detail-episodes');
         if (!episodesList) return;

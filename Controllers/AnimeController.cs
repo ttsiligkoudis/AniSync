@@ -227,6 +227,23 @@ namespace AnimeList.Controllers
                 && !string.IsNullOrEmpty(anime.id)
                 && !anime.id.StartsWith(anilistPrefix);
 
+            // Stream-source availability gate. Two independent signals: a
+            // Real-Debrid API key on file (Torrentio → RD-cached torrents
+            // surface on the watch page), or the External services toggle
+            // turned on (Crunchyroll / Netflix / HiDive links from
+            // GetExternalLinksAsync). Either alone is enough — they
+            // populate different sections of the picker. Both off →
+            // there's nothing to render on /watch, so the episode rows
+            // stay inert here.
+            bool hasRdKey = false;
+            bool externalEnabled = false;
+            if (!string.IsNullOrEmpty(uid))
+            {
+                var watchConfig = await GetConfigByUidAsync(uid, _configStore);
+                externalEnabled = watchConfig?.showExternalStreams == true;
+                hasRdKey = !string.IsNullOrEmpty(await _configStore.GetRealDebridApiKeyAsync(uid));
+            }
+
             return View(new AnimeDetailViewModel
             {
                 Anime = anime,
@@ -236,6 +253,7 @@ namespace AnimeList.Controllers
                 Entry = entry,
                 SourceLinks = sourceLinks,
                 DeferredSupplementaryLinks = deferredSupplementaryLinks,
+                HasStreamSources = hasRdKey || externalEnabled,
             });
         }
 
@@ -517,15 +535,25 @@ namespace AnimeList.Controllers
             // External streaming destinations — same per-service dispatch
             // StreamController uses. Series-level (no episode deep-link), so
             // the same list comes back regardless of episode number; the
-            // modal still renders them as the fallback bucket.
-            var externalRaw = !string.IsNullOrEmpty(id)
-                ? tokenData.anime_service switch
+            // modal still renders them as the fallback bucket. Gated on the
+            // user's showExternalStreams toggle so disabling it on
+            // /stremio or /advanced hides the Other sites block here too.
+            var externalEnabled = false;
+            if (!string.IsNullOrEmpty(uid))
+            {
+                var cfg = await GetConfigByUidAsync(uid, _configStore);
+                externalEnabled = cfg?.showExternalStreams == true;
+            }
+            List<StreamingLink> externalRaw = null;
+            if (externalEnabled && !string.IsNullOrEmpty(id))
+            {
+                externalRaw = tokenData.anime_service switch
                 {
                     AnimeService.Anilist     => await _anilistService.GetExternalLinksAsync(id, tokenData),
                     AnimeService.MyAnimeList => await _malService.GetExternalLinksAsync(id, tokenData),
                     _                        => await _kitsuService.GetExternalLinksAsync(id, tokenData),
-                }
-                : new List<StreamingLink>();
+                };
+            }
 
             var externalLinks = (externalRaw ?? new List<StreamingLink>())
                 .Where(l => !string.IsNullOrEmpty(l.Url) && !string.IsNullOrEmpty(l.Site))
@@ -754,6 +782,14 @@ namespace AnimeList.Controllers
         // meta call). Related + recommendations are always deferred regardless
         // of this flag.
         public bool DeferredSupplementaryLinks { get; set; }
+
+        // True when the user has at least one stream source wired up — a
+        // Real-Debrid API key on file OR the External services toggle
+        // turned on. Drives whether episode rows are clickable: if false,
+        // clicking would just navigate to a /watch page with no sources
+        // to render, which is a dead end, so we render the rows as inert
+        // and skip the cursor/keyboard affordances.
+        public bool HasStreamSources { get; set; }
     }
 
     /// <summary>
