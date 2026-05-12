@@ -376,6 +376,11 @@
             fetch('/anime/episode-streams?' + qs, {
                 credentials: 'same-origin',
                 headers: { 'Accept': 'application/json' },
+                // The Sources panel renders its own "Looking for streams…"
+                // placeholder while the request is in flight — the global
+                // full-screen loader-overlay on top of that would just be
+                // double-loading.
+                skipLoader: true,
             })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (data) {
