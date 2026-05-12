@@ -539,8 +539,9 @@ namespace AnimeList.Services
         /// <summary>
         /// Browse-flavour id resolution — prefers the primary's NATIVE id
         /// (kitsu:N / mal:N / anilist:N) over the cross-service imdb/tmdb
-        /// groupers. The browse routes (/discover?tag=, /staff/{id},
-        /// /studio/{id}) want each card to hand off to /anime/{id} with the
+        /// groupers. The browse routes (/discover/tag/{name},
+        /// /discover/staff/{id}, /discover/studio/{id}) want each card to
+        /// hand off to /anime/{id} with the
         /// user's primary's per-cour id so Manage Entry resolves directly
         /// instead of bouncing through an imdb-mapped franchise umbrella.
         /// Falls back to anilist:N when the requested service has no
