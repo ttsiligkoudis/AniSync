@@ -2333,6 +2333,47 @@ body.modal-open {
     width: 100%;
 }
 
+/* Studio listing grid (Views/Browse/Studios.cshtml). Auto-fill so a wide
+   desktop fans out 4–5 columns of name-only tiles and a phone gracefully
+   reflows to 2. Visually a flat sibling of .browse-tile but with name-only
+   content (no icon — AniList doesn't expose studio logos) so the row gets
+   a centred treatment instead of the icon+title+sub stack. */
+.studio-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.75rem;
+    width: 100%;
+}
+
+.studio-tile {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-height: 72px;
+    padding: 0.9rem 1rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 1rem;
+    color: #ddd;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
+}
+
+.studio-tile:hover,
+.studio-tile:focus {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    text-decoration: none;
+    transform: translateY(-1px);
+}
+
+.studio-tile-name {
+    line-height: 1.25;
+}
+
 .browse-tile {
     display: flex;
     align-items: flex-start;

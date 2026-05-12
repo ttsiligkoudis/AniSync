@@ -1,0 +1,26 @@
+@model List<AnimeList.Models.StudioSummary>
+@{
+    ViewData["Title"] = "Studios";
+    ViewData["BodyClass"] = "library-page";
+}
+
+<header class="page-header">
+    <p class="page-subtitle">Browse by</p>
+    <h1 class="page-title">Studios</h1>
+</header>
+
+@if (Model == null || Model.Count == 0)
+{
+    <p class="hint-text">No studios available right now. Try again in a moment.</p>
+}
+else
+{
+    <div class="studio-grid">
+        @foreach (var s in Model)
+        {
+            <a class="studio-tile" href="/studio/@s.Id">
+                <span class="studio-tile-name">@s.Name</span>
+            </a>
+        }
+    </div>
+}
