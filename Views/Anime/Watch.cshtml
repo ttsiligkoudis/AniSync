@@ -38,6 +38,7 @@
     path below catches anything the browser can't decode and offers an
     "open externally" affordance instead.
 *@
+<link rel="stylesheet" href="https://cdn.vidstack.io/player.css" />
 <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
 <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
 
@@ -195,11 +196,18 @@
                 mp.setAttribute('title', @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(episodeLabel)));
                 mp.setAttribute('src', stream.url);
                 mp.setAttribute('playsinline', '');
-                mp.setAttribute('autoplay', '');
+                // No `autoplay` — mobile Chromium blocks autoplay with
+                // audio, and vidstack surfaces some of those failures
+                // as a MediaError event we'd misread as "unsupported
+                // source". Let the user press play (the big center
+                // button) themselves; the loaded poster frame from
+                // the first decode is the visual cue that the source
+                // is ready.
+                //
                 // Deliberately no `crossorigin` — some RD direct URLs
-                // reject anonymous CORS requests; subtitles are already
-                // proxied through /anime/subtitle so they're same-origin
-                // and don't need the opt-in.
+                // reject anonymous CORS requests; subtitles are
+                // proxied same-origin through /anime/subtitle so they
+                // don't need the opt-in either.
 
                 var provider = document.createElement('media-provider');
                 mp.appendChild(provider);
@@ -229,17 +237,25 @@
                 playerHost.appendChild(mp);
                 player = mp;
 
-                // vidstack normalises media errors through its own
-                // "error" custom event. The detail carries .code (HTML5
-                // MediaError code) which matches the Plyr / native
-                // semantics — 4 = SRC_NOT_SUPPORTED, the "can't decode"
-                // signal we swap for the external-open fallback. The
-                // raw <video> error also bubbles through, so a single
-                // listener handles both.
-                mp.addEventListener('error', function (e) {
-                    var code = e && e.detail && e.detail.code;
-                    if (code === 4) showFallback(stream);
-                });
+                // Surface the "Open externally / Copy URL" affordance
+                // only after the user has been on the source for a few
+                // seconds and the underlying media element has actually
+                // entered an error state. Wiring straight to vidstack's
+                // "error" custom event was too eager — transient
+                // network glitches and autoplay-policy refusals on
+                // mobile both surfaced through it and triggered the
+                // fallback before the user even saw the player.
+                //
+                // The native <video> element's MediaError.code === 4
+                // (SRC_NOT_SUPPORTED) is the only signal that means
+                // "this browser truly can't decode this stream". A
+                // 2-second grace gives loading + autoplay-block to
+                // settle before we judge.
+                setTimeout(function () {
+                    var v = mp.querySelector('video');
+                    if (!v) return;
+                    if (v.error && v.error.code === 4) showFallback(stream);
+                }, 2000);
 
                 wireSkipOverlay(mp);
             }
