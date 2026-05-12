@@ -448,14 +448,13 @@
 
                 var description = !string.IsNullOrEmpty(v.overview) ? v.overview : v.description;
 
-                @{
-                    // role/tabindex only when at least one stream source is
-                    // wired up (RD key OR external services). Razor emits
-                    // attribute="" when set to "", or omits it when set to null,
-                    // so this leaves the row inert when both sources are off.
-                    var rowRole = Model.HasStreamSources ? "button" : null;
-                    var rowTabIndex = Model.HasStreamSources ? "0" : null;
-                }
+                // role/tabindex only when at least one stream source is
+                // wired up (RD key OR External services). Razor omits an
+                // attribute entirely when its value is null, so this
+                // leaves the row inert when both sources are off.
+                var rowRole = Model.HasStreamSources ? "button" : null;
+                var rowTabIndex = Model.HasStreamSources ? "0" : null;
+
                 <li class="@string.Join(" ", classes)"
                     data-episode-num="@v.episode"
                     data-season-num="@(v.season > 0 ? v.season : 1)"
