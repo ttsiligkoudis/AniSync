@@ -32,6 +32,20 @@ namespace AnimeList.Services
         private const int CatalogPageSize = 50;
 
         // Posts a serialised GraphQL body and returns the dynamic `data` payload, or
+        // Returns the supplied tokenData iff it's actually an AniList account
+        // token, else null so PostGraphQLAsync sends an anonymous request.
+        // Critical for the public meta queries (Media-by-id, recommendations,
+        // etc.) when the viewer's primary is MAL or Kitsu — those callers
+        // hand us a MAL/Kitsu bearer that AniList would 401 on, and the
+        // query is public so we don't need auth anyway.
+        private static TokenData AnilistBearerOrAnonymous(TokenData tokenData)
+        {
+            if (tokenData == null) return null;
+            if (tokenData.anime_service != AnimeService.Anilist) return null;
+            if (string.IsNullOrWhiteSpace(tokenData.access_token)) return null;
+            return tokenData;
+        }
+
         // null on transport failure. Bearer auth is applied when tokenData carries
         // an access_token; reads with no token (e.g. anonymous summary lookups) pass
         // null.
@@ -505,7 +519,7 @@ namespace AnimeList.Services
                 }
             ";
 
-            var data = await PostGraphQLAsync(SerializeObject(new { query, variables = new { id = resolvedAnimeId } }), tokenData);
+            var data = await PostGraphQLAsync(SerializeObject(new { query, variables = new { id = resolvedAnimeId } }), AnilistBearerOrAnonymous(tokenData));
             if (data == null) return null;
             var result = data.Media;
 
@@ -953,7 +967,9 @@ namespace AnimeList.Services
                 variables = new { id = resolvedAnimeId }
             });
 
-            var data = await PostGraphQLAsync(requestBody, tokenData);
+            // Public media query — same guard as GetAnimeByIdAsync so a
+            // non-AniList primary's bearer doesn't get sent and 401 us.
+            var data = await PostGraphQLAsync(requestBody, AnilistBearerOrAnonymous(tokenData));
             var media = data?.Media;
             if (media?.externalLinks == null) return [];
 
