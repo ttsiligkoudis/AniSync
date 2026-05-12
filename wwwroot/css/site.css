@@ -2182,6 +2182,129 @@ body.modal-open {
     flex-direction: column;
 }
 
+/* Skip-intro / skip-outro overlay — corner-anchored over the player so
+   the user can tap once without leaving the video. Hidden until JS
+   detects the playhead is inside an AniSkip range. */
+.watch-player {
+    position: relative;
+}
+
+.watch-skip-btn {
+    position: absolute;
+    bottom: 4.5rem;       /* clear Plyr's controls bar */
+    right: 1rem;
+    z-index: 5;
+    padding: 0.55rem 1rem;
+    background: rgba(0, 0, 0, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 0.5rem;
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+    transition: background 0.15s, transform 0.1s;
+}
+
+.watch-skip-btn:hover {
+    background: rgba(0, 0, 0, 0.9);
+    transform: translateY(-1px);
+}
+
+.watch-skip-btn[hidden] {
+    display: none;
+}
+
+.watch-player-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 0.5rem;
+}
+
+/* Auto-skip toggle — pill with a small inline indicator that fills when
+   active. Persists in localStorage so the user only flips it once. */
+.watch-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.75rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.watch-toggle:hover {
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.watch-toggle-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.25);
+    transition: background 0.15s, box-shadow 0.15s;
+}
+
+.watch-toggle.is-active {
+    background: rgba(99, 102, 241, 0.18);
+    border-color: rgba(99, 102, 241, 0.4);
+    color: #fff;
+}
+
+.watch-toggle.is-active .watch-toggle-dot {
+    background: rgba(165, 180, 252, 0.95);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+
+/* ─── Mobile (≤640px) ─────────────────────────────────────────────── */
+@media (max-width: 640px) {
+    .watch-page {
+        padding: 0.5rem;
+    }
+    .watch-header {
+        margin-bottom: 0.75rem;
+    }
+    .watch-title {
+        font-size: 1.15rem;
+    }
+    .watch-player {
+        border-radius: 0;
+        /* Edge-to-edge player on phones — recover the side padding the
+           page itself still has so the video gets the full viewport. */
+        margin: 0 -0.5rem;
+        width: calc(100% + 1rem);
+    }
+    .watch-skip-btn {
+        bottom: 3.5rem;
+        right: 0.5rem;
+        padding: 0.45rem 0.8rem;
+        font-size: 0.8rem;
+    }
+    .watch-nav-btn {
+        padding: 0.5rem 0.75rem;
+        min-height: 2.75rem;
+    }
+    .watch-nav-direction {
+        font-size: 0.7rem;
+    }
+    .watch-nav-label {
+        font-size: 0.85rem;
+    }
+    .episode-stream-pick {
+        padding: 0.5rem 0.6rem;
+        gap: 0.5rem;
+    }
+    .episode-stream-quality {
+        min-width: 2.75rem;
+        font-size: 0.68rem;
+    }
+}
+
 .episode-stream-video {
     width: 100%;
     max-height: 70vh;

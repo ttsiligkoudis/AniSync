@@ -23,6 +23,8 @@ namespace AnimeList.Controllers
         private readonly IFillerListService _fillerListService;
         private readonly IAnilistFallback _anilistFallback;
         private readonly ITorrentioService _torrentioService;
+        private readonly IAniSkipService _aniSkipService;
+        private readonly IWyzieSubtitleService _subtitleService;
         private readonly ILogger<AnimeController> _logger;
 
         public AnimeController(
@@ -36,6 +38,8 @@ namespace AnimeList.Controllers
             IFillerListService fillerListService,
             IAnilistFallback anilistFallback,
             ITorrentioService torrentioService,
+            IAniSkipService aniSkipService,
+            IWyzieSubtitleService subtitleService,
             ILogger<AnimeController> logger)
         {
             _tokenService = tokenService;
@@ -48,6 +52,8 @@ namespace AnimeList.Controllers
             _fillerListService = fillerListService;
             _anilistFallback = anilistFallback;
             _torrentioService = torrentioService;
+            _aniSkipService = aniSkipService;
+            _subtitleService = subtitleService;
             _logger = logger;
         }
 
@@ -526,13 +532,103 @@ namespace AnimeList.Controllers
                 .Select(l => new { site = l.Site, url = l.Url })
                 .ToList();
 
+            // Cross-service links + AniSkip + Wyzie subtitles all use the
+            // same anime id — fetch the source-links bundle once.
+            var sourceLinksForExtras = await _mappingService.BuildSourceLinksAsync(id);
+
+            // AniSkip — same lookup chain StreamController.BuildSkipHintsAsync
+            // uses for the Stremio addon side. Returns the intro/outro
+            // markers for the resolved MAL id; surfaces silently as null
+            // when there's no MAL mapping or no markers.
+            object skipTimes = null;
+            try
+            {
+                var malIdRaw = await _mappingService.GetIdByService(id, AnimeService.MyAnimeList, season);
+                if (int.TryParse(malIdRaw, out var malId) && malId > 0 && episode > 0)
+                {
+                    var markers = await _aniSkipService.GetSkipTimesAsync(malId, episode);
+                    if (markers != null && markers.Count > 0)
+                    {
+                        // Multiple "op" variants (op / mixed-op) can exist —
+                        // last-wins matches what BuildSkipHintsAsync does.
+                        SkipTime intro = null, outro = null;
+                        foreach (var m in markers)
+                        {
+                            switch (m.Type)
+                            {
+                                case "op": case "mixed-op": intro = m; break;
+                                case "ed": case "mixed-ed": outro = m; break;
+                            }
+                        }
+                        skipTimes = new
+                        {
+                            intro = intro == null ? null : new { start = intro.Start, end = intro.End },
+                            outro = outro == null ? null : new { start = outro.Start, end = outro.End },
+                        };
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AniSkip lookup failed for {Id} ep {Ep}.", id, episode);
+            }
+
+            // Subtitles — Wyzie returns proxied URLs already (served by
+            // /anime/subtitle below) so the <track> element on the watch
+            // page can load same-origin.
+            var subtitles = Array.Empty<object>() as IReadOnlyList<object>;
+            if (!string.IsNullOrEmpty(sourceLinksForExtras.ImdbId))
+            {
+                try
+                {
+                    var tracks = await _subtitleService.SearchAsync(sourceLinksForExtras.ImdbId, season, episode);
+                    subtitles = tracks.Select(t => (object)new
+                    {
+                        lang = t.Lang,
+                        label = t.Label,
+                        url = t.Url,
+                    }).ToList();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Wyzie subtitle search failed for {Id} ep {Ep}.", id, episode);
+                }
+            }
+
             return Json(new
             {
                 anonymous = tokenData.anonymousUser,
                 rdConfigured = !string.IsNullOrEmpty(apiKey),
                 debridStreams,
                 externalLinks,
+                skipTimes,
+                subtitles,
             });
+        }
+
+        /// <summary>
+        /// Proxies a subtitle URL through our origin and converts SRT to
+        /// VTT on the fly. Backs the &lt;track src&gt; tag on the watch
+        /// page — without this hop, the &lt;track&gt; load would be
+        /// cross-origin and the &lt;video&gt; would need a
+        /// <c>crossorigin</c> attribute (which can break some RD URLs
+        /// that reject anonymous CORS requests).
+        /// </summary>
+        [HttpGet("/anime/subtitle")]
+        public async Task<IActionResult> Subtitle(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return BadRequest();
+            }
+            var vtt = await _subtitleService.FetchAsVttAsync(url);
+            if (string.IsNullOrEmpty(vtt))
+            {
+                return StatusCode(502);
+            }
+            // 1-hour client cache so re-seeks / re-renders don't refetch.
+            Response.Headers["Cache-Control"] = "public, max-age=3600";
+            return Content(vtt, "text/vtt", System.Text.Encoding.UTF8);
         }
 
         private async Task<List<Meta>> TryGetRecommendationsAsync(int anilistId, AnimeService translateTo)
