@@ -205,32 +205,21 @@ namespace AnimeList.Controllers
             // is the correct degradation for entries outside the curated dataset.
             var sourceLinks = await BuildSourceLinksAsync(anime.id);
 
-            // Prequel + sequel carousel. Driven off the anime's AniList id since
-            // AniList's GraphQL is the only upstream that exposes explicit
-            // PREQUEL / SEQUEL relations. For pages loaded against a non-anilist
-            // id (kitsu: / mal: / tt…), the AnilistId surfaced by sourceLinks
-            // already came from the cross-service mapping, so we reuse it — no
-            // extra mapping round-trip needed.
-            var related = sourceLinks.AnilistId.HasValue
-                ? await TryGetRelatedAsync(sourceLinks.AnilistId.Value, animeService)
-                : [];
-
-            // Augment anime.links with AniList-sourced supplementary metadata
-            // (Tag / Studio / director / writer / Composer / Artist / Producer /
-            // Staff) when the page was loaded via a non-AniList service. The
-            // KitsuService and MalService GetAnimeByIdAsync paths don't surface
-            // this richness, so kitsu: / mal: pages would otherwise show no
-            // Tag / Staff / director sections. anime.id (post-fetch) reflects
-            // which service actually built the meta — including the Kitsu →
-            // AniList fallback path inside the dispatch above — so the
-            // !anilistPrefix check correctly skips the augment when AniList
-            // already populated everything.
-            if (sourceLinks.AnilistId.HasValue
+            // Related + recommendations + supplementary chip rows (Tag / Studio /
+            // director / writer / Composer / Artist / Producer / Staff) are now
+            // fetched client-side after page render via /anime/{id}/extras — see
+            // the Extras action below. Keeps the hero + episodes painting on the
+            // GetAnimeByIdAsync result alone instead of waiting for the extra
+            // AniList round-trip.
+            //
+            // DeferredSupplementaryLinks is only true for non-AniList primaries
+            // because the AniList per-anime GraphQL already returns the chip
+            // data inline in anime.links — paying for another /extras call there
+            // would be redundant. The placeholder for those chips only renders
+            // on non-AniList pages with a resolvable anilist id.
+            var deferredSupplementaryLinks = sourceLinks.AnilistId.HasValue
                 && !string.IsNullOrEmpty(anime.id)
-                && !anime.id.StartsWith(anilistPrefix))
-            {
-                await AugmentLinksFromAnilistAsync(anime, sourceLinks.AnilistId.Value);
-            }
+                && !anime.id.StartsWith(anilistPrefix);
 
             return View(new AnimeDetailViewModel
             {
@@ -240,7 +229,7 @@ namespace AnimeList.Controllers
                 ConfigUid = uid,
                 Entry = entry,
                 SourceLinks = sourceLinks,
-                Related = related,
+                DeferredSupplementaryLinks = deferredSupplementaryLinks,
             });
         }
 
@@ -254,35 +243,72 @@ namespace AnimeList.Controllers
             }
         }
 
-        private async Task AugmentLinksFromAnilistAsync(Meta anime, int anilistId)
+        // Companion JSON endpoint to Detail — returns the three below-the-fold
+        // sections (related, recommendations, supplementary chip rows) so the
+        // detail view can render its hero + episodes on the GetAnimeByIdAsync
+        // result alone and hydrate the rest client-side after page load.
+        // The three lists share one underlying GraphQL call (FetchSidedataAsync
+        // inside AnilistFallback caches recommendations + relations + tag /
+        // staff / studio in a single round-trip), so fanning these out into
+        // separate client endpoints wouldn't actually parallelise upstream
+        // work — one combined response is the right shape.
+        // Route shape note: a catch-all parameter must be the last segment, so
+        // we use /anime/extras/{*id} rather than /anime/{*id}/extras (the
+        // latter is invalid in ASP.NET Core routing). The placeholder script
+        // in Detail.cshtml builds the URL accordingly.
+        [Route("/anime/extras/{*id}")]
+        public async Task<IActionResult> Extras(string id)
         {
-            try
+            if (string.IsNullOrEmpty(id)) return Json(new AnimeExtrasResponse());
+
+            var tokenData = await _tokenService.GetAccessTokenAsync()
+                ?? new TokenData { anime_service = AnimeService.Kitsu };
+            var animeService = tokenData.anime_service;
+
+            // Cross-service id resolution mirrors what Detail does so the
+            // same /anime/{id}/extras URL works regardless of which service-
+            // prefix the page was loaded against.
+            var resolvedId = await ResolveToServiceIdAsync(id, animeService) ?? id;
+            var sourceLinks = await BuildSourceLinksAsync(resolvedId);
+            if (!sourceLinks.AnilistId.HasValue) return Json(new AnimeExtrasResponse());
+
+            var anilistId = sourceLinks.AnilistId.Value;
+            // All three lookups hit the same cached sidedata bundle inside
+            // AnilistFallback — kicking them off in parallel lets the first
+            // call populate the cache while the other two await on the
+            // resulting Task rather than each firing a redundant upstream
+            // request. Try/catch each so a partial failure still returns the
+            // pieces that succeeded.
+            var relatedTask = TryGetRelatedAsync(anilistId, animeService);
+            var recommendationsTask = TryGetRecommendationsAsync(anilistId, animeService);
+            var supplementaryTask = TryGetSupplementaryLinksAsync(anilistId);
+            await Task.WhenAll(relatedTask, recommendationsTask, supplementaryTask);
+
+            return Json(new AnimeExtrasResponse
             {
-                var supplementary = await _anilistFallback.GetSupplementaryLinksAsync(anilistId);
-                if (supplementary == null || supplementary.Count == 0) return;
+                Related = relatedTask.Result,
+                Recommendations = recommendationsTask.Result,
+                SupplementaryLinks = supplementaryTask.Result,
+            });
+        }
 
-                anime.links ??= [];
-
-                // Dedupe by (category, name) so a Studio the service already
-                // surfaced (Kitsu has some studio links) doesn't render twice
-                // alongside the AniList copy. Case-insensitive name compare
-                // since "Mappa" / "MAPPA" are the same studio.
-                var existing = new HashSet<(string, string)>(
-                    anime.links
-                        .Where(l => !string.IsNullOrEmpty(l.name))
-                        .Select(l => (l.category ?? string.Empty, l.name.ToLowerInvariant())));
-
-                foreach (var link in supplementary)
-                {
-                    if (string.IsNullOrEmpty(link.name)) continue;
-                    var key = (link.category ?? string.Empty, link.name.ToLowerInvariant());
-                    if (existing.Add(key))
-                        anime.links.Add(link);
-                }
-            }
+        private async Task<List<Meta>> TryGetRecommendationsAsync(int anilistId, AnimeService translateTo)
+        {
+            try { return await _anilistFallback.GetRecommendationMetasAsync(anilistId, translateTo); }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "AnimeController.Detail: link augment failed for anilist {Id}.", anilistId);
+                _logger.LogWarning(ex, "AnimeController.Extras: recommendations fetch failed for anilist {Id}.", anilistId);
+                return [];
+            }
+        }
+
+        private async Task<List<Link>> TryGetSupplementaryLinksAsync(int anilistId)
+        {
+            try { return await _anilistFallback.GetSupplementaryLinksAsync(anilistId); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AnimeController.Extras: supplementary-links fetch failed for anilist {Id}.", anilistId);
+                return [];
             }
         }
 
@@ -452,12 +478,14 @@ namespace AnimeList.Controllers
         // (e.g. obscure shows, donghua) simply omit the corresponding link.
         public AnimeSourceLinks SourceLinks { get; set; } = new();
 
-        // Prequels + sequels for this anime, ordered chronologically by air
-        // year. Driven off AniList's explicit PREQUEL/SEQUEL relations
-        // (not the IMDb-mapping "same cours" grouping, which is a different
-        // concept). Empty for anime AniList doesn't index or that simply
-        // have no prequel/sequel entries.
-        public List<Meta> Related { get; set; } = [];
+        // True when the page should fire a client-side fetch of /anime/{id}/extras
+        // to populate the supplementary chip rows (Tag/Studio/director/staff/etc.).
+        // The data lives behind AniList's GraphQL; only fetch when we have an
+        // anilist id to query against AND the page wasn't loaded against an AniList
+        // primary (those entries already have the chip data inline from the main
+        // meta call). Related + recommendations are always deferred regardless
+        // of this flag.
+        public bool DeferredSupplementaryLinks { get; set; }
     }
 
     /// <summary>
@@ -470,6 +498,21 @@ namespace AnimeList.Controllers
         public int? MalId { get; set; }
         public int? KitsuId { get; set; }
         public string ImdbId { get; set; }
+    }
+
+    /// <summary>
+    /// JSON payload for the /anime/{id}/extras endpoint — the three lists the
+    /// detail view hydrates after page load. All three share one underlying
+    /// AnilistFallback.FetchSidedataAsync GraphQL call, so the controller can
+    /// kick them off in parallel without paying for separate upstream round-
+    /// trips. Empty lists when the entry has no mapped AniList id (which is
+    /// the same condition that gates the placeholder section emission).
+    /// </summary>
+    public class AnimeExtrasResponse
+    {
+        public List<Meta> Related { get; set; } = [];
+        public List<Meta> Recommendations { get; set; } = [];
+        public List<Link> SupplementaryLinks { get; set; } = [];
     }
 
     /// <summary>

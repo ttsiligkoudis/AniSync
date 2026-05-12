@@ -533,44 +533,20 @@
     </section>
 }
 
-@if (Model.Related.Count > 0)
-{
-    @* Prequels + sequels carousel. Driven off AniList's explicit PREQUEL /
-       SEQUEL relations (sourced via the anime's anilist id, which is set
-       on Model.SourceLinks even when the page was loaded against a
-       kitsu: / mal: id). Sits above the generic Recommended shelf because
-       franchise continuations are tighter to the current anime than
-       "you might also like" picks. Same _PosterGrid scroll variant the
-       Recommended carousel uses, so the chrome stays consistent. *@
-    <section class="anime-detail-section">
-        <h2 class="anime-detail-section-title">Related</h2>
-        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
-        {
-            Items = Model.Related,
-            ConfigUid = Model.ConfigUid,
-            Variant = "scroll",
-        })
-    </section>
-}
+@* Related (prequel/sequel) + Recommended carousels are populated client-side
+   after page load via /anime/{id}/extras so the hero + episodes render off
+   GetAnimeByIdAsync alone. Each placeholder stays hidden until the fetch
+   completes; the script reveals + fills it with the same _PosterGrid card
+   markup the server would have emitted inline. *@
+<section class="anime-detail-section anime-detail-section-deferred" data-anime-related hidden>
+    <h2 class="anime-detail-section-title">Related</h2>
+    <div class="poster-scroll-row" data-anime-related-grid></div>
+</section>
 
-@if (a.recommendations?.Count > 0)
-{
-    @* Recommendations carousel — slim Metas with full poster chrome,
-       rendered through the same _PosterGrid partial in scroll-row mode that
-       the dashboard's Continue Watching shelf uses. Each card links to
-       /anime/{id}, so users can chain into related anime without leaving
-       the app. Currently AniList-populated only; MAL/Kitsu primaries see
-       the existing Similar links flow via the Stremio addon path. *@
-    <section class="anime-detail-section">
-        <h2 class="anime-detail-section-title">Recommended</h2>
-        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
-        {
-            Items = a.recommendations,
-            ConfigUid = Model.ConfigUid,
-            Variant = "scroll",
-        })
-    </section>
-}
+<section class="anime-detail-section anime-detail-section-deferred" data-anime-recommendations hidden>
+    <h2 class="anime-detail-section-title">Recommended</h2>
+    <div class="poster-scroll-row" data-anime-recommendations-grid></div>
+</section>
 
 @functions {
     // Builds an in-app href for a Link based on its category, or returns
@@ -602,31 +578,47 @@
     }
 }
 
-@foreach (var group in linksByCategory)
+@* AniList-primary pages render their Tag/Studio/director/staff/etc. chips
+   inline because GetAnimeByIdAsync returns them in anime.links already.
+   Non-AniList pages defer the chip data to /anime/{id}/extras (the augment
+   call is the same one the carousels share, so we ride along the deferred
+   fetch instead of blocking the hero on it). *@
+@if (!Model.DeferredSupplementaryLinks)
 {
-    <section class="anime-detail-section">
-        <h2 class="anime-detail-section-title">@group.Key</h2>
-        <ul class="anime-detail-link-list">
-            @foreach (var link in group)
-            {
-                var internalHref = InternalHrefFor(link);
-                if (!string.IsNullOrEmpty(internalHref))
+    @foreach (var group in linksByCategory)
+    {
+        <section class="anime-detail-section">
+            <h2 class="anime-detail-section-title">@group.Key</h2>
+            <ul class="anime-detail-link-list">
+                @foreach (var link in group)
                 {
-                    <li>
-                        <a class="anime-detail-link" href="@internalHref">@link.name</a>
-                    </li>
+                    var internalHref = InternalHrefFor(link);
+                    if (!string.IsNullOrEmpty(internalHref))
+                    {
+                        <li>
+                            <a class="anime-detail-link" href="@internalHref">@link.name</a>
+                        </li>
+                    }
+                    else
+                    {
+                        <li>
+                            <a class="anime-detail-link" href="@link.url" target="_blank" rel="noreferrer noopener">
+                                @link.name
+                            </a>
+                        </li>
+                    }
                 }
-                else
-                {
-                    <li>
-                        <a class="anime-detail-link" href="@link.url" target="_blank" rel="noreferrer noopener">
-                            @link.name
-                        </a>
-                    </li>
-                }
-            }
-        </ul>
-    </section>
+            </ul>
+        </section>
+    }
+}
+else
+{
+    @* Placeholder host — the client script generates one .anime-detail-section
+       per category and appends it here in the same shape the inline loop would
+       have rendered. Hidden until populated so a non-AniList page with no
+       upstream data doesn't show an empty header block. *@
+    <div data-anime-supplementary hidden></div>
 }
 
 @* Synopsis collapse/expand toggle + trailer lazy-embed. Inlined here
@@ -787,5 +779,179 @@
             card.removeAttribute('target');
             card.style.cursor = 'default';
         });
+    })();
+</script>
+
+@* Deferred-extras hydration. The hero + episodes render off
+   GetAnimeByIdAsync alone; this script fetches related + recommendations +
+   (for non-AniList pages) supplementary chip rows from /anime/{id}/extras
+   after the page paints, then reveals the placeholder sections. Skips the
+   fetch entirely when there's nothing to populate (no placeholders on the
+   page = no upstream call). *@
+<script>
+    (function () {
+        var relatedSection         = document.querySelector('[data-anime-related]');
+        var relatedGrid            = document.querySelector('[data-anime-related-grid]');
+        var recommendationsSection = document.querySelector('[data-anime-recommendations]');
+        var recommendationsGrid    = document.querySelector('[data-anime-recommendations-grid]');
+        var supplementaryHost      = document.querySelector('[data-anime-supplementary]');
+
+        // No placeholders on the page = nothing to hydrate; bail before the
+        // network call so anonymous fresh-visitors and entries with no AniList
+        // mapping don't pay for a 200-empty round-trip.
+        if (!relatedSection && !recommendationsSection && !supplementaryHost) return;
+
+        // Route shape: /anime/extras/{*id}. Pull the id slug off the current
+        // pathname (anything after /anime/) and prepend /anime/extras/. Trim
+        // any trailing slash so /anime/anilist:123/ resolves the same as
+        // /anime/anilist:123.
+        var idSlug = window.location.pathname.replace(/^\/anime\//, '').replace(/\/$/, '');
+        var extrasPath = '/anime/extras/' + idSlug;
+
+        // Render a single Meta card matching the markup _PosterGrid emits for
+        // the scroll variant — same class names + nesting so the existing CSS
+        // applies without duplication.
+        function buildCard(meta) {
+            if (!meta || !meta.id) return null;
+            var card = document.createElement('a');
+            card.className = 'library-card';
+            card.href = '/anime/' + meta.id;
+            card.title = meta.name || '';
+            card.setAttribute('data-meta-id', meta.id);
+            card.setAttribute('data-meta-name', meta.name || '');
+
+            var wrap = document.createElement('div');
+            wrap.className = 'library-card-poster-wrap';
+            if (meta.poster) {
+                var img = document.createElement('img');
+                img.className = 'library-card-poster';
+                img.src = meta.poster;
+                img.alt = meta.name || '';
+                img.loading = 'lazy';
+                wrap.appendChild(img);
+            } else {
+                var placeholder = document.createElement('div');
+                placeholder.className = 'library-card-poster library-card-poster-placeholder';
+                wrap.appendChild(placeholder);
+            }
+            if (typeof meta.score === 'number' && meta.score > 0) {
+                var score = document.createElement('span');
+                score.className = 'library-card-score';
+                score.textContent = '★ ' + meta.score.toFixed(1);
+                wrap.appendChild(score);
+            }
+            card.appendChild(wrap);
+
+            var title = document.createElement('span');
+            title.className = 'library-card-title';
+            title.textContent = meta.name || '';
+            card.appendChild(title);
+
+            var bits = [];
+            if (meta.format) bits.push(meta.format);
+            if (typeof meta.episodes === 'number' && meta.episodes > 0) {
+                bits.push(meta.episodes + ' ep' + (meta.episodes > 1 ? 's' : ''));
+            }
+            if (typeof meta.year === 'number' && meta.year > 0) bits.push(String(meta.year));
+            if (bits.length > 0) {
+                var info = document.createElement('span');
+                info.className = 'library-card-meta';
+                info.textContent = bits.join(' · ');
+                card.appendChild(info);
+            }
+            return card;
+        }
+
+        function fillGrid(section, grid, metas) {
+            if (!section || !grid || !metas || metas.length === 0) return;
+            metas.forEach(function (meta) {
+                var card = buildCard(meta);
+                if (card) grid.appendChild(card);
+            });
+            section.removeAttribute('hidden');
+        }
+
+        // Mirrors AnimeDetailViewModel.InternalHrefFor on the server side —
+        // map tag / studio / staff role categories onto the in-app browse
+        // routes so the chip clicks stay inside the site instead of bouncing
+        // to AniList. Returns null when the category isn't routable, in which
+        // case the caller falls back to the link's external url.
+        function internalHrefFor(link) {
+            if (!link) return null;
+            var cat = (link.category || '').toLowerCase();
+            if (cat === 'tag') {
+                return link.name ? '/discover?tag=' + encodeURIComponent(link.name) : null;
+            }
+            if (cat === 'studio') {
+                return link.anilistId ? '/studio/' + link.anilistId : null;
+            }
+            if (cat === 'staff' || cat === 'director' || cat === 'composer'
+                || cat === 'artist' || cat === 'producer' || cat === 'writer') {
+                return link.anilistId ? '/staff/' + link.anilistId : null;
+            }
+            return null;
+        }
+
+        function fillSupplementary(host, links) {
+            if (!host || !links || links.length === 0) return;
+            // Group by category (display label = category, "Links" fallback)
+            // mirroring the server-side LINQ groupBy.
+            var groups = {};
+            var order = [];
+            links.forEach(function (link) {
+                if (!link || !link.url || !link.name) return;
+                var key = link.category || 'Links';
+                if (!groups[key]) {
+                    groups[key] = [];
+                    order.push(key);
+                }
+                groups[key].push(link);
+            });
+
+            order.forEach(function (key) {
+                var section = document.createElement('section');
+                section.className = 'anime-detail-section';
+
+                var title = document.createElement('h2');
+                title.className = 'anime-detail-section-title';
+                title.textContent = key;
+                section.appendChild(title);
+
+                var ul = document.createElement('ul');
+                ul.className = 'anime-detail-link-list';
+                groups[key].forEach(function (link) {
+                    var li = document.createElement('li');
+                    var a = document.createElement('a');
+                    a.className = 'anime-detail-link';
+                    var internal = internalHrefFor(link);
+                    if (internal) {
+                        a.href = internal;
+                    } else {
+                        a.href = link.url;
+                        a.target = '_blank';
+                        a.rel = 'noreferrer noopener';
+                    }
+                    a.textContent = link.name;
+                    li.appendChild(a);
+                    ul.appendChild(li);
+                });
+                section.appendChild(ul);
+                host.appendChild(section);
+            });
+            host.removeAttribute('hidden');
+        }
+
+        // skipLoader: keep the global fetch-wrap loader from showing — this
+        // is background hydration, not user-initiated, so a full-screen
+        // spinner would be misleading.
+        fetch(extrasPath, { headers: { 'Accept': 'application/json' }, skipLoader: true })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (!data) return;
+                fillGrid(relatedSection, relatedGrid, data.Related);
+                fillGrid(recommendationsSection, recommendationsGrid, data.Recommendations);
+                fillSupplementary(supplementaryHost, data.SupplementaryLinks);
+            })
+            .catch(function () { /* silent — sections just stay hidden */ });
     })();
 </script>
