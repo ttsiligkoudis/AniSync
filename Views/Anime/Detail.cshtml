@@ -569,10 +569,10 @@
         }
         // Staff roles get categorised by StaffRoleToCategory ("Director",
         // "Composer", "Artist", "Producer", "Staff") — all route to the
-        // same /staff/{id} page.
+        // same /discover/staff/{id} page.
         if (cat is "staff" or "director" or "composer" or "artist" or "producer" or "writer")
         {
-            return link.anilistId.HasValue ? $"/staff/{link.anilistId.Value}" : null;
+            return link.anilistId.HasValue ? $"/discover/staff/{link.anilistId.Value}" : null;
         }
         return null;
     }
@@ -880,14 +880,14 @@ else
             if (!link) return null;
             var cat = (link.category || '').toLowerCase();
             if (cat === 'tag') {
-                return link.name ? '/discover?tag=' + encodeURIComponent(link.name) : null;
+                return link.name ? '/discover/tag/' + encodeURIComponent(link.name) : null;
             }
             if (cat === 'studio') {
-                return link.anilistId ? '/studio/' + link.anilistId : null;
+                return link.anilistId ? '/discover/studio/' + link.anilistId : null;
             }
             if (cat === 'staff' || cat === 'director' || cat === 'composer'
                 || cat === 'artist' || cat === 'producer' || cat === 'writer') {
-                return link.anilistId ? '/staff/' + link.anilistId : null;
+                return link.anilistId ? '/discover/staff/' + link.anilistId : null;
             }
             return null;
         }

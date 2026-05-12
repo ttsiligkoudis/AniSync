@@ -331,6 +331,37 @@ namespace AnimeList.Controllers
             });
         }
 
+        // ─── Staff drill-down ───────────────────────────────────────────
+        // Single anime-by-staff filmography page reached from a staff
+        // chip on the anime detail page. Not a "browse" affordance (no
+        // listing of all staff — AniList has tens of thousands), just
+        // the per-id catalog.
+
+        [Route("/discover/staff/{id:int}")]
+        [Route("/discover/staff/{id:int}/{slug?}")]
+        public async Task<IActionResult> Staff(int id)
+        {
+            var tokenData = await _tokenService.GetAccessTokenAsync()
+                ?? new TokenData { anime_service = AnimeService.Kitsu };
+
+            string uid = null;
+            if (!tokenData.anonymousUser)
+            {
+                var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                uid = resolved;
+            }
+
+            var (name, items) = await _anilistFallback.GetStaffMediaAsync(id, tokenData.anime_service);
+
+            return View("StaffDetail", new StaffDetailViewModel
+            {
+                Id = id,
+                Name = name,
+                ConfigUid = uid,
+                Items = items ?? [],
+            });
+        }
+
         // ─── Browse-by-tag ──────────────────────────────────────────────
         // Listing: every AniList tag in one render (MediaTagCollection is
         // unpaginated upstream — ~300 entries). Detail: poster grid for a
@@ -400,6 +431,15 @@ namespace AnimeList.Controllers
     {
         public int Id { get; set; }
         // Null when the studio id didn't resolve — view renders "Unknown".
+        public string Name { get; set; }
+        public string ConfigUid { get; set; }
+        public List<Meta> Items { get; set; } = [];
+    }
+
+    public class StaffDetailViewModel
+    {
+        public int Id { get; set; }
+        // Null when the staff id didn't resolve — view renders "Unknown".
         public string Name { get; set; }
         public string ConfigUid { get; set; }
         public List<Meta> Items { get; set; } = [];
