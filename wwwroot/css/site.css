@@ -4446,6 +4446,14 @@ button.anime-detail-user-state:hover {
     overflow: hidden;
 }
 
+/* Clickable affordance only when the row carries role="button" — set
+   server-side when the user has at least one stream source (RD key
+   or External services). Without either there's nothing to navigate
+   to, so the cursor stays default and the row reads as informational. */
+.anime-detail-episode[role="button"] {
+    cursor: pointer;
+}
+
 .anime-detail-episode:last-child {
     border-bottom: 0;
 }
