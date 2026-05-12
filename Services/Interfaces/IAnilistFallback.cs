@@ -131,14 +131,20 @@ namespace AnimeList.Services.Interfaces
 
         /// <summary>
         /// Browse a studio's catalog — every anime the studio produced,
-        /// sorted by popularity desc. Returns the studio's name with the
-        /// media list for the same reason GetStaffMediaAsync does.
+        /// sorted alphabetically (TITLE_ROMAJI). Returns the studio's
+        /// name with the media list for the same reason
+        /// GetStaffMediaAsync does, plus AniList's hasNextPage so the
+        /// infinite-scroll handler can stop at the real end of the
+        /// catalog (Studio.media is filtered client-side to drop manga
+        /// edges, so an empty page can still precede more anime pages —
+        /// callers must consult HasNextPage, not list emptiness).
+        /// Page is 1-indexed.
         /// </summary>
-        Task<(string Name, List<Meta> Items)> GetStudioMediaAsync(int studioId, AnimeService translateTo, string skip = null);
+        Task<(string Name, List<Meta> Items, bool HasNextPage)> GetStudioMediaAsync(int studioId, AnimeService translateTo, int page = 1);
 
         /// <summary>
         /// One page of studios from AniList's Page.studios connection,
-        /// sorted alphabetically (NAME). Each entry carries its
+        /// sorted by popularity (FAVOURITES_DESC). Each entry carries its
         /// <see cref="StudioSummary.AnimeCount"/> from the inline
         /// <c>media { pageInfo { total } }</c> sub-query so the tile can
         /// show "· N anime" without a per-studio follow-up. The list is

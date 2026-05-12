@@ -7,6 +7,14 @@
         : $"Studio #{Model.Id}";
     var title = string.IsNullOrEmpty(Model.Name) ? fallback : Model.Name;
     ViewData["Title"] = $"{title} · AniSync";
+
+    var posterGridModel = new AnimeList.Models.PosterGridViewModel
+    {
+        Items = Model.Items,
+        ConfigUid = Model.ConfigUid,
+        EmptyMessage = $"No anime found for {title}.",
+    };
+    var isStudio = Model.Kind == AnimeList.Controllers.BrowseKind.Studio;
 }
 
 <header class="page-header">
@@ -14,9 +22,28 @@
     <h1 class="page-title">@title</h1>
 </header>
 
-@await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+@if (isStudio && Model.Items?.Count > 0)
 {
-    Items = Model.Items,
-    ConfigUid = Model.ConfigUid,
-    EmptyMessage = $"No anime found for {title}.",
-})
+    @* Studio catalog supports infinite scroll: subsequent pages come
+       from /studio/{id}/page via studio-detail-pagination.js. Wrapper
+       carries the studio id and the last AniList page rendered
+       server-side; the JS bumps the page number on sentinel intersect. *@
+    <div class="studio-detail-paginator" data-studio-id="@Model.Id" data-page="1">
+        @await Html.PartialAsync("_PosterGrid", posterGridModel)
+        <div class="paginator-loader" hidden aria-hidden="true">
+            <div class="paginator-loader-spinner"></div>
+        </div>
+        <div class="studio-detail-sentinel" aria-hidden="true"></div>
+    </div>
+}
+else
+{
+    @await Html.PartialAsync("_PosterGrid", posterGridModel)
+}
+
+@section Scripts {
+    @if (isStudio && Model.Items?.Count > 0)
+    {
+        <script src="~/js/studio-detail-pagination.js" asp-append-version="true" defer></script>
+    }
+}
