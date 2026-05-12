@@ -255,6 +255,25 @@ app.UseRouting();
 app.UseRateLimiter();
 app.UseCors("AllowAllOrigins");
 app.UseSession();
+
+// Rehydrate the Session "AccessToken" entry from the persistent UID cookie
+// whenever the session is empty. Without this, the very first request after
+// a redeploy (or after the in-memory session store evicted the entry) renders
+// the layout and dashboard as "not logged in" — every other controller path
+// hits ITokenService.GetAccessTokenAsync which already does this rehydration,
+// but the dashboard intentionally skips that to avoid token-refresh IO. The
+// helper is a no-op once the session is populated, so the steady-state cost
+// is a single empty-string check per request.
+app.Use(async (ctx, next) =>
+{
+    var store = ctx.RequestServices.GetService<IConfigStore>();
+    if (store != null)
+    {
+        await TokenService.TryRehydrateSessionFromCookieAsync(ctx, store);
+    }
+    await next();
+});
+
 app.UseAuthorization();
 
 // Swagger UI lives at /api/docs so the addon's dashboard at / and configure

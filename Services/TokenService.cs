@@ -194,7 +194,31 @@ namespace AnimeList.Services
         // upstream OAuth tokens themselves (AniList ~1y, MAL 31d w/
         // refresh, Kitsu password-grant w/ refresh) handle their own
         // renewal cycles independently.
-        private const string UidCookieName = "anisync_uid";
+        public const string UidCookieName = "anisync_uid";
+
+        /// <summary>
+        /// Cookie → session rehydration without the token-refresh side
+        /// effects of <see cref="GetAccessTokenAsync"/>. Used by the request
+        /// pipeline middleware so every request (including the dashboard,
+        /// which intentionally skips GetAccessTokenAsync to keep the front
+        /// page free of network IO) sees a populated session even on the
+        /// very first hit after a redeploy wipes the in-memory session
+        /// store. Idempotent: bails immediately when session already has
+        /// AccessToken, so the cost is one no-op session read per request
+        /// after the first one in a given session.
+        /// </summary>
+        public static async Task TryRehydrateSessionFromCookieAsync(HttpContext ctx, IConfigStore configStore)
+        {
+            if (ctx == null || configStore == null) return;
+            if (!string.IsNullOrEmpty(ctx.Session.GetString("AccessToken"))) return;
+            var uidCookie = ctx.Request.Cookies[UidCookieName];
+            if (string.IsNullOrEmpty(uidCookie)) return;
+            var tokenData = await configStore.GetAsync(uidCookie);
+            if (tokenData != null)
+            {
+                ctx.Session.SetString("AccessToken", SerializeObject(tokenData));
+            }
+        }
 
         public void SetPrimaryUidCookie(string uid)
         {
