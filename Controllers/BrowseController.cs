@@ -50,20 +50,24 @@ namespace AnimeList.Controllers
         [Route("/studio")]
         public async Task<IActionResult> Studios()
         {
-            var studios = await _anilistFallback.GetStudiosListAsync(page: 1);
+            var (studios, _) = await _anilistFallback.GetStudiosListAsync(page: 1);
             return View("Studios", studios);
         }
 
         /// <summary>
         /// Next-page endpoint for /studio's infinite scroll. Returns the
         /// shared _StudioTiles partial so the client can splice its
-        /// children into the existing grid. Empty response is the
-        /// end-of-list signal (same convention as /discover/page).
+        /// children into the existing grid. The X-Has-Next-Page header
+        /// is the authoritative end-of-list signal — an empty partial
+        /// body can still mean "more pages ahead" because client-side
+        /// filtering (isAnimationStudio + non-zero anime count) can
+        /// drop every entry on a given AniList page.
         /// </summary>
         [Route("/studio/page")]
         public async Task<IActionResult> StudiosPage(int page = 1)
         {
-            var studios = await _anilistFallback.GetStudiosListAsync(page);
+            var (studios, hasNext) = await _anilistFallback.GetStudiosListAsync(page);
+            Response.Headers["X-Has-Next-Page"] = hasNext ? "true" : "false";
             return PartialView("_StudioTiles", studios ?? new List<StudioSummary>());
         }
 

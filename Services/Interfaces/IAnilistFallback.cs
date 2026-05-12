@@ -140,14 +140,18 @@ namespace AnimeList.Services.Interfaces
         /// One page of studios from AniList's Page.studios connection,
         /// sorted alphabetically (NAME). Each entry carries its
         /// <see cref="StudioSummary.AnimeCount"/> from the inline
-        /// <c>media(type: ANIME) { pageInfo { total } }</c> sub-query so the
-        /// tile can show "· N anime" without a per-studio follow-up.
+        /// <c>media { pageInfo { total } }</c> sub-query so the tile can
+        /// show "· N anime" without a per-studio follow-up. The list is
+        /// pre-filtered to <c>isAnimationStudio=true</c> with at least
+        /// one anime, so the returned count can be smaller than perPage
+        /// (sometimes zero) — callers must use <c>HasNextPage</c>, not
+        /// list emptiness, to decide whether more pages remain.
         ///
         /// Page is 1-indexed (matches AniList's convention). The /studio
         /// listing renders page 1 server-side and the JS paginator fetches
         /// subsequent pages on scroll. Cached 24h per page key so re-scrolls
         /// don't replay the upstream call.
         /// </summary>
-        Task<List<StudioSummary>> GetStudiosListAsync(int page = 1);
+        Task<(List<StudioSummary> Studios, bool HasNextPage)> GetStudiosListAsync(int page = 1);
     }
 }
