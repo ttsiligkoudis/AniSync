@@ -158,19 +158,9 @@
                 }
             </div>
 
-            @* Manual full-sync block — opens the modal that drives the client-side
-               batch loop. Only visible when at least one healthy linked account exists,
-               since there's nothing to sync to otherwise. *@
-            @if (Model.HasSwappableLinks)
-            {
-                <div class="full-sync-row">
-                    <div class="full-sync-text">
-                        <strong>Backfill linked accounts</strong>
-                        <span>Push every entry from your @Model.ServiceDisplay library to your linked accounts in one go. Useful right after first linking.</span>
-                    </div>
-                    <button type="button" id="syncNowBtn" class="btn-ghost btn-ghost-sm">Sync from primary</button>
-                </div>
-            }
+            @* Backfill-linked-accounts moved to /advanced — it's a one-shot
+               maintenance action, the configure surface stays focused on
+               identity. See Advanced.cshtml's "Sync" section. *@
         </section>
     }
 

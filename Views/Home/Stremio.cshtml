@@ -176,50 +176,10 @@
     @await Html.PartialAsync("_PreferencesSection", (IReadOnlyList<(string, string, string, bool)>)stremioPrefs)
 
     <!-- ─── STREAMS ─────────────────────────────────────────────────── -->
-    <section class="section-card">
-        <span class="section-title">Streams</span>
-        <p class="section-description">Choose what AniSync attaches to each episode in Stremio.</p>
-
-        <div class="streams-grid">
-            @* Manage Entry and Auto-track touch the user's list, so they only make sense *@
-            @* when there's an account behind the install. *@
-            @if (!Model.AnonymousUser)
-            {
-                <div class="stream-option">
-                    <div class="option-name-wrap">
-                        <span class="option-name">Manage Entry</span>
-                        <span class="option-name-sub">Quick-edit progress, score and notes from Stremio.</span>
-                    </div>
-                    <label class="switch">
-                        <input type="checkbox" id="showManageEntry" @(Model.ShowManageEntry ? "checked" : "") />
-                        <span class="slider"></span>
-                    </label>
-                </div>
-
-                <div class="stream-option">
-                    <div class="option-name-wrap">
-                        <span class="option-name">Auto-track progress</span>
-                        <span class="option-name-sub">Update your list when you start an episode in Stremio.</span>
-                    </div>
-                    <label class="switch">
-                        <input type="checkbox" id="autoTrackProgress" @(Model.AutoTrackProgress ? "checked" : "") />
-                        <span class="slider"></span>
-                    </label>
-                </div>
-            }
-
-            <div class="stream-option">
-                <div class="option-name-wrap">
-                    <span class="option-name">External services</span>
-                    <span class="option-name-sub">Crunchyroll, Netflix, HiDive, …</span>
-                </div>
-                <label class="switch">
-                    <input type="checkbox" id="showExternalStreams" @(cfg.showExternalStreams ? "checked" : "") />
-                    <span class="slider"></span>
-                </label>
-            </div>
-        </div>
-    </section>
+    @* Shared partial — same card lives on /advanced with isStremio=false
+       so RD + external-services configuration stays in one place. *@
+    @await Html.PartialAsync("_StreamsSection", Model,
+        new ViewDataDictionary(ViewData) { ["isStremio"] = true })
 
     <!-- ─── INSTALLATION OPTIONS ────────────────────────────────────── -->
     <section class="section-card">
