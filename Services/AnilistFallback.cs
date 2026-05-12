@@ -791,6 +791,12 @@ namespace AnimeList.Services
 
                 if (result.Count > 0)
                 {
+                    // Final ascending sort by airingAt — the GraphQL `sort: TIME`
+                    // already returns ascending, but make the order an explicit
+                    // post-condition so a future upstream change can't quietly
+                    // reorder the dashboard shelf.
+                    result = result.OrderBy(m => m.airingAt ?? long.MaxValue).ToList();
+
                     // Pin expiration to the next UTC midnight so the cache
                     // holds for exactly today rather than a rolling 24h
                     // window. A fetch at 23:00 UTC caches for 1h; a fetch
