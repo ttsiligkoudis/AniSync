@@ -1,0 +1,286 @@
+@model AnimeList.Controllers.WatchViewModel
+@{
+    var a = Model.Anime;
+    var ep = Model.Current;
+    var episodeLabel = !string.IsNullOrEmpty(ep.name) ? ep.name
+        : !string.IsNullOrEmpty(ep.title) ? ep.title
+        : $"Episode {ep.episode}";
+    var seasonNum = ep.season > 0 ? ep.season : 1;
+    var hasSeasons = a.videos != null && a.videos.Any(v => (v.season > 0 ? v.season : 1) != seasonNum);
+    var seasonLabel = hasSeasons ? $"S{seasonNum} · E{ep.episode}" : $"Episode {ep.episode}";
+    ViewData["Title"] = $"{a.name} · {seasonLabel} · AniSync";
+    ViewData["BodyClass"] = "watch-page";
+
+    string PrevHref()
+    {
+        if (Model.Prev == null) return null;
+        var ps = Model.Prev.season > 0 ? Model.Prev.season : 1;
+        return hasSeasons
+            ? $"/anime/{a.id}/watch/{ps}/{Model.Prev.episode}"
+            : $"/anime/{a.id}/watch/{Model.Prev.episode}";
+    }
+    string NextHref()
+    {
+        if (Model.Next == null) return null;
+        var ns = Model.Next.season > 0 ? Model.Next.season : 1;
+        return hasSeasons
+            ? $"/anime/{a.id}/watch/{ns}/{Model.Next.episode}"
+            : $"/anime/{a.id}/watch/{Model.Next.episode}";
+    }
+}
+
+@*
+    Plyr — small, well-maintained HTML5 player. Drops onto a <video>
+    element so codec support is whatever the browser exposes natively;
+    MKV plays in most Chromium variants for H.264/H.265 + AAC tracks,
+    and the error-fallback path below catches anything the browser
+    can't decode and offers an "open externally" affordance instead.
+*@
+<link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+
+<section class="watch-header">
+    <a class="watch-back" href="/anime/@a.id">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span>@a.name</span>
+    </a>
+    <h1 class="watch-title">@episodeLabel</h1>
+    <p class="watch-meta">@seasonLabel @if (!string.IsNullOrEmpty(ep.released) && ep.released.Length >= 10) { <span class="watch-meta-dot">·</span> <span>@ep.released[..10]</span> }</p>
+</section>
+
+<section class="watch-player-wrap">
+    @* Placeholder paragraph swaps out the moment a source is selected:
+       JS replaces the inner HTML with the <video> element + Plyr init.
+       Empty data-src means "no source picked yet" — the picker below
+       prompts the user. *@
+    <div id="watchPlayer" class="watch-player">
+        <div class="watch-player-empty">
+            <p>Pick a source below to start watching.</p>
+        </div>
+    </div>
+    <div id="watchPlayerFallback" class="watch-player-fallback" hidden>
+        @* Rendered by JS when the &lt;video&gt; element fires an error
+           (codec mismatch — most often MKV with HEVC on Firefox/Safari
+           or anything AV1-encoded on older browsers). *@
+    </div>
+</section>
+
+<nav class="watch-nav">
+    @if (Model.Prev != null)
+    {
+        <a class="watch-nav-btn watch-nav-prev" href="@PrevHref()">
+            <span class="watch-nav-direction">← Previous</span>
+            <span class="watch-nav-label">@(string.IsNullOrEmpty(Model.Prev.name) ? (string.IsNullOrEmpty(Model.Prev.title) ? $"Episode {Model.Prev.episode}" : Model.Prev.title) : Model.Prev.name)</span>
+        </a>
+    }
+    else
+    {
+        <span class="watch-nav-btn watch-nav-btn-disabled" aria-hidden="true"></span>
+    }
+    @if (Model.Next != null)
+    {
+        <a class="watch-nav-btn watch-nav-next" href="@NextHref()">
+            <span class="watch-nav-direction">Next →</span>
+            <span class="watch-nav-label">@(string.IsNullOrEmpty(Model.Next.name) ? (string.IsNullOrEmpty(Model.Next.title) ? $"Episode {Model.Next.episode}" : Model.Next.title) : Model.Next.name)</span>
+        </a>
+    }
+    else
+    {
+        <span class="watch-nav-btn watch-nav-btn-disabled" aria-hidden="true"></span>
+    }
+</nav>
+
+<section class="watch-sources" id="watchSources">
+    <h2 class="watch-section-title">Sources</h2>
+    <div id="watchSourcesBody" class="watch-sources-body">
+        <p class="hint-text">Looking for streams…</p>
+    </div>
+</section>
+
+@section Scripts {
+    <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
+    <script>
+        (function () {
+            var animeId = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(a.id));
+            var season  = @(Model.Current.season > 0 ? Model.Current.season : 1);
+            var episode = @Model.Current.episode;
+            var hasSeasons = @(hasSeasons ? "true" : "false");
+
+            var sourcesBody = document.getElementById('watchSourcesBody');
+            var playerHost  = document.getElementById('watchPlayer');
+            var fallbackHost = document.getElementById('watchPlayerFallback');
+            if (!sourcesBody || !playerHost) return;
+
+            // Plyr instance gets re-created on every source pick — Plyr
+            // exposes `destroy()` so swapping the underlying <video> stays
+            // clean (avoids dangling event listeners + lets the user
+            // change source mid-playback without state leakage).
+            var plyr = null;
+
+            function el(tag, attrs, text) {
+                var n = document.createElement(tag);
+                if (attrs) Object.keys(attrs).forEach(function (k) {
+                    if (k === 'class') n.className = attrs[k];
+                    else n.setAttribute(k, attrs[k]);
+                });
+                if (text != null) n.textContent = text;
+                return n;
+            }
+
+            function destroyPlayer() {
+                if (plyr) { try { plyr.destroy(); } catch (_) {} plyr = null; }
+                playerHost.innerHTML = '';
+                fallbackHost.hidden = true;
+                fallbackHost.innerHTML = '';
+            }
+
+            function showFallback(stream) {
+                fallbackHost.hidden = false;
+                fallbackHost.innerHTML = '';
+                fallbackHost.appendChild(el('p', { class: 'hint-text', style: 'margin: 0 0 0.75rem;' },
+                    "Your browser couldn't decode this stream. Open it in an external player or copy the URL."));
+                var row = el('div', { class: 'watch-fallback-actions' });
+                var open = el('a', {
+                    class: 'btn-ghost btn-ghost-sm',
+                    href: stream.url, target: '_blank', rel: 'noopener noreferrer',
+                }, 'Open externally');
+                var copy = el('button', { type: 'button', class: 'btn-ghost btn-ghost-sm' }, 'Copy URL');
+                copy.addEventListener('click', function () {
+                    navigator.clipboard.writeText(stream.url).then(function () {
+                        copy.textContent = 'Copied';
+                        setTimeout(function () { copy.textContent = 'Copy URL'; }, 1200);
+                    });
+                });
+                row.appendChild(open);
+                row.appendChild(copy);
+                fallbackHost.appendChild(row);
+            }
+
+            function playStream(stream) {
+                destroyPlayer();
+                var video = el('video', {
+                    id: 'watchVideo',
+                    playsinline: 'playsinline',
+                    controls: 'controls',
+                });
+                // Set src via the source element so we can hint at the
+                // type when we recognise the extension (some Chromium
+                // versions sniff MKV better when type is omitted).
+                var src = el('source', { src: stream.url });
+                video.appendChild(src);
+                playerHost.appendChild(video);
+
+                // MEDIA_ERR_SRC_NOT_SUPPORTED (code 4) is the "browser
+                // can't decode" signal — fall back to the external-open
+                // affordance instead of leaving the player frozen. We
+                // also listen on the underlying <source> element since
+                // some browsers fire the error there only.
+                function onErr() {
+                    var code = video.error && video.error.code;
+                    // Code 4 = src not supported; codes 1-3 = aborted /
+                    // network / decode (mid-playback). The user might
+                    // already be deep into the episode; only swap the
+                    // whole UI for code 4.
+                    if (code === 4) showFallback(stream);
+                }
+                video.addEventListener('error', onErr);
+                src.addEventListener('error', onErr);
+
+                plyr = new Plyr(video, {
+                    controls: ['play-large', 'play', 'rewind', 'fast-forward',
+                               'progress', 'current-time', 'duration', 'mute',
+                               'volume', 'captions', 'settings', 'pip',
+                               'airplay', 'fullscreen'],
+                    settings: ['captions', 'quality', 'speed', 'loop'],
+                    speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
+                    keyboard: { focused: true, global: true },
+                });
+            }
+
+            function renderSources(data) {
+                sourcesBody.innerHTML = '';
+
+                var debrid = (data && data.debridStreams) || [];
+                var external = (data && data.externalLinks) || [];
+
+                if (debrid.length > 0) {
+                    var h = el('h3', { class: 'watch-section-subtitle' }, 'Debrid streams');
+                    sourcesBody.appendChild(h);
+                    var list = el('ul', { class: 'episode-stream-list' });
+                    debrid.forEach(function (s) {
+                        var li = el('li', { class: 'episode-stream-row' });
+                        var btn = el('button', { type: 'button', class: 'episode-stream-pick' });
+                        btn.appendChild(el('span', { class: 'episode-stream-quality' }, s.quality || '—'));
+
+                        var meta = el('span', { class: 'episode-stream-meta' });
+                        var firstLine = (s.title || s.name || '').split('\n')[0];
+                        meta.appendChild(el('span', { class: 'episode-stream-title' }, firstLine));
+                        var sub = el('span', { class: 'episode-stream-sub' });
+                        if (s.size) sub.appendChild(el('span', { class: 'episode-stream-size' }, s.size));
+                        if (typeof s.seeders === 'number' && s.seeders > 0) {
+                            sub.appendChild(el('span', { class: 'episode-stream-seeders' }, '👤 ' + s.seeders));
+                        }
+                        if (s.language) {
+                            sub.appendChild(el('span', { class: 'episode-stream-language' }, s.language));
+                        }
+                        if (sub.childNodes.length > 0) meta.appendChild(sub);
+                        btn.appendChild(meta);
+
+                        btn.addEventListener('click', function () { playStream(s); });
+                        li.appendChild(btn);
+                        list.appendChild(li);
+                    });
+                    sourcesBody.appendChild(list);
+                }
+
+                if (external.length > 0) {
+                    var h2 = el('h3', { class: 'watch-section-subtitle' },
+                        debrid.length > 0 ? 'Other sites' : 'Watch on');
+                    sourcesBody.appendChild(h2);
+                    var ul = el('ul', { class: 'episode-stream-list episode-stream-list-external' });
+                    external.forEach(function (l) {
+                        var a = el('a', {
+                            class: 'episode-stream-pick',
+                            href: l.url, target: '_blank', rel: 'noopener noreferrer',
+                        });
+                        a.appendChild(el('span', { class: 'episode-stream-title' }, l.site));
+                        var li = el('li', { class: 'episode-stream-row' });
+                        li.appendChild(a);
+                        ul.appendChild(li);
+                    });
+                    sourcesBody.appendChild(ul);
+                }
+
+                if (debrid.length === 0 && external.length === 0) {
+                    var msg = data && data.anonymous
+                        ? "Sign in and add a Real-Debrid key in Settings to find streaming sources for this episode."
+                        : (data && !data.rdConfigured
+                            ? "No streaming sources found. Add a Real-Debrid key in Settings to surface RD-cached torrents via Torrentio."
+                            : "No streaming sources found for this episode.");
+                    sourcesBody.appendChild(el('p', { class: 'hint-text' }, msg));
+                }
+            }
+
+            var qs = 'id=' + encodeURIComponent(animeId)
+                + '&episode=' + encodeURIComponent(episode)
+                + (hasSeasons ? '&season=' + encodeURIComponent(season) : '');
+            fetch('/anime/episode-streams?' + qs, {
+                credentials: 'same-origin',
+                headers: { 'Accept': 'application/json' },
+            })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (data) {
+                    if (!data) {
+                        sourcesBody.innerHTML = '<p class="hint-text">Couldn\'t load sources. Try refreshing.</p>';
+                        return;
+                    }
+                    renderSources(data);
+                })
+                .catch(function () {
+                    sourcesBody.innerHTML = '<p class="hint-text">Couldn\'t load sources. Try refreshing.</p>';
+                });
+        })();
+    </script>
+}

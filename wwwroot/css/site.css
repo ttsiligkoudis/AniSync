@@ -2013,6 +2013,175 @@ body.modal-open {
     font-size: 0.72rem;
 }
 
+/* ─── Watch page (/anime/{id}/watch/{episode}) ───────────────────── */
+
+.watch-page {
+    /* Slightly tighter padding than other library-page surfaces — the
+       player wants horizontal real estate. */
+    padding: 1rem;
+    max-width: 1100px;
+    margin: 0 auto;
+}
+
+.watch-header {
+    margin-bottom: 1rem;
+}
+
+.watch-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: rgba(255, 255, 255, 0.65);
+    text-decoration: none;
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+}
+
+.watch-back:hover {
+    color: #fff;
+    text-decoration: none;
+}
+
+.watch-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0;
+    color: #fff;
+}
+
+.watch-meta {
+    margin: 0.25rem 0 0;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.watch-meta-dot {
+    margin: 0 0.35rem;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.watch-player-wrap {
+    margin-bottom: 1.25rem;
+}
+
+.watch-player {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    border-radius: 0.75rem;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.watch-player-empty {
+    color: rgba(255, 255, 255, 0.5);
+    text-align: center;
+    padding: 1rem;
+}
+
+.watch-player-fallback {
+    margin-top: 0.75rem;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.75rem;
+}
+
+.watch-fallback-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* Plyr overrides the <video> with its own DOM — restyle the wrapper
+   so the rounded corners + aspect ratio still hold. */
+.watch-player .plyr {
+    width: 100%;
+    height: 100%;
+    border-radius: 0.75rem;
+}
+
+.watch-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+}
+
+.watch-nav-btn {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.75rem 1rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.75rem;
+    color: #ddd;
+    text-decoration: none;
+    min-height: 3.25rem;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.watch-nav-btn:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    text-decoration: none;
+    transform: translateY(-1px);
+}
+
+.watch-nav-next {
+    text-align: right;
+}
+
+.watch-nav-btn-disabled {
+    /* Invisible spacer so the grid keeps two columns when one nav side
+       has no neighbour — keeps the remaining button on its expected
+       side of the screen. */
+    visibility: hidden;
+}
+
+.watch-nav-direction {
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.55);
+    font-weight: 600;
+}
+
+.watch-nav-label {
+    font-size: 0.9rem;
+    color: #ddd;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.watch-section-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.8);
+    margin: 0 0 0.6rem;
+}
+
+.watch-section-subtitle {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.6);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 1rem 0 0.5rem;
+}
+
+.watch-section-subtitle:first-child {
+    margin-top: 0;
+}
+
+.watch-sources-body {
+    display: flex;
+    flex-direction: column;
+}
+
 .episode-stream-video {
     width: 100%;
     max-height: 70vh;
