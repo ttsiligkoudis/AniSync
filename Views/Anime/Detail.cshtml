@@ -43,21 +43,10 @@
 }
 @{
     ViewData["BodyClass"] = "anime-detail-page";
+    // a is guaranteed non-null — AnimeController.Detail short-circuits to
+    // Views/Shared/NotFound.cshtml when the upstream / mapping comes back
+    // empty, so this view never gets rendered against a null anime.
     var a = Model.Anime;
-
-    if (a == null)
-    {
-        ViewData["Title"] = "Anime not found";
-        <div class="page-header">
-            <h1 class="page-title">Anime not found</h1>
-            <p class="page-subtitle">We couldn't pull metadata for this anime — it may be missing from the cross-service mapping or the upstream is temporarily down.</p>
-        </div>
-        <div class="hero-ctas" style="justify-content: center;">
-            <a class="hero-cta hero-cta-primary" href="/discover">Browse anime</a>
-            <a class="hero-cta hero-cta-secondary" href="/">Dashboard</a>
-        </div>
-        return;
-    }
 
     // Surface the anime name as the page title so browser history / bookmarks /
     // tab labels show the show being viewed instead of a generic "AniSync".

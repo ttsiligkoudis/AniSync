@@ -130,19 +130,16 @@ namespace AnimeList.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "AnimeController.Detail failed (id={Id}).", id);
-                return View("Detail", new AnimeDetailViewModel { Anime = null });
+                Response.StatusCode = 404;
+                return View("NotFound");
             }
 
             if (anime == null)
             {
-                // Same friendly "Anime not found" render the exception branch
-                // above falls through to — null Anime triggers a layout-
-                // styled placeholder in Detail.cshtml with browse / dashboard
-                // CTAs. Set the response status to 404 so the URL still
-                // reads as "not found" for crawlers / share-link previewers
-                // even though we return a full HTML body.
+                // Mapping miss / upstream gone. Hand off to the shared 404
+                // page so this matches what users see on any other bad URL.
                 Response.StatusCode = 404;
-                return View("Detail", new AnimeDetailViewModel { Anime = null });
+                return View("NotFound");
             }
 
             // Filler / canon enrichment — same pattern as MetaController's
