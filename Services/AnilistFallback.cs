@@ -1007,9 +1007,9 @@ namespace AnimeList.Services
             return (name, await BuildBrowseMetasAsync(nodes, translateTo));
         }
 
-        public async Task<(string Name, List<Meta> Items)> GetStudioMediaAsync(int studioId, AnimeService translateTo, string skip = null)
+        public async Task<(string Name, List<Meta> Items, bool HasNextPage)> GetStudioMediaAsync(int studioId, AnimeService translateTo, int page = 1)
         {
-            var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
+            if (page < 1) page = 1;
 
             var requestBody = SerializeObject(new
             {
@@ -1018,6 +1018,7 @@ namespace AnimeList.Services
                         Studio(id: $id) {
                             name
                             media(sort: TITLE_ROMAJI, page: $page, perPage: $perPage) {
+                                pageInfo { hasNextPage }
                                 edges {
                                     node {
                                         id
@@ -1039,7 +1040,7 @@ namespace AnimeList.Services
 
             var data = await PostJsonAsync(requestBody);
             var studio = data?.Studio;
-            if (studio == null) return (null, []);
+            if (studio == null) return (null, [], false);
 
             var name = (string)studio.name;
             var nodes = new List<dynamic>();
@@ -1055,14 +1056,23 @@ namespace AnimeList.Services
                     nodes.Add(edge.node);
                 }
             }
-            return (name, await BuildBrowseMetasAsync(nodes, translateTo));
+
+            // hasNextPage from AniList itself — independent of how many
+            // anime survived the manga filter above. A page can render
+            // zero cards (all manga) while more anime pages still
+            // follow, so the paginator can't infer end-of-list from
+            // list size alone.
+            bool hasNext = studio.media?.pageInfo?.hasNextPage != null
+                && (bool)studio.media.pageInfo.hasNextPage;
+
+            return (name, await BuildBrowseMetasAsync(nodes, translateTo), hasNext);
         }
 
         public async Task<(List<StudioSummary> Studios, bool HasNextPage)> GetStudiosListAsync(int page = 1)
         {
             if (page < 1) page = 1;
 
-            var cacheKey = $"anilist:studios-list:by-name:p{page}";
+            var cacheKey = $"anilist:studios-list:by-favourites:p{page}";
             if (_cache.TryGetValue<(List<StudioSummary>, bool)>(cacheKey, out var cached) && cached.Item1 != null)
             {
                 return cached;
@@ -1070,22 +1080,22 @@ namespace AnimeList.Services
 
             // perPage=50 matches the discover paginator's chunk size so the
             // user feels the same scroll-loaded cadence between anime and
-            // studio listings. NAME sort gives a stable alphabetical walk
-            // (AniList's other studio sorts swap order day-to-day with
-            // favourites churn — fine for a "popular" shelf, jarring for
-            // a "browse all" alphabetical grid). isAnimationStudio + the
-            // media pageInfo.total filter out manga / LN labels and
-            // empty entries so every rendered tile points at a catalog
-            // with at least one anime. NB: Studio.media does NOT accept
-            // a `type` argument — passing one 500s the whole query —
-            // so the anime/non-anime cut happens via isAnimationStudio.
+            // studio listings. FAVOURITES_DESC surfaces the studios the
+            // user is most likely to recognise first (Mappa, Madhouse,
+            // Ghibli, …) and tapers down into long-tail entries as they
+            // scroll. isAnimationStudio + the media pageInfo.total filter
+            // out manga / LN labels and empty entries so every rendered
+            // tile points at a catalog with at least one anime. NB:
+            // Studio.media does NOT accept a `type` argument — passing
+            // one 500s the whole query — so the anime/non-anime cut
+            // happens via isAnimationStudio.
             var requestBody = SerializeObject(new
             {
                 query = @"
                     query ($page: Int, $perPage: Int) {
                         Page(page: $page, perPage: $perPage) {
                             pageInfo { hasNextPage }
-                            studios(sort: NAME) {
+                            studios(sort: FAVOURITES_DESC) {
                                 id
                                 name
                                 isAnimationStudio

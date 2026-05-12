@@ -40,6 +40,36 @@ namespace AnimeList.Controllers
         public Task<IActionResult> Studio(int id) => Browse(BrowseKind.Studio, id);
 
         /// <summary>
+        /// Next-page endpoint for /studio/{id}'s infinite scroll. Returns
+        /// the shared _PosterGrid partial so studio-detail-pagination.js
+        /// can splice its children into the existing grid. The
+        /// X-Has-Next-Page header is the authoritative end-of-list
+        /// signal — Studio.media is filtered client-side to drop manga
+        /// edges, so an "empty" partial can still mean more pages ahead.
+        /// </summary>
+        [Route("/studio/{id:int}/page")]
+        public async Task<IActionResult> StudioPage(int id, int page = 1)
+        {
+            var tokenData = await _tokenService.GetAccessTokenAsync()
+                ?? new TokenData { anime_service = AnimeService.Kitsu };
+
+            string uid = null;
+            if (!tokenData.anonymousUser)
+            {
+                var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                uid = resolved;
+            }
+
+            var (_, items, hasNext) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service, page);
+            Response.Headers["X-Has-Next-Page"] = hasNext ? "true" : "false";
+            return PartialView("_PosterGrid", new PosterGridViewModel
+            {
+                Items = items ?? new List<Meta>(),
+                ConfigUid = uid,
+            });
+        }
+
+        /// <summary>
         /// /studio listing — alphabetical tile grid. Renders the first
         /// AniList page server-side; subsequent pages are pulled in via
         /// <see cref="StudiosPage"/> by the infinite-scroll handler.
@@ -86,9 +116,16 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
-            var (name, items) = kind == BrowseKind.Staff
-                ? await _anilistFallback.GetStaffMediaAsync(id, tokenData.anime_service)
-                : await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service);
+            string name;
+            List<Meta> items;
+            if (kind == BrowseKind.Staff)
+            {
+                (name, items) = await _anilistFallback.GetStaffMediaAsync(id, tokenData.anime_service);
+            }
+            else
+            {
+                (name, items, _) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service);
+            }
 
             return View("Index", new BrowseViewModel
             {

@@ -2386,7 +2386,8 @@ body.modal-open {
 
 /* Same role as .discover-sentinel — a zero-height invisible tracker
    the IntersectionObserver watches to trigger the next-page fetch. */
-.studio-sentinel {
+.studio-sentinel,
+.studio-detail-sentinel {
     height: 1px;
     width: 100%;
 }
