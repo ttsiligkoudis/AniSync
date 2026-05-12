@@ -17,8 +17,9 @@ else
 {
     @* Paginator wrapper carries the state the JS reads on startup: which
        AniList page we last rendered server-side. studio-pagination.js
-       increments and fetches /studio/page?page=N+1 as the sentinel
-       scrolls into view, appending tiles directly into .studio-grid. *@
+       increments and fetches /discover/studio/page?page=N+1 as the
+       sentinel scrolls into view, appending tiles directly into
+       .studio-grid. *@
     <div class="studio-paginator" data-page="1">
         <div class="studio-grid">
             @await Html.PartialAsync("_StudioTiles", Model)

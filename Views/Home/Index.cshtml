@@ -314,10 +314,8 @@
 @* Browse By: secondary discovery surfaces. Replaces the previous three nav
    tiles now that the layout's bottom-nav + hamburger drawer cover primary
    navigation (Home / Library / Discover / Configure) — keeping nav tiles
-   here too would just duplicate. The four browse paths match the StreamD
-   reference: Seasons + Genres are functional today; Studios and Platforms
-   are coming-soon stubs because the catalog dispatchers don't support them
-   yet. *@
+   here too would just duplicate. Four browse paths: Seasons, Genres,
+   Studios, Tags — all functional, all under /discover. *@
 <section class="dashboard-section">
     <div class="dashboard-section-header">
         <h2 class="dashboard-section-title">Browse By</h2>
@@ -352,7 +350,7 @@
             </div>
         </a>
 
-        <a class="browse-tile" href="/studio">
+        <a class="browse-tile" href="/discover/studio">
             <span class="browse-tile-icon browse-tile-icon-amber">
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="4" y="3" width="16" height="18" rx="1"></rect>
@@ -370,18 +368,17 @@
             </div>
         </a>
 
-        <div class="browse-tile browse-tile-disabled">
+        <a class="browse-tile" href="/discover/tag">
             <span class="browse-tile-icon browse-tile-icon-purple">
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="2" y="4" width="20" height="14" rx="2"></rect>
-                    <line x1="8" y1="22" x2="16" y2="22"></line>
-                    <line x1="12" y1="18" x2="12" y2="22"></line>
+                    <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                    <line x1="7" y1="7" x2="7.01" y2="7"></line>
                 </svg>
             </span>
             <div class="browse-tile-body">
-                <h3 class="browse-tile-title">Platforms</h3>
-                <p class="browse-tile-text">Coming soon</p>
+                <h3 class="browse-tile-title">Tags</h3>
+                <p class="browse-tile-text">Browse by tag</p>
             </div>
-        </div>
+        </a>
     </div>
 </section>

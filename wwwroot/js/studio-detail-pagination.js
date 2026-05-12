@@ -1,6 +1,6 @@
-// Infinite-scroll for /studio/{id} (a studio's anime catalog).
+// Infinite-scroll for /discover/studio/{id} (a studio's anime catalog).
 //
-// Shape mirrors studio-pagination.js (the alphabetical /studio listing):
+// Shape mirrors studio-pagination.js (the /discover/studio listing):
 //   - page-based, 1-indexed, matches AniList's own pagination
 //   - end-of-list comes from the X-Has-Next-Page header, NOT from
 //     "added === 0", because Studio.media returns Manga + Anime mixed
@@ -55,7 +55,7 @@
     function hideLoader() { if (loader) loader.hidden = true; }
 
     function appendCards(html) {
-        // The /studio/{id}/page partial returns
+        // The /discover/studio/{id}/page partial returns
         // <div class="library-grid">…cards…</div>. Strip the wrapper and
         // move each child into the existing grid so the CSS-grid layout
         // stays unified across appended chunks.
@@ -83,7 +83,7 @@
         function step(p) {
             if (done) return Promise.resolve();
             attempts++;
-            return fetch('/studio/' + encodeURIComponent(studioId) + '/page?page=' + p, {
+            return fetch('/discover/studio/' + encodeURIComponent(studioId) + '/page?page=' + p, {
                 credentials: 'same-origin',
                 headers: { 'Accept': 'text/html' },
                 skipLoader: true

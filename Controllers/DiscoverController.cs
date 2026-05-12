@@ -265,6 +265,163 @@ namespace AnimeList.Controllers
                 return ListType.Trending_Desc;
             return ListType.Trending_Desc;
         }
+
+        // ─── Browse-by-studio ───────────────────────────────────────────
+        // Listing + per-studio detail live under /discover/studio so the
+        // URL surface tracks the Browse By card on the home page. /studio
+        // and /studio/{id} stay registered as permanent redirects below
+        // for AniList chips and any in-the-wild bookmarks predating the
+        // consolidation.
+
+        [Route("/discover/studio")]
+        public async Task<IActionResult> Studios()
+        {
+            var (studios, _) = await _anilistFallback.GetStudiosListAsync(page: 1);
+            return View("Studios", studios);
+        }
+
+        [Route("/discover/studio/page")]
+        public async Task<IActionResult> StudiosPage(int page = 1)
+        {
+            var (studios, hasNext) = await _anilistFallback.GetStudiosListAsync(page);
+            Response.Headers["X-Has-Next-Page"] = hasNext ? "true" : "false";
+            return PartialView("_StudioTiles", studios ?? new List<StudioSummary>());
+        }
+
+        [Route("/discover/studio/{id:int}")]
+        [Route("/discover/studio/{id:int}/{slug?}")]
+        public async Task<IActionResult> Studio(int id)
+        {
+            var tokenData = await _tokenService.GetAccessTokenAsync()
+                ?? new TokenData { anime_service = AnimeService.Kitsu };
+
+            string uid = null;
+            if (!tokenData.anonymousUser)
+            {
+                var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                uid = resolved;
+            }
+
+            var (name, items, _) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service);
+            return View("StudioDetail", new StudioDetailViewModel
+            {
+                Id = id,
+                Name = name,
+                ConfigUid = uid,
+                Items = items ?? [],
+            });
+        }
+
+        [Route("/discover/studio/{id:int}/page")]
+        public async Task<IActionResult> StudioPage(int id, int page = 1)
+        {
+            var tokenData = await _tokenService.GetAccessTokenAsync()
+                ?? new TokenData { anime_service = AnimeService.Kitsu };
+
+            string uid = null;
+            if (!tokenData.anonymousUser)
+            {
+                var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                uid = resolved;
+            }
+
+            var (_, items, hasNext) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service, page);
+            Response.Headers["X-Has-Next-Page"] = hasNext ? "true" : "false";
+            return PartialView("_PosterGrid", new PosterGridViewModel
+            {
+                Items = items ?? new List<Meta>(),
+                ConfigUid = uid,
+            });
+        }
+
+        // Permanent redirects for the legacy /studio surface. Keeps AniList
+        // chip links and any in-the-wild bookmarks working after the move.
+        [Route("/studio")]
+        public IActionResult LegacyStudios() => RedirectPermanent("/discover/studio");
+
+        [Route("/studio/{id:int}")]
+        [Route("/studio/{id:int}/{slug?}")]
+        public IActionResult LegacyStudio(int id) => RedirectPermanent($"/discover/studio/{id}");
+
+        // ─── Browse-by-tag ──────────────────────────────────────────────
+        // Listing: every AniList tag in one render (MediaTagCollection is
+        // unpaginated upstream — ~300 entries). Detail: poster grid for a
+        // single tag with infinite scroll. /discover/tag/{tagStr} is the
+        // dedicated landing URL; the /discover?tag=X query-param path
+        // remains for filter-bar interactions inside the main /discover
+        // page.
+
+        [Route("/discover/tag")]
+        public async Task<IActionResult> Tags()
+        {
+            var tags = await _anilistFallback.GetTagsListAsync();
+            return View("Tags", tags ?? new List<TagSummary>());
+        }
+
+        [Route("/discover/tag/{tagStr}")]
+        public async Task<IActionResult> Tag(string tagStr)
+        {
+            if (string.IsNullOrWhiteSpace(tagStr))
+            {
+                return RedirectToAction(nameof(Tags));
+            }
+
+            var tokenData = await _tokenService.GetAccessTokenAsync()
+                ?? new TokenData { anime_service = AnimeService.Kitsu };
+
+            string uid = null;
+            if (!tokenData.anonymousUser)
+            {
+                var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                uid = resolved;
+            }
+
+            var (items, _) = await _anilistFallback.GetByTagPageAsync(tagStr, tokenData.anime_service, page: 1);
+            return View("TagDetail", new TagDetailViewModel
+            {
+                Tag = tagStr,
+                ConfigUid = uid,
+                Items = items ?? [],
+            });
+        }
+
+        [Route("/discover/tag/{tagStr}/page")]
+        public async Task<IActionResult> TagPage(string tagStr, int page = 1)
+        {
+            var tokenData = await _tokenService.GetAccessTokenAsync()
+                ?? new TokenData { anime_service = AnimeService.Kitsu };
+
+            string uid = null;
+            if (!tokenData.anonymousUser)
+            {
+                var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                uid = resolved;
+            }
+
+            var (items, hasNext) = await _anilistFallback.GetByTagPageAsync(tagStr, tokenData.anime_service, page);
+            Response.Headers["X-Has-Next-Page"] = hasNext ? "true" : "false";
+            return PartialView("_PosterGrid", new PosterGridViewModel
+            {
+                Items = items ?? new List<Meta>(),
+                ConfigUid = uid,
+            });
+        }
+    }
+
+    public class StudioDetailViewModel
+    {
+        public int Id { get; set; }
+        // Null when the studio id didn't resolve — view renders "Unknown".
+        public string Name { get; set; }
+        public string ConfigUid { get; set; }
+        public List<Meta> Items { get; set; } = [];
+    }
+
+    public class TagDetailViewModel
+    {
+        public string Tag { get; set; }
+        public string ConfigUid { get; set; }
+        public List<Meta> Items { get; set; } = [];
     }
 
     /// <summary>

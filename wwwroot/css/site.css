@@ -2387,9 +2387,64 @@ body.modal-open {
 /* Same role as .discover-sentinel — a zero-height invisible tracker
    the IntersectionObserver watches to trigger the next-page fetch. */
 .studio-sentinel,
-.studio-detail-sentinel {
+.studio-detail-sentinel,
+.tag-detail-sentinel {
     height: 1px;
     width: 100%;
+}
+
+/* Tag listing (Views/Discover/Tags.cshtml). Same wide-auto-fill shape
+   as the studio grid but slimmer rows — tag names are typically one
+   or two words, and we render hundreds at a time so a denser packing
+   reads better than the studio tile's two-line stack. Grouped under
+   .tag-group section headers so the dense list stays scannable. */
+.tag-group {
+    margin-bottom: 1.5rem;
+}
+
+.tag-group-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.65);
+    margin: 0 0 0.6rem 0;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.tag-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 0.5rem;
+}
+
+.tag-tile {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-height: 48px;
+    padding: 0.5rem 0.75rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.75rem;
+    color: #ddd;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
+}
+
+.tag-tile:hover,
+.tag-tile:focus {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    text-decoration: none;
+    transform: translateY(-1px);
+}
+
+.tag-tile-name {
+    font-size: 0.85rem;
+    font-weight: 500;
+    line-height: 1.2;
 }
 
 .browse-tile {

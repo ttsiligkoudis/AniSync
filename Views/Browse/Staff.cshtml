@@ -1,0 +1,19 @@
+@model AnimeList.Controllers.BrowseViewModel
+@{
+    ViewData["BodyClass"] = "library-page";
+    var fallback = $"Staff #{Model.Id}";
+    var title = string.IsNullOrEmpty(Model.Name) ? fallback : Model.Name;
+    ViewData["Title"] = $"{title} · AniSync";
+}
+
+<header class="page-header">
+    <p class="page-subtitle">Anime by</p>
+    <h1 class="page-title">@title</h1>
+</header>
+
+@await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+{
+    Items = Model.Items,
+    ConfigUid = Model.ConfigUid,
+    EmptyMessage = $"No anime found for {title}.",
+})
