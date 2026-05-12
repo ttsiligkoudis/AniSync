@@ -137,13 +137,17 @@ namespace AnimeList.Services.Interfaces
         Task<(string Name, List<Meta> Items)> GetStudioMediaAsync(int studioId, AnimeService translateTo, string skip = null);
 
         /// <summary>
-        /// Top studios by AniList favourites count — surfaced on the /studio
-        /// listing page where the user picks a studio before drilling into
-        /// its catalog. AniList has no "list all" endpoint that's worth
-        /// paging through (thousands of niche entries), so we fetch a
-        /// curated top slice instead. Cached 24h since the ordering of
-        /// the popular studios shifts on the order of days, not minutes.
+        /// One page of studios from AniList's Page.studios connection,
+        /// sorted alphabetically (NAME). Each entry carries its
+        /// <see cref="StudioSummary.AnimeCount"/> from the inline
+        /// <c>media(type: ANIME) { pageInfo { total } }</c> sub-query so the
+        /// tile can show "· N anime" without a per-studio follow-up.
+        ///
+        /// Page is 1-indexed (matches AniList's convention). The /studio
+        /// listing renders page 1 server-side and the JS paginator fetches
+        /// subsequent pages on scroll. Cached 24h per page key so re-scrolls
+        /// don't replay the upstream call.
         /// </summary>
-        Task<List<StudioSummary>> GetStudiosListAsync();
+        Task<List<StudioSummary>> GetStudiosListAsync(int page = 1);
     }
 }

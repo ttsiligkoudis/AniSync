@@ -40,17 +40,31 @@ namespace AnimeList.Controllers
         public Task<IActionResult> Studio(int id) => Browse(BrowseKind.Studio, id);
 
         /// <summary>
-        /// /studio listing — a tile grid of popular studios. Sits at the
-        /// no-id end of the same route prefix; the :int constraints on
-        /// the per-studio routes above keep this from being shadowed.
-        /// Clicking a tile lands on /studio/{id} which is already
-        /// implemented by <see cref="Studio"/>.
+        /// /studio listing — alphabetical tile grid. Renders the first
+        /// AniList page server-side; subsequent pages are pulled in via
+        /// <see cref="StudiosPage"/> by the infinite-scroll handler.
+        /// Sits at the no-id end of the same route prefix; the :int
+        /// constraints on the per-studio routes above keep this from
+        /// being shadowed.
         /// </summary>
         [Route("/studio")]
         public async Task<IActionResult> Studios()
         {
-            var studios = await _anilistFallback.GetStudiosListAsync();
+            var studios = await _anilistFallback.GetStudiosListAsync(page: 1);
             return View("Studios", studios);
+        }
+
+        /// <summary>
+        /// Next-page endpoint for /studio's infinite scroll. Returns the
+        /// shared _StudioTiles partial so the client can splice its
+        /// children into the existing grid. Empty response is the
+        /// end-of-list signal (same convention as /discover/page).
+        /// </summary>
+        [Route("/studio/page")]
+        public async Task<IActionResult> StudiosPage(int page = 1)
+        {
+            var studios = await _anilistFallback.GetStudiosListAsync(page);
+            return PartialView("_StudioTiles", studios ?? new List<StudioSummary>());
         }
 
         private async Task<IActionResult> Browse(BrowseKind kind, int id)

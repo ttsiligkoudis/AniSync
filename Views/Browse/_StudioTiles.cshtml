@@ -1,0 +1,17 @@
+@model List<AnimeList.Models.StudioSummary>
+@*
+    Shared tile chunk used by both Studios.cshtml (server-rendered first page)
+    and BrowseController.StudiosPage (subsequent pages fetched by
+    studio-pagination.js). The outer wrapper is intentionally just the
+    tile elements — the parent grid container lives in Studios.cshtml so
+    the JS can append children directly without nesting another grid.
+*@
+@foreach (var s in Model)
+{
+    <a class="studio-tile" href="/studio/@s.Id" data-studio-id="@s.Id">
+        <span class="studio-tile-name">@s.Name</span>
+        @* Counter is a separate child so the tile can size its leading row
+           independently and the count reads as a quieter sub-label. *@
+        <span class="studio-tile-count">@s.AnimeCount anime</span>
+    </a>
+}

@@ -2347,16 +2347,17 @@ body.modal-open {
 
 .studio-tile {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
-    min-height: 72px;
+    gap: 0.2rem;
+    min-height: 80px;
     padding: 0.9rem 1rem;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 1rem;
     color: #ddd;
-    font-weight: 600;
     text-decoration: none;
     transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
 }
@@ -2372,6 +2373,22 @@ body.modal-open {
 
 .studio-tile-name {
     line-height: 1.25;
+    font-weight: 600;
+}
+
+/* Subdued count below the name. Lighter colour + smaller size so the
+   name reads as the headline and the count as a quiet annotation. */
+.studio-tile-count {
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1.2;
+}
+
+/* Same role as .discover-sentinel — a zero-height invisible tracker
+   the IntersectionObserver watches to trigger the next-page fetch. */
+.studio-sentinel {
+    height: 1px;
+    width: 100%;
 }
 
 .browse-tile {

@@ -15,12 +15,21 @@
 }
 else
 {
-    <div class="studio-grid">
-        @foreach (var s in Model)
-        {
-            <a class="studio-tile" href="/studio/@s.Id">
-                <span class="studio-tile-name">@s.Name</span>
-            </a>
-        }
+    @* Paginator wrapper carries the state the JS reads on startup: which
+       AniList page we last rendered server-side. studio-pagination.js
+       increments and fetches /studio/page?page=N+1 as the sentinel
+       scrolls into view, appending tiles directly into .studio-grid. *@
+    <div class="studio-paginator" data-page="1">
+        <div class="studio-grid">
+            @await Html.PartialAsync("_StudioTiles", Model)
+        </div>
+        <div class="paginator-loader" hidden aria-hidden="true">
+            <div class="paginator-loader-spinner"></div>
+        </div>
+        <div class="studio-sentinel" aria-hidden="true"></div>
     </div>
+}
+
+@section Scripts {
+    <script src="~/js/studio-pagination.js" asp-append-version="true" defer></script>
 }
