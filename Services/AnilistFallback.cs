@@ -1058,12 +1058,12 @@ namespace AnimeList.Services
             return (name, await BuildBrowseMetasAsync(nodes, translateTo));
         }
 
-        public async Task<List<StudioSummary>> GetStudiosListAsync(int page = 1)
+        public async Task<(List<StudioSummary> Studios, bool HasNextPage)> GetStudiosListAsync(int page = 1)
         {
             if (page < 1) page = 1;
 
             var cacheKey = $"anilist:studios-list:by-name:p{page}";
-            if (_cache.TryGetValue<List<StudioSummary>>(cacheKey, out var cached) && cached != null)
+            if (_cache.TryGetValue<(List<StudioSummary>, bool)>(cacheKey, out var cached) && cached.Item1 != null)
             {
                 return cached;
             }
@@ -1100,9 +1100,9 @@ namespace AnimeList.Services
             if (data?.Page?.studios == null)
             {
                 // Upstream errored / rate-limited — don't cache, let the
-                // next request retry. Returning an empty list lets the
-                // caller render its "no studios" hint rather than 500.
-                return new List<StudioSummary>();
+                // next request retry. Empty list + HasNextPage=false
+                // stops the client paginator gracefully without 500ing.
+                return (new List<StudioSummary>(), false);
             }
 
             var studios = new List<StudioSummary>();
@@ -1127,15 +1127,19 @@ namespace AnimeList.Services
                 });
             }
 
-            // Cache even empty pages — once AniList genuinely returns no
-            // more studios (past end of catalog), the client uses the
-            // empty response as its end-of-list signal and we don't want
-            // to keep replaying upstream when the user scrolls past it.
-            _cache.Set(cacheKey, studios, new MemoryCacheEntryOptions
+            // hasNextPage comes from AniList's own pageInfo — independent
+            // of how many studios survived our client-side filter. A page
+            // can render zero tiles (all 50 entries were manga labels)
+            // and still have more real pages after; the caller must use
+            // this flag, not list size, to decide when to stop scrolling.
+            bool hasNext = data.Page.pageInfo?.hasNextPage != null && (bool)data.Page.pageInfo.hasNextPage;
+
+            var result = (studios, hasNext);
+            _cache.Set(cacheKey, result, new MemoryCacheEntryOptions
             {
                 AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24),
             });
-            return studios;
+            return result;
         }
     }
 }

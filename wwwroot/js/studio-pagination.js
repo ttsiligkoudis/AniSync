@@ -1,10 +1,12 @@
 // Infinite-scroll for /studio.
 //
-// Same shape as discover-pagination.js but page-based instead of skip-based:
-// AniList's Page.studios connection is 1-indexed and a NAME-sorted walk
-// returns exactly perPage studios per page (modulo end-of-list), so the
-// client just increments page and fetches /studio/page?page=N+1 when the
-// sentinel scrolls into view. Empty response = end of catalog.
+// Page-based like AniList itself (1-indexed). End-of-list comes from the
+// server's X-Has-Next-Page header, NOT from "added === 0", because the
+// server filters out manga/LN labels and zero-anime studios — a given
+// AniList page can legitimately yield zero tiles while still having
+// real pages after it. So when a page renders nothing but the header
+// says hasNext=true, we transparently fetch the next page in the same
+// loadMore() pass so the user never sees the scroll stall.
 (function () {
     'use strict';
 
@@ -21,9 +23,13 @@
     var done = false;
     var observer = null;
 
-    // Dedupe by studio id so a momentary upstream hiccup that returns the
-    // same AniList page twice can't render duplicate tiles. Seeded from
-    // the server-rendered initial page.
+    // Cap on consecutive empty-but-hasNext pages we'll roll through in one
+    // loadMore call. Guards against a runaway loop if AniList ever returns
+    // hasNextPage=true forever (or a long stretch of all-filtered pages
+    // would spin the upstream API). 10 * 50 = 500 studios scanned — well
+    // past any realistic "all manga labels" cluster in the NAME ordering.
+    var EMPTY_PAGE_CAP = 10;
+
     var seenIds = new Set();
     Array.prototype.forEach.call(grid.querySelectorAll('[data-studio-id]'), function (el) {
         var id = el.getAttribute('data-studio-id');
@@ -44,10 +50,6 @@
     function hideLoader() { if (loader) loader.hidden = true; }
 
     function appendTiles(html) {
-        // The /studio/page partial returns bare tile <a> elements (no
-        // wrapping grid div, unlike _PosterGrid). Wrap in a temporary
-        // container so we can iterate children and move them into the
-        // live grid one at a time, with the dedupe guard.
         var temp = document.createElement('div');
         temp.innerHTML = html;
         var added = 0;
@@ -65,29 +67,56 @@
         return added;
     }
 
+    // Walk forward through AniList pages until either (a) we render at
+    // least one tile, (b) the server reports hasNext=false, or (c) we
+    // hit the safety cap. Returns a promise so the outer loadMore can
+    // hide the loader / re-arm cleanly.
+    function fetchUntilNonEmpty(startPage) {
+        var attempts = 0;
+        function step(p) {
+            if (done) return Promise.resolve();
+            attempts++;
+            return fetch('/studio/page?page=' + p, {
+                credentials: 'same-origin',
+                headers: { 'Accept': 'text/html' },
+                skipLoader: true
+            }).then(function (r) {
+                if (!r || !r.ok) { teardown(); return; }
+                var hasNext = (r.headers.get('X-Has-Next-Page') || '').toLowerCase() === 'true';
+                return r.text().then(function (html) {
+                    var added = appendTiles(html || '');
+                    if (added > 0) {
+                        page = p;
+                        if (!hasNext) teardown();
+                        return;
+                    }
+                    // Empty render. If upstream has more pages and we
+                    // haven't blown the cap, roll forward without
+                    // returning control — the user shouldn't have to
+                    // scroll again to skip a barren cluster.
+                    if (!hasNext) { teardown(); return; }
+                    if (attempts >= EMPTY_PAGE_CAP) {
+                        // Safety bail. Advance `page` so a subsequent
+                        // sentinel hit picks up where we left off
+                        // instead of redoing the same empty stretch.
+                        page = p;
+                        return;
+                    }
+                    return step(p + 1);
+                });
+            });
+        }
+        return step(startPage);
+    }
+
     function loadMore() {
         if (loading || done) return;
         loading = true;
         showLoader();
 
-        var nextPage = page + 1;
-        fetch('/studio/page?page=' + nextPage, {
-            credentials: 'same-origin',
-            headers: { 'Accept': 'text/html' },
-            skipLoader: true
-        })
-            .then(function (r) { return r.ok ? r.text() : null; })
-            .then(function (html) {
-                if (html === null || html === undefined) { teardown(); return; }
-                var added = appendTiles(html);
-                if (added === 0) {
-                    teardown();
-                } else {
-                    page = nextPage;
-                }
-            })
-            .catch(function () { /* swallow — sentinel stays, user can scroll back up and retry */ })
-            .finally(function () { loading = false; hideLoader(); });
+        fetchUntilNonEmpty(page + 1)
+            .catch(function () { /* swallow — sentinel stays, retry on next scroll */ })
+            .then(function () { loading = false; hideLoader(); });
     }
 
     observer = new IntersectionObserver(function (entries) {
