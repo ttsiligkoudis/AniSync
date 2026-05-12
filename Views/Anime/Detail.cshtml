@@ -948,9 +948,13 @@ else
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (data) {
                 if (!data) return;
-                fillGrid(relatedSection, relatedGrid, data.Related);
-                fillGrid(recommendationsSection, recommendationsGrid, data.Recommendations);
-                fillSupplementary(supplementaryHost, data.SupplementaryLinks);
+                // System.Text.Json's web defaults camelCase property names,
+                // so the response keys are related / recommendations /
+                // supplementaryLinks regardless of the PascalCase used on
+                // the AnimeExtrasResponse DTO.
+                fillGrid(relatedSection, relatedGrid, data.related);
+                fillGrid(recommendationsSection, recommendationsGrid, data.recommendations);
+                fillSupplementary(supplementaryHost, data.supplementaryLinks);
             })
             .catch(function () { /* silent — sections just stay hidden */ });
     })();
