@@ -3723,11 +3723,12 @@ button.anime-detail-user-state:hover {
    margins compensate for the inner padding-right we add to keep the
    list edge clear of the scrollbar gutter on Chromium. */
 .anime-detail-episodes-body {
-    /* Caps the body at ~4 episode rows; tall lists scroll inside this
-       container instead of stretching the whole page. 480px is sized
-       against the typical ~118px row height (thumbnail + two text rows
-       + separator). */
-    max-height: 480px;
+    /* Caps the body at ~3 episode rows; tall lists scroll inside this
+       container instead of stretching the whole page. 340px sits ~30%
+       below the previous 480px window — keeps the episode shelf out
+       of the way on long-running shows so the synopsis / related
+       carousels are closer to the fold. */
+    max-height: 340px;
     overflow-y: auto;
     padding-right: 0.35rem;
     /* Custom thin scrollbar so the inner scroll doesn't feel like a
@@ -4081,6 +4082,30 @@ ol.anime-detail-episodes-busy {
     border-color: rgba(59, 130, 246, 0.5);
     color: #fff;
     text-decoration: none;
+}
+
+/* Hero-genre variant — same chip shape as the bottom-section
+   .anime-detail-link chips but in a neutral-grey palette so the
+   genre row reads as part of the hero badge stack (score / status /
+   user-state pill) instead of duplicating the cobalt accent the
+   Tag / Studio / Staff sections use below. Also centred regardless
+   of viewport — the chips sit between the title and the score row,
+   which looks lopsided when flush left. */
+.anime-detail-genre-list {
+    justify-content: center;
+}
+
+.anime-detail-genre-list .anime-detail-link {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #d4d4d8;
+}
+
+.anime-detail-genre-list .anime-detail-link:hover,
+.anime-detail-genre-list .anime-detail-link:focus {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #fff;
 }
 
 /* Title under the poster — the whole point of building this UI rather than

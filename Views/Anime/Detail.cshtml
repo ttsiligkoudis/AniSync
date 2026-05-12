@@ -208,11 +208,16 @@
             {
                 @* Genre chips link into /discover?genre=X so a tap surfaces
                    more anime sharing the genre rather than bouncing to AniList.
-                   Uses the same .anime-detail-link-list + .anime-detail-link
-                   chip styling the bottom sections (Tag / Studio / Staff /
-                   director / etc.) use, so every chip on the page reads as
-                   a single consistent UI primitive. *@
-                <ul class="anime-detail-link-list">
+                   Shares the .anime-detail-link-list scaffolding with the
+                   bottom sections but adds .anime-detail-genre-list as a
+                   visual modifier — neutral-grey chrome (instead of the
+                   cobalt accent the Tag / Staff / Studio chips use below)
+                   so the genre row reads as part of the hero badge stack
+                   alongside the score / status pills rather than as a
+                   stray copy of the bottom section. Centred on all
+                   viewports too — they sit between the title and the
+                   score/status pair and look off-balance when flush left. *@
+                <ul class="anime-detail-link-list anime-detail-genre-list">
                     @foreach (var g in a.genres.Take(8))
                     {
                         <li>
