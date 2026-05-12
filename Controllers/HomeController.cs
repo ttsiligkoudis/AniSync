@@ -3,7 +3,6 @@ using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json;
-using System.Diagnostics;
 
 public class HomeController : Controller
 {
@@ -48,26 +47,29 @@ public class HomeController : Controller
         _dashboardCache = dashboardCache;
     }
 
-    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
-    public IActionResult Error()
-    {
-        return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
-    }
-
     /// <summary>
-    /// Generic 404 landing page. Reached two ways: the status-code re-execute
-    /// middleware (Program.cs) reroutes any unhandled 404 here, and controllers
-    /// that detect a missing entity at the top of an action can also return
-    /// View("NotFound") directly. Sets the response status to 404 so the URL
-    /// still reads as "not found" for crawlers and share-link previewers even
-    /// though we return a full HTML body.
+    /// Unified error landing page. Reached three ways:
+    ///   1. Status-code re-execute (Program.cs UseStatusCodePagesWithReExecute)
+    ///      with the original code substituted into the {statusCode} slot —
+    ///      catches any unhandled 4xx/5xx with no body, most commonly route
+    ///      misses (404) and bare NotFound() / StatusCode(500) returns.
+    ///   2. Exception handler middleware re-executes /error/500 for any
+    ///      uncaught exception in non-dev builds.
+    ///   3. Controllers that detect a missing entity at the top of an action
+    ///      can return View("NotFound") directly, sidestepping the
+    ///      re-execute round-trip.
+    /// 404 gets the NotFound view; everything else falls through to
+    /// ServerError. The original status code is restored on the response so
+    /// crawlers / share-link previewers see the real code even though we're
+    /// returning a full HTML body.
     /// </summary>
-    [Route("/notfound")]
+    [Route("/error/{statusCode:int?}")]
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
-    public IActionResult NotFoundPage()
+    public IActionResult ErrorPage(int? statusCode)
     {
-        Response.StatusCode = 404;
-        return View("NotFound");
+        var code = statusCode ?? 500;
+        Response.StatusCode = code;
+        return View(code == 404 ? "NotFound" : "ServerError");
     }
 
     public async Task<IActionResult> Index(bool nocache = false)

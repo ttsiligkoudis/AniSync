@@ -244,16 +244,20 @@ await app.Services.GetRequiredService<IAnimeMappingService>().EnsureLoadedAsync(
 
 if (!app.Environment.IsDevelopment())
 {
-    app.UseExceptionHandler("/Home/Error");
+    // Re-execute /error/500 on any uncaught exception so users see the
+    // friendly ServerError view instead of a stack trace. Dev keeps the
+    // default developer exception page so the trace is right there
+    // during local work.
+    app.UseExceptionHandler("/error/500");
     app.UseHsts();
 }
 
-// Re-execute the pipeline against /notfound for any unhandled 404 — covers
-// bad URLs (no route match) and explicit NotFound() returns alike. Runs in
-// both dev and prod so the friendly page is what users see locally too.
-// Uses re-execute (not redirect) so the original URL stays in the address
-// bar instead of bouncing to /notfound.
-app.UseStatusCodePagesWithReExecute("/notfound");
+// Re-execute /error/{code} for any unhandled 4xx/5xx with no body —
+// covers bad URLs (no route match → 404) and bare StatusCode(...)
+// returns. Runs in both dev and prod so the friendly page is what
+// users see locally too. Re-execute (not redirect) keeps the
+// original URL in the address bar.
+app.UseStatusCodePagesWithReExecute("/error/{0}");
 
 app.UseResponseCompression();
 app.UseHttpsRedirection();
