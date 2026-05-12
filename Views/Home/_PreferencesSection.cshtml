@@ -1,0 +1,42 @@
+@*
+    Shared "Preferences" card used by both /configure and /stremio. The caller
+    passes a list of toggle descriptors; this partial renders the section-card
+    chrome + a single Save button that the _ConfigurePageScript binds to via
+    #savePreferencesBtn. When the list is empty (e.g. anonymous user on the
+    /configure page, where every site-side pref is account-only) the whole
+    card — including the Save button — is omitted so we don't render an
+    actions row with nothing to commit. The DOM ids on each <input> must
+    match the selectors readFlags() in _ConfigurePageScript already drives.
+*@
+@model IReadOnlyList<(string Id, string Label, string Description, bool Checked)>
+
+@if (Model != null && Model.Count > 0)
+{
+    <section class="section-card">
+        <span class="section-title">Preferences</span>
+        <p class="section-description">
+            General display preferences that apply across the site and the Stremio addon.
+        </p>
+
+        <div class="streams-grid">
+            @foreach (var pref in Model)
+            {
+                <div class="stream-option">
+                    <div class="option-name-wrap">
+                        <span class="option-name">@pref.Label</span>
+                        <span class="option-name-sub">@pref.Description</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="@pref.Id" @(pref.Checked ? "checked" : "") />
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            }
+        </div>
+
+        <div class="btn-action-row">
+            <button id="savePreferencesBtn" type="button" class="btn-primary-action btn-login">Save</button>
+            <span id="savePreferencesStatus" class="save-preferences-status" aria-live="polite"></span>
+        </div>
+    </section>
+}
