@@ -81,18 +81,20 @@ namespace AnimeList.Services
             {
                 return [];
             }
+            var idType = stremioId.Value.Type;
+            var idPath = stremioId.Value.Path;
 
             // Hashed apiKey in the cache key so the in-memory dictionary
             // doesn't carry plaintext RD tokens around — a memory dump or
             // accidental log of the cache state stays sanitised.
             var keyFingerprint = ShortFingerprint(apiKey);
-            var cacheKey = $"torrentio:{keyFingerprint}:{stremioId.Path}";
+            var cacheKey = $"torrentio:{keyFingerprint}:{idPath}";
             if (_cache.TryGetValue<IReadOnlyList<TorrentioStream>>(cacheKey, out var hit) && hit != null)
             {
                 return hit;
             }
 
-            var url = $"{BaseUrl}/realdebrid={Uri.EscapeDataString(apiKey)}/stream/{stremioId.Type}/{stremioId.Path}.json";
+            var url = $"{BaseUrl}/realdebrid={Uri.EscapeDataString(apiKey)}/stream/{idType}/{idPath}.json";
 
             try
             {
@@ -110,7 +112,7 @@ namespace AnimeList.Services
                     else
                     {
                         _logger.LogWarning("Torrentio non-success {Status} for {Path}.",
-                            (int)response.StatusCode, stremioId.Path);
+                            (int)response.StatusCode, idPath);
                     }
                     return [];
                 }
@@ -129,12 +131,12 @@ namespace AnimeList.Services
             }
             catch (OperationCanceledException)
             {
-                _logger.LogWarning("Torrentio call timed out ({Path}).", stremioId.Path);
+                _logger.LogWarning("Torrentio call timed out ({Path}).", idPath);
                 return [];
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Torrentio call failed ({Path}).", stremioId.Path);
+                _logger.LogWarning(ex, "Torrentio call failed ({Path}).", idPath);
                 return [];
             }
         }
