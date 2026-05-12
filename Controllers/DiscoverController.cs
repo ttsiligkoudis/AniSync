@@ -268,10 +268,7 @@ namespace AnimeList.Controllers
 
         // ─── Browse-by-studio ───────────────────────────────────────────
         // Listing + per-studio detail live under /discover/studio so the
-        // URL surface tracks the Browse By card on the home page. /studio
-        // and /studio/{id} stay registered as permanent redirects below
-        // for AniList chips and any in-the-wild bookmarks predating the
-        // consolidation.
+        // URL surface tracks the Browse By card on the home page.
 
         [Route("/discover/studio")]
         public async Task<IActionResult> Studios()
@@ -333,15 +330,6 @@ namespace AnimeList.Controllers
                 ConfigUid = uid,
             });
         }
-
-        // Permanent redirects for the legacy /studio surface. Keeps AniList
-        // chip links and any in-the-wild bookmarks working after the move.
-        [Route("/studio")]
-        public IActionResult LegacyStudios() => RedirectPermanent("/discover/studio");
-
-        [Route("/studio/{id:int}")]
-        [Route("/studio/{id:int}/{slug?}")]
-        public IActionResult LegacyStudio(int id) => RedirectPermanent($"/discover/studio/{id}");
 
         // ─── Browse-by-tag ──────────────────────────────────────────────
         // Listing: every AniList tag in one render (MediaTagCollection is
