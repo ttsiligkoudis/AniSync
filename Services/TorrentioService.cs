@@ -43,10 +43,45 @@ namespace AnimeList.Services
             ("480p",  "480p"),
         ];
 
+        // Display order for the filtered+ranked output. Higher resolutions
+        // first so the user's eye lands on the best available quality.
+        // Anything not listed here is dropped (480p, SD, unknown).
+        private static readonly string[] AllowedQualities = ["2160p", "1440p", "1080p", "720p"];
+        private const int PerQualityCap = 2;
+
         // Torrentio embeds the file size as a 💾 token followed by a number +
         // unit (GB / MB). One regex pulls it out of either `name` or `title`.
         private static readonly Regex SizeRegex = new(@"💾\s*([\d.,]+)\s*(GB|MB|KB|TB)",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        // Seeder count Torrentio prefixes with 👤 — drives the per-quality
+        // popularity rank. Missing token reads as 0 seeders (those entries
+        // sort to the bottom of their bucket and usually fall outside the
+        // top-N cap, which is the behaviour we want).
+        private static readonly Regex SeedersRegex = new(@"👤\s*(\d+)",
+            RegexOptions.Compiled);
+
+        // Country-flag emojis are pairs of regional-indicator codepoints
+        // (U+1F1E6..U+1F1FF). Torrentio emits them when language metadata
+        // is in the release name — usually as the rightmost token in the
+        // title. We grab every run of 1+ flags and join with " / " for the
+        // multi-audio case (🇯🇵🇺🇸 → "🇯🇵 / 🇺🇸").
+        private static readonly Regex FlagRegex = new(
+            @"(?:\uD83C[\uDDE6-\uDDFF]){2}",
+            RegexOptions.Compiled);
+
+        // Fallback tokens when no flag emoji is present. Order matters: a
+        // "MULTi" release is also "DUAL" sometimes — we pick the more
+        // specific label that appears first.
+        private static readonly (string Needle, string Label)[] LanguageTokens =
+        [
+            ("MULTi",       "Multi"),
+            ("Multi Audio", "Multi"),
+            ("DUAL",        "Dual"),
+            ("Dual Audio",  "Dual"),
+            ("DUBBED",      "Dub"),
+            ("SUBBED",      "Sub"),
+        ];
 
         // Browser-playable extensions for the inline <video> path on the web
         // modal. MKV is technically possible in Chrome but unreliable enough
@@ -178,18 +213,22 @@ namespace AnimeList.Services
         }
 
         /// <summary>
-        /// Parses Torrentio's <c>{ streams: [...] }</c> response into our
-        /// slim projection. Drops entries without a <c>url</c> field (those
-        /// need RD to cache on demand — v1+1) and entries whose name/title
-        /// doesn't carry an RD marker.
+        /// Parses Torrentio's <c>{ streams: [...] }</c> response, then
+        /// filters + ranks: drop entries without a <c>url</c> (need RD
+        /// to cache on demand — v1+1), drop entries below 720p (480p
+        /// and below are too low to be worth surfacing for anime), and
+        /// keep only the top <see cref="PerQualityCap"/> entries per
+        /// resolution sorted by seeder count desc. Final order is
+        /// 2160p → 1440p → 1080p → 720p with the two most-seeded
+        /// releases inside each bucket.
         /// </summary>
         private static List<TorrentioStream> ParseStreams(string json)
         {
-            var result = new List<TorrentioStream>();
-            if (string.IsNullOrWhiteSpace(json)) return result;
+            var raw = new List<TorrentioStream>();
+            if (string.IsNullOrWhiteSpace(json)) return raw;
 
             dynamic root = DeserializeObject<dynamic>(json);
-            if (root?.streams == null) return result;
+            if (root?.streams == null) return raw;
 
             foreach (var s in root.streams)
             {
@@ -201,23 +240,88 @@ namespace AnimeList.Services
                 var combined = $"{name}\n{title}";
 
                 var quality = DetectQuality(combined);
+                // Quality must be detectable AND ≥720p — otherwise we
+                // don't have a confident enough signal to rank the entry,
+                // and the user asked for high-res only.
+                if (quality == null || Array.IndexOf(AllowedQualities, quality) < 0)
+                    continue;
+
                 var size = DetectSize(combined);
+                var seeders = DetectSeeders(combined);
+                var language = DetectLanguage(combined);
                 var playable = IsBrowserPlayable(url);
 
                 string bingeGroup = null;
                 try { bingeGroup = (string)s.behaviorHints?.bingeGroup; }
                 catch { /* missing object — leave null */ }
 
-                result.Add(new TorrentioStream(
+                raw.Add(new TorrentioStream(
                     Name: name,
                     Title: title,
                     Url: url,
                     Quality: quality,
                     Size: size,
                     Playable: playable,
-                    BingeGroup: bingeGroup));
+                    BingeGroup: bingeGroup,
+                    Seeders: seeders,
+                    Language: language));
             }
-            return result;
+
+            return RankAndCap(raw);
+        }
+
+        /// <summary>
+        /// Group by quality, sort each group by seeder count desc,
+        /// take the top <see cref="PerQualityCap"/>, then re-emit in
+        /// <see cref="AllowedQualities"/> order. Tie-break by larger
+        /// file size — for a given seed count, the bigger release is
+        /// usually the higher-bitrate one (better source / less
+        /// compression). Stable enough that re-renders look the same.
+        /// </summary>
+        private static List<TorrentioStream> RankAndCap(List<TorrentioStream> raw)
+        {
+            var byQuality = raw
+                .GroupBy(s => s.Quality)
+                .ToDictionary(g => g.Key, g => g
+                    .OrderByDescending(s => s.Seeders)
+                    .ThenByDescending(s => ParseSizeBytes(s.Size))
+                    .Take(PerQualityCap)
+                    .ToList());
+
+            var ranked = new List<TorrentioStream>(AllowedQualities.Length * PerQualityCap);
+            foreach (var q in AllowedQualities)
+            {
+                if (byQuality.TryGetValue(q, out var bucket))
+                {
+                    ranked.AddRange(bucket);
+                }
+            }
+            return ranked;
+        }
+
+        /// <summary>
+        /// Best-effort bytes from a "12.4 GB" / "850 MB" display string.
+        /// Only used as a tie-breaker inside the seeder-count sort, so
+        /// a parse miss returning 0 is harmless — those entries just
+        /// settle into stable insertion order behind anything we did
+        /// manage to size.
+        /// </summary>
+        private static long ParseSizeBytes(string size)
+        {
+            if (string.IsNullOrEmpty(size)) return 0;
+            var parts = size.Split(' ');
+            if (parts.Length != 2) return 0;
+            if (!double.TryParse(parts[0], System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var v))
+                return 0;
+            return parts[1].ToUpperInvariant() switch
+            {
+                "TB" => (long)(v * 1024L * 1024L * 1024L * 1024L),
+                "GB" => (long)(v * 1024L * 1024L * 1024L),
+                "MB" => (long)(v * 1024L * 1024L),
+                "KB" => (long)(v * 1024L),
+                _    => 0,
+            };
         }
 
         private static string DetectQuality(string haystack)
@@ -238,6 +342,43 @@ namespace AnimeList.Services
             // unit casing the user expects (GB / MB / …).
             var value = m.Groups[1].Value.Replace(",", "");
             return $"{value} {m.Groups[2].Value.ToUpperInvariant()}";
+        }
+
+        private static int DetectSeeders(string haystack)
+        {
+            var m = SeedersRegex.Match(haystack);
+            if (!m.Success) return 0;
+            return int.TryParse(m.Groups[1].Value, out var n) ? n : 0;
+        }
+
+        /// <summary>
+        /// Pulls language hints out of Torrentio's title. Priority: flag
+        /// emojis (every flag found, joined with " / ") → MULTi/DUAL/etc
+        /// token fallback. Returns null when neither is present — most
+        /// raw fansub releases have no language metadata and surfacing
+        /// "Unknown" everywhere would just be noise.
+        /// </summary>
+        private static string DetectLanguage(string haystack)
+        {
+            var flagMatches = FlagRegex.Matches(haystack);
+            if (flagMatches.Count > 0)
+            {
+                // Dedupe — some titles repeat the same flag in two places
+                // (e.g. once as banner art, once as track summary).
+                var seen = new HashSet<string>();
+                var ordered = new List<string>();
+                foreach (Match m in flagMatches)
+                {
+                    if (seen.Add(m.Value)) ordered.Add(m.Value);
+                }
+                return string.Join(" / ", ordered);
+            }
+            foreach (var (needle, label) in LanguageTokens)
+            {
+                if (haystack.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                    return label;
+            }
+            return null;
         }
 
         private static bool IsBrowserPlayable(string url)

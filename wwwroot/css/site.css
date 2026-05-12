@@ -1985,9 +1985,32 @@ body.modal-open {
     white-space: nowrap;
 }
 
-.episode-stream-size {
+.episode-stream-sub {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
     color: rgba(255, 255, 255, 0.5);
     font-size: 0.75rem;
+}
+
+.episode-stream-size,
+.episode-stream-seeders {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.75rem;
+}
+
+/* Language pill — slightly heavier visual weight than the muted size /
+   seeders because flag emojis are tiny on their own and benefit from a
+   contained background to read as a deliberate tag. */
+.episode-stream-language {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.05rem 0.4rem;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 0.35rem;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 0.72rem;
 }
 
 .episode-stream-video {

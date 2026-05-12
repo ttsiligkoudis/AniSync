@@ -38,6 +38,12 @@ namespace AnimeList.Services.Interfaces
     /// URL; <see cref="Playable"/> tells the web side whether the
     /// browser can hand it to a &lt;video&gt; element (mp4/webm/m4v)
     /// or has to surface "open externally" affordances (mkv/avi).
+    /// <see cref="Seeders"/> drives the per-resolution top-N ranking
+    /// (higher seeders = more popular = more likely to be a clean
+    /// release). <see cref="Language"/> is a best-effort extraction
+    /// from Torrentio's title — flag emojis when present, else any
+    /// MULTi / DUAL token Torrentio appended; null when nothing
+    /// recognisable was emitted.
     /// </summary>
     public record TorrentioStream(
         string Name,
@@ -46,5 +52,7 @@ namespace AnimeList.Services.Interfaces
         string Quality,
         string Size,
         bool Playable,
-        string BingeGroup);
+        string BingeGroup,
+        int Seeders,
+        string Language);
 }
