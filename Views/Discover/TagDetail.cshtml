@@ -1,0 +1,45 @@
+@model AnimeList.Controllers.TagDetailViewModel
+@{
+    ViewData["BodyClass"] = "library-page";
+    ViewData["Title"] = $"{Model.Tag} · AniSync";
+
+    var posterGridModel = new AnimeList.Models.PosterGridViewModel
+    {
+        Items = Model.Items,
+        ConfigUid = Model.ConfigUid,
+        EmptyMessage = $"No anime found for the {Model.Tag} tag.",
+    };
+    var hasItems = Model.Items?.Count > 0;
+}
+
+<header class="page-header">
+    <p class="page-subtitle">Tag</p>
+    <h1 class="page-title">@Model.Tag</h1>
+</header>
+
+@if (hasItems)
+{
+    @* tag-detail-pagination.js fetches subsequent pages from
+       /discover/tag/{tagStr}/page on sentinel intersect, splicing
+       poster cards into .library-grid. data-tag carries the AniList
+       tag name verbatim; data-page tracks the AniList page we last
+       rendered server-side. *@
+    <div class="tag-detail-paginator" data-tag="@Model.Tag" data-page="1">
+        @await Html.PartialAsync("_PosterGrid", posterGridModel)
+        <div class="paginator-loader" hidden aria-hidden="true">
+            <div class="paginator-loader-spinner"></div>
+        </div>
+        <div class="tag-detail-sentinel" aria-hidden="true"></div>
+    </div>
+}
+else
+{
+    @await Html.PartialAsync("_PosterGrid", posterGridModel)
+}
+
+@section Scripts {
+    @if (hasItems)
+    {
+        <script src="~/js/tag-detail-pagination.js" asp-append-version="true" defer></script>
+    }
+}

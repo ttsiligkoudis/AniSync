@@ -121,6 +121,25 @@ namespace AnimeList.Services.Interfaces
         Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null);
 
         /// <summary>
+        /// Page-based variant of <see cref="GetByTagAsync"/> backing the
+        /// dedicated /discover/tag/{tagStr} drill-down. Returns AniList's
+        /// hasNextPage alongside the page's media so the infinite-scroll
+        /// handler can stop at the real end of the catalog. Page is
+        /// 1-indexed (AniList's convention).
+        /// </summary>
+        Task<(List<Meta> Items, bool HasNextPage)> GetByTagPageAsync(string tag, AnimeService translateTo, int page = 1);
+
+        /// <summary>
+        /// Full tag catalog from AniList's MediaTagCollection — surfaced by
+        /// the /discover/tag listing page. Returns the entire tag list in
+        /// one upstream call (AniList doesn't paginate this endpoint),
+        /// filtered to non-adult entries and ordered so categories cluster
+        /// together for the view's grouped rendering. Cached 24h since
+        /// AniList's tag taxonomy shifts on the order of months.
+        /// </summary>
+        Task<List<TagSummary>> GetTagsListAsync();
+
+        /// <summary>
         /// Browse a staff member's filmography — every anime they're
         /// credited on, sorted by popularity desc. Returns the staff's
         /// display name alongside the media list so the page header can

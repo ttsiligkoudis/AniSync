@@ -561,11 +561,11 @@
         {
             return string.IsNullOrEmpty(link.name)
                 ? null
-                : $"/discover?tag={Uri.EscapeDataString(link.name)}";
+                : $"/discover/tag/{Uri.EscapeDataString(link.name)}";
         }
         if (cat == "studio")
         {
-            return link.anilistId.HasValue ? $"/studio/{link.anilistId.Value}" : null;
+            return link.anilistId.HasValue ? $"/discover/studio/{link.anilistId.Value}" : null;
         }
         // Staff roles get categorised by StaffRoleToCategory ("Director",
         // "Composer", "Artist", "Producer", "Staff") — all route to the

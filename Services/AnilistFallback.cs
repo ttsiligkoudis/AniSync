@@ -962,6 +962,105 @@ namespace AnimeList.Services
             return await BuildBrowseMetasAsync(data?.Page?.media, translateTo);
         }
 
+        public async Task<(List<Meta> Items, bool HasNextPage)> GetByTagPageAsync(string tag, AnimeService translateTo, int page = 1)
+        {
+            if (string.IsNullOrWhiteSpace(tag)) return ([], false);
+            if (page < 1) page = 1;
+
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($page: Int, $perPage: Int, $tag: String) {
+                        Page(page: $page, perPage: $perPage) {
+                            pageInfo { hasNextPage }
+                            media(type: ANIME, tag: $tag, sort: TITLE_ROMAJI) {
+                                id
+                                format
+                                episodes
+                                averageScore
+                                seasonYear
+                                title { english romaji }
+                                coverImage { large }
+                                description
+                            }
+                        }
+                    }",
+                variables = new { page, perPage = PageSize, tag },
+            });
+
+            var data = await PostJsonAsync(requestBody);
+            var items = await BuildBrowseMetasAsync(data?.Page?.media, translateTo);
+            bool hasNext = data?.Page?.pageInfo?.hasNextPage != null
+                && (bool)data.Page.pageInfo.hasNextPage;
+            return (items, hasNext);
+        }
+
+        public async Task<List<TagSummary>> GetTagsListAsync()
+        {
+            const string cacheKey = "anilist:tags-list:by-category";
+            if (_cache.TryGetValue<List<TagSummary>>(cacheKey, out var cached) && cached != null)
+            {
+                return cached;
+            }
+
+            // MediaTagCollection isn't paginated upstream — AniList returns
+            // every tag in one shot (a few hundred entries). Adult-only
+            // tags are dropped here rather than at render time so the
+            // server-side cache stays consistent with what we ever surface.
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query {
+                        MediaTagCollection {
+                            name
+                            category
+                            description
+                            isAdult
+                        }
+                    }",
+            });
+
+            var data = await PostJsonAsync(requestBody);
+            var tags = new List<TagSummary>();
+            if (data?.MediaTagCollection != null)
+            {
+                foreach (var t in data.MediaTagCollection)
+                {
+                    if (t == null) continue;
+                    var name = (string)t.name;
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+                    if (t.isAdult != null && (bool)t.isAdult) continue;
+                    tags.Add(new TagSummary
+                    {
+                        Name = name,
+                        Category = (string)t.category,
+                        Description = (string)t.description,
+                    });
+                }
+            }
+
+            // Sort by category, then name — lets the view render section
+            // headers (Theme – Action, Theme – Romance, Setting-Time, …)
+            // without an extra group-by pass. Tags with no category land
+            // under an "Other" bucket at the top alphabetically.
+            tags.Sort((a, b) =>
+            {
+                var ca = a.Category ?? string.Empty;
+                var cb = b.Category ?? string.Empty;
+                var byCat = string.Compare(ca, cb, StringComparison.OrdinalIgnoreCase);
+                return byCat != 0 ? byCat : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+            });
+
+            if (tags.Count > 0)
+            {
+                _cache.Set(cacheKey, tags, new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24),
+                });
+            }
+            return tags;
+        }
+
         public async Task<(string Name, List<Meta> Items)> GetStaffMediaAsync(int staffId, AnimeService translateTo, string skip = null)
         {
             var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;

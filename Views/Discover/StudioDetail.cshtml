@@ -1,10 +1,7 @@
-@model AnimeList.Controllers.BrowseViewModel
+@model AnimeList.Controllers.StudioDetailViewModel
 @{
     ViewData["BodyClass"] = "library-page";
-    var kindLabel = Model.Kind == AnimeList.Controllers.BrowseKind.Staff ? "Anime by" : "From";
-    var fallback = Model.Kind == AnimeList.Controllers.BrowseKind.Staff
-        ? $"Staff #{Model.Id}"
-        : $"Studio #{Model.Id}";
+    var fallback = $"Studio #{Model.Id}";
     var title = string.IsNullOrEmpty(Model.Name) ? fallback : Model.Name;
     ViewData["Title"] = $"{title} · AniSync";
 
@@ -14,20 +11,20 @@
         ConfigUid = Model.ConfigUid,
         EmptyMessage = $"No anime found for {title}.",
     };
-    var isStudio = Model.Kind == AnimeList.Controllers.BrowseKind.Studio;
+    var hasItems = Model.Items?.Count > 0;
 }
 
 <header class="page-header">
-    <p class="page-subtitle">@kindLabel</p>
+    <p class="page-subtitle">From</p>
     <h1 class="page-title">@title</h1>
 </header>
 
-@if (isStudio && Model.Items?.Count > 0)
+@if (hasItems)
 {
-    @* Studio catalog supports infinite scroll: subsequent pages come
-       from /studio/{id}/page via studio-detail-pagination.js. Wrapper
-       carries the studio id and the last AniList page rendered
-       server-side; the JS bumps the page number on sentinel intersect. *@
+    @* studio-detail-pagination.js fetches subsequent pages from
+       /discover/studio/{id}/page on sentinel intersect and splices the
+       returned poster cards into .library-grid. data-studio-id +
+       data-page seed the JS's request state. *@
     <div class="studio-detail-paginator" data-studio-id="@Model.Id" data-page="1">
         @await Html.PartialAsync("_PosterGrid", posterGridModel)
         <div class="paginator-loader" hidden aria-hidden="true">
@@ -42,7 +39,7 @@ else
 }
 
 @section Scripts {
-    @if (isStudio && Model.Items?.Count > 0)
+    @if (hasItems)
     {
         <script src="~/js/studio-detail-pagination.js" asp-append-version="true" defer></script>
     }

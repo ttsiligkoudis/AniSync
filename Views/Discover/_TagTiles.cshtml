@@ -1,0 +1,14 @@
+@model IEnumerable<AnimeList.Models.TagSummary>
+@*
+    Bare tile chunk shared by Tags.cshtml (full server render — there's
+    no pagination since AniList's MediaTagCollection returns every tag
+    in one call). Kept as a separate partial mainly for symmetry with
+    _StudioTiles and so a future "search inside tags" affordance can
+    re-render slices via the same template.
+*@
+@foreach (var t in Model)
+{
+    <a class="tag-tile" href="/discover/tag/@Uri.EscapeDataString(t.Name)" data-tag-name="@t.Name" title="@t.Description">
+        <span class="tag-tile-name">@t.Name</span>
+    </a>
+}

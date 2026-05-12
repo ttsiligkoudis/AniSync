@@ -1,4 +1,4 @@
-// Infinite-scroll for /studio.
+// Infinite-scroll for /discover/studio.
 //
 // Page-based like AniList itself (1-indexed). End-of-list comes from the
 // server's X-Has-Next-Page header, NOT from "added === 0", because the
@@ -76,7 +76,7 @@
         function step(p) {
             if (done) return Promise.resolve();
             attempts++;
-            return fetch('/studio/page?page=' + p, {
+            return fetch('/discover/studio/page?page=' + p, {
                 credentials: 'same-origin',
                 headers: { 'Accept': 'text/html' },
                 skipLoader: true
