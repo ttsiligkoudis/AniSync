@@ -170,19 +170,22 @@
     $(FLAG_TOGGLE_SELECTOR).on('change', refreshUrls);
 
     // Floating save bar — one global commit point that lives on every
-    // configure surface (/configure, /stremio, /advanced). setDirty(true)
-    // is fired on any flag-toggle change; the user's Save click persists
-    // every toggle's state in one POST. Hidden until the user actually
-    // changes something so the bar doesn't clutter a freshly-loaded page.
+    // configure surface (/configure, /stremio, /advanced). Always
+    // visible; the label + button styling swap between "All changes
+    // saved" (clean) and "Unsaved changes" (any flag-bearing toggle
+    // has moved). Save click works in either state — a clean-state
+    // click just re-POSTs the current flag bytes, cheap and idempotent
+    // server-side.
     function setDirty(state) {
         var $bar = $('#floatingSaveBar');
         if ($bar.length === 0) return;
+        $bar.toggleClass('is-dirty', !!state);
         if (state) {
-            $bar.removeAttr('hidden');
             $('#floatingSaveStatus').text('Unsaved changes').removeClass('floating-save-status-success');
             $('#floatingSaveBtn').prop('disabled', false).text('Save');
         } else {
-            $bar.attr('hidden', 'hidden');
+            $('#floatingSaveStatus').text('All changes saved').removeClass('floating-save-status-success');
+            $('#floatingSaveBtn').prop('disabled', false).text('Save');
         }
     }
     $(FLAG_TOGGLE_SELECTOR).on('change', function () { setDirty(true); });

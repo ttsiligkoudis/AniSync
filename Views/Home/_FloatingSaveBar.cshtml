@@ -1,12 +1,13 @@
 @model AnimeList.Models.ConfigureViewModel
 
 @*
-    Floating save bar shared by /configure, /stremio, /advanced. Hidden
-    until a flag-bearing toggle changes (the change handler in
-    _ConfigurePageScript flips it on via setDirty(true)). One commit
-    point across all three views replaces the per-section "Save
-    Preferences" button — toggles can live wherever they make sense
-    semantically without each section needing its own save affordance.
+    Floating save bar shared by /configure, /stremio, /advanced. Always
+    visible — discoverability beats minimalism here, the user should
+    never have to hunt for "where do I commit my changes?". The label
+    swaps between "All changes saved" (clean) and "Unsaved changes"
+    (any flag-bearing toggle has moved since last save). The button
+    stays clickable in both states; clicking with nothing dirty just
+    re-POSTs the current flag bytes (cheap idempotent server-side).
 
     Gated on a uid-backed install since SaveConfig writes by uid;
     anonymous (v3) URLs already carry their flag state inline so
@@ -14,8 +15,8 @@
 *@
 @if (!Model.AnonymousUser && !string.IsNullOrEmpty(Model.ConfigUid))
 {
-    <div id="floatingSaveBar" class="floating-save-bar" hidden aria-live="polite" role="status">
-        <span id="floatingSaveStatus" class="floating-save-status">Unsaved changes</span>
+    <div id="floatingSaveBar" class="floating-save-bar" aria-live="polite" role="status">
+        <span id="floatingSaveStatus" class="floating-save-status">All changes saved</span>
         <button id="floatingSaveBtn" class="floating-save-btn" type="button">Save</button>
     </div>
 }
