@@ -2095,12 +2095,21 @@ body.modal-open {
     flex-wrap: wrap;
 }
 
-/* Plyr overrides the <video> with its own DOM — restyle the wrapper
-   so the rounded corners + aspect ratio still hold. */
-.watch-player .plyr {
+/* vidstack web component fills its host. The default theme sets its
+   own border-radius on the player chrome, but the outer wrapper
+   keeps its 16:9 aspect-ratio + rounded corners so the empty / error
+   states stay visually consistent with playback. */
+.watch-player media-player {
     width: 100%;
     height: 100%;
     border-radius: 0.75rem;
+    overflow: hidden;
+    --media-brand: #7c3aed;        /* match the app's purple accent */
+    --media-focus-ring-color: #7c3aed;
+}
+
+.watch-player media-player[data-fullscreen] {
+    border-radius: 0;
 }
 
 .watch-nav {

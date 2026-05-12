@@ -30,13 +30,16 @@
 }
 
 @*
-    Plyr — small, well-maintained HTML5 player. Drops onto a <video>
-    element so codec support is whatever the browser exposes natively;
-    MKV plays in most Chromium variants for H.264/H.265 + AAC tracks,
-    and the error-fallback path below catches anything the browser
-    can't decode and offers an "open externally" affordance instead.
+    vidstack — modern, framework-agnostic web-component player. Default
+    "video" layout gives us a polished pro-style UI out of the box
+    (center play, ±10s seeks, captions menu, settings, PiP, AirPlay,
+    fullscreen, touch gestures, keyboard shortcuts). Codec support is
+    still whatever the browser provides natively; the error-fallback
+    path below catches anything the browser can't decode and offers an
+    "open externally" affordance instead.
 *@
-<link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+<link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
+<link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
 
 <section class="watch-header">
     <a class="watch-back" href="/anime/@a.id">
@@ -114,7 +117,7 @@
 </section>
 
 @section Scripts {
-    <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
+    <script src="https://cdn.vidstack.io/player" type="module"></script>
     <script>
         (function () {
             var animeId = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(a.id));
@@ -127,11 +130,11 @@
             var fallbackHost = document.getElementById('watchPlayerFallback');
             if (!sourcesBody || !playerHost) return;
 
-            // Plyr instance gets re-created on every source pick — Plyr
-            // exposes `destroy()` so swapping the underlying <video> stays
-            // clean (avoids dangling event listeners + lets the user
-            // change source mid-playback without state leakage).
-            var plyr = null;
+            // Live <media-player> reference. vidstack web components
+            // clean up after themselves when removed from the DOM, so
+            // destroyPlayer() just empties the host — no plyr.destroy()
+            // equivalent needed.
+            var player = null;
             // Cached last /episode-streams response so playStream +
             // wireSkipOverlay can read the same skipTimes + subtitles
             // bundle without an extra fetch on every source pick.
@@ -148,7 +151,9 @@
             }
 
             function destroyPlayer() {
-                if (plyr) { try { plyr.destroy(); } catch (_) {} plyr = null; }
+                // vidstack tears down its internal state when the element
+                // leaves the DOM; clearing innerHTML is enough.
+                player = null;
                 playerHost.innerHTML = '';
                 fallbackHost.hidden = true;
                 fallbackHost.innerHTML = '';
@@ -178,87 +183,65 @@
 
             function playStream(stream) {
                 destroyPlayer();
-                var video = el('video', {
-                    id: 'watchVideo',
-                    playsinline: 'playsinline',
-                    controls: 'controls',
-                });
 
-                // Subtitle tracks. Proxied through /anime/subtitle so the
-                // <track> request is same-origin (the alternative — cross-
-                // origin tracks — requires `crossorigin` on the <video>,
-                // which can break some RD URLs that reject anonymous
-                // CORS requests). label + srclang drive Plyr's captions
-                // menu entries.
+                // vidstack web-component player. The <media-player>
+                // hosts the source + tracks + UI layout siblings; the
+                // <media-provider> renders the underlying <video> and
+                // <media-video-layout> draws the default control UI
+                // (center play, ±10s seeks, captions, settings, PiP,
+                // AirPlay, fullscreen, touch gestures, keyboard
+                // shortcuts).
+                var mp = document.createElement('media-player');
+                mp.setAttribute('title', @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(episodeLabel)));
+                mp.setAttribute('src', stream.url);
+                mp.setAttribute('playsinline', '');
+                mp.setAttribute('autoplay', '');
+                // Deliberately no `crossorigin` — some RD direct URLs
+                // reject anonymous CORS requests; subtitles are already
+                // proxied through /anime/subtitle so they're same-origin
+                // and don't need the opt-in.
+
+                var provider = document.createElement('media-provider');
+                mp.appendChild(provider);
+
+                // Subtitle tracks. Proxied through /anime/subtitle so
+                // the <track> request is same-origin (avoids the CORS
+                // dance the cross-origin alternative would need). The
+                // default layout's CC menu picks them up automatically.
                 if (lastData && Array.isArray(lastData.subtitles)) {
                     lastData.subtitles.forEach(function (t, i) {
-                        var track = el('track', {
-                            kind: 'captions',
-                            src: t.url,
-                            srclang: t.lang || 'en',
-                            label: t.label || t.lang || 'Subtitles',
-                        });
-                        if (i === 0 && (lastData.preferredSubtitleLang === t.lang
-                                        || /^en/i.test(t.lang || ''))) {
-                            track.setAttribute('default', 'default');
+                        var track = document.createElement('track');
+                        track.setAttribute('kind', 'subtitles');
+                        track.setAttribute('src', t.url);
+                        track.setAttribute('srclang', t.lang || 'en');
+                        track.setAttribute('label', t.label || t.lang || 'Subtitles');
+                        if (i === 0 && /^en/i.test(t.lang || '')) {
+                            track.setAttribute('default', '');
                         }
-                        video.appendChild(track);
+                        // vidstack reads <track> children inside <media-provider>.
+                        provider.appendChild(track);
                     });
                 }
 
-                // Set src via the source element so we can hint at the
-                // type when we recognise the extension (some Chromium
-                // versions sniff MKV better when type is omitted).
-                var src = el('source', { src: stream.url });
-                video.appendChild(src);
-                playerHost.appendChild(video);
+                var layout = document.createElement('media-video-layout');
+                mp.appendChild(layout);
 
-                // MEDIA_ERR_SRC_NOT_SUPPORTED (code 4) is the "browser
-                // can't decode" signal — fall back to the external-open
-                // affordance instead of leaving the player frozen.
-                function onErr() {
-                    var code = video.error && video.error.code;
+                playerHost.appendChild(mp);
+                player = mp;
+
+                // vidstack normalises media errors through its own
+                // "error" custom event. The detail carries .code (HTML5
+                // MediaError code) which matches the Plyr / native
+                // semantics — 4 = SRC_NOT_SUPPORTED, the "can't decode"
+                // signal we swap for the external-open fallback. The
+                // raw <video> error also bubbles through, so a single
+                // listener handles both.
+                mp.addEventListener('error', function (e) {
+                    var code = e && e.detail && e.detail.code;
                     if (code === 4) showFallback(stream);
-                }
-                video.addEventListener('error', onErr);
-                src.addEventListener('error', onErr);
-
-                // Full Plyr toolbar. Plyr's responsive layout will hide
-                // the lowest-priority controls on narrow screens
-                // automatically (rewind / fast-forward / pip / airplay
-                // fold first), so play / progress / time / mute /
-                // fullscreen always stay visible while desktop gets the
-                // complete set. seekTime defaults to 10s for the rewind
-                // / fast-forward arrows — matches what most pro players
-                // ship by default.
-                plyr = new Plyr(video, {
-                    controls: [
-                        'play-large',
-                        'rewind',
-                        'play',
-                        'fast-forward',
-                        'progress',
-                        'current-time',
-                        'duration',
-                        'mute',
-                        'volume',
-                        'captions',
-                        'settings',
-                        'pip',
-                        'airplay',
-                        'fullscreen',
-                    ],
-                    settings: ['captions', 'speed', 'loop'],
-                    seekTime: 10,
-                    speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
-                    keyboard: { focused: true, global: true },
-                    captions: { active: true, update: true, language: 'auto' },
                 });
 
-                // AniSkip overlay. Listen on the underlying <video> for
-                // timeupdate (Plyr emits its own event but the native
-                // one is more frequent and fires even during seek).
-                wireSkipOverlay(video);
+                wireSkipOverlay(mp);
             }
 
             // ── AniSkip skip-intro / skip-outro overlay ───────────────
@@ -282,7 +265,7 @@
                 });
             }
 
-            function wireSkipOverlay(video) {
+            function wireSkipOverlay(mediaPlayer) {
                 if (!skipButton) return;
                 var times = lastData && lastData.skipTimes;
                 if (!times || (!times.intro && !times.outro)) {
@@ -299,15 +282,22 @@
                     }
                     return null;
                 }
-                video.addEventListener('timeupdate', function () {
-                    var r = activeRange(video.currentTime);
+                // vidstack emits "time-update" (dasherised) with the
+                // currentTime in the event detail. Native "timeupdate"
+                // also bubbles from the inner <video>, but the dasherised
+                // one is the canonical vidstack API.
+                mediaPlayer.addEventListener('time-update', function (e) {
+                    var t = (e && e.detail && typeof e.detail.currentTime === 'number')
+                        ? e.detail.currentTime
+                        : (mediaPlayer.currentTime || 0);
+                    var r = activeRange(t);
                     if (!r) {
                         currentRange = null;
                         skipButton.hidden = true;
                         return;
                     }
                     if (autoSkip) {
-                        video.currentTime = r.end + 1;
+                        mediaPlayer.currentTime = r.end + 1;
                         skipButton.hidden = true;
                         return;
                     }
@@ -320,7 +310,7 @@
                 });
                 skipButton.onclick = function () {
                     var t = parseFloat(skipButton.dataset.seekTo || '0');
-                    if (t > 0) video.currentTime = t;
+                    if (t > 0) mediaPlayer.currentTime = t;
                 };
             }
 
