@@ -2620,11 +2620,11 @@ body.modal-open {
 }
 
 /* Floating save bar — shared commit point across /configure, /stremio,
-   /advanced. Hidden by default; the change-handler in
-   _ConfigurePageScript flips it visible the first time any flag-bearing
-   toggle changes. Bottom-center pill keeps the Save affordance one tap
-   away regardless of scroll position; the slide-in animation reads as
-   "something new appeared, look here". */
+   /advanced. Always visible (discoverability beats minimalism — users
+   need to know where Save is at all times). The .is-dirty modifier
+   bumps the visual weight when there are unsaved toggle changes; the
+   clean state stays muted so the bar isn't visually shouting at a
+   user who's just scrolling. */
 .floating-save-bar {
     position: fixed;
     left: 50%;
@@ -2635,45 +2635,58 @@ body.modal-open {
     align-items: center;
     gap: 0.75rem;
     padding: 0.45rem 0.45rem 0.45rem 1rem;
-    background: rgba(20, 20, 20, 0.95);
+    background: rgba(20, 20, 20, 0.92);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 999px;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-    animation: floatingSaveSlideIn 0.2s ease-out;
+    transition: border-color 0.18s, box-shadow 0.18s, background 0.18s;
 }
 
-.floating-save-bar[hidden] {
-    display: none;
-}
-
-@keyframes floatingSaveSlideIn {
-    from { opacity: 0; transform: translateX(-50%) translateY(0.5rem); }
-    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+/* Dirty state — bring the bar forward visually so the user sees the
+   urgency. Subtle border tint + a small glow rather than a full
+   colour-shift so it stays elegant. */
+.floating-save-bar.is-dirty {
+    border-color: rgba(124, 58, 237, 0.55);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5),
+                0 0 0 3px rgba(124, 58, 237, 0.18);
 }
 
 .floating-save-status {
-    color: rgba(255, 255, 255, 0.8);
+    color: rgba(255, 255, 255, 0.55);
     font-size: 0.85rem;
     font-weight: 500;
     line-height: 1;
+    transition: color 0.18s;
+}
+
+.floating-save-bar.is-dirty .floating-save-status {
+    color: rgba(255, 255, 255, 0.92);
 }
 
 .floating-save-status-success {
-    color: rgb(134, 239, 172); /* green-300-ish — Tailwind-aligned */
+    color: rgb(134, 239, 172) !important; /* green-300-ish, win over .is-dirty rule */
 }
 
+/* Clean-state button is muted; dirty-state button gets the gradient.
+   Either way it's clickable — a clean-state click re-POSTs the current
+   flag bytes (cheap, idempotent) so the affordance never feels dead. */
 .floating-save-btn {
     padding: 0.5rem 1.1rem;
-    background: linear-gradient(135deg, #4f46e5, #7c3aed);
-    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.85);
     border: 0;
     border-radius: 999px;
     font-weight: 600;
     font-size: 0.85rem;
     cursor: pointer;
-    transition: opacity 0.15s, transform 0.1s;
+    transition: background 0.18s, color 0.18s, opacity 0.15s, transform 0.1s;
+}
+
+.floating-save-bar.is-dirty .floating-save-btn {
+    background: linear-gradient(135deg, #4f46e5, #7c3aed);
+    color: #fff;
 }
 
 .floating-save-btn:hover {
