@@ -65,14 +65,6 @@
 
     var canEdit = !Model.AnonymousUser && !string.IsNullOrEmpty(Model.ConfigUid);
 
-    // Studios get surfaced in the hero ("By: KyoAni, MAPPA") rather than
-    // buried in the bottom link list — production credit is part of the
-    // anime's identity. Pull them out before grouping the rest.
-    var studios = (a.links ?? new())
-        .Where(l => string.Equals(l.category, "Studio", StringComparison.OrdinalIgnoreCase))
-        .Where(l => !string.IsNullOrEmpty(l.name))
-        .ToList();
-
     // Group external links by category so the page shows distinct sections
     // (Streaming, Character, etc.) rather than one flat list.
     // Filters:
@@ -83,12 +75,14 @@
     //     the same source. Keep the Stremio-facing Link entries on the meta
     //     (they still flow through to the addon JSON), just don't render
     //     them as a separate links section here.
-    //   - "Studio" surfaces in the hero (above), don't double-render below.
+    //   - Studios sit alongside Tag / Staff / director in the bottom link
+    //     sections — they're rendered with the same anime-detail-link-list
+    //     chip style as everything else (used to be a "By X" stripe in the
+    //     hero, but it visually competed with the title block).
     var linksByCategory = (a.links ?? new())
         .Where(l => !string.IsNullOrEmpty(l.url) && !string.IsNullOrEmpty(l.name))
         .Where(l => !string.Equals(l.category, "Manage", StringComparison.OrdinalIgnoreCase))
         .Where(l => !string.Equals(l.category, "Similar", StringComparison.OrdinalIgnoreCase))
-        .Where(l => !string.Equals(l.category, "Studio", StringComparison.OrdinalIgnoreCase))
         .GroupBy(l => string.IsNullOrEmpty(l.category) ? "Links" : l.category)
         .ToList();
 
@@ -206,42 +200,26 @@
                     </button>
                 }
             </div>
-            @if (studios.Count > 0)
-            {
-                @* Hero "By X" — links to the in-app /studio/{id} browse page
-                   when the AniList studio id is known, otherwise falls back
-                   to the external AniList URL the link was created with. *@
-                <div class="anime-detail-studios">
-                    By
-                    @for (var i = 0; i < studios.Count; i++)
-                    {
-                        var s = studios[i];
-                        if (i > 0) { <text>, </text> }
-                        if (s.anilistId.HasValue)
-                        {
-                            <a href="@($"/studio/{s.anilistId.Value}")" class="anime-detail-studio-link">@s.name</a>
-                        }
-                        else if (!string.IsNullOrEmpty(s.url))
-                        {
-                            <a href="@s.url" class="anime-detail-studio-link" target="_blank" rel="noreferrer noopener">@s.name</a>
-                        }
-                        else
-                        {
-                            <span>@s.name</span>
-                        }
-                    }
-                </div>
-            }
+            @* Studios are rendered as their own section in the bottom
+               linksByCategory loop now — same chip style as Tag / Staff
+               / director. The hero stays focused on title + score +
+               status + genres without competing chrome below it. *@
             @if (a.genres?.Count > 0)
             {
                 @* Genre chips link into /discover?genre=X so a tap surfaces
-                   more anime sharing the genre rather than bouncing to AniList. *@
-                <div class="anime-detail-genres">
+                   more anime sharing the genre rather than bouncing to AniList.
+                   Uses the same .anime-detail-link-list + .anime-detail-link
+                   chip styling the bottom sections (Tag / Studio / Staff /
+                   director / etc.) use, so every chip on the page reads as
+                   a single consistent UI primitive. *@
+                <ul class="anime-detail-link-list">
                     @foreach (var g in a.genres.Take(8))
                     {
-                        <a class="genre-chip" href="@($"/discover?genre={Uri.EscapeDataString(g)}")">@g</a>
+                        <li>
+                            <a class="anime-detail-link" href="@($"/discover?genre={Uri.EscapeDataString(g)}")">@g</a>
+                        </li>
                     }
-                </div>
+                </ul>
             }
             @{
                 var sl = Model.SourceLinks;
