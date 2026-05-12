@@ -59,6 +59,20 @@
         <div class="watch-player-empty">
             <p>Pick a source below to start watching.</p>
         </div>
+        @* AniSkip overlay: corner-anchored button rendered by JS when
+           the playhead enters an intro / outro range. Hidden by default
+           — the wireSkipOverlay() init bails out cleanly when no skip
+           markers are available for the episode. *@
+        <button id="watchSkipButton" class="watch-skip-btn" type="button" hidden>Skip intro →</button>
+    </div>
+    <div class="watch-player-toolbar">
+        @* Auto-skip preference lives in localStorage so it persists
+           across episodes — click once, intros / outros get jumped
+           silently for every subsequent episode. *@
+        <button id="watchSkipAuto" class="watch-toggle" type="button" aria-pressed="false">
+            <span class="watch-toggle-dot" aria-hidden="true"></span>
+            <span>Auto-skip intro / outro</span>
+        </button>
     </div>
     <div id="watchPlayerFallback" class="watch-player-fallback" hidden>
         @* Rendered by JS when the &lt;video&gt; element fires an error
@@ -72,7 +86,7 @@
     {
         <a class="watch-nav-btn watch-nav-prev" href="@PrevHref()">
             <span class="watch-nav-direction">← Previous</span>
-            <span class="watch-nav-label">@(string.IsNullOrEmpty(Model.Prev.name) ? (string.IsNullOrEmpty(Model.Prev.title) ? $"Episode {Model.Prev.episode}" : Model.Prev.title) : Model.Prev.name)</span>
+            <span class="watch-nav-label">Episode @Model.Prev.episode</span>
         </a>
     }
     else
@@ -83,7 +97,7 @@
     {
         <a class="watch-nav-btn watch-nav-next" href="@NextHref()">
             <span class="watch-nav-direction">Next →</span>
-            <span class="watch-nav-label">@(string.IsNullOrEmpty(Model.Next.name) ? (string.IsNullOrEmpty(Model.Next.title) ? $"Episode {Model.Next.episode}" : Model.Next.title) : Model.Next.name)</span>
+            <span class="watch-nav-label">Episode @Model.Next.episode</span>
         </a>
     }
     else
@@ -118,6 +132,10 @@
             // clean (avoids dangling event listeners + lets the user
             // change source mid-playback without state leakage).
             var plyr = null;
+            // Cached last /episode-streams response so playStream +
+            // wireSkipOverlay can read the same skipTimes + subtitles
+            // bundle without an extra fetch on every source pick.
+            var lastData = null;
 
             function el(tag, attrs, text) {
                 var n = document.createElement(tag);
@@ -165,6 +183,29 @@
                     playsinline: 'playsinline',
                     controls: 'controls',
                 });
+
+                // Subtitle tracks. Proxied through /anime/subtitle so the
+                // <track> request is same-origin (the alternative — cross-
+                // origin tracks — requires `crossorigin` on the <video>,
+                // which can break some RD URLs that reject anonymous
+                // CORS requests). label + srclang drive Plyr's captions
+                // menu entries.
+                if (lastData && Array.isArray(lastData.subtitles)) {
+                    lastData.subtitles.forEach(function (t, i) {
+                        var track = el('track', {
+                            kind: 'captions',
+                            src: t.url,
+                            srclang: t.lang || 'en',
+                            label: t.label || t.lang || 'Subtitles',
+                        });
+                        if (i === 0 && (lastData.preferredSubtitleLang === t.lang
+                                        || /^en/i.test(t.lang || ''))) {
+                            track.setAttribute('default', 'default');
+                        }
+                        video.appendChild(track);
+                    });
+                }
+
                 // Set src via the source element so we can hint at the
                 // type when we recognise the extension (some Chromium
                 // versions sniff MKV better when type is omitted).
@@ -174,30 +215,96 @@
 
                 // MEDIA_ERR_SRC_NOT_SUPPORTED (code 4) is the "browser
                 // can't decode" signal — fall back to the external-open
-                // affordance instead of leaving the player frozen. We
-                // also listen on the underlying <source> element since
-                // some browsers fire the error there only.
+                // affordance instead of leaving the player frozen.
                 function onErr() {
                     var code = video.error && video.error.code;
-                    // Code 4 = src not supported; codes 1-3 = aborted /
-                    // network / decode (mid-playback). The user might
-                    // already be deep into the episode; only swap the
-                    // whole UI for code 4.
                     if (code === 4) showFallback(stream);
                 }
                 video.addEventListener('error', onErr);
                 src.addEventListener('error', onErr);
 
+                // Mobile-tuned control list: play first so the toggle is
+                // always visible; airplay / pip dropped because they
+                // crowd the toolbar on narrow widths.
                 plyr = new Plyr(video, {
-                    controls: ['play-large', 'play', 'rewind', 'fast-forward',
-                               'progress', 'current-time', 'duration', 'mute',
-                               'volume', 'captions', 'settings', 'pip',
-                               'airplay', 'fullscreen'],
-                    settings: ['captions', 'quality', 'speed', 'loop'],
+                    controls: ['play', 'progress', 'current-time', 'duration',
+                               'mute', 'volume', 'captions', 'settings',
+                               'fullscreen'],
+                    settings: ['captions', 'speed', 'loop'],
                     speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
                     keyboard: { focused: true, global: true },
+                    captions: { active: true, update: true, language: 'auto' },
+                });
+
+                // AniSkip overlay. Listen on the underlying <video> for
+                // timeupdate (Plyr emits its own event but the native
+                // one is more frequent and fires even during seek).
+                wireSkipOverlay(video);
+            }
+
+            // ── AniSkip skip-intro / skip-outro overlay ───────────────
+            // Shows a corner-anchored button when the playhead enters
+            // the intro or outro range. Click → seek to range.end + 1s
+            // (the +1s puts the user just past the marker so they don't
+            // immediately re-enter the trigger zone). Auto-skip is
+            // persisted in localStorage so the user can flip it on once
+            // and forget about it across episodes.
+            var skipButton = document.getElementById('watchSkipButton');
+            var skipAutoBtn = document.getElementById('watchSkipAuto');
+            var autoSkip = localStorage.getItem('anisync.autoSkip') === '1';
+            if (skipAutoBtn) {
+                skipAutoBtn.setAttribute('aria-pressed', autoSkip ? 'true' : 'false');
+                skipAutoBtn.classList.toggle('is-active', autoSkip);
+                skipAutoBtn.addEventListener('click', function () {
+                    autoSkip = !autoSkip;
+                    localStorage.setItem('anisync.autoSkip', autoSkip ? '1' : '0');
+                    skipAutoBtn.setAttribute('aria-pressed', autoSkip ? 'true' : 'false');
+                    skipAutoBtn.classList.toggle('is-active', autoSkip);
                 });
             }
+
+            function wireSkipOverlay(video) {
+                if (!skipButton) return;
+                var times = lastData && lastData.skipTimes;
+                if (!times || (!times.intro && !times.outro)) {
+                    skipButton.hidden = true;
+                    return;
+                }
+                var currentRange = null;
+                function activeRange(t) {
+                    if (times.intro && t >= times.intro.start && t < times.intro.end - 0.5) {
+                        return { label: 'Skip intro', end: times.intro.end };
+                    }
+                    if (times.outro && t >= times.outro.start && t < times.outro.end - 0.5) {
+                        return { label: 'Skip outro', end: times.outro.end };
+                    }
+                    return null;
+                }
+                video.addEventListener('timeupdate', function () {
+                    var r = activeRange(video.currentTime);
+                    if (!r) {
+                        currentRange = null;
+                        skipButton.hidden = true;
+                        return;
+                    }
+                    if (autoSkip) {
+                        video.currentTime = r.end + 1;
+                        skipButton.hidden = true;
+                        return;
+                    }
+                    if (currentRange !== r.label) {
+                        currentRange = r.label;
+                        skipButton.textContent = r.label + ' →';
+                        skipButton.dataset.seekTo = String(r.end + 1);
+                    }
+                    skipButton.hidden = false;
+                });
+                skipButton.onclick = function () {
+                    var t = parseFloat(skipButton.dataset.seekTo || '0');
+                    if (t > 0) video.currentTime = t;
+                };
+            }
+
 
             function renderSources(data) {
                 sourcesBody.innerHTML = '';
@@ -276,6 +383,7 @@
                         sourcesBody.innerHTML = '<p class="hint-text">Couldn\'t load sources. Try refreshing.</p>';
                         return;
                     }
+                    lastData = data;
                     renderSources(data);
                 })
                 .catch(function () {
