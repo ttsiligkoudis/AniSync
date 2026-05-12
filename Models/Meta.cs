@@ -65,6 +65,14 @@ namespace AnimeList.Models
         // Seasonal / Airing because those return media without per-user
         // context). Cards render an "Ep N / Total" badge when set.
         public int? progress { get; set; }
+
+        // Episode number that's airing in the current shelf window — populated
+        // by GetNewEpisodesTodayAsync from AniList's airingSchedule and
+        // surfaced as an "Ep N" top-left badge on the "New Episodes Today"
+        // cards. Distinct from <see cref="progress"/> (user-list state); the
+        // two never coexist on the same card today, but both feed the same
+        // top-left badge slot in _PosterGrid.
+        public int? airingEpisode { get; set; }
         public List<string> genres { get; set; }
         public string background { get; set; }
         public string type { get; set; } = MetaType.series.ToString();

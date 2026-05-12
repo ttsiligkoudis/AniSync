@@ -784,6 +784,7 @@ namespace AnimeList.Services
                         episodes = (int?)media.episodes,
                         year = (int?)media.seasonYear,
                         format = NormalizeFormat((string)media.format),
+                        airingEpisode = (int?)sched.episode,
                     });
                 }
 
@@ -837,6 +838,7 @@ namespace AnimeList.Services
                     episodes = m.episodes,
                     year = m.year,
                     format = m.format,
+                    airingEpisode = m.airingEpisode,
                 });
             }
             return copy;

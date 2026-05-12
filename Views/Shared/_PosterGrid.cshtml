@@ -78,6 +78,10 @@
                     {
                         <span class="library-card-progress">@progressLabel</span>
                     }
+                    else if (meta.airingEpisode.HasValue)
+                    {
+                        <span class="library-card-progress">Ep @meta.airingEpisode.Value</span>
+                    }
                     @if (hasScore)
                     {
                         <span class="library-card-score">★ @meta.score.Value.ToString("0.0")</span>
