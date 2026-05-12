@@ -1,0 +1,21 @@
+@*
+    Full-sync modal — the progress UI for "Backfill linked accounts" /
+    "Sync from primary". Mounted on /advanced (where the trigger button
+    now lives) so the JS handlers in _ConfigurePageScript can find
+    #syncModal in the DOM. Driven entirely by the client — the server
+    is stateless. The backdrop click and Escape are intentionally not
+    wired to dismiss; the only way out while a sync is in flight is
+    the Cancel button (which aborts in-flight fetches via
+    AbortController and stops the loop). After completion or abort,
+    the same button switches to "Close" and just hides the modal.
+*@
+<div id="syncModal" class="sync-modal" hidden aria-hidden="true" role="dialog" aria-labelledby="syncModalTitle">
+    <div class="sync-modal-card">
+        <h3 id="syncModalTitle" class="sync-modal-title">Backfill linked accounts</h3>
+        <p id="syncModalMessage" class="sync-modal-message">Fetching primary library…</p>
+        <div class="sync-modal-bar"><div id="syncModalBarFill" class="sync-modal-bar-fill"></div></div>
+        <div class="sync-modal-actions">
+            <button type="button" id="syncModalCancel" class="btn-primary-action btn-login">Cancel</button>
+        </div>
+    </div>
+</div>
