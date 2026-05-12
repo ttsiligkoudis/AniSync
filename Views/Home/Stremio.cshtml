@@ -159,22 +159,20 @@
        get the groupSeasons toggle alone — they still have a v3 manifest
        whose URL encodes the bit, but no library to filter unaired entries
        against). *@
-    @{
-        var stremioPrefs = new List<(string Id, string Label, string Description, bool Checked)>();
-        if (!Model.AnonymousUser)
-        {
-            stremioPrefs.Add((
-                "hideUnreleasedWatching",
-                "Hide unaired from Watching",
-                "When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.",
-                Model.HideUnreleasedWatching));
-        }
+    var stremioPrefs = new List<(string Id, string Label, string Description, bool Checked)>();
+    if (!Model.AnonymousUser)
+    {
         stremioPrefs.Add((
-            "groupSeasons",
-            "Group anime seasons",
-            "Collapse multi-cour franchises into a single catalog card. Off shows every cour separately.",
-            Model.GroupSeasons));
+            "hideUnreleasedWatching",
+            "Hide unaired from Watching",
+            "When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.",
+            Model.HideUnreleasedWatching));
     }
+    stremioPrefs.Add((
+        "groupSeasons",
+        "Group anime seasons",
+        "Collapse multi-cour franchises into a single catalog card. Off shows every cour separately.",
+        Model.GroupSeasons));
     @await Html.PartialAsync("_PreferencesSection", (IReadOnlyList<(string, string, string, bool)>)stremioPrefs)
 
     <!-- ─── STREAMS ─────────────────────────────────────────────────── -->

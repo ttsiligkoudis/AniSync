@@ -181,16 +181,14 @@
        against, and the partial omits the whole card (Save button included)
        when the list is empty. Group-anime-seasons doesn't belong on this
        page — it's addon-only — so it stays on /stremio's list. *@
-    @{
-        var configurePrefs = new List<(string Id, string Label, string Description, bool Checked)>();
-        if (!Model.AnonymousUser)
-        {
-            configurePrefs.Add((
-                "hideUnreleasedWatching",
-                "Hide unaired from Watching",
-                "When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.",
-                Model.HideUnreleasedWatching));
-        }
+    var configurePrefs = new List<(string Id, string Label, string Description, bool Checked)>();
+    if (!Model.AnonymousUser)
+    {
+        configurePrefs.Add((
+            "hideUnreleasedWatching",
+            "Hide unaired from Watching",
+            "When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.",
+            Model.HideUnreleasedWatching));
     }
     @await Html.PartialAsync("_PreferencesSection", (IReadOnlyList<(string, string, string, bool)>)configurePrefs)
 
