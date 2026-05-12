@@ -1874,6 +1874,136 @@ body.modal-open {
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
 }
 
+/* Episode-stream picker overrides — wider card so the source list +
+   inline <video> player don't feel cramped. Reuses .sync-modal shell
+   for backdrop / centering. */
+.episode-stream-modal .sync-modal-card {
+    width: min(92vw, 720px);
+    max-height: 86vh;
+    overflow-y: auto;
+}
+
+.sync-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.sync-modal-close {
+    background: transparent;
+    border: 0;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 1.6rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 0.25rem;
+}
+
+.sync-modal-close:hover {
+    color: #fff;
+}
+
+.episode-stream-section-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.6);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 1rem 0 0.4rem;
+}
+
+.episode-stream-section-title:first-child {
+    margin-top: 0;
+}
+
+.episode-stream-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.episode-stream-row {
+    margin: 0;
+}
+
+.episode-stream-pick {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    text-align: left;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.6rem;
+    padding: 0.6rem 0.8rem;
+    color: #ddd;
+    text-decoration: none;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.episode-stream-pick:hover,
+.episode-stream-pick:focus {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    text-decoration: none;
+}
+
+.episode-stream-quality {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 3.5rem;
+    padding: 0.15rem 0.5rem;
+    background: rgba(99, 102, 241, 0.18);
+    color: rgba(165, 180, 252, 0.95);
+    border-radius: 0.4rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.episode-stream-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+    flex: 1;
+}
+
+.episode-stream-title {
+    color: #ddd;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.episode-stream-size {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.75rem;
+}
+
+.episode-stream-video {
+    width: 100%;
+    max-height: 70vh;
+    background: #000;
+    border-radius: 0.5rem;
+}
+
+.episode-stream-footer {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+    margin-top: 0.75rem;
+}
+
 .sync-modal-title {
     font-size: 1.05rem;
     margin: 0 0 0.6rem;

@@ -311,6 +311,7 @@ public class HomeController : Controller
         string encodedTokenData = null;
         string scrobbleToken = null;
         string plexUsername = null;
+        bool hasRealDebridKey = false;
 
         if (tokenData != null)
         {
@@ -375,6 +376,7 @@ public class HomeController : Controller
                 // pastes into Plex/Jellyfin/Emby is /api/v1/scrobble/{scrobbleToken}.
                 scrobbleToken = await _configStore.EnsureScrobbleTokenAsync(configUid);
                 plexUsername = await _configStore.GetPlexUsernameAsync(configUid);
+                hasRealDebridKey = !string.IsNullOrEmpty(await _configStore.GetRealDebridApiKeyAsync(configUid));
 
                 // Hydrate the session from the config-URL-derived tokenData when the user
                 // arrives via a v5 install URL (or any path that resolves identity from the
@@ -435,6 +437,7 @@ public class HomeController : Controller
             LinkedTokens = linkedTokens,
             ScrobbleToken = scrobbleToken,
             PlexUsername = plexUsername,
+            HasRealDebridKey = hasRealDebridKey,
             Configuration = configuration,
         });
     }
@@ -502,6 +505,20 @@ public class HomeController : Controller
 
         await _configStore.SetPlexUsernameAsync(request.uid, request.username);
         return new JsonResult(new { success = true });
+    }
+
+    /// <summary>
+    /// Stores the user's Real-Debrid API key. Empty / whitespace apiKey clears
+    /// the stored key. Used by the /configure RD card's Save and Clear buttons.
+    /// </summary>
+    [HttpPost("Home/SetRealDebridApiKey")]
+    public async Task<JsonResult> SetRealDebridApiKey([FromBody] RealDebridKeyRequest request)
+    {
+        if (string.IsNullOrEmpty(request?.uid))
+            return new JsonResult(new { success = false, error = "missing uid" });
+
+        await _configStore.SetRealDebridApiKeyAsync(request.uid, request.apiKey);
+        return new JsonResult(new { success = true, hasKey = !string.IsNullOrWhiteSpace(request.apiKey) });
     }
 
     /// <summary>
@@ -620,6 +637,15 @@ public class PlexUsernameRequest
 {
     public string uid { get; set; }
     public string username { get; set; }
+}
+
+public class RealDebridKeyRequest
+{
+    public string uid { get; set; }
+    // Plaintext API key on the way up (HTTPS-protected); empty / null clears
+    // the stored key. The server never re-emits the value to the client after
+    // first save — the configure page renders a presence-only badge.
+    public string apiKey { get; set; }
 }
 
 public class ConfigBackup

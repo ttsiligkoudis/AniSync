@@ -30,5 +30,15 @@ namespace AnimeList.Services.Interfaces
         Task<List<int>> GetSeasonsAsync(string animeId);
 
         Task EnrichImdbMappings(List<AnimeIdMapping> mappings);
+
+        /// <summary>
+        /// Resolves every cross-service id we know about for the given anime
+        /// into a single <see cref="AnimeSourceLinks"/> bundle — used by the
+        /// detail page's source chips and by the RD/Torrentio lookup which
+        /// needs the IMDb / Kitsu id to construct a Stremio stream identifier.
+        /// Best-effort: any single mapping miss leaves the corresponding
+        /// field null instead of failing the whole call.
+        /// </summary>
+        Task<AnimeSourceLinks> BuildSourceLinksAsync(string animeId);
     }
 }

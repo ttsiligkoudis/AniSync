@@ -22,6 +22,7 @@ namespace AnimeList.Controllers
         private readonly IConfigStore _configStore;
         private readonly IFillerListService _fillerListService;
         private readonly IAnilistFallback _anilistFallback;
+        private readonly ITorrentioService _torrentioService;
         private readonly ILogger<AnimeController> _logger;
 
         public AnimeController(
@@ -34,6 +35,7 @@ namespace AnimeList.Controllers
             IConfigStore configStore,
             IFillerListService fillerListService,
             IAnilistFallback anilistFallback,
+            ITorrentioService torrentioService,
             ILogger<AnimeController> logger)
         {
             _tokenService = tokenService;
@@ -45,6 +47,7 @@ namespace AnimeList.Controllers
             _configStore = configStore;
             _fillerListService = fillerListService;
             _anilistFallback = anilistFallback;
+            _torrentioService = torrentioService;
             _logger = logger;
         }
 
@@ -289,6 +292,87 @@ namespace AnimeList.Controllers
             });
         }
 
+        /// <summary>
+        /// Episode click endpoint backing the Detail page's stream picker modal.
+        /// Returns the union of (a) RD-resolved Torrentio streams when the user
+        /// has a Real-Debrid API key configured on a v5 (uid-backed) install
+        /// and (b) the same legal external streaming links that
+        /// StreamController emits to the Stremio addon. Anonymous / RD-less
+        /// users get only the external links. Both sections may be empty;
+        /// the view treats an all-empty response as a "no playable sources"
+        /// state.
+        ///
+        /// Query-string route on purpose: the Detail action above is bound to
+        /// /anime/{*id} which would otherwise swallow any literal sub-path.
+        /// </summary>
+        [HttpGet("/anime/episode-streams")]
+        public async Task<IActionResult> EpisodeStreams(string id, int? season, int episode)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                return BadRequest(new { error = "id required" });
+            }
+
+            var tokenData = await _tokenService.GetAccessTokenAsync()
+                ?? new TokenData { anime_service = AnimeService.Kitsu };
+
+            string uid = null;
+            if (!tokenData.anonymousUser)
+            {
+                var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                uid = resolved;
+            }
+
+            // RD only for authenticated v5 installs — matches StreamController.
+            string apiKey = null;
+            if (!string.IsNullOrEmpty(uid))
+            {
+                apiKey = await _configStore.GetRealDebridApiKeyAsync(uid);
+            }
+
+            var debridStreams = Array.Empty<object>() as IReadOnlyList<object>;
+            if (!string.IsNullOrEmpty(apiKey))
+            {
+                var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
+                var raw = await _torrentioService.GetStreamsAsync(apiKey, sourceLinks, season, episode);
+                debridStreams = raw.Select(s => (object)new
+                {
+                    name = s.Name,
+                    title = s.Title,
+                    url = s.Url,
+                    quality = s.Quality,
+                    size = s.Size,
+                    playable = s.Playable,
+                }).ToList();
+            }
+
+            // External streaming destinations — same per-service dispatch
+            // StreamController uses. Series-level (no episode deep-link), so
+            // the same list comes back regardless of episode number; the
+            // modal still renders them as the fallback bucket.
+            var externalRaw = !string.IsNullOrEmpty(id)
+                ? tokenData.anime_service switch
+                {
+                    AnimeService.Anilist     => await _anilistService.GetExternalLinksAsync(id, tokenData),
+                    AnimeService.MyAnimeList => await _malService.GetExternalLinksAsync(id, tokenData),
+                    _                        => await _kitsuService.GetExternalLinksAsync(id, tokenData),
+                }
+                : new List<StreamingLink>();
+
+            var externalLinks = (externalRaw ?? new List<StreamingLink>())
+                .Where(l => !string.IsNullOrEmpty(l.Url) && !string.IsNullOrEmpty(l.Site))
+                .Select(l => new { site = l.Site, url = l.Url })
+                .ToList();
+
+            return Json(new
+            {
+                anonymous = tokenData.anonymousUser,
+                rdConfigured = !string.IsNullOrEmpty(apiKey),
+                debridStreams,
+                externalLinks,
+            });
+        }
+
         private async Task<List<Meta>> TryGetRecommendationsAsync(int anilistId, AnimeService translateTo)
         {
             try { return await _anilistFallback.GetRecommendationMetasAsync(anilistId, translateTo); }
@@ -309,79 +393,8 @@ namespace AnimeList.Controllers
             }
         }
 
-        private async Task<AnimeSourceLinks> BuildSourceLinksAsync(string animeId)
-        {
-            var links = new AnimeSourceLinks();
-            if (string.IsNullOrEmpty(animeId)) return links;
-
-            try
-            {
-                // 1. Seed from the self id when it's in a service-native id
-                //    space. The detail page now always renders ungrouped so
-                //    anime.id arrives in the native space; the IMDb / TMDB
-                //    branches stay for direct deep-links (e.g. when Stremio's
-                //    grouped-cour card hands the user to /anime/tt5311514).
-                AnimeIdMapping mapping = null;
-                if (animeId.StartsWith(anilistPrefix)
-                    && int.TryParse(animeId[anilistPrefix.Length..], out var aId))
-                {
-                    links.AnilistId = aId;
-                    mapping = await _mappingService.GetAnilistMapping(animeId);
-                }
-                else if (animeId.StartsWith(malPrefix)
-                    && int.TryParse(animeId[malPrefix.Length..], out var mId))
-                {
-                    links.MalId = mId;
-                    mapping = await _mappingService.GetMalMapping(animeId);
-                }
-                else if (animeId.StartsWith(kitsuPrefix)
-                    && int.TryParse(animeId[kitsuPrefix.Length..], out var kId))
-                {
-                    links.KitsuId = kId;
-                    mapping = await _mappingService.GetKitsuMapping(animeId);
-                }
-                else if (animeId.StartsWith(imdbPrefix))
-                {
-                    // imdbPrefix is "tt" — the same shape IMDb itself uses.
-                    // GetImdbMapping returns one entry per cour, ordered by
-                    // season; take the first since that's what ResolveGroupedId
-                    // collapses every cour to anyway. ImdbId is set
-                    // unconditionally below from this id so the IMDb chip
-                    // always renders on the grouped-cours code path.
-                    links.ImdbId = animeId;
-                    var imdbMappings = await _mappingService.GetImdbMapping(animeId);
-                    mapping = imdbMappings.FirstOrDefault();
-                }
-                else if (animeId.StartsWith(tmdbPrefix))
-                {
-                    var tmdbMappings = await _mappingService.GetTmdbMapping(animeId);
-                    mapping = tmdbMappings.FirstOrDefault();
-                }
-
-                // 2. Enrich with sibling ids from the cross-service mapping.
-                //    ??= means a sibling id from the mapping fills in only
-                //    when we don't already have one — so the prefix-derived
-                //    self id (when present) wins over the mapping's
-                //    sometimes-stale duplicate, but the IMDb-grouped code
-                //    path still gets all four chips from the mapping alone.
-                if (mapping != null)
-                {
-                    links.AnilistId ??= mapping.AnilistId;
-                    links.MalId ??= mapping.MalId;
-                    links.KitsuId ??= mapping.KitsuId;
-                    if (string.IsNullOrEmpty(links.ImdbId)
-                        && !string.IsNullOrEmpty(mapping.ImdbId)
-                        && mapping.ImdbId.StartsWith("tt"))
-                        links.ImdbId = mapping.ImdbId;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "BuildSourceLinks failed (id={Id}).", animeId);
-            }
-
-            return links;
-        }
+        private Task<AnimeSourceLinks> BuildSourceLinksAsync(string animeId)
+            => _mappingService.BuildSourceLinksAsync(animeId);
 
         // For imdb: ids, look up the cross-service mapping and translate to a
         // service-native id the per-service GetAnimeByIdAsync can handle. For
@@ -483,18 +496,6 @@ namespace AnimeList.Controllers
         // meta call). Related + recommendations are always deferred regardless
         // of this flag.
         public bool DeferredSupplementaryLinks { get; set; }
-    }
-
-    /// <summary>
-    /// Resolved external-site identifiers for the anime currently being viewed.
-    /// All fields nullable; null means "no mapping found, don't render that link".
-    /// </summary>
-    public class AnimeSourceLinks
-    {
-        public int? AnilistId { get; set; }
-        public int? MalId { get; set; }
-        public int? KitsuId { get; set; }
-        public string ImdbId { get; set; }
     }
 
     /// <summary>

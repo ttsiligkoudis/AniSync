@@ -116,6 +116,22 @@ namespace AnimeList.Services.Interfaces
         Task<string> GetPlexUsernameAsync(string uid);
 
         /// <summary>
+        /// Stores the user's Real-Debrid API key. Pass null/empty to clear.
+        /// Plaintext at rest in v1 — matches the scrobble_token / plex_username
+        /// posture; encrypt-at-rest is a known follow-up before public launch.
+        /// No-op if the UID is unknown.
+        /// </summary>
+        Task SetRealDebridApiKeyAsync(string uid, string apiKey);
+
+        /// <summary>
+        /// Reads the stored Real-Debrid API key, or null when none is set / the
+        /// UID is unknown. Consumed by StreamController and the
+        /// /anime/episode-streams endpoint to decide whether to query Torrentio
+        /// for RD-cached torrents.
+        /// </summary>
+        Task<string> GetRealDebridApiKeyAsync(string uid);
+
+        /// <summary>
         /// Swaps the primary provider with the linked token of <paramref name="newPrimaryService"/>.
         /// The chosen link becomes the primary on this row; the previous primary moves into the
         /// linked-tokens array. The UID is preserved so existing install URLs keep working.

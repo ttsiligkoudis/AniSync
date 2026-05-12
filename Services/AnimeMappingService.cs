@@ -143,6 +143,73 @@ namespace AnimeList.Services
             }
         }
 
+        public async Task<AnimeSourceLinks> BuildSourceLinksAsync(string animeId)
+        {
+            var links = new AnimeSourceLinks();
+            if (string.IsNullOrEmpty(animeId)) return links;
+
+            try
+            {
+                // 1. Seed from the self id when it's in a service-native id
+                //    space. Detail page handoffs always carry a service-native
+                //    id at this point; the IMDb / TMDB branches stay for
+                //    direct deep-links (e.g. when Stremio's grouped-cour card
+                //    hands the user to /anime/tt5311514).
+                AnimeIdMapping mapping = null;
+                if (animeId.StartsWith(anilistPrefix)
+                    && int.TryParse(animeId[anilistPrefix.Length..], out var aId))
+                {
+                    links.AnilistId = aId;
+                    mapping = await GetAnilistMapping(animeId);
+                }
+                else if (animeId.StartsWith(malPrefix)
+                    && int.TryParse(animeId[malPrefix.Length..], out var mId))
+                {
+                    links.MalId = mId;
+                    mapping = await GetMalMapping(animeId);
+                }
+                else if (animeId.StartsWith(kitsuPrefix)
+                    && int.TryParse(animeId[kitsuPrefix.Length..], out var kId))
+                {
+                    links.KitsuId = kId;
+                    mapping = await GetKitsuMapping(animeId);
+                }
+                else if (animeId.StartsWith(imdbPrefix))
+                {
+                    links.ImdbId = animeId;
+                    var imdbMappings = await GetImdbMapping(animeId);
+                    mapping = imdbMappings.FirstOrDefault();
+                }
+                else if (animeId.StartsWith(tmdbPrefix))
+                {
+                    var tmdbMappings = await GetTmdbMapping(animeId);
+                    mapping = tmdbMappings.FirstOrDefault();
+                }
+
+                // 2. Enrich with sibling ids from the cross-service mapping —
+                //    ??= so the self id (when present) wins over the
+                //    mapping's sometimes-stale duplicate.
+                if (mapping != null)
+                {
+                    links.AnilistId ??= mapping.AnilistId;
+                    links.MalId ??= mapping.MalId;
+                    links.KitsuId ??= mapping.KitsuId;
+                    if (string.IsNullOrEmpty(links.ImdbId)
+                        && !string.IsNullOrEmpty(mapping.ImdbId)
+                        && mapping.ImdbId.StartsWith("tt"))
+                        links.ImdbId = mapping.ImdbId;
+                }
+            }
+            catch
+            {
+                // Best-effort: a single mapping miss leaves the corresponding
+                // fields null. Caller treats an empty result as "no cross-
+                // service ids known" — no need for logger plumbing here.
+            }
+
+            return links;
+        }
+
         private async Task EnsureMappingsLoadedAsync()
         {
             if (_anilistMapping is not null && DateTime.UtcNow - _lastLoaded < CacheDuration)
