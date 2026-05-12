@@ -39,6 +39,20 @@ namespace AnimeList.Controllers
         [Route("/studio/{id:int}/{slug?}")]
         public Task<IActionResult> Studio(int id) => Browse(BrowseKind.Studio, id);
 
+        /// <summary>
+        /// /studio listing — a tile grid of popular studios. Sits at the
+        /// no-id end of the same route prefix; the :int constraints on
+        /// the per-studio routes above keep this from being shadowed.
+        /// Clicking a tile lands on /studio/{id} which is already
+        /// implemented by <see cref="Studio"/>.
+        /// </summary>
+        [Route("/studio")]
+        public async Task<IActionResult> Studios()
+        {
+            var studios = await _anilistFallback.GetStudiosListAsync();
+            return View("Studios", studios);
+        }
+
         private async Task<IActionResult> Browse(BrowseKind kind, int id)
         {
             // Anonymous fresh-visit: synthesise a Kitsu-default token so the

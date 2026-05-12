@@ -135,5 +135,15 @@ namespace AnimeList.Services.Interfaces
         /// media list for the same reason GetStaffMediaAsync does.
         /// </summary>
         Task<(string Name, List<Meta> Items)> GetStudioMediaAsync(int studioId, AnimeService translateTo, string skip = null);
+
+        /// <summary>
+        /// Top studios by AniList favourites count — surfaced on the /studio
+        /// listing page where the user picks a studio before drilling into
+        /// its catalog. AniList has no "list all" endpoint that's worth
+        /// paging through (thousands of niche entries), so we fetch a
+        /// curated top slice instead. Cached 24h since the ordering of
+        /// the popular studios shifts on the order of days, not minutes.
+        /// </summary>
+        Task<List<StudioSummary>> GetStudiosListAsync();
     }
 }

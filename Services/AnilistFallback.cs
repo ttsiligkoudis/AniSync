@@ -1057,5 +1057,49 @@ namespace AnimeList.Services
             }
             return (name, await BuildBrowseMetasAsync(nodes, translateTo));
         }
+
+        public async Task<List<StudioSummary>> GetStudiosListAsync()
+        {
+            const string cacheKey = "anilist:studios-list:fav-desc";
+            if (_cache.TryGetValue<List<StudioSummary>>(cacheKey, out var cached) && cached != null)
+            {
+                return cached;
+            }
+
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query {
+                        Page(page: 1, perPage: 60) {
+                            studios(sort: FAVOURITES_DESC) {
+                                id
+                                name
+                            }
+                        }
+                    }",
+            });
+
+            var data = await PostJsonAsync(requestBody);
+            var studios = new List<StudioSummary>();
+            if (data?.Page?.studios != null)
+            {
+                foreach (var s in data.Page.studios)
+                {
+                    if (s == null) continue;
+                    var name = (string)s.name;
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+                    studios.Add(new StudioSummary { Id = (int)s.id, Name = name });
+                }
+            }
+
+            if (studios.Count > 0)
+            {
+                _cache.Set(cacheKey, studios, new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24),
+                });
+            }
+            return studios;
+        }
     }
 }
