@@ -223,14 +223,33 @@
                 video.addEventListener('error', onErr);
                 src.addEventListener('error', onErr);
 
-                // Mobile-tuned control list: play first so the toggle is
-                // always visible; airplay / pip dropped because they
-                // crowd the toolbar on narrow widths.
+                // Full Plyr toolbar. Plyr's responsive layout will hide
+                // the lowest-priority controls on narrow screens
+                // automatically (rewind / fast-forward / pip / airplay
+                // fold first), so play / progress / time / mute /
+                // fullscreen always stay visible while desktop gets the
+                // complete set. seekTime defaults to 10s for the rewind
+                // / fast-forward arrows — matches what most pro players
+                // ship by default.
                 plyr = new Plyr(video, {
-                    controls: ['play', 'progress', 'current-time', 'duration',
-                               'mute', 'volume', 'captions', 'settings',
-                               'fullscreen'],
+                    controls: [
+                        'play-large',
+                        'rewind',
+                        'play',
+                        'fast-forward',
+                        'progress',
+                        'current-time',
+                        'duration',
+                        'mute',
+                        'volume',
+                        'captions',
+                        'settings',
+                        'pip',
+                        'airplay',
+                        'fullscreen',
+                    ],
                     settings: ['captions', 'speed', 'loop'],
+                    seekTime: 10,
                     speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
                     keyboard: { focused: true, global: true },
                     captions: { active: true, update: true, language: 'auto' },
