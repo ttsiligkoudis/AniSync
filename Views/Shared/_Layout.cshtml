@@ -12,6 +12,13 @@
         catch { /* unparseable — render as anonymous */ }
     }
     var layoutLoggedIn = layoutToken != null && !layoutToken.anonymousUser;
+    @* layoutHasSession covers both real accounts AND anonymous sessions —
+       used to decide whether the header pill / drawer footer surfaces
+       "Sign in" or "Disconnect". An anonymous user is still "connected
+       (without account)" and shouldn't see a Sign in CTA when the
+       Disconnect path on /configure is the only way to actually clear
+       their session. *@
+    var layoutHasSession = layoutToken != null;
     var activeNav = ViewData["ActiveNav"]?.ToString();
 }
 <!DOCTYPE html>
@@ -114,9 +121,11 @@
             </a>
         </nav>
         <div class="nav-drawer-footer">
-            @if (layoutLoggedIn)
+            @if (layoutHasSession)
             {
-                <span class="nav-drawer-status">✓ Connected to @layoutToken.anime_service</span>
+                <span class="nav-drawer-status">
+                    @(layoutLoggedIn ? $"✓ Connected to {layoutToken.anime_service}" : "✓ Connected without account")
+                </span>
                 <a class="nav-drawer-cta nav-drawer-cta-secondary" href="@Url.Action("Logout", "Auth")">Disconnect</a>
             }
             else
@@ -223,8 +232,11 @@
                 </button>
                 @* Desktop-only auth CTA — replaces what the drawer footer
                    exposes on mobile (Sign in / Disconnect). Hidden under
-                   992px; the drawer keeps surfacing it on mobile. *@
-                @if (layoutLoggedIn)
+                   992px; the drawer keeps surfacing it on mobile. Treats
+                   anonymous sessions the same as real accounts: a token
+                   in any form means there's something to Disconnect, so
+                   showing Sign in alongside it would be misleading. *@
+                @if (layoutHasSession)
                 {
                     <a class="site-header-cta site-header-cta-secondary" href="@Url.Action("Logout", "Auth")">Disconnect</a>
                 }

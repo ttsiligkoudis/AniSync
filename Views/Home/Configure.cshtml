@@ -174,37 +174,25 @@
         </section>
     }
 
-    @* Site preferences — toggles that affect the site + addon experience
-       outside the Stremio catalog/stream switches. Group-anime-seasons
-       lives on /stremio because it's addon-specific; everything here is
-       behaviour shared across the site (Library / dashboard) and the
-       Stremio catalogs. Save commits all flags via the same /Home/SaveConfig
-       endpoint /stremio uses, and preserves bits whose inputs aren't on
-       this page (the script's initialFlags + bitFor() fallback). *@
-    <section class="section-card">
-        <span class="section-title">Site preferences</span>
-        <p class="section-description">
-            General display preferences that apply across the site and the Stremio addon.
-        </p>
-
-        <div class="streams-grid">
-            <div class="stream-option">
-                <div class="option-name-wrap">
-                    <span class="option-name">Hide unaired from Watching</span>
-                    <span class="option-name-sub">When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.</span>
-                </div>
-                <label class="switch">
-                    <input type="checkbox" id="hideUnreleasedWatching" @(Model.HideUnreleasedWatching ? "checked" : "") />
-                    <span class="slider"></span>
-                </label>
-            </div>
-        </div>
-
-        <div class="btn-action-row">
-            <button id="savePreferencesBtn" type="button" class="btn-primary-action btn-login">Save</button>
-            <span id="savePreferencesStatus" class="save-preferences-status" aria-live="polite"></span>
-        </div>
-    </section>
+    @* Preferences — toggles that affect the site + addon experience outside
+       the Stremio catalog/stream switches. The list is built per-page so the
+       same partial can render zero, one, or several toggles; anonymous users
+       see nothing here because Hide-unaired requires a real library to filter
+       against, and the partial omits the whole card (Save button included)
+       when the list is empty. Group-anime-seasons doesn't belong on this
+       page — it's addon-only — so it stays on /stremio's list. *@
+    @{
+        var configurePrefs = new List<(string Id, string Label, string Description, bool Checked)>();
+        if (!Model.AnonymousUser)
+        {
+            configurePrefs.Add((
+                "hideUnreleasedWatching",
+                "Hide unaired from Watching",
+                "When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.",
+                Model.HideUnreleasedWatching));
+        }
+    }
+    @await Html.PartialAsync("_PreferencesSection", (IReadOnlyList<(string, string, string, bool)>)configurePrefs)
 
     @* Stremio-addon-specific config (catalogs, streams, install URL,
        scrobble webhook) used to live inline below this line; it's now
