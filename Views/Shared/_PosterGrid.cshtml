@@ -80,7 +80,7 @@
                     }
                     else if (meta.airingEpisode.HasValue)
                     {
-                        <span class="library-card-progress">Ep @meta.airingEpisode.Value</span>
+                        <span class="library-card-progress" data-airing-at="@meta.airingAt">Ep @meta.airingEpisode.Value</span>
                     }
                     @if (hasScore)
                     {
@@ -101,6 +101,20 @@
             </a>
         }
     </div>
+    @* Localize the unix-seconds airing time to the viewer's clock so a single
+       cached shelf renders correctly for users in different timezones. *@
+    <script>
+        (function () {
+            document.querySelectorAll('.library-card-progress[data-airing-at]').forEach(function (el) {
+                var ts = parseInt(el.getAttribute('data-airing-at'), 10);
+                if (!ts) return;
+                var d = new Date(ts * 1000);
+                var hh = String(d.getHours()).padStart(2, '0');
+                var mm = String(d.getMinutes()).padStart(2, '0');
+                el.textContent = el.textContent + ' · ' + hh + ':' + mm;
+            });
+        })();
+    </script>
 }
 else if (!string.IsNullOrEmpty(Model.EmptyMessage))
 {

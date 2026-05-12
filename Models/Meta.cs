@@ -73,6 +73,12 @@ namespace AnimeList.Models
         // two never coexist on the same card today, but both feed the same
         // top-left badge slot in _PosterGrid.
         public int? airingEpisode { get; set; }
+
+        // Unix-seconds airing timestamp paired with airingEpisode. Surfaced
+        // as a "· HH:mm" suffix on the badge, formatted client-side to the
+        // viewer's local timezone since the shelf is served to users in
+        // different timezones from a single cached build.
+        public long? airingAt { get; set; }
         public List<string> genres { get; set; }
         public string background { get; set; }
         public string type { get; set; } = MetaType.series.ToString();
