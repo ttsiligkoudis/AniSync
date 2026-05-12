@@ -132,6 +132,9 @@ body.anime-detail-page .anime-detail-hero {
     .site-header-nav a,
     .site-header-nav a:link,
     .site-header-nav a:visited {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
         padding: 0.45rem 0.8rem;
         color: #ccc;
         text-decoration: none;
@@ -139,6 +142,13 @@ body.anime-detail-page .anime-detail-hero {
         font-weight: 500;
         border-radius: 0.5rem;
         transition: background 0.15s, color 0.15s;
+    }
+
+    /* Inline nav icons sit flush with the label baseline. flex-shrink:0 keeps
+       the icon's box from squishing when the row tightens at narrower
+       desktop widths (between the 992px breakpoint and ~1200px). */
+    .site-header-nav .nav-icon {
+        flex-shrink: 0;
     }
 
     .site-header-nav a:hover,
@@ -304,6 +314,9 @@ body.drawer-open .drawer-backdrop {
 .nav-drawer-nav a,
 .nav-drawer-nav a:link,
 .nav-drawer-nav a:visited {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
     padding: 0.85rem 0.5rem;
     color: #ccc;
     text-decoration: none;
@@ -311,6 +324,13 @@ body.drawer-open .drawer-backdrop {
     font-weight: 500;
     border-radius: 0.5rem;
     transition: background 0.15s, color 0.15s;
+}
+
+/* Drawer icons are slightly larger than the inline-desktop ones (20px vs
+   16px). flex-shrink:0 stops the icon collapsing when the label wraps on
+   narrow phones (e.g. "My Library" plus an icon at 320px). */
+.nav-drawer-nav .nav-icon {
+    flex-shrink: 0;
 }
 
 .nav-drawer-nav a:hover,
