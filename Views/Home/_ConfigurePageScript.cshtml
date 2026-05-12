@@ -369,7 +369,7 @@
 
         var completed = 0, failed = 0, processed = 0, total = 0;
         try {
-            var resp = await fetch('/Auth/SyncEntries', { signal: syncAbort.signal });
+            var resp = await fetch('/Auth/SyncEntries', { signal: syncAbort.signal, skipLoader: true });
             if (!resp.ok) throw new Error((await resp.text()) || 'Failed to fetch entries.');
             var body = await resp.json();
             var entries = body.entries || [];
@@ -410,11 +410,16 @@
                     var slice = batches[idx];
 
                     try {
+                        // skipLoader: the modal's progress bar is the
+                        // sync's progress indicator — the global full-
+                        // screen overlay on top of it would obscure the
+                        // bar + Cancel button mid-flight.
                         var r = await fetch('/Auth/SyncBatch', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ entries: slice }),
                             signal: syncAbort.signal,
+                            skipLoader: true,
                         });
                         if (!r.ok) {
                             // Server rejected the whole batch (e.g. session expired). Count
