@@ -64,7 +64,7 @@ namespace AnimeList.Services
             var firstPage = await FetchKitsuPageAsync(firstUrl, tokenData);
             if (firstPage == null) return [];
 
-            await ProcessKitsuPageAsync(firstPage, list, isUserList, genre, seenIds, groupSeasons);
+            await ProcessKitsuPageAsync(firstPage, list, isUserList, genre, seenIds, groupSeasons, hideUnreleased);
 
             if (fetchAll)
             {
@@ -89,7 +89,7 @@ namespace AnimeList.Services
                     foreach (var page in pages)
                     {
                         if (page == null) continue;
-                        await ProcessKitsuPageAsync(page, list, isUserList, genre, seenIds, groupSeasons);
+                        await ProcessKitsuPageAsync(page, list, isUserList, genre, seenIds, groupSeasons, hideUnreleased);
                     }
                 }
                 else if (!totalCount.HasValue && firstDataCount >= CatalogPageSize)
@@ -107,7 +107,7 @@ namespace AnimeList.Services
                         var dataCount = (page["data"] as JArray)?.Count ?? 0;
                         if (dataCount == 0) break;
 
-                        await ProcessKitsuPageAsync(page, list, isUserList, genre, seenIds, groupSeasons);
+                        await ProcessKitsuPageAsync(page, list, isUserList, genre, seenIds, groupSeasons, hideUnreleased);
                         if (dataCount < CatalogPageSize) break;
                         offset += CatalogPageSize;
                     }
@@ -147,7 +147,7 @@ namespace AnimeList.Services
         // Parses a single Kitsu list-style page and merges the entries into <paramref name="seenIds"/>.
         // Centralised so the parallel-fan-out path and the fallback serial path share the same
         // dedup, genre-filter, and mapping-resolution logic.
-        private async Task ProcessKitsuPageAsync(JObject json, ListType? list, bool isUserList, string genre, Dictionary<string, Meta> seenIds, bool groupSeasons)
+        private async Task ProcessKitsuPageAsync(JObject json, ListType? list, bool isUserList, string genre, Dictionary<string, Meta> seenIds, bool groupSeasons, bool hideUnreleased)
         {
             // Build O(1) lookups for `included` resources by id, separated by type
             var includedAnime = new Dictionary<string, JObject>();

@@ -102,11 +102,16 @@
         }
     </div>
     @* Localize the unix-seconds airing time to the viewer's clock so a single
-       cached shelf renders correctly for users in different timezones. *@
+       cached shelf renders correctly for users in different timezones. The
+       partial is rendered multiple times per page (one per shelf) so each
+       script block could otherwise re-format already-localized badges from
+       a sibling grid. Strip data-airing-at after formatting so subsequent
+       script blocks skip the already-handled cards. *@
     <script>
         (function () {
             document.querySelectorAll('.library-card-progress[data-airing-at]').forEach(function (el) {
                 var ts = parseInt(el.getAttribute('data-airing-at'), 10);
+                el.removeAttribute('data-airing-at');
                 if (!ts) return;
                 var d = new Date(ts * 1000);
                 var hh = String(d.getHours()).padStart(2, '0');
