@@ -440,7 +440,7 @@ namespace AnimeList.Controllers
                 var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
                 var uid = configuration?.tokenUid;
                 if (string.IsNullOrEmpty(uid))
-                    return BadRequest(new ApiError("config is not stored — diff requires a v4/v5 install URL"));
+                    return BadRequest(new ApiError("config is not stored — diff requires a v5 install URL"));
 
                 var linked = await _configStore.GetLinkedTokensAsync(uid);
                 if (linked.Count == 0)
@@ -562,7 +562,7 @@ namespace AnimeList.Controllers
                 var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
                 var uid = configuration?.tokenUid;
                 if (string.IsNullOrEmpty(uid))
-                    return BadRequest(new ApiError("config is not stored — only v4/v5 install URLs can swap primary"));
+                    return BadRequest(new ApiError("config is not stored — only v5 install URLs can swap primary"));
 
                 var (newPrimary, reason) = await _configStore.SwapPrimaryAsync(uid, service, force);
                 if (newPrimary == null)
@@ -730,7 +730,7 @@ namespace AnimeList.Controllers
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new ApiError("config has no primary token"));
 
-                // Only v5 (UID-only) URLs have linked tokens — v3/v4 inline URLs can
+                // Only v5 (UID-only) URLs have linked tokens — v3 inline anonymous URLs can
                 // only carry the primary, so the linked list is necessarily empty.
                 // ResolveConfigAsync decodes the install URL and pulls tokenUid out of
                 // either the inline JSON (v4) or the embedded UID byte segment (v5).

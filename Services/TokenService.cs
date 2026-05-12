@@ -41,12 +41,12 @@ namespace AnimeList.Services
 
                 if (!string.IsNullOrEmpty(configuration?.tokenUid))
                 {
-                    // v4: token JSON lives in the config store, not the URL.
+                    // v5: token JSON lives in the config store, looked up by UID.
                     tokenData = await _configStore.GetAsync(configuration.tokenUid);
                 }
                 else if (!string.IsNullOrEmpty(configuration?.tokenData))
                 {
-                    // v1/v2/v3: token JSON inline in the URL.
+                    // v3: anonymous install with token JSON inline in the URL.
                     tokenData = DeserializeObject<TokenData>(configuration.tokenData);
                 }
             }
@@ -104,7 +104,7 @@ namespace AnimeList.Services
                     if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
                     {
                         _anilistTokenCache[cacheKey] = refreshed;
-                        // Write back to the config store so v4 install URLs survive token rotation.
+                        // Write back to the config store so v5 install URLs survive token rotation.
                         await _configStore.UpdateByUserAsync(refreshed);
                     }
                     tokenData = refreshed;

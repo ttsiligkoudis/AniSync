@@ -3,25 +3,20 @@
     public class Configuration
     {
         /// <summary>
-        /// Inline token JSON (set for legacy v1/v2/v3 install URLs that embed credentials in
-        /// the URL itself). Mutually exclusive with <see cref="tokenUid"/>: v4 URLs leave this
-        /// null and store the token JSON in <see cref="Services.Interfaces.IConfigStore"/>.
+        /// Inline token JSON, set for v3 install URLs that embed credentials in the URL
+        /// itself (the anonymous-install path — no UID to look up). Mutually exclusive with
+        /// <see cref="tokenUid"/>: v5 URLs store the token JSON in
+        /// <see cref="Services.Interfaces.IConfigStore"/> instead and leave this null.
         /// </summary>
         public string tokenData  { get; set; }
 
         /// <summary>
         /// 22-char base64url UID pointing at a row in <see cref="Services.Interfaces.IConfigStore"/>.
-        /// Set for v4 and v5 install URLs.
+        /// Set for v5 install URLs; null for v3 anonymous installs. Presence of this field is
+        /// the signal that toggle flags should be hydrated from the store via
+        /// <see cref="Utils.ResolveConfigAsync"/>.
         /// </summary>
         public string tokenUid { get; set; }
-
-        /// <summary>
-        /// True for v5 URLs (UID only, flags persisted in the config store). When set, callers
-        /// must hydrate the flag fields below from
-        /// <see cref="Services.Interfaces.IConfigStore.GetFlagsAsync"/> before reading them —
-        /// see <see cref="Utils.ResolveConfigAsync"/>.
-        /// </summary>
-        public bool flagsInDb { get; set; }
 
         public bool showCurrent { get; set; }
         public bool showCompleted { get; set; }

@@ -376,43 +376,9 @@ namespace AnimeList
             return true;
         }
 
-        public static string CompressString(string text)
-        {
-            byte[] buffer = Encoding.UTF8.GetBytes(text);
-            using var memoryStream = new MemoryStream();
-            using (var gzipStream = new GZipStream(memoryStream, CompressionMode.Compress, true))
-            {
-                gzipStream.Write(buffer, 0, buffer.Length);
-            }
-            memoryStream.Position = 0;
-            byte[] compressed = new byte[memoryStream.Length];
-            memoryStream.Read(compressed, 0, compressed.Length);
-
-            byte[] gzBuffer = new byte[compressed.Length + 4];
-            Buffer.BlockCopy(compressed, 0, gzBuffer, 4, compressed.Length);
-            Buffer.BlockCopy(BitConverter.GetBytes(buffer.Length), 0, gzBuffer, 0, 4);
-            return Convert.ToBase64String(gzBuffer);
-        }
-
-        public static string DecompressString(string compressedText)
-        {
-            byte[] gzBuffer = Convert.FromBase64String(compressedText);
-            using var memoryStream = new MemoryStream();
-            int dataLength = BitConverter.ToInt32(gzBuffer, 0);
-            memoryStream.Write(gzBuffer, 4, gzBuffer.Length - 4);
-
-            byte[] buffer = new byte[dataLength];
-            memoryStream.Position = 0;
-
-            using (var gzipStream = new GZipStream(memoryStream, CompressionMode.Decompress))
-            {
-                gzipStream.Read(buffer, 0, buffer.Length);
-            }
-            return Encoding.UTF8.GetString(buffer);
-        }
-
         /// <summary>
         /// Compresses text using GZip and returns a URL-safe Base64 string (no padding, +→-, /→_).
+        /// Used by HomeController to build the v3 inline-token bytes for anonymous installs.
         /// </summary>
         public static string CompressToUrlSafe(string text)
         {
@@ -423,15 +389,6 @@ namespace AnimeList
                 gzip.Write(data, 0, data.Length);
             }
             return Base64UrlEncode(output.ToArray());
-        }
-
-        /// <summary>
-        /// Decompresses a URL-safe Base64 GZip string back to the original text.
-        /// </summary>
-        public static string DecompressFromUrlSafe(string compressedText)
-        {
-            byte[] data = Base64UrlDecode(compressedText);
-            return DecompressBytes(data);
         }
 
         /// <summary>
@@ -470,66 +427,32 @@ namespace AnimeList
 
         /// <summary>
         /// Decodes a config route parameter into a <see cref="Configuration"/>.
-        /// Supports seven formats for backward compatibility:
+        /// Two active formats:
         /// <list type="bullet">
-        ///   <item>Legacy raw JSON (starts with '{')</item>
-        ///   <item>GZip-compressed JSON via Base64Url (GZip magic bytes 0x1F 0x8B)</item>
-        ///   <item>Binary v1: [0x01][flags byte][GZip tokenData] — 8 catalog flags</item>
-        ///   <item>Binary v2: [0x02][flags1][flags2][GZip tokenData] — 16 catalog flags</item>
-        ///   <item>Binary v3: [0x03][flags1][flags2][flags3][GZip tokenData] — 24 catalog flags</item>
-        ///   <item>Binary v4: [0x04][flags1][flags2][flags3][16-byte UID] — flags in the URL,
-        ///     token JSON in the config store. Decoded for back-compat; new installs use v5.</item>
-        ///   <item>Binary v5: [0x05][16-byte UID] — UID only; both flags and token JSON live
-        ///     in the config store. Lets the configure-page "Save" button persist toggle
-        ///     changes server-side without forcing a reinstall in Stremio.</item>
+        ///   <item>Binary v3: [0x03][flags1][flags2][flags3][GZip tokenData] — 24 catalog
+        ///     flags + inline token JSON. Used for anonymous installs that have no
+        ///     server-side row to point a UID at.</item>
+        ///   <item>Binary v5: [0x05][16-byte UID] — UID only; both flags and token JSON
+        ///     live in the config store. Lets the configure-page "Save" button persist
+        ///     toggle changes server-side without forcing a reinstall in Stremio.</item>
         /// </list>
         /// For v5, the flag fields on the returned <see cref="Configuration"/> stay at their
         /// default (false) — call <see cref="ResolveConfigAsync"/> to hydrate them from the
-        /// config store, or check <see cref="Configuration.flagsInDb"/> and do it yourself.
+        /// config store.
         /// </summary>
         public static Configuration DecodeConfig(string config)
         {
             if (string.IsNullOrEmpty(config))
                 return null;
 
-            // Legacy format: raw JSON starts with '{'
-            if (config.StartsWith('{'))
-            {
-                var result = DeserializeObject<Configuration>(config);
-                if (!string.IsNullOrEmpty(result?.tokenData))
-                    result.tokenData = DecompressString(Uri.UnescapeDataString(result.tokenData));
-                return result;
-            }
-
             byte[] data = Base64UrlDecode(config);
-
-            // Previous format: GZip-compressed JSON (magic bytes 0x1F 0x8B)
-            if (data.Length >= 2 && data[0] == 0x1F && data[1] == 0x8B)
-            {
-                string json = DecompressBytes(data);
-                var result = DeserializeObject<Configuration>(json);
-                if (!string.IsNullOrEmpty(result?.tokenData))
-                    result.tokenData = DecompressString(Uri.UnescapeDataString(result.tokenData));
-                return result;
-            }
-
-            // Binary v1: [0x01][flags][GZip tokenData]
-            if (data.Length >= 2 && data[0] == 0x01)
-                return DecodeBinaryConfig(data, headerLen: 2, flags1: data[1], flags2: 0, flags3: 0);
-
-            // Binary v2: [0x02][flags1][flags2][GZip tokenData]
-            if (data.Length >= 3 && data[0] == 0x02)
-                return DecodeBinaryConfig(data, headerLen: 3, flags1: data[1], flags2: data[2], flags3: 0);
 
             // Binary v3: [0x03][flags1][flags2][flags3][GZip tokenData]
             if (data.Length >= 4 && data[0] == 0x03)
-                return DecodeBinaryConfig(data, headerLen: 4, flags1: data[1], flags2: data[2], flags3: data[3]);
-
-            // Binary v4: [0x04][flags1][flags2][flags3][16-byte UID]
-            if (data.Length >= 4 + 16 && data[0] == 0x04)
             {
-                var cfg = DecodeBinaryFlags(data[1], data[2], data[3]);
-                cfg.tokenUid = Base64UrlEncode(data[4..(4 + 16)]);
+                var cfg = new Configuration();
+                ApplyBinaryFlags(cfg, data[1], data[2], data[3]);
+                cfg.tokenData = data.Length > 4 ? DecompressBytes(data[4..]) : null;
                 return cfg;
             }
 
@@ -539,7 +462,6 @@ namespace AnimeList
                 return new Configuration
                 {
                     tokenUid = Base64UrlEncode(data[1..(1 + 16)]),
-                    flagsInDb = true,
                 };
             }
 
@@ -547,14 +469,14 @@ namespace AnimeList
         }
 
         /// <summary>
-        /// Calls <see cref="DecodeConfig"/> and, for v5 URLs, hydrates the toggle flags from
-        /// the config store. Use this from controllers that need the flag bits (Manifest,
-        /// Stream, Home). v3/v4 paths never touch the store.
+        /// Calls <see cref="DecodeConfig"/> and, for v5 URLs (anything with a stored
+        /// <see cref="Configuration.tokenUid"/>), hydrates the toggle flags from the
+        /// config store. v3 URLs carry their flags inline so this is a no-op for them.
         /// </summary>
         public static async Task<Configuration> ResolveConfigAsync(string config, IConfigStore store)
         {
             var cfg = DecodeConfig(config);
-            if (cfg?.flagsInDb == true && !string.IsNullOrEmpty(cfg.tokenUid))
+            if (!string.IsNullOrEmpty(cfg?.tokenUid))
             {
                 var (f1, f2, f3, _) = await store.GetFlagsAsync(cfg.tokenUid);
                 ApplyBinaryFlags(cfg, f1, f2, f3);
@@ -582,8 +504,9 @@ namespace AnimeList
 
         /// <summary>
         /// Writes flag bits into the existing <see cref="Configuration"/> instance. Used by
-        /// both <see cref="DecodeBinaryFlags"/> (URL bytes path) and <see cref="ResolveConfigAsync"/>
-        /// (DB-backed path) so the bit layout stays in one place.
+        /// both <see cref="DecodeConfig"/> (v3 inline-bytes path) and
+        /// <see cref="ResolveConfigAsync"/> (v5 store-backed path) so the bit layout stays
+        /// in one place.
         /// </summary>
         public static void ApplyBinaryFlags(Configuration cfg, byte flags1, byte flags2, byte flags3)
         {
@@ -651,20 +574,6 @@ namespace AnimeList
             if (cfg.enableSeasonGrouping)   f3 |= 0x20;
 
             return (f1, f2, f3);
-        }
-
-        private static Configuration DecodeBinaryConfig(byte[] data, int headerLen, byte flags1, byte flags2, byte flags3)
-        {
-            var cfg = DecodeBinaryFlags(flags1, flags2, flags3);
-            cfg.tokenData = data.Length > headerLen ? DecompressBytes(data[headerLen..]) : null;
-            return cfg;
-        }
-
-        private static Configuration DecodeBinaryFlags(byte flags1, byte flags2, byte flags3)
-        {
-            var cfg = new Configuration();
-            ApplyBinaryFlags(cfg, flags1, flags2, flags3);
-            return cfg;
         }
 
         /// <summary>
