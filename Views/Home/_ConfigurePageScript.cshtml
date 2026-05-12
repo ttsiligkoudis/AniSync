@@ -158,11 +158,34 @@
 
     refreshUrls();
 
+    // Selector for every flag-bearing toggle. Used in three places: the
+    // refreshUrls change handler (keeps the install URL preview in sync),
+    // the floating-save-bar dirty marker (reveals the Save bar when any
+    // toggle flips), and the post-save re-init that hides the bar.
+    var FLAG_TOGGLE_SELECTOR = '.catalogCheck, .discoverCheck, #showExternalStreams, #showManageEntry, #autoTrackProgress, #groupSeasons, #hideUnreleasedWatching';
+
     // Catalog + stream toggles — recompute the manifest URL whenever flags change. (For
     // v5 the path bytes don't actually change since flags live in DB, but we still call
     // refreshUrls() to keep the path in sync after a SaveConfig response bumps revision.)
-    $('.catalogCheck, .discoverCheck, #showExternalStreams, #showManageEntry, #autoTrackProgress, #groupSeasons, #hideUnreleasedWatching')
-        .on('change', refreshUrls);
+    $(FLAG_TOGGLE_SELECTOR).on('change', refreshUrls);
+
+    // Floating save bar — one global commit point that lives on every
+    // configure surface (/configure, /stremio, /advanced). setDirty(true)
+    // is fired on any flag-toggle change; the user's Save click persists
+    // every toggle's state in one POST. Hidden until the user actually
+    // changes something so the bar doesn't clutter a freshly-loaded page.
+    function setDirty(state) {
+        var $bar = $('#floatingSaveBar');
+        if ($bar.length === 0) return;
+        if (state) {
+            $bar.removeAttr('hidden');
+            $('#floatingSaveStatus').text('Unsaved changes').removeClass('floating-save-status-success');
+            $('#floatingSaveBtn').prop('disabled', false).text('Save');
+        } else {
+            $bar.attr('hidden', 'hidden');
+        }
+    }
+    $(FLAG_TOGGLE_SELECTOR).on('change', function () { setDirty(true); });
 
     // When an enable checkbox is toggled, enable/disable its discover-only sibling
     $('.catalogCheck').on('change', function () {
@@ -514,19 +537,23 @@
     // for "Saved" / "Failed" feedback so users have an obvious
     // commit point for site preferences (currently just the
     // Group-anime-seasons toggle).
-    $('#savePreferencesBtn').on('click', async function () {
+    // Floating-save-bar commit handler. saveFlags() handles the POST + the
+    // configRevision bump + install-URL refresh. On success we flash a
+    // brief "Saved ✓" confirmation, then auto-hide the bar so the user
+    // gets explicit feedback before the surface returns to its calm
+    // resting state.
+    $('#floatingSaveBtn').on('click', async function () {
         var $btn = $(this);
-        var $status = $('#savePreferencesStatus');
+        var $status = $('#floatingSaveStatus');
         $btn.prop('disabled', true).text('Saving…');
-        $status.removeClass('save-success save-error').text('');
         try {
             await saveFlags();
-            $status.addClass('save-success').text('✓ Saved');
+            $status.addClass('floating-save-status-success').text('Saved ✓');
+            $btn.text('Saved');
+            setTimeout(function () { setDirty(false); }, 1200);
         } catch {
-            $status.addClass('save-error').text('✗ Save failed');
-        } finally {
-            $btn.prop('disabled', false).text('Save');
-            setTimeout(function () { $status.text(''); }, 3000);
+            $status.removeClass('floating-save-status-success').text('Save failed — retry?');
+            $btn.prop('disabled', false).text('Retry');
         }
     });
 

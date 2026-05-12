@@ -1,12 +1,13 @@
 @*
     Shared "Preferences" card used by both /configure and /stremio. The caller
     passes a list of toggle descriptors; this partial renders the section-card
-    chrome + a single Save button that the _ConfigurePageScript binds to via
-    #savePreferencesBtn. When the list is empty (e.g. anonymous user on the
-    /configure page, where every site-side pref is account-only) the whole
-    card — including the Save button — is omitted so we don't render an
-    actions row with nothing to commit. The DOM ids on each <input> must
-    match the selectors readFlags() in _ConfigurePageScript already drives.
+    chrome with one toggle row per descriptor. Saving is owned by the floating
+    save bar (_FloatingSaveBar.cshtml) — any flag-bearing toggle in the page
+    flips it on, and one Save click persists every toggle's state in one call.
+    When the descriptor list is empty (anonymous user / nothing to surface
+    on this view) the whole card is omitted so the page doesn't get an
+    empty section header. DOM ids on each <input> must match the selectors
+    readFlags() in _ConfigurePageScript already drives.
 *@
 @model IReadOnlyList<(string Id, string Label, string Description, bool Checked)>
 
@@ -32,11 +33,6 @@
                     </label>
                 </div>
             }
-        </div>
-
-        <div class="btn-action-row">
-            <button id="savePreferencesBtn" type="button" class="btn-primary-action btn-login">Save</button>
-            <span id="savePreferencesStatus" class="save-preferences-status" aria-live="polite"></span>
         </div>
     </section>
 }
