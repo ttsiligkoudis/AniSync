@@ -7,11 +7,11 @@ using System.Diagnostics;
 
 public class HomeController : Controller
 {
-    // Maximum number of "Continue watching" tiles surfaced on the dashboard. Six fits
-    // 2-3 rows on the dashboard's narrow main column without scrolling, and matches
-    // the kind of "what you were last watching" shape users expect on home screens —
-    // not a full list, just the most recent few.
-    private const int ContinueWatchingMaxItems = 6;
+    // Maximum number of "Continue watching" tiles surfaced on the dashboard. Matches
+    // the "Most Popular / Most Anticipated" shelves so the row reads as a full
+    // horizontal scroller rather than a stubby 2-3 row block — the user can fan
+    // through their backlog without leaving the dashboard.
+    private const int ContinueWatchingMaxItems = 15;
 
     private readonly ITokenService _tokenService;
     private readonly IConfigStore _configStore;
