@@ -83,6 +83,35 @@ namespace AnimeList.Services
                     ON configs(scrobble_token)   WHERE scrobble_token   IS NOT NULL;
                 """;
             create.ExecuteNonQuery();
+
+            // Idempotent column additions for deployed databases predating
+            // the column. Stays even though the canonical CREATE above
+            // already lists the column — pre-existing fly.dev DB files
+            // were minted before that column was added and SQLite's
+            // CREATE IF NOT EXISTS doesn't alter existing tables. The
+            // try/catch covers the "already exists" race on a fresh DB.
+            EnsureColumn(conn, "configs", "real_debrid_api_key", "TEXT");
+        }
+
+        private static void EnsureColumn(SqliteConnection conn, string table, string column, string typeAndConstraints)
+        {
+            using var check = conn.CreateCommand();
+            check.CommandText = $"PRAGMA table_info({table})";
+            using var reader = check.ExecuteReader();
+            // PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk.
+            // Name is at ordinal 1.
+            while (reader.Read())
+            {
+                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                {
+                    return; // already present
+                }
+            }
+            reader.Close();
+
+            using var alter = conn.CreateCommand();
+            alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {typeAndConstraints}";
+            alter.ExecuteNonQuery();
         }
 
         public async Task<string> UpsertAsync(TokenData tokenData)
