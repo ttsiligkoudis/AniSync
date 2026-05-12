@@ -538,22 +538,6 @@
     <div class="poster-scroll-row" data-anime-recommendations-grid></div>
 </section>
 
-@* Episode-stream picker modal. Hidden until an episode row is clicked;
-   the JS at the foot of the page renders state into it. Reuses the
-   .sync-modal / .sync-modal-card styles from the configure page so the
-   shell is themed without inventing new classes. *@
-<div id="episodeStreamModal" class="sync-modal episode-stream-modal" hidden aria-hidden="true">
-    <div class="sync-modal-card">
-        <div class="sync-modal-header">
-            <h3 class="sync-modal-title" id="episodeStreamTitle">Episode</h3>
-            <button id="episodeStreamClose" class="sync-modal-close" type="button" aria-label="Close">&times;</button>
-        </div>
-        <div id="episodeStreamBody" class="sync-modal-body">
-            @* Body is rendered by JS — loading / list / player / empty states all swap in here. *@
-        </div>
-    </div>
-</div>
-
 @functions {
     // Builds an in-app href for a Link based on its category, or returns
     // null when the link doesn't map (e.g. a tag link without an id, or a
@@ -966,224 +950,46 @@ else
     })();
 </script>
 
-@* Episode-stream picker. Clicking an episode row opens the modal, which
-   fetches /anime/episode-streams and renders two sections: RD-cached
-   debrid streams (when the user has a Real-Debrid key) and the legal
-   external streaming sites that GetExternalLinksAsync surfaces.
-   Future-dated episodes don't trigger — there's nothing to stream yet. *@
+@* Episode rows navigate to the dedicated /anime/{id}/watch/{ep} page
+   (Plyr-based player + source picker + prev/next nav). Future-dated
+   episodes don't trigger — nothing to stream yet. We pass season in
+   the URL only when the show actually has more than one cour so
+   single-season URLs stay clean. *@
 <script>
     (function () {
         var animeId = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.Anime?.id));
         if (!animeId) return;
 
-        var modal = document.getElementById('episodeStreamModal');
-        var titleEl = document.getElementById('episodeStreamTitle');
-        var bodyEl = document.getElementById('episodeStreamBody');
-        var closeBtn = document.getElementById('episodeStreamClose');
-        if (!modal || !bodyEl) return;
-
-        function openModal(label) {
-            titleEl.textContent = label;
-            modal.hidden = false;
-            modal.setAttribute('aria-hidden', 'false');
-        }
-        function closeModal() {
-            modal.hidden = true;
-            modal.setAttribute('aria-hidden', 'true');
-            // Stop any inline <video> so audio doesn't keep playing after close.
-            var v = bodyEl.querySelector('video');
-            if (v) { try { v.pause(); } catch (_) {} v.removeAttribute('src'); v.load(); }
-            bodyEl.innerHTML = '';
-        }
-        closeBtn.addEventListener('click', closeModal);
-        modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape' && !modal.hidden) closeModal();
-        });
-
-        function renderLoading() {
-            bodyEl.innerHTML = '<p class="hint-text" style="text-align:center;margin:1rem 0;">Looking for streams…</p>';
-        }
-
-        function el(tag, attrs, text) {
-            var n = document.createElement(tag);
-            if (attrs) Object.keys(attrs).forEach(function (k) {
-                if (k === 'class') n.className = attrs[k];
-                else n.setAttribute(k, attrs[k]);
-            });
-            if (text != null) n.textContent = text;
-            return n;
-        }
-
-        function renderState(data) {
-            bodyEl.innerHTML = '';
-
-            var debrid = (data && data.debridStreams) || [];
-            var external = (data && data.externalLinks) || [];
-
-            if (debrid.length > 0) {
-                var h = el('h4', { class: 'episode-stream-section-title' }, 'Debrid streams');
-                bodyEl.appendChild(h);
-                var list = el('ul', { class: 'episode-stream-list' });
-                debrid.forEach(function (s) {
-                    var row = el('li', { class: 'episode-stream-row' });
-                    var btn = el('button', { type: 'button', class: 'episode-stream-pick' });
-
-                    var qual = el('span', { class: 'episode-stream-quality' }, s.quality || '—');
-                    btn.appendChild(qual);
-
-                    var meta = el('span', { class: 'episode-stream-meta' });
-                    // The title carries the release / tracker info; first line
-                    // is usually enough at picker width.
-                    var firstLine = (s.title || s.name || '').split('\n')[0];
-                    meta.appendChild(el('span', { class: 'episode-stream-title' }, firstLine));
-
-                    // Sub-row: size + seeders + language. Each piece is its
-                    // own span so missing fields just drop out instead of
-                    // showing "·" runs with nothing between them.
-                    var sub = el('span', { class: 'episode-stream-sub' });
-                    if (s.size) sub.appendChild(el('span', { class: 'episode-stream-size' }, s.size));
-                    if (typeof s.seeders === 'number' && s.seeders > 0) {
-                        sub.appendChild(el('span', { class: 'episode-stream-seeders' }, '👤 ' + s.seeders));
-                    }
-                    if (s.language) {
-                        sub.appendChild(el('span', { class: 'episode-stream-language' }, s.language));
-                    }
-                    if (sub.childNodes.length > 0) meta.appendChild(sub);
-                    btn.appendChild(meta);
-
-                    btn.addEventListener('click', function () {
-                        if (s.playable) playInline(s);
-                        else showExternalPlayback(s);
-                    });
-                    row.appendChild(btn);
-                    list.appendChild(row);
-                });
-                bodyEl.appendChild(list);
-            }
-
-            if (external.length > 0) {
-                var h2 = el('h4', { class: 'episode-stream-section-title' },
-                    debrid.length > 0 ? 'Other sites' : 'Watch on');
-                bodyEl.appendChild(h2);
-                var ul = el('ul', { class: 'episode-stream-list episode-stream-list-external' });
-                external.forEach(function (l) {
-                    var a = el('a', {
-                        class: 'episode-stream-pick',
-                        href: l.url, target: '_blank', rel: 'noopener noreferrer',
-                    });
-                    a.appendChild(el('span', { class: 'episode-stream-title' }, l.site));
-                    var li = el('li', { class: 'episode-stream-row' });
-                    li.appendChild(a);
-                    ul.appendChild(li);
-                });
-                bodyEl.appendChild(ul);
-            }
-
-            if (debrid.length === 0 && external.length === 0) {
-                var msg = data && data.anonymous
-                    ? "Sign in and add a Real-Debrid key in Settings to find streaming sources for this episode."
-                    : (data && !data.rdConfigured
-                        ? "No streaming sources found. Add a Real-Debrid key in Settings to surface RD-cached torrents via Torrentio."
-                        : "No streaming sources found for this episode.");
-                bodyEl.appendChild(el('p', { class: 'hint-text', style: 'text-align:center;margin:1rem 0;' }, msg));
-            }
-        }
-
-        function playInline(stream) {
-            bodyEl.innerHTML = '';
-            var video = el('video', {
-                class: 'episode-stream-video',
-                src: stream.url, controls: 'controls', autoplay: 'autoplay',
-                playsinline: 'playsinline',
-            });
-            bodyEl.appendChild(video);
-            var foot = el('div', { class: 'episode-stream-footer' });
-            var back = el('button', { type: 'button', class: 'btn-ghost btn-ghost-sm' }, 'Back to sources');
-            back.addEventListener('click', function () {
-                try { video.pause(); } catch (_) {}
-                // Stash + restore: re-fire the last fetch trigger so the
-                // sources list re-renders without an extra round-trip.
-                var ctx = modal._lastCtx;
-                if (ctx) loadStreams(ctx.season, ctx.episode, ctx.label);
-                else closeModal();
-            });
-            foot.appendChild(back);
-            bodyEl.appendChild(foot);
-        }
-
-        function showExternalPlayback(stream) {
-            bodyEl.innerHTML = '';
-            bodyEl.appendChild(el('p', { class: 'hint-text', style: 'margin:0 0 1rem;' },
-                "This file's format (likely MKV) doesn't play reliably in browsers. Open it in your external player, or copy the URL."));
-            var row = el('div', { class: 'episode-stream-footer' });
-            var open = el('a', {
-                class: 'btn-ghost btn-ghost-sm',
-                href: stream.url, target: '_blank', rel: 'noopener noreferrer',
-            }, 'Open externally');
-            var copy = el('button', { type: 'button', class: 'btn-ghost btn-ghost-sm' }, 'Copy URL');
-            copy.addEventListener('click', function () {
-                navigator.clipboard.writeText(stream.url).then(function () {
-                    copy.textContent = 'Copied';
-                    setTimeout(function () { copy.textContent = 'Copy URL'; }, 1200);
-                });
-            });
-            var back = el('button', { type: 'button', class: 'btn-ghost btn-ghost-sm' }, 'Back');
-            back.addEventListener('click', function () {
-                var ctx = modal._lastCtx;
-                if (ctx) loadStreams(ctx.season, ctx.episode, ctx.label);
-            });
-            row.appendChild(open);
-            row.appendChild(copy);
-            row.appendChild(back);
-            bodyEl.appendChild(row);
-        }
-
-        function loadStreams(season, episode, label) {
-            modal._lastCtx = { season: season, episode: episode, label: label };
-            openModal(label);
-            renderLoading();
-            var qs = 'id=' + encodeURIComponent(animeId)
-                + '&episode=' + encodeURIComponent(episode)
-                + (season != null ? '&season=' + encodeURIComponent(season) : '');
-            fetch('/anime/episode-streams?' + qs, {
-                credentials: 'same-origin',
-                headers: { 'Accept': 'application/json' },
-            })
-                .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (data) {
-                    if (!data) {
-                        bodyEl.innerHTML = '<p class="hint-text" style="text-align:center;margin:1rem 0;">Couldn\'t load sources. Try again in a moment.</p>';
-                        return;
-                    }
-                    renderState(data);
-                })
-                .catch(function () {
-                    bodyEl.innerHTML = '<p class="hint-text" style="text-align:center;margin:1rem 0;">Couldn\'t load sources. Try again in a moment.</p>';
-                });
-        }
-
-        // Delegate clicks on every episode row inside the episodes list.
-        // Skips rows tagged as future (release date hasn't passed yet) so
-        // the modal doesn't open on an episode that obviously has no
-        // sources to find.
         var episodesList = document.querySelector('.anime-detail-episodes');
         if (!episodesList) return;
+
+        // Walk the rendered rows once to learn whether we have multiple
+        // cours — same data the server used to pick season tabs, just
+        // derived from the DOM so we don't have to plumb it through
+        // ViewBag. Single-cour shows omit the season segment from the
+        // URL to keep it short.
+        var seasons = new Set();
+        episodesList.querySelectorAll('li.anime-detail-episode').forEach(function (li) {
+            seasons.add(li.getAttribute('data-season-num') || '1');
+        });
+        var hasMultipleSeasons = seasons.size > 1;
 
         function handleEpisodeActivate(li) {
             if (!li || li.classList.contains('anime-detail-episode-future')) return;
             var ep = parseInt(li.getAttribute('data-episode-num'), 10);
             var season = parseInt(li.getAttribute('data-season-num'), 10);
             if (!ep || ep <= 0) return;
-            var titleSpan = li.querySelector('.anime-detail-episode-title');
-            var label = titleSpan ? titleSpan.textContent.trim() : ('Episode ' + ep);
-            loadStreams(isNaN(season) ? null : season, ep, label);
+            var idSeg = encodeURIComponent(animeId);
+            var href = hasMultipleSeasons && !isNaN(season)
+                ? '/anime/' + idSeg + '/watch/' + season + '/' + ep
+                : '/anime/' + idSeg + '/watch/' + ep;
+            window.location.assign(href);
         }
 
         episodesList.addEventListener('click', function (e) {
-            // Ignore clicks that come from inside the quick-mark +1 button or
-            // any other interactive child the row will eventually grow —
-            // they handle their own behaviour.
+            // Ignore clicks from inside any interactive child the row may
+            // grow later (quick-mark +1 button etc.) — they handle their
+            // own behaviour.
             if (e.target.closest('button, a, [data-no-stream]')) return;
             var li = e.target.closest('li.anime-detail-episode');
             handleEpisodeActivate(li);

@@ -293,6 +293,166 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
+        /// Dedicated per-episode "watch" page. Replaces the in-page modal on
+        /// /anime/{id}: episode rows on Detail.cshtml now navigate here so the
+        /// user lands on a full screen with the Plyr-styled player, source
+        /// picker, and prev / next episode buttons. The id segment carries
+        /// the same colon-prefixed shapes /anime/{id} accepts
+        /// (anilist:N / kitsu:N / mal:N / tt12345 / tmdb:N) — kept as a
+        /// single segment because the existing /anime/{id} card links work
+        /// the same way and Detail's catch-all is for absorbing slugs.
+        /// </summary>
+        [Route("/anime/{id}/watch/{episode:int}")]
+        [Route("/anime/{id}/watch/{season:int}/{episode:int}")]
+        public async Task<IActionResult> Watch(string id, int episode, int? season = null)
+        {
+            if (string.IsNullOrEmpty(id) || episode <= 0)
+            {
+                Response.StatusCode = 404;
+                return View("NotFound");
+            }
+
+            var tokenData = await _tokenService.GetAccessTokenAsync()
+                ?? new TokenData { anime_service = AnimeService.Kitsu };
+            var animeService = tokenData.anime_service;
+
+            string uid = null;
+            if (!tokenData.anonymousUser)
+            {
+                var (resolvedUid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                uid = resolvedUid;
+            }
+
+            id = await ResolveToServiceIdAsync(id, animeService) ?? id;
+
+            const bool groupSeasons = false;
+            Meta anime;
+            try
+            {
+                anime = await LoadAnimeForWatchAsync(id, animeService, tokenData, groupSeasons);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "AnimeController.Watch failed (id={Id}).", id);
+                Response.StatusCode = 404;
+                return View("NotFound");
+            }
+
+            if (anime?.videos == null || anime.videos.Count == 0)
+            {
+                Response.StatusCode = 404;
+                return View("NotFound");
+            }
+
+            // Match on episode + season — season null means "any cour", which
+            // covers the common single-cour case where the videos all carry
+            // season 1 implicitly.
+            var current = anime.videos.FirstOrDefault(v =>
+                v.episode == episode &&
+                (season == null || (v.season > 0 ? v.season : 1) == season.Value));
+            if (current == null)
+            {
+                Response.StatusCode = 404;
+                return View("NotFound");
+            }
+
+            var (prev, next) = ComputePrevNext(anime.videos, current);
+
+            return View("Watch", new WatchViewModel
+            {
+                Anime = anime,
+                Current = current,
+                Prev = prev,
+                Next = next,
+                ConfigUid = uid,
+                AnonymousUser = tokenData.anonymousUser,
+            });
+        }
+
+        /// <summary>
+        /// Slim version of <see cref="Detail"/>'s per-service id dispatch.
+        /// Returns the resolved Meta or null when no service knows about
+        /// the id. Skips the filler / entry / extras enrichment Detail
+        /// adds — the watch page doesn't need any of it.
+        /// </summary>
+        private async Task<Meta> LoadAnimeForWatchAsync(string id, AnimeService animeService, TokenData tokenData, bool groupSeasons)
+        {
+            if (id.StartsWith(tmdbPrefix))
+                return await _tmdbService.GetAnimeByIdAsync(id, tokenData);
+
+            if (id.StartsWith(kitsuPrefix))
+            {
+                var a = await _kitsuService.GetAnimeByIdAsync(id, tokenData, groupSeasons: groupSeasons);
+                if (a != null) return a;
+                var mapping = await _mappingService.GetKitsuMapping(id);
+                if (mapping?.AnilistId != null)
+                    return await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData, groupSeasons: groupSeasons);
+                return null;
+            }
+
+            if (id.StartsWith(anilistPrefix))
+            {
+                var a = await _anilistService.GetAnimeByIdAsync(id, tokenData, groupSeasons: groupSeasons);
+                if (a != null) return a;
+                var mapping = await _mappingService.GetAnilistMapping(id);
+                if (mapping?.KitsuId != null)
+                    return await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData, groupSeasons: groupSeasons);
+                return null;
+            }
+
+            if (id.StartsWith(malPrefix))
+            {
+                var a = await _malService.GetAnimeByIdAsync(id, tokenData, groupSeasons: groupSeasons);
+                if (a != null) return a;
+                var mapping = await _mappingService.GetMalMapping(id);
+                if (mapping?.AnilistId != null)
+                    return await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData, groupSeasons: groupSeasons);
+                if (mapping?.KitsuId != null)
+                    return await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData, groupSeasons: groupSeasons);
+                return null;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Walks the episode list (in (season, episode) order) and finds the
+        /// neighbours of <paramref name="current"/>. Returns (null, null) at
+        /// the ends so the view can hide the prev / next buttons cleanly.
+        /// Ignores future-dated episodes for the "next" lookup so the user
+        /// doesn't land on an unaired episode picker that has nothing to
+        /// show.
+        /// </summary>
+        private static (Video Prev, Video Next) ComputePrevNext(List<Video> videos, Video current)
+        {
+            var today = DateTime.UtcNow.Date;
+            var ordered = videos
+                .OrderBy(v => v.season > 0 ? v.season : 1)
+                .ThenBy(v => v.episode)
+                .ToList();
+            var idx = ordered.FindIndex(v =>
+                v.episode == current.episode &&
+                (v.season > 0 ? v.season : 1) == (current.season > 0 ? current.season : 1));
+            if (idx < 0) return (null, null);
+
+            Video prev = idx > 0 ? ordered[idx - 1] : null;
+            Video next = null;
+            for (int i = idx + 1; i < ordered.Count; i++)
+            {
+                var v = ordered[i];
+                if (!string.IsNullOrEmpty(v.released) && v.released.Length >= 10
+                    && DateTime.TryParse(v.released[..10], out var d)
+                    && d.Date > today)
+                {
+                    continue; // unaired — skip when picking "next"
+                }
+                next = v;
+                break;
+            }
+            return (prev, next);
+        }
+
+        /// <summary>
         /// Episode click endpoint backing the Detail page's stream picker modal.
         /// Returns the union of (a) RD-resolved Torrentio streams when the user
         /// has a Real-Debrid API key configured on a v5 (uid-backed) install
@@ -527,5 +687,22 @@ namespace AnimeList.Controllers
         public int Progress { get; set; }
         public int? TotalEpisodes { get; set; }
         public double? UserScore { get; set; }
+    }
+
+    /// <summary>
+    /// View model for the dedicated /anime/{id}/watch/{episode} page.
+    /// Carries the resolved anime, the current episode, and pre-computed
+    /// prev / next neighbour episodes so the view can render the nav
+    /// without re-walking the episode list at request time. Prev / Next
+    /// are null at the ends so the view can hide the buttons cleanly.
+    /// </summary>
+    public class WatchViewModel
+    {
+        public Meta Anime { get; set; }
+        public Video Current { get; set; }
+        public Video Prev { get; set; }
+        public Video Next { get; set; }
+        public string ConfigUid { get; set; }
+        public bool AnonymousUser { get; set; }
     }
 }
