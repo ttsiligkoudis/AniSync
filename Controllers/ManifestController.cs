@@ -47,11 +47,12 @@ namespace AnimeList.Controllers
 
         private async Task<JsonResult> BuildManifestAsync(string config)
         {
-            // Hydrates flags from the config store for v5 URLs; v3/v4 URLs carry them inline.
+            // Hydrates flags from the config store for v5 URLs; v3 (anonymous) carries
+            // its flags inline so resolution is a no-op for that branch.
             var configuration = await ResolveConfigAsync(config, _configStore);
 
-            // For v3 (inline tokenData) the in-URL JSON is enough to tell us "logged in"; for
-            // v4/v5 we go through TokenService, which knows how to fetch from the config store.
+            // For v3 (inline tokenData) the in-URL JSON is enough to tell us "logged in";
+            // for v5 we go through TokenService, which knows how to fetch from the store.
             TokenData tokenData = null;
             if (configuration != null)
             {

@@ -47,7 +47,7 @@ namespace AnimeList.Controllers
         private async Task<JsonResult> GetStreamsInternal(string config, string type, string id, JsonResult empty)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync(config);
-            // Hydrates flags from the config store for v5 URLs; v3/v4 carry them inline.
+            // Hydrates flags from the config store for v5 URLs; v3 (anonymous) carries them inline.
             var configuration = await ResolveConfigAsync(config, _configStore);
 
             if (!TryParseAnimeId(id, out var animeId, out var season, out var episode))

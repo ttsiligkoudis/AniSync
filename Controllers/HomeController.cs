@@ -376,7 +376,7 @@ public class HomeController : Controller
         }
 
         // Hydrate the toggle flags. The URL-config path covers Stremio's manifest deep-link
-        // (v3/v4/v5 bytes in the path); the UID fallback covers everything else — direct
+        // (v3/v5 bytes in the path); the UID fallback covers everything else — direct
         // visits to /configure, redirects after primary swap, login-completion landings — so
         // the page always reflects the user's saved state instead of falling back to defaults.
         Configuration configuration = null;
