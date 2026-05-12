@@ -86,6 +86,11 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
+            // Honor the "Hide unaired from Watching" pref. Only affects the
+            // ListType.Current discover-only tab; harmless on every other list.
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
+
             // Discover is always ungrouped — the enableSeasonGrouping pref now
             // only governs Stremio's catalog endpoints. The site renders every
             // cour as its own card so users can land directly on the season
@@ -107,9 +112,9 @@ namespace AnimeList.Controllers
             {
                 metas = tokenData.anime_service switch
                 {
-                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
-                    _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season),
+                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
+                    _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
                 };
             }
 
@@ -179,6 +184,9 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
+
             // Search runs as ListType.Search across the full anime database;
             // matches the addon-side branch. Pagination scroll calls don't
             // pass a search term so this stays the existing per-tab dispatch.
@@ -196,9 +204,9 @@ namespace AnimeList.Controllers
             {
                 metas = tokenData.anime_service switch
                 {
-                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season),
-                    _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season),
+                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
+                    _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
                 };
             }
 

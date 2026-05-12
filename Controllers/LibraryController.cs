@@ -88,6 +88,11 @@ namespace AnimeList.Controllers
             // detail of the link href.
             var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
 
+            // Honor the "Hide unaired from Watching" site preference — only affects
+            // ListType.Current, every other tab passes the flag through harmlessly.
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
+
             // Library is always ungrouped — the enableSeasonGrouping pref now
             // only governs Stremio's catalog / meta endpoints. The site
             // surfaces every cour as its own row so "what's in my Watching
@@ -111,9 +116,9 @@ namespace AnimeList.Controllers
             // library-pagination.js.
             var metas = tokenData.anime_service switch
             {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
             };
 
             if (hasSearch && metas?.Count > 0)
@@ -202,6 +207,9 @@ namespace AnimeList.Controllers
 
             var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
 
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
+
             var listForCall = hasSearch ? ListType.Search : activeList;
             const bool groupSeasonsForCall = false;
 
@@ -212,9 +220,9 @@ namespace AnimeList.Controllers
             // since search results are single-shot anyway.
             var metas = tokenData.anime_service switch
             {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall),
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
             };
 
             if (hasSearch && metas?.Count > 0)

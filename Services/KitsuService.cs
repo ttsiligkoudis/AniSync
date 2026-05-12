@@ -32,7 +32,7 @@ namespace AnimeList.Services
             _logger = logger;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null, bool hideUnreleased = false)
         {
             // Kitsu has no native airing-schedule endpoint; delegate to the AniList fallback
             // and translate ids back to Kitsu for downstream meta/manage flows. genre
@@ -194,7 +194,7 @@ namespace AnimeList.Services
                 }
 
                 var status = SafeGet<string>(anime, "attributes", "status");
-                if (list == ListType.Current && status is "tba" or "unreleased" or "upcoming") continue;
+                if (hideUnreleased && list == ListType.Current && status is "tba" or "unreleased" or "upcoming") continue;
 
                 var animeKitsuId = (string)anime["id"];
 

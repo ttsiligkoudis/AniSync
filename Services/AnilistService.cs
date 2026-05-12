@@ -312,7 +312,7 @@ namespace AnimeList.Services
             return requestBody;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null, bool hideUnreleased = false)
         {
             // Airing schedule is shared between services and lives in the cross-service helper.
             // genre threads through so the Discover page's "Airing + Action" filter swaps
@@ -367,7 +367,7 @@ namespace AnimeList.Services
                     media = entry;
                 }
 
-                if (list == ListType.Current && (string)media.status == "NOT_YET_RELEASED") continue;
+                if (hideUnreleased && list == ListType.Current && (string)media.status == "NOT_YET_RELEASED") continue;
 
                 // Filter user list entries by genre when discover-only provides a genre selection
                 if (!string.IsNullOrEmpty(genre) && isUserList && media.genres != null)

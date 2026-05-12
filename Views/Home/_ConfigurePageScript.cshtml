@@ -110,6 +110,9 @@
         // enableSeasonGrouping is positive-sense (1 = grouping ON, 0 = OFF default),
         // so the bit follows the checkbox state directly — no inversion.
         flags3 |= bitFor('#groupSeasons',           initialFlags3, 0x20);
+        // Same positive-sense for hideUnreleasedFromWatching — default off (0 = show
+        // all entries in Currently Watching), checked = filter out not-yet-aired.
+        flags3 |= bitFor('#hideUnreleasedWatching', initialFlags3, 0x40);
 
         return { flags1: flags1, flags2: flags2, flags3: flags3 };
     }
@@ -158,7 +161,7 @@
     // Catalog + stream toggles — recompute the manifest URL whenever flags change. (For
     // v5 the path bytes don't actually change since flags live in DB, but we still call
     // refreshUrls() to keep the path in sync after a SaveConfig response bumps revision.)
-    $('.catalogCheck, .discoverCheck, #showExternalStreams, #showManageEntry, #autoTrackProgress, #groupSeasons')
+    $('.catalogCheck, .discoverCheck, #showExternalStreams, #showManageEntry, #autoTrackProgress, #groupSeasons, #hideUnreleasedWatching')
         .on('change', refreshUrls);
 
     // When an enable checkbox is toggled, enable/disable its discover-only sibling

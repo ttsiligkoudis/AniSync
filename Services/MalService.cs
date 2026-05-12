@@ -59,7 +59,7 @@ namespace AnimeList.Services
             _logger = logger;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null, bool hideUnreleased = false)
         {
             // MAL has no airing schedule endpoint, so use the AniList fallback like Kitsu does.
             // genre passes through so Airing-by-genre swaps to the RELEASING+genre query.
@@ -126,7 +126,7 @@ namespace AnimeList.Services
                     // the list endpoint — drop pre-release entries from the Currently Watching and
                     // Rewatching catalogs so they match the parity behaviour of the other services.
                     var status = (string)node["status"];
-                    if ((list == ListType.Current || list == ListType.Repeating) && status == "not_yet_aired")
+                    if (hideUnreleased && (list == ListType.Current || list == ListType.Repeating) && status == "not_yet_aired")
                         continue;
 
                     // Genre post-filter — MAL's list/ranking endpoints have no server-side genre
