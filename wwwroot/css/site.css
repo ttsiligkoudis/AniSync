@@ -3378,9 +3378,24 @@ a.stats-cell-link:hover {
    consideration, so we go letter-mark for now. */
 .anime-detail-sources {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
+    /* Source chips (AniList / MAL / Kitsu / IMDb / TMDB) always sit in a
+       single row — the user reads them as a quick "open externally"
+       palette, not a wrapped block. Narrow viewports get horizontal
+       scroll on the row rather than wrapping; flex-shrink:0 on the
+       chips themselves preserves their full width. */
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 0.4rem;
     margin-top: 0.5rem;
+    /* Hide the horizontal scrollbar; the chips are short enough that
+       the user usually doesn't need to scroll, and the visual chrome
+       of a permanent scrollbar would clutter the hero. */
+    scrollbar-width: none;
+}
+
+.anime-detail-sources::-webkit-scrollbar {
+    display: none;
 }
 
 .source-chip,
@@ -3388,10 +3403,11 @@ a.stats-cell-link:hover {
 .source-chip:visited {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
-    padding: 0.12rem 0.55rem 0.12rem 0.18rem;
+    flex-shrink: 0;
+    gap: 0.4rem;
+    padding: 0.2rem 0.75rem 0.2rem 0.25rem;
     border-radius: 999px;
-    font-size: 0.72rem;
+    font-size: 0.85rem;
     font-weight: 600;
     line-height: 1.35;
     text-decoration: none;
@@ -3411,12 +3427,12 @@ a.stats-cell-link:hover {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 0.3rem;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 0.4rem;
     border-radius: 999px;
     background: rgba(0, 0, 0, 0.35);
-    font-size: 0.65rem;
+    font-size: 0.78rem;
     font-weight: 800;
     letter-spacing: 0.02em;
 }
@@ -3707,7 +3723,11 @@ button.anime-detail-user-state:hover {
    margins compensate for the inner padding-right we add to keep the
    list edge clear of the scrollbar gutter on Chromium. */
 .anime-detail-episodes-body {
-    max-height: 600px;
+    /* Caps the body at ~4 episode rows; tall lists scroll inside this
+       container instead of stretching the whole page. 480px is sized
+       against the typical ~118px row height (thumbnail + two text rows
+       + separator). */
+    max-height: 480px;
     overflow-y: auto;
     padding-right: 0.35rem;
     /* Custom thin scrollbar so the inner scroll doesn't feel like a
