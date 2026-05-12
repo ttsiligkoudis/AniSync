@@ -1,0 +1,124 @@
+@model ConfigureViewModel
+@{
+    ViewData["ActiveNav"] = "configure";
+    ViewData["Title"] = "Advanced";
+}
+
+@* Advanced sub-page of /configure. The Configure action renders this view
+   verbatim (RenderConfigure dispatches by viewName), so the shared
+   _ConfigurePageScript partial at the bottom wires up the same JS handlers
+   it does on the main /configure page — selectors for sections that aren't
+   on this page (catalogs, streams, prefs) silently no-op. *@
+<header class="page-header">
+    <h1 class="page-title">Advanced</h1>
+    <p class="page-subtitle">Backups · home server sync · destructive actions</p>
+</header>
+
+@if (Model.IsLoggedIn)
+{
+    <!-- ─── BACKUPS ─────────────────────────────────────────────────── -->
+    @* Export is gated on a config row existing — HomeController.ExportConfig
+       returns 400 for anonymous sessions. Import is left visible because it's
+       the canonical "restore on a fresh browser" path: an anonymous (no-session)
+       user imports a backup to recover their tokens + flags, which then bumps
+       them into the non-anonymous flow on next render. *@
+    <section class="section-card">
+        <span class="section-title">Backups</span>
+        <p class="section-description">
+            @(Model.AnonymousUser
+                ? "Restore your configuration from a previously exported file."
+                : "Export your configuration to a file or restore from one.")
+        </p>
+
+        <div class="btn-action-row">
+            @if (!Model.AnonymousUser)
+            {
+                <a id="exportConfigBtn" class="btn-ghost" href="/Home/ExportConfig" download>
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    Export
+                </a>
+            }
+            <button id="importConfigBtn" class="btn-ghost" type="button">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Import
+            </button>
+            <input id="importConfigFile" type="file" accept="application/json,.json" hidden />
+        </div>
+    </section>
+
+    @if (!Model.AnonymousUser)
+    {
+        <!-- ─── HOME SERVER SYNC ────────────────────────────────────────── -->
+        @* Webhook ingestion from Plex / Jellyfin / Emby. The URL below points to a single
+           endpoint that auto-detects which server is calling — users only ever copy one URL. *@
+        <section class="section-card">
+            <span class="section-title">Home Server Sync</span>
+            <p class="section-description">
+                Mirror your watch progress from Plex, Jellyfin, or Emby into your linked anime
+                trackers automatically. Paste the URL below into your media server's webhook
+                settings — same URL for any of the three.
+            </p>
+
+            <p class="manifest-url-label">Webhook URL</p>
+            <div class="manifest-url-row">
+                <input id="scrobbleUrlInput" class="manifest-url-input" readonly type="text" value="" />
+                <button id="copyScrobbleBtn" class="btn-icon-copy" type="button" title="Copy URL" aria-label="Copy URL">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="btn-action-row" style="margin-top: 0.75rem;">
+                <button id="rotateScrobbleBtn" class="btn-ghost btn-ghost-sm" type="button">Rotate token</button>
+                <span class="option-name-sub" style="margin-left: 0.5rem;">
+                    Anyone with this URL can scrobble onto your account. Rotating invalidates the old URL.
+                </span>
+            </div>
+
+            <p class="manifest-url-label" style="margin-top: 1.5rem;">Plex Home username (optional)</p>
+            <div class="manifest-url-row">
+                <input id="plexUsernameInput" class="manifest-url-input" type="text"
+                       placeholder="(accept any Plex username)"
+                       value="@(Model.PlexUsername ?? "")" />
+                <button id="savePlexUsernameBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;">Save</button>
+            </div>
+            <p class="option-name-sub" style="margin-top: 0.5rem;">
+                Set this only if you share your Plex server with others. Plex events from any
+                other username will be ignored. Jellyfin / Emby don't need this — their webhook
+                payloads only fire for the user who started playback.
+            </p>
+        </section>
+
+        <!-- ─── DANGER ZONE ─────────────────────────────────────────────── -->
+        @* Anonymous users have no DB row (HomeController only Upserts when !anonymousUser),
+           so Reset is a no-op (the JS guards on configUid) and Delete has nothing to delete.
+           Hide the whole card for them rather than render dead buttons. *@
+        <section class="section-card danger-zone-card">
+            <span class="section-title">Danger Zone</span>
+            <p class="section-description">Perform potentially destructive actions that cannot be undone.</p>
+
+            <div class="btn-action-row">
+                <button id="resetConfigBtn" class="btn-danger-pill" type="button">Reset Configuration</button>
+                <button id="deleteConfigBtn" class="btn-danger-pill" type="button">Delete Configuration</button>
+            </div>
+        </section>
+    }
+}
+else
+{
+    <div class="card-section">
+        <p class="hint-text">Sign in on the Account page first.</p>
+        <a class="btn-primary-action btn-login" href="@Url.Action("Configure", "Home")">Go to Account</a>
+    </div>
+}
+
+@await Html.PartialAsync("_ConfigurePageScript")

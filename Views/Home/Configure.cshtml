@@ -16,7 +16,7 @@
    doesn't surface (drawer shows a Sign in CTA for anonymous instead). *@
 <header class="page-header">
     <h1 class="page-title">Account</h1>
-    <p class="page-subtitle">Provider · linked accounts · backups</p>
+    <p class="page-subtitle">Provider · linked accounts</p>
 </header>
 
 @if (!Model.AnonymousUser || Model.IsLoggedIn)
@@ -192,75 +192,33 @@
     }
     @await Html.PartialAsync("_PreferencesSection", (IReadOnlyList<(string, string, string, bool)>)configurePrefs)
 
-    @* Stremio-addon-specific config (catalogs, streams, install URL,
-       scrobble webhook) used to live inline below this line; it's now
+    @* Stremio-addon-specific config (catalogs, streams, install URL) lives
        on its own page at /stremio so /configure stays focused on the
-       site-side identity bits (provider, linked accounts, backups,
-       danger zone). *@
+       site-side identity bits (provider, linked accounts). *@
     <section class="section-card">
         <span class="section-title">Stremio addon</span>
         <p class="section-description">
             Pick which catalogs and streams the AniSync addon exposes to Stremio,
-            grab the install URL, set up Plex / Jellyfin / Emby scrobble — all on a
-            dedicated page so this one stays focused on your account.
+            grab the install URL — all on a dedicated page so this one stays focused
+            on your account.
         </p>
         <a class="btn-primary-action btn-login" href="@Url.Action("Stremio", "Home")">Configure Stremio addon →</a>
     </section>
 
-    <!-- ─── BACKUPS ─────────────────────────────────────────────────── -->
-    @* Export is gated on a config row existing — HomeController.ExportConfig
-       returns 400 for anonymous sessions. Import is left visible because it's
-       the canonical "restore on a fresh browser" path: an anonymous (no-session)
-       user imports a backup to recover their tokens + flags, which then bumps
-       them into the non-anonymous flow on next render. *@
+    @* Advanced — exports / imports, Home Server Sync webhook, danger-zone
+       reset/delete. Same split rationale as the Stremio card above: these
+       are infrequently-used controls that don't belong on the primary
+       account page. The destination /advanced reuses ConfigureViewModel
+       so the shared _ConfigurePageScript wires its JS handlers the same
+       way it does here. *@
     <section class="section-card">
-        <span class="section-title">Backups</span>
+        <span class="section-title">Advanced</span>
         <p class="section-description">
-            @(Model.AnonymousUser
-                ? "Restore your configuration from a previously exported file."
-                : "Export your configuration to a file or restore from one.")
+            Export or import a backup, configure Plex / Jellyfin / Emby scrobble,
+            or reset / delete your configuration.
         </p>
-
-        <div class="btn-action-row">
-            @if (!Model.AnonymousUser)
-            {
-                <a id="exportConfigBtn" class="btn-ghost" href="/Home/ExportConfig" download>
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="17 8 12 3 7 8"></polyline>
-                        <line x1="12" y1="3" x2="12" y2="15"></line>
-                    </svg>
-                    Export
-                </a>
-            }
-            <button id="importConfigBtn" class="btn-ghost" type="button">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="7 10 12 15 17 10"></polyline>
-                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                Import
-            </button>
-            <input id="importConfigFile" type="file" accept="application/json,.json" hidden />
-        </div>
+        <a class="btn-primary-action btn-login" href="@Url.Action("Advanced", "Home")">Open advanced settings →</a>
     </section>
-
-    @* Anonymous users have no DB row (HomeController only Upserts when !anonymousUser),
-       so Reset is a no-op (the JS guards on configUid) and Delete has nothing to delete.
-       Hide the whole card for them rather than render dead buttons. *@
-    @if (!Model.AnonymousUser)
-    {
-        <!-- ─── DANGER ZONE ─────────────────────────────────────────────── -->
-        <section class="section-card danger-zone-card">
-            <span class="section-title">Danger Zone</span>
-            <p class="section-description">Perform potentially destructive actions that cannot be undone.</p>
-
-            <div class="btn-action-row">
-                <button id="resetConfigBtn" class="btn-danger-pill" type="button">Reset Configuration</button>
-                <button id="deleteConfigBtn" class="btn-danger-pill" type="button">Delete Configuration</button>
-            </div>
-        </section>
-    }
 
     @* Full-sync modal. Driven entirely by the client — the server is stateless. The
        backdrop click and Escape are intentionally not wired to dismiss; the only way

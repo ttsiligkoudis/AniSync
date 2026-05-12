@@ -432,6 +432,16 @@ public class HomeController : Controller
     [Route("/stremio")]
     public Task<IActionResult> Stremio() => RenderConfigure("Stremio", config: null);
 
+    /// <summary>
+    /// Advanced settings page — Backups, Danger Zone, Home Server Sync.
+    /// Lives off /configure so the account page stays focused on identity
+    /// + linked accounts; reuses Configure's view-model so the JS handlers
+    /// in _ConfigurePageScript bind the same way regardless of which view
+    /// rendered them.
+    /// </summary>
+    [Route("/advanced")]
+    public Task<IActionResult> Advanced() => RenderConfigure("Advanced", config: null);
+
     private async Task<IActionResult> RenderConfigure(string viewName, string config)
     {
         var result = await Configure(config);
