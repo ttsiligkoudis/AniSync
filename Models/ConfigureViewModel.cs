@@ -48,6 +48,14 @@ namespace AnimeList.Models
         public string PlexUsername { get; init; }
 
         /// <summary>
+        /// Presence-only flag for the user's Real-Debrid API key. The plaintext
+        /// value is never re-emitted to the client after first save — the
+        /// configure UI renders a "•••••• (set)" badge + Replace button when
+        /// this is true, the entry input otherwise.
+        /// </summary>
+        public bool HasRealDebridKey { get; init; }
+
+        /// <summary>
         /// Persisted toggle flags. Always non-null — the controller hands the view a
         /// default-initialised instance when nothing is loaded yet.
         /// </summary>

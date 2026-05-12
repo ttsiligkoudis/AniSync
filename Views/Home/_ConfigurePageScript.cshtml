@@ -594,6 +594,62 @@
         }
     });
 
+    // ── Real-Debrid API key ───────────────────────────────────────────
+    // Two states (set / edit) share the same row so the swap on Replace /
+    // Save / Clear is a pair of jQuery .show() / .hide() calls; the server
+    // never sends the plaintext back, so the "set" state is a pure
+    // presence badge.
+    function rdKeyShowEditState() {
+        $('#rdKeyInput').val('');
+        $('#rdKeySetState').hide();
+        $('#rdKeyEditState').show();
+        $('#rdKeyInput').trigger('focus');
+    }
+    function rdKeyShowSetState() {
+        $('#rdKeyEditState').hide();
+        $('#rdKeySetState').show();
+    }
+
+    $('#rdKeyReplaceBtn').on('click', rdKeyShowEditState);
+
+    $('#rdKeySaveBtn').on('click', async function () {
+        if (!configUid) return;
+        var apiKey = ($('#rdKeyInput').val() || '').trim();
+        if (!apiKey) { alert('Paste your Real-Debrid API key first.'); return; }
+        var $btn = $(this);
+        try {
+            var resp = await fetch('/Home/SetRealDebridApiKey', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uid: configUid, apiKey: apiKey }),
+            });
+            if (!resp.ok) throw new Error('save failed: ' + resp.status);
+            var data = await resp.json();
+            if (!data.success) throw new Error(data.error || 'save failed');
+            rdKeyShowSetState();
+        } catch (e) {
+            alert('Could not save Real-Debrid key: ' + e.message);
+        } finally {
+            $btn.prop('disabled', false);
+        }
+    });
+
+    $('#rdKeyClearBtn').on('click', async function () {
+        if (!configUid) return;
+        if (!confirm('Remove your Real-Debrid API key? Episode pickers and the Stremio addon will stop surfacing debrid streams.')) return;
+        try {
+            var resp = await fetch('/Home/SetRealDebridApiKey', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uid: configUid, apiKey: '' }),
+            });
+            if (!resp.ok) throw new Error('clear failed: ' + resp.status);
+            rdKeyShowEditState();
+        } catch (e) {
+            alert('Could not clear Real-Debrid key: ' + e.message);
+        }
+    });
+
     // ── Backups ───────────────────────────────────────────────────────
     $('#importConfigBtn').on('click', function () {
         $('#importConfigFile').trigger('click');

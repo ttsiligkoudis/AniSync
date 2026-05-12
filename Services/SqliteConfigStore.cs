@@ -66,6 +66,9 @@ namespace AnimeList.Services
                     revision          INTEGER NOT NULL DEFAULT 0,
                     scrobble_token    TEXT,
                     plex_username     TEXT,
+                    -- Real-Debrid API key. Plaintext for v1; encrypt at rest
+                    -- before public launch (TODO: see Configuration.cs).
+                    real_debrid_api_key TEXT,
                     created_at        INTEGER NOT NULL,
                     updated_at        INTEGER NOT NULL
                 );
@@ -400,6 +403,37 @@ namespace AnimeList.Services
             await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT plex_username FROM configs WHERE uid = $uid LIMIT 1";
+            cmd.Parameters.AddWithValue("$uid", uid);
+            return await cmd.ExecuteScalarAsync() as string;
+        }
+
+        public async Task SetRealDebridApiKeyAsync(string uid, string apiKey)
+        {
+            if (string.IsNullOrEmpty(uid)) return;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE configs
+                   SET real_debrid_api_key = $k, updated_at = $ts
+                 WHERE uid = $uid
+                """;
+            cmd.Parameters.AddWithValue("$k",
+                string.IsNullOrWhiteSpace(apiKey) ? (object)DBNull.Value : apiKey.Trim());
+            cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$uid", uid);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<string> GetRealDebridApiKeyAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return null;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT real_debrid_api_key FROM configs WHERE uid = $uid LIMIT 1";
             cmd.Parameters.AddWithValue("$uid", uid);
             return await cmd.ExecuteScalarAsync() as string;
         }

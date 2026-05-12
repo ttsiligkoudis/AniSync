@@ -216,6 +216,10 @@ builder.Services.AddScoped<IMalService, MalService>();
 builder.Services.AddScoped<ITmdbService, TmdbService>();
 builder.Services.AddScoped<ICinemetaService, CinemetaService>();
 builder.Services.AddScoped<IAnilistFallback, AnilistFallback>();
+// Singleton so the (apiKey-fingerprint, stremio-id) → streams cache outlives
+// individual requests — Torrentio responses are stable enough that a 10-min
+// cache slashes the upstream call rate when a user paginates through episodes.
+builder.Services.AddSingleton<ITorrentioService, TorrentioService>();
 builder.Services.AddScoped<ISyncService, SyncService>();
 // Singleton — its (malId, episode) → markers cache is the whole point. Per-request
 // scoping would defeat the cache. The service depends only on IHttpClientFactory

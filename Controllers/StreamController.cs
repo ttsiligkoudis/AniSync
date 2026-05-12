@@ -13,11 +13,14 @@ namespace AnimeList.Controllers
         private readonly IMalService _malService;
         private readonly IAniSkipService _aniSkipService;
         private readonly IConfigStore _configStore;
+        private readonly ITorrentioService _torrentioService;
         private readonly ILogger<StreamController> _logger;
 
         public StreamController(ITokenService tokenService, IAnimeMappingService mappingService,
             IAnilistService anilistService, IKitsuService kitsuService, IMalService malService,
-            IAniSkipService aniSkipService, IConfigStore configStore, ILogger<StreamController> logger)
+            IAniSkipService aniSkipService, IConfigStore configStore,
+            ITorrentioService torrentioService,
+            ILogger<StreamController> logger)
         {
             _tokenService = tokenService;
             _mappingService = mappingService;
@@ -26,6 +29,7 @@ namespace AnimeList.Controllers
             _malService = malService;
             _aniSkipService = aniSkipService;
             _configStore = configStore;
+            _torrentioService = torrentioService;
             _logger = logger;
         }
 
@@ -70,6 +74,34 @@ namespace AnimeList.Controllers
             // object.
             var skipHints = await BuildSkipHintsAsync(animeId, season, episode);
 
+            // Real-Debrid streams via Torrentio. v1 scope: only for v5
+            // (uid-backed) installs, never for v3 anonymous URLs — keeps
+            // RD keys out of install URLs that get pasted around.
+            // Prepended so debrid sits above Manage Entry + external streams
+            // (which keep firing regardless).
+            if (!string.IsNullOrEmpty(configuration?.realDebridApiKey)
+                && tokenData != null && !tokenData.anonymousUser)
+            {
+                var sourceLinks = await _mappingService.BuildSourceLinksAsync(animeId);
+                var debrid = await _torrentioService.GetStreamsAsync(
+                    configuration.realDebridApiKey, sourceLinks, season, episode);
+                var rdBingeGroup = $"anisync:rd:{resolvedAnimeId}";
+                foreach (var s in debrid)
+                {
+                    // Prefer Torrentio's own bingeGroup when present (it
+                    // already buckets by quality so Stremio auto-plays the
+                    // next episode at the same tier); fall back to our
+                    // anime-level group otherwise.
+                    var bingeGroup = !string.IsNullOrEmpty(s.BingeGroup) ? s.BingeGroup : rdBingeGroup;
+                    streams.Add(new
+                    {
+                        name = s.Name,
+                        title = s.Title,
+                        url = s.Url,
+                        behaviorHints = MergeBehaviorHints(bingeGroup, skipHints),
+                    });
+                }
+            }
 
             // Manage Entry stream — shown by default for authenticated, non-anonymous users.
             // The configure page's "Manage Entry" toggle stores the negative bit (hideManageEntry)
