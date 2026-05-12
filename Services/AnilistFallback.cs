@@ -1058,25 +1058,38 @@ namespace AnimeList.Services
             return (name, await BuildBrowseMetasAsync(nodes, translateTo));
         }
 
-        public async Task<List<StudioSummary>> GetStudiosListAsync()
+        public async Task<List<StudioSummary>> GetStudiosListAsync(int page = 1)
         {
-            const string cacheKey = "anilist:studios-list:fav-desc";
+            if (page < 1) page = 1;
+
+            var cacheKey = $"anilist:studios-list:by-name:p{page}";
             if (_cache.TryGetValue<List<StudioSummary>>(cacheKey, out var cached) && cached != null)
             {
                 return cached;
             }
 
+            // perPage=50 matches the discover paginator's chunk size so the
+            // user feels the same scroll-loaded cadence between anime and
+            // studio listings. NAME sort gives a stable alphabetical walk
+            // (AniList's other studio sorts swap order day-to-day with
+            // favourites churn — fine for a "popular" shelf, jarring for
+            // a "browse all" alphabetical grid). The inline media block
+            // counts only ANIME (filters out studios that only publish
+            // manga / light novels) so the count rendered on the tile
+            // matches what the user finds when they open the catalog.
             var requestBody = SerializeObject(new
             {
                 query = @"
-                    query {
-                        Page(page: 1, perPage: 60) {
-                            studios(sort: FAVOURITES_DESC) {
+                    query ($page: Int, $perPage: Int) {
+                        Page(page: $page, perPage: $perPage) {
+                            studios(sort: NAME) {
                                 id
                                 name
+                                media(type: ANIME) { pageInfo { total } }
                             }
                         }
                     }",
+                variables = new { page, perPage = 50 },
             });
 
             var data = await PostJsonAsync(requestBody);
@@ -1088,17 +1101,31 @@ namespace AnimeList.Services
                     if (s == null) continue;
                     var name = (string)s.name;
                     if (string.IsNullOrWhiteSpace(name)) continue;
-                    studios.Add(new StudioSummary { Id = (int)s.id, Name = name });
+                    int count = 0;
+                    if (s.media?.pageInfo?.total != null)
+                    {
+                        count = (int)s.media.pageInfo.total;
+                    }
+                    // Drop entries with no anime — AniList's studios table
+                    // is shared with manga / LN labels, and a tile linking
+                    // to a "0 anime" catalog page would be a dead end.
+                    if (count <= 0) continue;
+                    studios.Add(new StudioSummary
+                    {
+                        Id = (int)s.id,
+                        Name = name,
+                        AnimeCount = count,
+                    });
                 }
             }
 
-            if (studios.Count > 0)
+            // Cache even empty results — the client uses an empty response
+            // as the end-of-list signal, and we don't want to keep replaying
+            // upstream when the user scrolls past the last alphabetical page.
+            _cache.Set(cacheKey, studios, new MemoryCacheEntryOptions
             {
-                _cache.Set(cacheKey, studios, new MemoryCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24),
-                });
-            }
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24),
+            });
             return studios;
         }
     }
