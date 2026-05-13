@@ -612,27 +612,13 @@ namespace AnimeList.Controllers
                 _logger.LogWarning(ex, "AniSkip lookup failed for {Id} ep {Ep}.", id, episode);
             }
 
-            // Subtitles — Wyzie returns proxied URLs already (served by
-            // /anime/subtitle below) so the <track> element on the watch
-            // page can load same-origin.
-            var subtitles = Array.Empty<object>() as IReadOnlyList<object>;
-            if (!string.IsNullOrEmpty(sourceLinksForExtras.ImdbId))
-            {
-                try
-                {
-                    var tracks = await _subtitleService.SearchAsync(sourceLinksForExtras.ImdbId, season, episode);
-                    subtitles = tracks.Select(t => (object)new
-                    {
-                        lang = t.Lang,
-                        label = t.Label,
-                        url = t.Url,
-                    }).ToList();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Wyzie subtitle search failed for {Id} ep {Ep}.", id, episode);
-                }
-            }
+            // Subtitles are now fetched lazily by the watch page once
+            // the user picks a source — the source's filename is the
+            // signal OpenSubtitles needs to return release-matched
+            // tracks (correct timing), and we don't know which source
+            // the user will pick at this point. See EpisodeSubtitles
+            // below. Skipping the upfront fetch keeps this response
+            // lighter too.
 
             return Json(new
             {
@@ -641,8 +627,58 @@ namespace AnimeList.Controllers
                 debridStreams,
                 externalLinks,
                 skipTimes,
-                subtitles,
             });
+        }
+
+        /// <summary>
+        /// Lazy subtitle lookup invoked by the watch page after the
+        /// user picks a source. Splitting this off from
+        /// <see cref="EpisodeStreams"/> lets us pass the chosen
+        /// source's filename to OpenSubtitles, which is the signal
+        /// that selects release-matched subs whose timing actually
+        /// matches the file. Best-effort: any failure returns an
+        /// empty list so the player initialises without subs rather
+        /// than 500ing.
+        /// </summary>
+        [HttpGet("/anime/episode-subtitles")]
+        public async Task<IActionResult> EpisodeSubtitles(string id, int? season, int episode, string filename = null)
+        {
+            if (string.IsNullOrWhiteSpace(id) || episode <= 0)
+            {
+                return Json(new { subtitles = Array.Empty<object>() });
+            }
+
+            var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
+            if (string.IsNullOrEmpty(sourceLinks.ImdbId))
+            {
+                return Json(new { subtitles = Array.Empty<object>() });
+            }
+
+            // ImdbSeason on the mapping is the franchise-side season
+            // — same fix as Torrentio. URL season is the AniSync cour-
+            // internal value (usually 1) and would query the wrong
+            // season of the IMDb listing otherwise.
+            var effectiveSeason = sourceLinks.ImdbSeason ?? season;
+
+            try
+            {
+                var tracks = await _subtitleService.SearchAsync(
+                    sourceLinks.ImdbId, effectiveSeason, episode, filename);
+                return Json(new
+                {
+                    subtitles = tracks.Select(t => (object)new
+                    {
+                        lang = t.Lang,
+                        label = t.Label,
+                        url = t.Url,
+                    }).ToList(),
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "OpenSubtitles search failed for {Id} ep {Ep}.", id, episode);
+                return Json(new { subtitles = Array.Empty<object>() });
+            }
         }
 
         /// <summary>
