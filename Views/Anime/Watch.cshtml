@@ -437,6 +437,22 @@
                 console.warn('No working ArtPlayer settings API found; selector not refreshed');
             }
 
+            // Hosts that consistently block cross-origin `fetch()` on
+            // the media URL. Media elements (`<video>`) play these
+            // fine because they don't enforce CORS, but the
+            // matroska-subtitles pipeline needs raw bytes via fetch.
+            // Listed here so we can skip the extract attempt rather
+            // than letting it fail loudly in the console.
+            var CORS_BLOCKED_HOST_RE = /(?:^|\.)(?:real-debrid\.com|alldebrid\.com|debrid-link\.com|premiumize\.me|torbox\.app|offcloud\.com|strem\.fun)$/i;
+            function isCorsBlockedHost(url) {
+                try {
+                    var h = new URL(url, window.location.href).hostname;
+                    return CORS_BLOCKED_HOST_RE.test(h);
+                } catch (_) {
+                    return false;
+                }
+            }
+
             // Stream the MKV via Range-aware fetch into
             // matroska-subtitles, accumulate per-track cues, and on
             // completion build a renderable ASS document for each
@@ -445,6 +461,23 @@
             // surface entries before full parse completes — final
             // (onComplete) fires once cue accumulation is done.
             function extractEmbeddedSubs(url, onTracks, onComplete) {
+                // Known CORS-blocked hosts: debrid CDNs and the
+                // Torrentio resolver all redirect to media URLs that
+                // don't send Access-Control-Allow-Origin, so `fetch()`
+                // will always throw TypeError("Failed to fetch") here
+                // — even though the <video> tag plays the same URL
+                // fine. We could let the fetch run and fail, but
+                // that pollutes the console with browser-injected
+                // CORS / ERR_FAILED warnings on every source switch.
+                // Skip the pipeline entirely for these hosts and
+                // leave subtitle duty to OpenSubtitles.
+                if (isCorsBlockedHost(url)) {
+                    setEmbedStatus(null);
+                    onComplete([]);
+                    var noop = new AbortController();
+                    return noop;
+                }
+
                 setEmbedStatus('Looking for embedded subtitles…', 'loading');
 
                 var abortCtl = new AbortController();
