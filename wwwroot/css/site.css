@@ -2119,6 +2119,9 @@ body.modal-open {
 
 .watch-player-prompt {
     position: relative;
+    /* Above both backdrop (z 0) and thumbnail (z 1) so the pill
+       stays visible regardless of which image layer is rendering. */
+    z-index: 2;
     margin: 0 1rem 1.5rem;
     padding: 0.55rem 1rem;
     background: rgba(0, 0, 0, 0.55);
