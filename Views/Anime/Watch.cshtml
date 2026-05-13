@@ -65,12 +65,21 @@
            after init so it corner-anchors over the video frame. *@
         <div id="watchPlayer" class="watch-player">
             <div class="watch-player-empty">
-                @* Use the episode thumbnail as a preview-frame before
-                   any source is picked — same image the detail-page
-                   episode row carries, so the user gets visual
-                   confirmation they're on the right episode. Falls back
-                   to a plain "pick a source" prompt when the upstream
-                   meta has no thumbnail (older / niche entries). *@
+                @* Layered preview frame:
+                   - Bottom layer: the anime's hero backdrop, always
+                     rendered when the meta has one. Acts as the
+                     fallback when the episode-thumbnail layer fails
+                     (unaired episodes ship with a stub URL Cinemeta
+                     fills in before art exists — it 404s).
+                   - Top layer: the episode-specific thumbnail. Hides
+                     itself via onerror when it 404s, letting the
+                     backdrop show through.
+                   - Pill: "Pick a source below" overlay regardless. *@
+                @if (!string.IsNullOrEmpty(a.background))
+                {
+                    <img class="watch-player-backdrop" src="@a.background" alt="" loading="lazy"
+                         onerror="this.classList.add('is-missing');" />
+                }
                 @if (!string.IsNullOrEmpty(ep.thumbnail))
                 {
                     <img class="watch-player-poster" src="@ep.thumbnail" alt="" loading="lazy"

@@ -2090,6 +2090,12 @@ body.modal-open {
     overflow: hidden;
 }
 
+/* Anime backdrop is the always-present base layer; episode
+   thumbnail stacks on top via z-index when it loads. When the
+   per-episode thumbnail URL 404s (unaired episodes ship with a
+   stub URL Cinemeta fills in before the still exists), it hides
+   itself and the backdrop shows through unchanged. */
+.watch-player-backdrop,
 .watch-player-poster {
     position: absolute;
     inset: 0;
@@ -2099,9 +2105,14 @@ body.modal-open {
     filter: brightness(0.55);
 }
 
+.watch-player-poster {
+    z-index: 1;
+}
+
 /* onerror handler in the view adds .is-missing — hide the broken
-   poster so the prompt + default black background carry the empty
-   state without a missing-image icon. */
+   image so the prompt pill carries the empty state without a
+   missing-image icon. */
+.watch-player-backdrop.is-missing,
 .watch-player-poster.is-missing {
     display: none;
 }
