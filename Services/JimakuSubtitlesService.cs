@@ -36,13 +36,17 @@ namespace AnimeList.Services
         // plenty to tell hiragana / katakana / kanji from Latin script.
         private const int SniffByteLimit = 4096;
 
-        // CJK ratio threshold — files with at least this many CJK
-        // characters per total decoded chars are Japanese (also
-        // catches Chinese / Korean — distinguished separately via
-        // script-specific Unicode ranges below). 3% is conservative:
-        // even English subs that quote a Japanese term land well
-        // below this on a 4 KB sample.
-        private const double CjkRatioThreshold = 0.03;
+        // CJK ratio threshold — files with at least this fraction of
+        // CJK characters in their *dialogue text* are non-Latin
+        // (Japanese / Chinese / Korean — distinguished via script-
+        // specific Unicode ranges). 15 % is generous: real Japanese
+        // subs run 40-60 % kana+kanji in the dialogue body, while
+        // English subs with the occasional Japanese style name or
+        // karaoke header stay well under 5 %. Earlier 3 % threshold
+        // false-positived on ASS files whose header carries Japanese
+        // metadata, mislabelling them as JP even when the actual
+        // dialogue is English.
+        private const double CjkRatioThreshold = 0.15;
 
         // Strong filename markers — when present we trust them and
         // skip the byte sniff (saves a round trip per file). Anything
@@ -177,6 +181,21 @@ namespace AnimeList.Services
                 var matched = FilterByEpisode(allFiles, episode);
                 var classified = await ClassifyLanguagesAsync(matched, client, cts.Token);
                 var tracks = BuildTracks(classified);
+
+                // Single info line per query so the operator can see
+                // what the classifier decided without burying logs
+                // under per-file detail. e.g. "Jimaku anilist=12345
+                // ep=3: 4 files → eng:1 jpn:3" reads at a glance.
+                if (classified.Count > 0)
+                {
+                    var counts = string.Join(" ",
+                        classified.GroupBy(x => x.Code)
+                                  .OrderBy(g => g.Key)
+                                  .Select(g => $"{g.Key}:{g.Count()}"));
+                    _logger.LogInformation(
+                        "Jimaku anilist={Anilist} ep={Ep}: {Count} files → {Counts}",
+                        anilistId, episode, classified.Count, counts);
+                }
 
                 _cache.Set(cacheKey, tracks, new MemoryCacheEntryOptions
                 {
@@ -421,12 +440,22 @@ namespace AnimeList.Services
         /// bucket). Falls back to English when no CJK script clears
         /// the threshold — Jimaku does host English fansubs, they
         /// just rarely advertise it in the filename.
+        ///
+        /// Only *dialogue* text is classified — SRT cue numbers and
+        /// timestamps are skipped, and ASS files contribute only the
+        /// text portion of their <c>Dialogue:</c> events. Otherwise
+        /// an ASS [Script Info] / [V4+ Styles] header containing
+        /// Japanese style names would push an English file over the
+        /// CJK threshold.
         /// </summary>
         private static string ClassifyByScript(string text)
         {
             if (string.IsNullOrEmpty(text)) return "eng";
+            var dialogue = ExtractDialogueText(text);
+            if (dialogue.Length == 0) return "eng";
+
             int total = 0, hiragana = 0, katakana = 0, han = 0, hangul = 0;
-            foreach (var c in text)
+            foreach (var c in dialogue)
             {
                 total++;
                 if (c >= 0x3040 && c <= 0x309F) hiragana++;
@@ -459,6 +488,84 @@ namespace AnimeList.Services
                 if (rx.IsMatch(filename)) return code;
             }
             return null;
+        }
+
+        // Trims out everything that isn't actual subtitle dialogue so
+        // the script-counter only sees what the viewer would see on
+        // screen. SRT and ASS use very different layouts but share
+        // the trait that their non-dialogue lines are pure ASCII —
+        // running the classifier on them dilutes the CJK ratio and
+        // makes English-with-JP-headers look "more Japanese" than it
+        // actually is. WebVTT lines are dropped through the same SRT
+        // path (cue numbers + arrow timestamps).
+        private static readonly Regex SrtTimestampLine = new(
+            @"\d{1,2}:\d{2}:\d{2}[\.,]\d{2,3}\s*-->",
+            RegexOptions.Compiled);
+
+        private static string ExtractDialogueText(string text)
+        {
+            var lines = text.Replace("\r\n", "\n").Split('\n');
+            var assDialogueDetected = false;
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].StartsWith("Dialogue:", StringComparison.OrdinalIgnoreCase))
+                {
+                    assDialogueDetected = true;
+                    break;
+                }
+            }
+
+            var sb = new StringBuilder(text.Length);
+            foreach (var raw in lines)
+            {
+                var line = raw.Trim();
+                if (line.Length == 0) continue;
+
+                if (assDialogueDetected)
+                {
+                    // ASS: keep only the dialogue body, which sits
+                    // after the 9th comma in a Dialogue: line.
+                    // Format:
+                    //   Dialogue: Layer, Start, End, Style, Name,
+                    //             MarginL, MarginR, MarginV, Effect, Text
+                    if (!line.StartsWith("Dialogue:", StringComparison.OrdinalIgnoreCase)) continue;
+                    var body = line.Substring("Dialogue:".Length);
+                    var commas = 0;
+                    var idx = 0;
+                    while (idx < body.Length && commas < 9)
+                    {
+                        if (body[idx] == ',') commas++;
+                        idx++;
+                    }
+                    if (commas < 9) continue;
+                    var dialogue = StripAssOverrides(body.Substring(idx));
+                    if (dialogue.Length > 0) sb.AppendLine(dialogue);
+                    continue;
+                }
+
+                // SRT / VTT / plain: skip the structural lines.
+                if (SrtTimestampLine.IsMatch(line)) continue;
+                // Cue numbers — purely digits.
+                var allDigits = true;
+                foreach (var c in line)
+                {
+                    if (c < '0' || c > '9') { allDigits = false; break; }
+                }
+                if (allDigits) continue;
+                if (line.Equals("WEBVTT", StringComparison.OrdinalIgnoreCase)) continue;
+
+                sb.AppendLine(line);
+            }
+            return sb.ToString();
+        }
+
+        // ASS override tags ({\i1}, {\an8}, karaoke {\k20}, etc.) are
+        // pure ASCII so they don't break classification, but stripping
+        // them keeps the ratio cleaner.
+        private static readonly Regex AssOverrideTag = new(@"\{[^}]*\}", RegexOptions.Compiled);
+        private static string StripAssOverrides(string s)
+        {
+            return AssOverrideTag.Replace(s, string.Empty).Replace("\\N", " ").Trim();
         }
 
         private static IReadOnlyList<SubtitleTrack> BuildTracks(List<(string Code, JimakuFile File)> classified)
