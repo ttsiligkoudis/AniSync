@@ -166,32 +166,51 @@
         // extraction pipeline awaits this so it never fires the
         // "support unavailable" status just because the imports
         // hadn't completed by the time the user picked a source.
-        // Each library has a fallback CDN chain — esm.sh, then
-        // esm.run (jsDelivr ESM), then skypack — so a single
-        // outage doesn't kill embedded subtitles for everyone.
-        async function tryImport(specifiers) {
+        //
+        // Each library has a fallback CDN chain — esm.sh, esm.run
+        // (jsDelivr ESM), skypack — and each attempt is wrapped in
+        // a 6-second timeout. esm.sh occasionally hangs while it
+        // compiles a Node-only package on first request, leaving
+        // `await import(url)` pending for minutes; the timeout
+        // forces a fall-through to the next CDN. Matroska + jassub
+        // load in parallel to halve the worst-case wait.
+        function timeoutPromise(ms, message) {
+            return new Promise(function (_, reject) {
+                setTimeout(function () { reject(new Error(message)); }, ms);
+            });
+        }
+        async function tryImport(specifiers, timeoutMs) {
+            timeoutMs = timeoutMs || 6000;
             for (const spec of specifiers) {
-                try { return await import(spec); }
-                catch (e) { console.warn('module load failed:', spec, e && e.message); }
+                try {
+                    return await Promise.race([
+                        import(spec),
+                        timeoutPromise(timeoutMs, 'import timeout: ' + spec),
+                    ]);
+                } catch (e) {
+                    console.warn('module load attempt failed:', spec, e && e.message);
+                }
             }
             return null;
         }
         window.subtitleLibsReady = (async () => {
             const status = { matroska: false, jassub: false };
-            const m = await tryImport([
-                'https://esm.sh/matroska-subtitles@3.4.0',
-                'https://esm.run/matroska-subtitles@3.4.0',
-                'https://cdn.skypack.dev/matroska-subtitles@3.4.0',
+            const [m, j] = await Promise.all([
+                tryImport([
+                    'https://esm.sh/matroska-subtitles@3.4.0',
+                    'https://esm.run/matroska-subtitles@3.4.0',
+                    'https://cdn.skypack.dev/matroska-subtitles@3.4.0',
+                ]),
+                tryImport([
+                    'https://esm.sh/jassub@1.7.16',
+                    'https://esm.run/jassub@1.7.16',
+                    'https://cdn.skypack.dev/jassub@1.7.16',
+                ]),
             ]);
             if (m && m.SubtitleParser) {
                 window.MatroskaSubtitles = { SubtitleParser: m.SubtitleParser };
                 status.matroska = true;
             }
-            const j = await tryImport([
-                'https://esm.sh/jassub@1.7.16',
-                'https://esm.run/jassub@1.7.16',
-                'https://cdn.skypack.dev/jassub@1.7.16',
-            ]);
             if (j) {
                 window.JASSUB = j.default || j.JASSUB || j;
                 status.jassub = true;
