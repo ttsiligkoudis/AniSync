@@ -2095,20 +2095,20 @@ body.modal-open {
     flex-wrap: wrap;
 }
 
-/* vidstack web component fills its host. The default theme sets its
-   own border-radius on the player chrome, but the outer wrapper
-   keeps its 16:9 aspect-ratio + rounded corners so the empty / error
-   states stay visually consistent with playback. */
-.watch-player media-player {
-    width: 100%;
-    height: 100%;
+/* ArtPlayer mounts its UI inside #watchPlayer as a .art-video-player
+   div. We want it to fill the host so the 16:9 wrapper aspect-ratio
+   applies, with the same rounded corners as the empty-state shell. */
+.watch-player .art-video-player {
+    width: 100% !important;
+    height: 100% !important;
     border-radius: 0.75rem;
     overflow: hidden;
-    --media-brand: #7c3aed;        /* match the app's purple accent */
-    --media-focus-ring-color: #7c3aed;
 }
 
-.watch-player media-player[data-fullscreen] {
+/* No rounding when the player goes fullscreen — looks weird against
+   the black bars on devices that don't match the source's aspect. */
+.watch-player .art-video-player.art-fullscreen,
+.watch-player .art-video-player.art-fullscreen-web {
     border-radius: 0;
 }
 
@@ -2200,7 +2200,7 @@ body.modal-open {
 
 .watch-skip-btn {
     position: absolute;
-    bottom: 4.5rem;       /* clear Plyr's controls bar */
+    bottom: 4.5rem;       /* clear ArtPlayer's bottom controls bar */
     right: 1rem;
     z-index: 5;
     padding: 0.55rem 1rem;

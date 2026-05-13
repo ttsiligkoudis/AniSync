@@ -30,16 +30,13 @@
 }
 
 @*
-    vidstack — modern, framework-agnostic web-component player. Default
-    "video" layout gives us a polished pro-style UI out of the box
-    (center play, ±10s seeks, captions menu, settings, PiP, AirPlay,
-    fullscreen, touch gestures, keyboard shortcuts). Codec support is
-    still whatever the browser provides natively; the error-fallback
-    path below catches anything the browser can't decode and offers an
-    "open externally" affordance instead.
+    ArtPlayer — feature-rich HTML5 player with the pro layout we want
+    out of the box: center play with rewind / fast-forward arrows,
+    progress bar with timestamps, settings menu for subtitles +
+    playback speed + aspect ratio, web-fullscreen, picture-in-picture,
+    auto-orientation on mobile. ArtPlayer ships its own CSS embedded
+    in the JS bundle, so no separate stylesheet to wire in.
 *@
-<link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
-<link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
 
 <section class="watch-header">
     <a class="watch-back" href="/anime/@a.id">
@@ -54,20 +51,22 @@
 </section>
 
 <section class="watch-player-wrap">
-    @* Placeholder paragraph swaps out the moment a source is selected:
-       JS replaces the inner HTML with the <video> element + Plyr init.
-       Empty data-src means "no source picked yet" — the picker below
-       prompts the user. *@
+    @* ArtPlayer owns the contents of #watchPlayer once a source is
+       picked — it replaces children with its own <video> + chrome.
+       The empty-state placeholder swaps out at that moment. The skip
+       button is a sibling now (not a child) so ArtPlayer's wipe
+       doesn't take it down; the wrap is position:relative so the
+       button can still corner-anchor over the player area. *@
     <div id="watchPlayer" class="watch-player">
         <div class="watch-player-empty">
             <p>Pick a source below to start watching.</p>
         </div>
-        @* AniSkip overlay: corner-anchored button rendered by JS when
-           the playhead enters an intro / outro range. Hidden by default
-           — the wireSkipOverlay() init bails out cleanly when no skip
-           markers are available for the episode. *@
-        <button id="watchSkipButton" class="watch-skip-btn" type="button" hidden>Skip intro →</button>
     </div>
+    @* AniSkip overlay: corner-anchored button rendered by JS when the
+       playhead enters an intro / outro range. Hidden by default —
+       wireSkipOverlay() bails cleanly when no skip markers are
+       available for the episode. *@
+    <button id="watchSkipButton" class="watch-skip-btn" type="button" hidden>Skip intro →</button>
     <div class="watch-player-toolbar">
         @* Auto-skip preference lives in localStorage so it persists
            across episodes — click once, intros / outros get jumped
@@ -78,7 +77,7 @@
         </button>
     </div>
     <div id="watchPlayerFallback" class="watch-player-fallback" hidden>
-        @* Rendered by JS when the &lt;video&gt; element fires an error
+        @* Rendered by JS when the <video> element fires an error
            (codec mismatch — most often MKV with HEVC on Firefox/Safari
            or anything AV1-encoded on older browsers). *@
     </div>
@@ -117,7 +116,7 @@
 </section>
 
 @section Scripts {
-    <script src="https://cdn.vidstack.io/player" type="module"></script>
+    <script src="https://unpkg.com/artplayer@5/dist/artplayer.js"></script>
     <script>
         (function () {
             var animeId = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(a.id));
@@ -130,11 +129,11 @@
             var fallbackHost = document.getElementById('watchPlayerFallback');
             if (!sourcesBody || !playerHost) return;
 
-            // Live <media-player> reference. vidstack web components
-            // clean up after themselves when removed from the DOM, so
-            // destroyPlayer() just empties the host — no plyr.destroy()
-            // equivalent needed.
-            var player = null;
+            // Live ArtPlayer instance — recreated on every source pick
+            // so the underlying <video> can be swapped cleanly.
+            // art.destroy(true) detaches the player, removes its DOM,
+            // and unbinds every listener it registered.
+            var art = null;
             // Cached last /episode-streams response so playStream +
             // wireSkipOverlay can read the same skipTimes + subtitles
             // bundle without an extra fetch on every source pick.
@@ -151,9 +150,12 @@
             }
 
             function destroyPlayer() {
-                // vidstack tears down its internal state when the element
-                // leaves the DOM; clearing innerHTML is enough.
-                player = null;
+                // ArtPlayer.destroy(true) detaches the player, removes
+                // its DOM, and unbinds every listener it registered.
+                // Without the `true`, the player only pauses + retains
+                // its DOM — we'd accumulate stale instances per source
+                // pick.
+                if (art) { try { art.destroy(true); } catch (_) {} art = null; }
                 playerHost.innerHTML = '';
                 fallbackHost.hidden = true;
                 fallbackHost.innerHTML = '';
@@ -184,64 +186,123 @@
             function playStream(stream) {
                 destroyPlayer();
 
-                // vidstack web-component player. The <media-player>
-                // hosts the source + tracks + UI layout siblings; the
-                // <media-provider> renders the underlying <video> and
-                // <media-video-layout> draws the default control UI
-                // (center play, ±10s seeks, captions, settings, PiP,
-                // AirPlay, fullscreen, touch gestures, keyboard
-                // shortcuts).
-                var mp = document.createElement('media-player');
-                mp.setAttribute('title', @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(episodeLabel)));
-                mp.setAttribute('src', stream.url);
-                mp.setAttribute('playsinline', '');
-                mp.setAttribute('autoplay', '');
-                // Deliberately no `crossorigin` — some RD direct URLs
-                // reject anonymous CORS requests; subtitles are already
-                // proxied through /anime/subtitle so they're same-origin
-                // and don't need the opt-in.
+                // ArtPlayer wipes its container on init, so the
+                // placeholder paragraph + any stale DOM go away
+                // automatically. Title flows through to the top-left
+                // overlay; theme tints the active progress + buttons.
+                var subtitles = (lastData && Array.isArray(lastData.subtitles)) ? lastData.subtitles : [];
+                // Pick the default subtitle: first English entry when
+                // present, otherwise the first track. Empty array
+                // means "no subs" — ArtPlayer renders a disabled CC
+                // affordance in that case.
+                var defaultSubIdx = -1;
+                for (var i = 0; i < subtitles.length; i++) {
+                    if (/^en/i.test(subtitles[i].lang || '')) { defaultSubIdx = i; break; }
+                }
+                if (defaultSubIdx === -1 && subtitles.length > 0) defaultSubIdx = 0;
 
-                var provider = document.createElement('media-provider');
-                mp.appendChild(provider);
-
-                // Subtitle tracks. Proxied through /anime/subtitle so
-                // the <track> request is same-origin (avoids the CORS
-                // dance the cross-origin alternative would need). The
-                // default layout's CC menu picks them up automatically.
-                if (lastData && Array.isArray(lastData.subtitles)) {
-                    lastData.subtitles.forEach(function (t, i) {
-                        var track = document.createElement('track');
-                        track.setAttribute('kind', 'subtitles');
-                        track.setAttribute('src', t.url);
-                        track.setAttribute('srclang', t.lang || 'en');
-                        track.setAttribute('label', t.label || t.lang || 'Subtitles');
-                        if (i === 0 && /^en/i.test(t.lang || '')) {
-                            track.setAttribute('default', '');
-                        }
-                        // vidstack reads <track> children inside <media-provider>.
-                        provider.appendChild(track);
+                var settings = [];
+                if (subtitles.length > 0) {
+                    settings.push({
+                        html: 'Subtitles',
+                        tooltip: 'Subtitle language',
+                        selector: subtitles.map(function (t, i) {
+                            return {
+                                html: t.label || t.lang || 'Subtitles',
+                                url: t.url,
+                                "default": i === defaultSubIdx,
+                            };
+                        }),
+                        onSelect: function (item) {
+                            art.subtitle.switch(item.url, { name: item.html });
+                            return item.html;
+                        },
                     });
                 }
 
-                var layout = document.createElement('media-video-layout');
-                mp.appendChild(layout);
+                // Mark intro / outro on the progress bar so the user
+                // sees the upcoming skip-points at a glance. Same data
+                // wireSkipOverlay() uses for its corner-anchored
+                // button — these are the visual cue, the button is
+                // the action.
+                var highlight = [];
+                var times = lastData && lastData.skipTimes;
+                if (times) {
+                    if (times.intro) {
+                        highlight.push({ time: times.intro.start, text: 'OP' });
+                    }
+                    if (times.outro) {
+                        highlight.push({ time: times.outro.start, text: 'ED' });
+                    }
+                }
 
-                playerHost.appendChild(mp);
-                player = mp;
-
-                // vidstack normalises media errors through its own
-                // "error" custom event. The detail carries .code (HTML5
-                // MediaError code) which matches the Plyr / native
-                // semantics — 4 = SRC_NOT_SUPPORTED, the "can't decode"
-                // signal we swap for the external-open fallback. The
-                // raw <video> error also bubbles through, so a single
-                // listener handles both.
-                mp.addEventListener('error', function (e) {
-                    var code = e && e.detail && e.detail.code;
-                    if (code === 4) showFallback(stream);
+                art = new Artplayer({
+                    container: playerHost,
+                    url: stream.url,
+                    title: @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(episodeLabel)),
+                    theme: '#7c3aed',
+                    autoplay: true,
+                    pip: true,
+                    screenshot: true,
+                    setting: true,
+                    playbackRate: true,
+                    aspectRatio: true,
+                    fullscreen: true,
+                    fullscreenWeb: true,
+                    subtitleOffset: true,
+                    miniProgressBar: true,
+                    autoOrientation: true,
+                    hotkey: true,
+                    airplay: true,
+                    moreVideoAttr: { playsInline: true },
+                    subtitle: defaultSubIdx >= 0 ? {
+                        url: subtitles[defaultSubIdx].url,
+                        type: 'vtt',
+                        encoding: 'utf-8',
+                        // escape: true keeps ArtPlayer HTML-escaping
+                        // subtitle text — Wyzie content is third-party
+                        // and we don't want stray <script> / <img> tags
+                        // landing in the captions overlay.
+                        escape: true,
+                        name: subtitles[defaultSubIdx].label || subtitles[defaultSubIdx].lang,
+                    } : {},
+                    settings: settings,
+                    highlight: highlight,
+                    controls: [
+                        {
+                            // Quick "Open externally" affordance for users
+                            // who'd rather hand the URL to their desktop
+                            // player. Sits to the right of the progress
+                            // controls; ArtPlayer renders it as a tooltip-
+                            // ed icon button.
+                            position: 'right',
+                            html: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+                            tooltip: 'Open externally',
+                            click: function () { window.open(stream.url, '_blank', 'noopener'); },
+                        },
+                    ],
                 });
 
-                wireSkipOverlay(mp);
+                // ArtPlayer normalises the native HTMLVideoElement
+                // through art.video; the "video:error" custom event
+                // fires whenever the inner element errors. code === 4
+                // (MEDIA_ERR_SRC_NOT_SUPPORTED) is the definitive
+                // "browser can't decode" signal we swap for the
+                // external-open fallback.
+                art.on('video:error', function () {
+                    var v = art.video;
+                    if (v && v.error && v.error.code === 4) showFallback(stream);
+                });
+
+                // Move the skip-intro overlay button into the player
+                // host now that ArtPlayer has mounted its DOM there.
+                // playerHost is position:relative; the button is
+                // position:absolute, so this gives the button a stable
+                // corner-anchor over the video frame regardless of
+                // ArtPlayer's internal chrome size.
+                if (skipButton) playerHost.appendChild(skipButton);
+
+                wireSkipOverlay(art);
             }
 
             // ── AniSkip skip-intro / skip-outro overlay ───────────────
@@ -265,7 +326,7 @@
                 });
             }
 
-            function wireSkipOverlay(mediaPlayer) {
+            function wireSkipOverlay(art) {
                 if (!skipButton) return;
                 var times = lastData && lastData.skipTimes;
                 if (!times || (!times.intro && !times.outro)) {
@@ -282,14 +343,12 @@
                     }
                     return null;
                 }
-                // vidstack emits "time-update" (dasherised) with the
-                // currentTime in the event detail. Native "timeupdate"
-                // also bubbles from the inner <video>, but the dasherised
-                // one is the canonical vidstack API.
-                mediaPlayer.addEventListener('time-update', function (e) {
-                    var t = (e && e.detail && typeof e.detail.currentTime === 'number')
-                        ? e.detail.currentTime
-                        : (mediaPlayer.currentTime || 0);
+                // ArtPlayer exposes the underlying <video> on art.video.
+                // The native "timeupdate" event fires at ~250ms cadence
+                // which is fine for the once-every-few-seconds polling
+                // the overlay needs.
+                art.on('video:timeupdate', function () {
+                    var t = art.currentTime || 0;
                     var r = activeRange(t);
                     if (!r) {
                         currentRange = null;
@@ -297,7 +356,7 @@
                         return;
                     }
                     if (autoSkip) {
-                        mediaPlayer.currentTime = r.end + 1;
+                        art.seek = r.end + 1;
                         skipButton.hidden = true;
                         return;
                     }
@@ -310,7 +369,7 @@
                 });
                 skipButton.onclick = function () {
                     var t = parseFloat(skipButton.dataset.seekTo || '0');
-                    if (t > 0) mediaPlayer.currentTime = t;
+                    if (t > 0) art.seek = t;
                 };
             }
 
