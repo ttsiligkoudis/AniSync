@@ -187,7 +187,14 @@ namespace AnimeList.Services
             // Episode-shaped lookup (series).
             if (episode.HasValue && episode.Value > 0)
             {
-                var s = season ?? 1;
+                // For IMDb series ids, the mapping's ImdbSeason wins over
+                // whatever the URL passed: the URL season is the AniSync
+                // cour-internal number (almost always 1 because each cour
+                // is a self-contained anime entry in AniSync), but
+                // Torrentio addresses the franchise's IMDb listing with
+                // the franchise-wide season number. Fall back to the URL
+                // value only when the mapping has no opinion.
+                var s = links.ImdbSeason ?? season ?? 1;
                 if (!string.IsNullOrEmpty(links.ImdbId) && links.ImdbId.StartsWith("tt"))
                 {
                     return ("series", $"{links.ImdbId}:{s}:{episode.Value}");
