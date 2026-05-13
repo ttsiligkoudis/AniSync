@@ -1929,13 +1929,20 @@ body.modal-open {
 
 .episode-stream-row {
     margin: 0;
+    /* The pick button used to fill the row alone. With copy / launch
+       actions sitting next to it, the row is now a flex container so
+       the actions cluster on the right and the pick takes the rest. */
+    display: flex;
+    align-items: stretch;
+    gap: 0.4rem;
 }
 
 .episode-stream-pick {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     text-align: left;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1946,6 +1953,72 @@ body.modal-open {
     cursor: pointer;
     font-size: 0.85rem;
     transition: background 0.15s, border-color 0.15s;
+}
+
+/* Action group — copy + external launcher, sitting flush against the
+   right edge of the row. Visual weight kept low so it doesn't compete
+   with the primary "pick to play" button next to it. */
+.episode-stream-actions {
+    display: flex;
+    align-items: stretch;
+    gap: 0.25rem;
+    flex-shrink: 0;
+}
+
+.episode-stream-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.4rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.6rem;
+    color: rgba(255, 255, 255, 0.65);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.episode-stream-action:hover,
+.episode-stream-action:focus {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #fff;
+}
+
+.episode-stream-action.is-success {
+    color: rgb(134, 239, 172);
+    border-color: rgba(34, 197, 94, 0.45);
+}
+
+/* Popup menu shown when the external-launcher action is clicked.
+   Lives directly under <body> so it's not clipped by the source
+   panel's overflow rules and survives source-list re-renders. */
+.episode-stream-external-menu {
+    position: absolute;
+    z-index: 50;
+    min-width: 12rem;
+    background: rgba(20, 20, 28, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.6rem;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+    padding: 0.25rem;
+    display: flex;
+    flex-direction: column;
+}
+
+.episode-stream-external-menu a {
+    display: block;
+    padding: 0.5rem 0.75rem;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 0.85rem;
+    text-decoration: none;
+    border-radius: 0.4rem;
+}
+
+.episode-stream-external-menu a:hover,
+.episode-stream-external-menu a:focus {
+    background: rgba(124, 58, 237, 0.25);
+    color: #fff;
 }
 
 .episode-stream-pick:hover,
