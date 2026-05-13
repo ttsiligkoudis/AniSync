@@ -891,6 +891,7 @@
                 if (skipButton) playerHost.appendChild(skipButton);
 
                 wireSkipOverlay(art);
+                paintSkipRanges(art);
 
                 // Kick off embedded MKV subtitle extraction in
                 // background. matroska-subtitles streams the file via
@@ -1027,6 +1028,62 @@
                     var t = parseFloat(skipButton.dataset.seekTo || '0');
                     if (t > 0) art.seek = t;
                 };
+            }
+
+            // Paint a translucent fill over the OP / ED ranges on the
+            // ArtPlayer progress bar. The existing `highlight: [...]`
+            // option gives single-tick markers at intro.start /
+            // outro.start; the range fill adds width so the user can
+            // see at a glance how much they'd skip. The fill lives
+            // inside ArtPlayer's progress element, so it dies with
+            // the player on source switch — no cleanup needed.
+            function paintSkipRanges(art) {
+                var times = lastData && lastData.skipTimes;
+                if (!times || (!times.intro && !times.outro)) return;
+                // Need the video duration to convert seconds → %. On
+                // some browsers metadata lands a beat after `ready`,
+                // so listen on the earliest event that has duration
+                // and bail if it still isn't there.
+                function paint() {
+                    var dur = art.duration || (art.video && art.video.duration) || 0;
+                    if (!dur || !isFinite(dur)) return false;
+                    var host = art.template && art.template.$progress;
+                    if (!host) host = art.constructor.utils
+                        ? art.constructor.utils.query('.art-control-progress', art.template && art.template.$player)
+                        : null;
+                    if (!host) host = (art.template && art.template.$player || document)
+                        .querySelector('.art-control-progress');
+                    if (!host) return false;
+                    // Idempotent: nuke any prior fills before re-paint.
+                    var prior = host.querySelectorAll('.watch-skip-range');
+                    for (var i = 0; i < prior.length; i++) prior[i].remove();
+                    function addBand(range, kind) {
+                        if (!range) return;
+                        var startPct = Math.max(0, Math.min(100, (range.start / dur) * 100));
+                        var endPct = Math.max(0, Math.min(100, (range.end / dur) * 100));
+                        var width = Math.max(0, endPct - startPct);
+                        if (width <= 0) return;
+                        var band = document.createElement('span');
+                        band.className = 'watch-skip-range watch-skip-range-' + kind;
+                        band.style.left = startPct + '%';
+                        band.style.width = width + '%';
+                        band.title = (kind === 'intro' ? 'Opening' : 'Ending')
+                            + ' — ' + Math.round(range.start) + 's → ' + Math.round(range.end) + 's';
+                        host.appendChild(band);
+                    }
+                    addBand(times.intro, 'intro');
+                    addBand(times.outro, 'outro');
+                    return true;
+                }
+                if (!paint()) {
+                    // Duration not ready yet — retry on the next
+                    // event that signals metadata is loaded.
+                    var once = function () {
+                        if (paint()) art.off('video:loadedmetadata', once);
+                    };
+                    art.on('video:loadedmetadata', once);
+                    art.on('ready', once);
+                }
             }
 
 
