@@ -199,7 +199,7 @@
             // published npm version. The previous pinned versions
             // (3.4.0 / 1.7.16) didn't exist on npm and 404'd across
             // all three CDNs. If "latest" ever ships a breaking
-            // change here, pin to a known-good major like @3 / @1
+            // change here, pin to a known-good major like @@3 / @@1
             // once we know what the current versions actually are.
             const [m, j] = await Promise.all([
                 tryImport([
