@@ -213,13 +213,31 @@
                     'https://cdn.skypack.dev/jassub',
                 ]),
             ]);
-            if (m && m.SubtitleParser) {
-                window.MatroskaSubtitles = { SubtitleParser: m.SubtitleParser };
-                status.matroska = true;
+            if (m) {
+                // Look for SubtitleParser as named export, on default,
+                // or wrapped in a `parser` property — different ESM
+                // bundlers (esm.sh / esm.run / skypack) sometimes
+                // shape CJS-to-ESM differently for the same package.
+                var Parser = m.SubtitleParser
+                    || (m.default && m.default.SubtitleParser)
+                    || m.default;
+                if (typeof Parser === 'function') {
+                    window.MatroskaSubtitles = { SubtitleParser: Parser };
+                    status.matroska = true;
+                } else {
+                    console.warn('matroska-subtitles: SubtitleParser export not found; module shape:', Object.keys(m || {}));
+                }
             }
             if (j) {
-                window.JASSUB = j.default || j.JASSUB || j;
-                status.jassub = true;
+                var JassubCtor = (typeof j === 'function' && j)
+                    || j.default
+                    || j.JASSUB;
+                if (typeof JassubCtor === 'function') {
+                    window.JASSUB = JassubCtor;
+                    status.jassub = true;
+                } else {
+                    console.warn('jassub: constructor export not found; module shape:', Object.keys(j || {}));
+                }
             }
             return status;
         })();
@@ -436,7 +454,14 @@
                     var parser;
                     try { parser = new MatroskaSubtitles.SubtitleParser(); }
                     catch (e) {
-                        setEmbedStatus('Embedded-subtitle parser init failed', 'error');
+                        // Surface the actual error so we can see whether
+                        // it's a missing-API problem (Buffer / stream
+                        // polyfills), a different export shape, or a
+                        // genuine bug in the parser. Truncated to keep
+                        // the pill readable.
+                        var msg = (e && e.message) ? String(e.message) : 'unknown error';
+                        console.warn('matroska parser init threw:', e);
+                        setEmbedStatus('Parser init failed: ' + msg.slice(0, 80), 'error');
                         onComplete([]);
                         return;
                     }
