@@ -195,16 +195,22 @@
         }
         window.subtitleLibsReady = (async () => {
             const status = { matroska: false, jassub: false };
+            // Version-less URLs — every CDN resolves to the latest
+            // published npm version. The previous pinned versions
+            // (3.4.0 / 1.7.16) didn't exist on npm and 404'd across
+            // all three CDNs. If "latest" ever ships a breaking
+            // change here, pin to a known-good major like @3 / @1
+            // once we know what the current versions actually are.
             const [m, j] = await Promise.all([
                 tryImport([
-                    'https://esm.sh/matroska-subtitles@3.4.0',
-                    'https://esm.run/matroska-subtitles@3.4.0',
-                    'https://cdn.skypack.dev/matroska-subtitles@3.4.0',
+                    'https://esm.sh/matroska-subtitles',
+                    'https://esm.run/matroska-subtitles',
+                    'https://cdn.skypack.dev/matroska-subtitles',
                 ]),
                 tryImport([
-                    'https://esm.sh/jassub@1.7.16',
-                    'https://esm.run/jassub@1.7.16',
-                    'https://cdn.skypack.dev/jassub@1.7.16',
+                    'https://esm.sh/jassub',
+                    'https://esm.run/jassub',
+                    'https://cdn.skypack.dev/jassub',
                 ]),
             ]);
             if (m && m.SubtitleParser) {
@@ -258,11 +264,13 @@
             // new source mid-extraction.
             var embeddedExtractAbort = null;
 
-            // CDN URLs for jassub's worker + WebAssembly bundle.
-            // Hardcoded to match the <script> include above so the
-            // worker init pulls from the same version.
-            var JASSUB_WORKER = 'https://cdn.jsdelivr.net/npm/jassub@1.7.16/dist/jassub-worker.js';
-            var JASSUB_WASM   = 'https://cdn.jsdelivr.net/npm/jassub@1.7.16/dist/jassub-worker.wasm';
+            // jsDelivr serves the latest published version when no
+            // tag is specified — matches the version-less imports
+            // in the module bootstrap so the worker + wasm stay in
+            // step with whatever jassub package the dynamic import
+            // ended up resolving.
+            var JASSUB_WORKER = 'https://cdn.jsdelivr.net/npm/jassub/dist/jassub-worker.js';
+            var JASSUB_WASM   = 'https://cdn.jsdelivr.net/npm/jassub/dist/jassub-worker.wasm';
 
             function el(tag, attrs, text) {
                 var n = document.createElement(tag);
