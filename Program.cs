@@ -224,11 +224,13 @@ builder.Services.AddSingleton<ITorrentioService, TorrentioService>();
 // cache outlive individual requests — anime episodes are watched
 // repeatedly and the same /watch view re-fetches on every visit.
 builder.Services.AddSingleton<ISubtitleService, OpenSubtitlesService>();
-// Anime-specialised second subtitle provider. Same singleton reasoning
-// — (anilistId, episode) → tracks cache should outlive requests. Opt-in
-// via JIMAKU_API_KEY; the service short-circuits to [] when the key is
-// missing, so it's safe to keep registered unconditionally.
-builder.Services.AddSingleton<IJimakuSubtitlesService, JimakuSubtitlesService>();
+// Second subtitle provider — Wyzie federates Subdl / Addic7ed /
+// others behind a single IMDb-keyed endpoint. No API key, results
+// from "OpenSubtitles" upstream are filtered out at the service
+// boundary so this is purely complementary to the dedicated
+// OpenSubtitles addon path above. Singleton so the
+// (imdb, season, episode) → tracks cache outlives requests.
+builder.Services.AddSingleton<IWyzieSubtitlesService, WyzieSubtitlesService>();
 builder.Services.AddScoped<ISyncService, SyncService>();
 // Singleton — its (malId, episode) → markers cache is the whole point. Per-request
 // scoping would defeat the cache. The service depends only on IHttpClientFactory
