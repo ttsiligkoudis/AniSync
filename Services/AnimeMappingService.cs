@@ -198,6 +198,16 @@ namespace AnimeList.Services
                         && !string.IsNullOrEmpty(mapping.ImdbId)
                         && mapping.ImdbId.StartsWith("tt"))
                         links.ImdbId = mapping.ImdbId;
+                    // mapping.Season is the IMDb-side cour pointer.
+                    // Anime franchises typically have ONE imdb id with
+                    // each cour mapped to a different season number,
+                    // so the cour's anilist / mal id → mapping.Season
+                    // pair is what tells downstream callers (Torrentio
+                    // most importantly) which season of the franchise
+                    // we mean. Without this the request silently
+                    // resolves to season 1 of the franchise for every
+                    // cour.
+                    links.ImdbSeason ??= mapping.Season;
                 }
             }
             catch

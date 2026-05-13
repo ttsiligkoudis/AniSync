@@ -236,6 +236,13 @@
                     }
                 }
 
+                // Reusable SVG markup for the ±10s control buttons —
+                // pre-encoded inline so ArtPlayer can drop them into
+                // its toolbar without an extra fetch. Both icons mirror
+                // each other; only the polyline + the digit shift.
+                var rewindSvg = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>';
+                var forwardSvg = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>';
+
                 art = new Artplayer({
                     container: playerHost,
                     url: stream.url,
@@ -243,10 +250,15 @@
                     theme: '#7c3aed',
                     autoplay: true,
                     pip: true,
-                    screenshot: true,
+                    // screenshot / aspectRatio dropped from the toolbar —
+                    // the screenshot icon and the aspect-ratio toggle
+                    // were noise for the average viewer; users who want
+                    // those can still get aspect-ratio via the settings
+                    // menu's video-scaling entry if we ever surface one.
+                    screenshot: false,
                     setting: true,
                     playbackRate: true,
-                    aspectRatio: true,
+                    aspectRatio: false,
                     fullscreen: true,
                     fullscreenWeb: true,
                     subtitleOffset: true,
@@ -270,15 +282,32 @@
                     highlight: highlight,
                     controls: [
                         {
-                            // Quick "Open externally" affordance for users
-                            // who'd rather hand the URL to their desktop
-                            // player. Sits to the right of the progress
-                            // controls; ArtPlayer renders it as a tooltip-
-                            // ed icon button.
-                            position: 'right',
-                            html: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
-                            tooltip: 'Open externally',
-                            click: function () { window.open(stream.url, '_blank', 'noopener'); },
+                            // ←10s — sits in the toolbar to the left of
+                            // the play button. `index` orders custom
+                            // controls within their position; play is at
+                            // 10 by default, so 8 puts us just before it.
+                            position: 'left',
+                            index: 8,
+                            html: rewindSvg,
+                            tooltip: 'Rewind 10s',
+                            click: function () {
+                                var v = art && art.video;
+                                if (v) art.seek = Math.max(0, (v.currentTime || 0) - 10);
+                            },
+                        },
+                        {
+                            // 10s→ — mirror of rewind, just after play.
+                            position: 'left',
+                            index: 12,
+                            html: forwardSvg,
+                            tooltip: 'Forward 10s',
+                            click: function () {
+                                var v = art && art.video;
+                                if (!v) return;
+                                var target = (v.currentTime || 0) + 10;
+                                if (v.duration && target > v.duration) target = v.duration;
+                                art.seek = target;
+                            },
                         },
                     ],
                 });
