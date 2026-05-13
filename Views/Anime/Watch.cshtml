@@ -1,7 +1,19 @@
 @model AnimeList.Controllers.WatchViewModel
+@inject Microsoft.Extensions.Configuration.IConfiguration Configuration
 @{
     var a = Model.Anime;
     var ep = Model.Current;
+    // Optional Cloudflare Worker proxy that adds CORS headers to debrid CDN
+    // responses, re-enabling the client-side matroska-subtitles extractor on
+    // real-debrid / all-debrid / etc. (See cf-cors-proxy/ in the repo for the
+    // worker source + deployment steps.) Unset → embedded-sub extraction stays
+    // skipped on those hosts.
+    var corsProxyUrl = (Configuration["CORS_PROXY_URL"]
+        ?? Environment.GetEnvironmentVariable("CORS_PROXY_URL")
+        ?? string.Empty).Trim();
+    var corsProxySecret = (Configuration["CORS_PROXY_SECRET"]
+        ?? Environment.GetEnvironmentVariable("CORS_PROXY_SECRET")
+        ?? string.Empty).Trim();
     var episodeLabel = !string.IsNullOrEmpty(ep.name) ? ep.name
         : !string.IsNullOrEmpty(ep.title) ? ep.title
         : $"Episode {ep.episode}";
@@ -442,13 +454,28 @@
                 console.warn('No working ArtPlayer settings API found; selector not refreshed');
             }
 
+            // Optional Cloudflare Worker CORS proxy. When set, debrid
+            // URLs route through `<proxy>?url=<encoded>` so the bytes
+            // come back with Access-Control-Allow-Origin: * — that
+            // re-enables the matroska-subtitles extractor for hosts
+            // that would otherwise be CORS-blocked.
+            var CORS_PROXY_URL    = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(corsProxyUrl));
+            var CORS_PROXY_SECRET = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(corsProxySecret));
+
             // Hosts that consistently block cross-origin `fetch()` on
             // the media URL. Media elements (`<video>`) play these
             // fine because they don't enforce CORS, but the
             // matroska-subtitles pipeline needs raw bytes via fetch.
-            // Listed here so we can skip the extract attempt rather
-            // than letting it fail loudly in the console.
+            // Listed here so we can skip the extract attempt — or
+            // route through CORS_PROXY_URL when configured.
             var CORS_BLOCKED_HOST_RE = /(?:^|\.)(?:real-debrid\.com|alldebrid\.com|debrid-link\.com|premiumize\.me|torbox\.app|offcloud\.com|strem\.fun)$/i;
+
+            function viaCorsProxy(url) {
+                if (!CORS_PROXY_URL) return null;
+                var u = CORS_PROXY_URL.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url);
+                if (CORS_PROXY_SECRET) u += '&secret=' + encodeURIComponent(CORS_PROXY_SECRET);
+                return u;
+            }
             function isCorsBlockedHost(url) {
                 try {
                     var h = new URL(url, window.location.href).hostname;
@@ -466,21 +493,29 @@
             // surface entries before full parse completes — final
             // (onComplete) fires once cue accumulation is done.
             function extractEmbeddedSubs(url, onTracks, onComplete) {
-                // Known CORS-blocked hosts: debrid CDNs and the
-                // Torrentio resolver all redirect to media URLs that
-                // don't send Access-Control-Allow-Origin, so `fetch()`
-                // will always throw TypeError("Failed to fetch") here
+                // Debrid CDNs and the Torrentio resolver don't send
+                // Access-Control-Allow-Origin on their media URLs, so
+                // direct `fetch()` throws TypeError("Failed to fetch")
                 // — even though the <video> tag plays the same URL
-                // fine. We could let the fetch run and fail, but
-                // that pollutes the console with browser-injected
-                // CORS / ERR_FAILED warnings on every source switch.
-                // Skip the pipeline entirely for these hosts and
-                // leave subtitle duty to OpenSubtitles.
+                // fine. Two outcomes here:
+                //   * CORS_PROXY_URL configured (Cloudflare Worker
+                //     in cf-cors-proxy/ deployed) → route bytes
+                //     through the proxy. The worker adds the missing
+                //     CORS header and the matroska-subtitles
+                //     pipeline runs normally.
+                //   * Not configured → skip the pipeline entirely
+                //     to avoid polluting the console with browser-
+                //     injected CORS / ERR_FAILED warnings on every
+                //     source switch.
                 if (isCorsBlockedHost(url)) {
-                    setEmbedStatus(null);
-                    onComplete([]);
-                    var noop = new AbortController();
-                    return noop;
+                    var proxied = viaCorsProxy(url);
+                    if (!proxied) {
+                        setEmbedStatus(null);
+                        onComplete([]);
+                        var noop = new AbortController();
+                        return noop;
+                    }
+                    url = proxied;
                 }
 
                 setEmbedStatus('Looking for embedded subtitles…', 'loading');
