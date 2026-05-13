@@ -144,6 +144,15 @@
 
 @section Scripts {
     <script src="https://unpkg.com/artplayer@5/dist/artplayer.js"></script>
+    @* matroska-subtitles streams an MKV via Range requests and
+       extracts embedded subtitle tracks (the SSA / ASS fansubs that
+       Stremio surfaces). jassub is a WebAssembly port of libass for
+       rendering those tracks with their full styling. Both are
+       optional — if either CDN fails or the MKV's Range requests
+       are blocked, the player still works with the OpenSubtitles
+       VTT path. *@
+    <script src="https://cdn.jsdelivr.net/npm/matroska-subtitles@3.4.0/dist/matroska-subtitles.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jassub@1.7.16/dist/jassub.js"></script>
     <script>
         (function () {
             var animeId = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(a.id));
@@ -166,6 +175,30 @@
             // bundle without an extra fetch on every source pick.
             var lastData = null;
 
+            // Live JASSUB renderer for SSA/ASS subtitle tracks. Spun
+            // up when the user picks an ASS entry from the subtitle
+            // selector, torn down when they switch to anything else
+            // (None / VTT) or change source. Lives outside any single
+            // function so the dispatcher can reach it across selector
+            // changes.
+            var jassubInstance = null;
+            // Embedded MKV subtitle tracks discovered by streaming
+            // matroska-subtitles over the current source. Empty until
+            // extraction has progressed enough to surface tracks
+            // metadata; refreshSubtitleSelector() repopulates the
+            // settings menu when it's been updated.
+            var embeddedTracks = [];
+            // Cancellation token for the in-flight MKV extraction —
+            // lets us abort the parse + fetch when the user picks a
+            // new source mid-extraction.
+            var embeddedExtractAbort = null;
+
+            // CDN URLs for jassub's worker + WebAssembly bundle.
+            // Hardcoded to match the <script> include above so the
+            // worker init pulls from the same version.
+            var JASSUB_WORKER = 'https://cdn.jsdelivr.net/npm/jassub@1.7.16/dist/jassub-worker.js';
+            var JASSUB_WASM   = 'https://cdn.jsdelivr.net/npm/jassub@1.7.16/dist/jassub-worker.wasm';
+
             function el(tag, attrs, text) {
                 var n = document.createElement(tag);
                 if (attrs) Object.keys(attrs).forEach(function (k) {
@@ -183,10 +216,223 @@
                 // its DOM — we'd accumulate stale instances per source
                 // pick.
                 if (art) { try { art.destroy(true); } catch (_) {} art = null; }
+                tearDownJassub();
+                // Embedded extraction is source-scoped — cancel the
+                // in-flight stream + parser when we leave this source
+                // so the next source's pipeline starts clean.
+                if (embeddedExtractAbort) {
+                    try { embeddedExtractAbort.abort(); } catch (_) {}
+                    embeddedExtractAbort = null;
+                }
+                embeddedTracks = [];
                 playerHost.innerHTML = '';
                 fallbackHost.hidden = true;
                 fallbackHost.innerHTML = '';
             }
+
+            function tearDownJassub() {
+                if (jassubInstance) {
+                    try { jassubInstance.destroy(); } catch (_) {}
+                    jassubInstance = null;
+                }
+            }
+
+            // Dispatcher fired when the user picks an entry from the
+            // Subtitles selector. Three kinds:
+            //   - "none": hide every subtitle overlay.
+            //   - "vtt":  use ArtPlayer's native subtitle pipeline
+            //             (already running through art.subtitle).
+            //   - "ass":  hand off to a fresh JASSUB instance that
+            //             renders SSA/ASS on a canvas over the video.
+            // The two pipelines are mutually exclusive — tearDownJassub
+            // + art.subtitle.show=false at the top of every branch
+            // ensures only one overlay is live at a time.
+            function applySubtitle(item) {
+                tearDownJassub();
+                if (!art) return;
+                if (item.kind === 'none') {
+                    art.subtitle.show = false;
+                    return;
+                }
+                if (item.kind === 'vtt') {
+                    art.subtitle.show = true;
+                    art.subtitle.switch(item.url, { name: item.html });
+                    return;
+                }
+                if (item.kind === 'ass') {
+                    // ArtPlayer's native overlay stays off while
+                    // jassub paints over the video.
+                    art.subtitle.show = false;
+                    if (typeof JASSUB === 'undefined' || !art.video) return;
+                    try {
+                        jassubInstance = new JASSUB({
+                            video: art.video,
+                            subContent: item.trackData,
+                            workerUrl: JASSUB_WORKER,
+                            wasmUrl: JASSUB_WASM,
+                        });
+                    } catch (e) {
+                        // JASSUB init failure (CORS, codec mismatch in
+                        // the codecPrivate header, etc) — leave both
+                        // overlays off, surface a console hint, let
+                        // the user pick a different track.
+                        console.warn('jassub init failed:', e);
+                    }
+                }
+            }
+
+            // Rebuild the subtitles selector inside ArtPlayer's
+            // settings menu — called after the MKV extraction
+            // surfaces new embedded tracks so the menu reflects
+            // them without a player rebuild. ArtPlayer doesn't
+            // expose a documented "update existing selector"
+            // method that I trust; we fall back to swapping the
+            // settings object's selector array and re-rendering.
+            function refreshSubtitleSelector(rebuildFn) {
+                if (!art || !art.setting) return;
+                try {
+                    var newOptions = rebuildFn();
+                    // Walk the live setting tree to find our
+                    // "Subtitles" entry and replace its selector.
+                    var settingsList = (art.setting.option && art.setting.option.selector)
+                        || (art.template && art.template.$settings)
+                        || null;
+                    // ArtPlayer's setting.update(name, partial)
+                    // exists in 5.x. Try it first; fall back to a
+                    // no-op if the API isn't there (the next source
+                    // pick will rebuild the menu from scratch).
+                    if (typeof art.setting.update === 'function') {
+                        art.setting.update({
+                            name: 'subtitles',
+                            selector: newOptions,
+                        });
+                    }
+                } catch (e) {
+                    console.warn('setting refresh failed:', e);
+                }
+            }
+
+            // Stream the MKV via Range-aware fetch into
+            // matroska-subtitles, accumulate per-track cues, and on
+            // completion build a renderable ASS document for each
+            // track. Progressive callback (onTracks) fires as soon
+            // as the parser sees the Tracks element so the menu can
+            // surface entries before full parse completes — final
+            // (onComplete) fires once cue accumulation is done.
+            function extractEmbeddedSubs(url, onTracks, onComplete) {
+                if (typeof MatroskaSubtitles === 'undefined' || !MatroskaSubtitles.SubtitleParser) {
+                    onComplete([]);
+                    return null;
+                }
+                var parser;
+                try { parser = new MatroskaSubtitles.SubtitleParser(); }
+                catch (e) { onComplete([]); return null; }
+
+                var trackMeta = [];   // [{ number, language, codecID, header }]
+                var trackCues = {};   // number → array of { time, duration, text }
+
+                parser.once('tracks', function (tracks) {
+                    trackMeta = tracks.map(function (t) {
+                        return {
+                            number: t.number,
+                            language: t.language || 'und',
+                            codecID: t.type || '',
+                            header: t.header || '',
+                            // Friendly label for the selector — use
+                            // an ISO-639-2/B → name mapping where we
+                            // have one, otherwise echo the raw code.
+                            label: prettyLanguage(t.language),
+                        };
+                    });
+                    // Notify caller that track metadata is available;
+                    // the cues themselves still need time to stream
+                    // in, but the menu can update with the language
+                    // list immediately.
+                    onTracks(trackMeta);
+                });
+                parser.on('subtitle', function (sub, trackNumber) {
+                    (trackCues[trackNumber] = trackCues[trackNumber] || []).push(sub);
+                });
+                parser.on('finish', function () {
+                    var output = trackMeta.map(function (t) {
+                        return Object.assign({}, t, {
+                            data: buildAssDocument(t.header, trackCues[t.number] || []),
+                        });
+                    });
+                    onComplete(output);
+                });
+                parser.on('error', function (e) {
+                    console.warn('matroska parser error:', e);
+                    onComplete([]);
+                });
+
+                var abortCtl = new AbortController();
+                fetch(url, { signal: abortCtl.signal })
+                    .then(function (response) {
+                        if (!response.ok || !response.body) {
+                            onComplete([]);
+                            return;
+                        }
+                        var reader = response.body.getReader();
+                        function pump() {
+                            return reader.read().then(function (result) {
+                                if (result.done) { try { parser.end(); } catch (_) {} return; }
+                                try { parser.write(result.value); } catch (e) { /* parser may abort early when EOS reached */ }
+                                return pump();
+                            });
+                        }
+                        return pump();
+                    })
+                    .catch(function (e) {
+                        // AbortError on source switch is expected;
+                        // surface anything else but don't fail the
+                        // player.
+                        if (e && e.name !== 'AbortError') console.warn('embedded sub stream failed:', e);
+                        onComplete([]);
+                    });
+                return abortCtl;
+            }
+
+            // Best-effort ISO-639-2/B → friendly name. Returns the
+            // raw code (upper-cased) when unmapped — anime sometimes
+            // ships with non-standard or empty language entries.
+            function prettyLanguage(code) {
+                var c = (code || '').toLowerCase();
+                var map = {
+                    eng: 'English', spa: 'Spanish', por: 'Portuguese',
+                    fre: 'French', fra: 'French', ger: 'German', deu: 'German',
+                    ita: 'Italian', rus: 'Russian', ara: 'Arabic',
+                    jpn: 'Japanese', chi: 'Chinese', zho: 'Chinese',
+                    kor: 'Korean', tur: 'Turkish', pol: 'Polish',
+                    dut: 'Dutch', nld: 'Dutch', und: 'Embedded',
+                };
+                return map[c] || (code ? code.toUpperCase() : 'Embedded');
+            }
+
+            // Stitches matroska-subtitles' header (the .ass file's
+            // Script Info + V4+ Styles + Events header lines) with
+            // accumulated cues into a complete .ass document that
+            // jassub can render. Each cue's `text` is already the
+            // Dialogue line text after the timestamp; we just prefix
+            // with the standard Dialogue header per ASS spec.
+            function buildAssDocument(header, cues) {
+                if (!cues || cues.length === 0) return header || '';
+                var lines = cues.map(function (c) {
+                    var start = formatAssTime(c.time);
+                    var end   = formatAssTime(c.time + (c.duration || 0));
+                    return 'Dialogue: 0,' + start + ',' + end + ',Default,,0,0,0,,' + (c.text || '');
+                });
+                return (header || '') + '\n' + lines.join('\n') + '\n';
+            }
+            function formatAssTime(ms) {
+                if (!ms || ms < 0) ms = 0;
+                var h  = Math.floor(ms / 3600000);
+                var m  = Math.floor((ms % 3600000) / 60000);
+                var s  = Math.floor((ms % 60000) / 1000);
+                var cs = Math.floor((ms % 1000) / 10);
+                return h + ':' + pad2(m) + ':' + pad2(s) + '.' + pad2(cs);
+            }
+            function pad2(n) { return (n < 10 ? '0' : '') + n; }
 
             function showFallback(stream) {
                 fallbackHost.hidden = false;
@@ -245,34 +491,55 @@
                 // placeholder paragraph + any stale DOM go away
                 // automatically. Title flows through to the top-left
                 // overlay; theme tints the active progress + buttons.
+
                 // Pick the default subtitle: first English entry when
-                // present, otherwise the first track. Empty array
-                // means "no subs" — ArtPlayer renders a disabled CC
-                // affordance in that case.
+                // present, otherwise the first track. Used to mark
+                // the initial pick in the settings selector + as the
+                // ArtPlayer `subtitle:` config so something shows
+                // immediately on play.
                 var defaultSubIdx = -1;
                 for (var i = 0; i < subtitles.length; i++) {
                     if (/^en/i.test(subtitles[i].lang || '')) { defaultSubIdx = i; break; }
                 }
                 if (defaultSubIdx === -1 && subtitles.length > 0) defaultSubIdx = 0;
 
-                var settings = [];
-                if (subtitles.length > 0) {
-                    settings.push({
-                        html: 'Subtitles',
-                        tooltip: 'Subtitle language',
-                        selector: subtitles.map(function (t, i) {
-                            return {
-                                html: t.label || t.lang || 'Subtitles',
-                                url: t.url,
-                                "default": i === defaultSubIdx,
-                            };
-                        }),
-                        onSelect: function (item) {
-                            art.subtitle.switch(item.url, { name: item.html });
-                            return item.html;
-                        },
+                // Subtitle picker is ALWAYS rendered with a "None"
+                // option at the top so users can turn captions off
+                // regardless of how many tracks are available. ASS
+                // entries get added later (after MKV extraction
+                // completes); they live alongside the VTT tracks in
+                // the same selector and route through applySubtitle().
+                function buildSubtitleSelector() {
+                    var options = [{ html: 'None', kind: 'none', "default": defaultSubIdx < 0 }];
+                    subtitles.forEach(function (t, i) {
+                        options.push({
+                            html: t.label || t.lang || 'Subtitles',
+                            kind: 'vtt',
+                            url: t.url,
+                            "default": i === defaultSubIdx,
+                        });
                     });
+                    embeddedTracks.forEach(function (t) {
+                        options.push({
+                            html: (t.label || 'Embedded') + ' (SSA)',
+                            kind: 'ass',
+                            trackData: t.data,
+                            "default": false,
+                        });
+                    });
+                    return options;
                 }
+
+                var settings = [{
+                    name: 'subtitles',
+                    html: 'Subtitles',
+                    tooltip: 'Subtitle track',
+                    selector: buildSubtitleSelector(),
+                    onSelect: function (item) {
+                        applySubtitle(item);
+                        return item.html;
+                    },
+                }];
 
                 // Mark intro / outro on the progress bar so the user
                 // sees the upcoming skip-points at a glance. Same data
@@ -395,6 +662,31 @@
                 if (skipButton) playerHost.appendChild(skipButton);
 
                 wireSkipOverlay(art);
+
+                // Kick off embedded MKV subtitle extraction in
+                // background. matroska-subtitles streams the file via
+                // fetch + Range; track metadata surfaces as soon as
+                // the parser hits the Tracks element (often within
+                // the first MB), and the full ASS bodies finalise on
+                // completion. We rebuild the Subtitles selector
+                // twice — once on metadata, once on completion — so
+                // the user sees the entries appear as they become
+                // usable.
+                embeddedExtractAbort = extractEmbeddedSubs(
+                    stream.url,
+                    function (meta) {
+                        // Metadata-only step: tracks visible in the
+                        // menu but trackData is empty; selecting one
+                        // does nothing until completion fires.
+                        embeddedTracks = meta.map(function (t) {
+                            return Object.assign({}, t, { data: '' });
+                        });
+                        refreshSubtitleSelector(buildSubtitleSelector);
+                    },
+                    function (full) {
+                        embeddedTracks = full;
+                        refreshSubtitleSelector(buildSubtitleSelector);
+                    });
             }
 
             // ── AniSkip skip-intro / skip-outro overlay ───────────────
