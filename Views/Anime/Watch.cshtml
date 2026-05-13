@@ -101,6 +101,11 @@
                 <span class="watch-toggle-dot" aria-hidden="true"></span>
                 <span>Auto-skip intro / outro</span>
             </button>
+            @* Embedded-subtitle status pill — surfaces the SSA / ASS
+               extraction progress so the user can tell whether the
+               pipeline is alive when nothing new appears in the
+               Subtitles menu. Hidden until the pipeline kicks off. *@
+            <span id="watchEmbeddedStatus" class="watch-embed-status" hidden></span>
         </div>
         <div id="watchPlayerFallback" class="watch-player-fallback" hidden>
             @* Rendered by JS when the <video> element fires an error
@@ -295,33 +300,50 @@
 
             // Rebuild the subtitles selector inside ArtPlayer's
             // settings menu — called after the MKV extraction
-            // surfaces new embedded tracks so the menu reflects
-            // them without a player rebuild. ArtPlayer doesn't
-            // expose a documented "update existing selector"
-            // method that I trust; we fall back to swapping the
-            // settings object's selector array and re-rendering.
+            // surfaces new embedded tracks. ArtPlayer's settings
+            // API across 5.x has shifted shape a few times; try the
+            // documented paths in order until one succeeds. Final
+            // fallback is remove + add, which always works.
             function refreshSubtitleSelector(rebuildFn) {
-                if (!art || !art.setting) return;
-                try {
-                    var newOptions = rebuildFn();
-                    // Walk the live setting tree to find our
-                    // "Subtitles" entry and replace its selector.
-                    var settingsList = (art.setting.option && art.setting.option.selector)
-                        || (art.template && art.template.$settings)
-                        || null;
-                    // ArtPlayer's setting.update(name, partial)
-                    // exists in 5.x. Try it first; fall back to a
-                    // no-op if the API isn't there (the next source
-                    // pick will rebuild the menu from scratch).
-                    if (typeof art.setting.update === 'function') {
-                        art.setting.update({
-                            name: 'subtitles',
-                            selector: newOptions,
-                        });
-                    }
-                } catch (e) {
-                    console.warn('setting refresh failed:', e);
+                if (!art || !art.setting) {
+                    console.warn('refreshSubtitleSelector: no art.setting');
+                    return;
                 }
+                var newOptions;
+                try { newOptions = rebuildFn(); }
+                catch (e) { console.warn('rebuildFn threw:', e); return; }
+
+                var newEntry = {
+                    name: 'subtitles',
+                    html: 'Subtitles',
+                    tooltip: 'Subtitle track',
+                    selector: newOptions,
+                    onSelect: function (item) {
+                        applySubtitle(item);
+                        return item.html;
+                    },
+                };
+
+                // Path 1: setting.update — newest API, takes an
+                // option object matched by `name`.
+                try {
+                    if (typeof art.setting.update === 'function') {
+                        art.setting.update(newEntry);
+                        return;
+                    }
+                } catch (e) { console.warn('setting.update failed:', e); }
+
+                // Path 2: remove + add — works on older 5.x.
+                try {
+                    if (typeof art.setting.remove === 'function'
+                        && typeof art.setting.add === 'function') {
+                        art.setting.remove('subtitles');
+                        art.setting.add(newEntry);
+                        return;
+                    }
+                } catch (e) { console.warn('setting.remove+add failed:', e); }
+
+                console.warn('No working ArtPlayer settings API found; selector not refreshed');
             }
 
             // Stream the MKV via Range-aware fetch into
@@ -333,12 +355,18 @@
             // (onComplete) fires once cue accumulation is done.
             function extractEmbeddedSubs(url, onTracks, onComplete) {
                 if (typeof MatroskaSubtitles === 'undefined' || !MatroskaSubtitles.SubtitleParser) {
+                    setEmbedStatus('Embedded-subtitle support unavailable', 'error');
                     onComplete([]);
                     return null;
                 }
                 var parser;
                 try { parser = new MatroskaSubtitles.SubtitleParser(); }
-                catch (e) { onComplete([]); return null; }
+                catch (e) {
+                    setEmbedStatus('Embedded-subtitle parser init failed', 'error');
+                    onComplete([]);
+                    return null;
+                }
+                setEmbedStatus('Looking for embedded subtitles…', 'loading');
 
                 var trackMeta = [];   // [{ number, language, codecID, header }]
                 var trackCues = {};   // number → array of { time, duration, text }
@@ -356,6 +384,13 @@
                             label: prettyLanguage(t.language),
                         };
                     });
+                    if (trackMeta.length > 0) {
+                        setEmbedStatus(
+                            'Found ' + trackMeta.length + ' embedded track' + (trackMeta.length === 1 ? '' : 's') + ' — parsing cues…',
+                            'loading');
+                    } else {
+                        setEmbedStatus('No embedded subtitles in this file', 'none');
+                    }
                     // Notify caller that track metadata is available;
                     // the cues themselves still need time to stream
                     // in, but the menu can update with the language
@@ -371,10 +406,18 @@
                             data: buildAssDocument(t.header, trackCues[t.number] || []),
                         });
                     });
+                    if (output.length > 0) {
+                        setEmbedStatus(
+                            output.length + ' embedded track' + (output.length === 1 ? '' : 's') + ' ready',
+                            'success');
+                    } else {
+                        setEmbedStatus('No embedded subtitles in this file', 'none');
+                    }
                     onComplete(output);
                 });
                 parser.on('error', function (e) {
                     console.warn('matroska parser error:', e);
+                    setEmbedStatus('Embedded-subtitle parse failed', 'error');
                     onComplete([]);
                 });
 
@@ -399,7 +442,10 @@
                         // AbortError on source switch is expected;
                         // surface anything else but don't fail the
                         // player.
-                        if (e && e.name !== 'AbortError') console.warn('embedded sub stream failed:', e);
+                        if (e && e.name !== 'AbortError') {
+                            console.warn('embedded sub stream failed:', e);
+                            setEmbedStatus('Embedded-subtitle fetch failed', 'error');
+                        }
                         onComplete([]);
                     });
                 return abortCtl;
@@ -710,6 +756,28 @@
             // and forget about it across episodes.
             var skipButton = document.getElementById('watchSkipButton');
             var skipAutoBtn = document.getElementById('watchSkipAuto');
+            var embedStatusEl = document.getElementById('watchEmbeddedStatus');
+
+            // Surface the embedded-subtitle pipeline state to the user.
+            // Without this they can't tell whether SSA extraction is
+            // running, whether it finished with no tracks (some
+            // releases bake subtitles into the video itself rather
+            // than as a separate track), or whether the libraries
+            // failed to load. `kind` drives the pill colour:
+            // loading / success / none / error.
+            function setEmbedStatus(text, kind) {
+                if (!embedStatusEl) return;
+                if (!text) {
+                    embedStatusEl.hidden = true;
+                    embedStatusEl.textContent = '';
+                    embedStatusEl.removeAttribute('data-kind');
+                    return;
+                }
+                embedStatusEl.hidden = false;
+                embedStatusEl.textContent = text;
+                embedStatusEl.setAttribute('data-kind', kind || '');
+            }
+
             var autoSkip = localStorage.getItem('anisync.autoSkip') === '1';
             if (skipAutoBtn) {
                 skipAutoBtn.setAttribute('aria-pressed', autoSkip ? 'true' : 'false');
