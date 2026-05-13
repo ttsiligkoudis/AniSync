@@ -106,6 +106,11 @@
                pipeline is alive when nothing new appears in the
                Subtitles menu. Hidden until the pipeline kicks off. *@
             <span id="watchEmbeddedStatus" class="watch-embed-status" hidden></span>
+            @* Per-provider subtitle count chip. Populated after the
+               /anime/episode-subtitles fetch resolves so the user can
+               see at a glance whether OpenSubtitles, Wyzie, or both
+               returned anything. Hidden when no subtitles loaded. *@
+            <span id="watchSubsProvider" class="watch-embed-status" hidden></span>
         </div>
         <div id="watchPlayerFallback" class="watch-player-fallback" hidden>
             @* Rendered by JS when the <video> element fires an error
@@ -708,7 +713,24 @@
                     .then(function (r) { return r.ok ? r.json() : { subtitles: [] }; })
                     .catch(function () { return { subtitles: [] }; })
                     .then(function (data) {
-                        initPlayer(stream, (data && data.subtitles) || []);
+                        var subs = (data && data.subtitles) || [];
+                        // Visibility into per-provider contribution.
+                        // Logged to console (devtools-only, no UI cost
+                        // for normal users) and rendered as a chip in
+                        // the toolbar (visible to everyone) so the
+                        // user can confirm at a glance whether each
+                        // provider returned anything.
+                        var pc = (data && data.providerCounts) || {};
+                        try {
+                            console.log(
+                                '[AniSync] subtitles loaded:',
+                                subs.length, 'tracks',
+                                'opensubtitles=' + (pc.opensubtitles || 0),
+                                'wyzie=' + (pc.wyzie || 0),
+                                subs);
+                        } catch (_) {}
+                        renderSubsProviderChip(pc);
+                        initPlayer(stream, subs);
                     });
             }
 
@@ -950,6 +972,26 @@
             var skipButton = document.getElementById('watchSkipButton');
             var skipAutoBtn = document.getElementById('watchSkipAuto');
             var embedStatusEl = document.getElementById('watchEmbeddedStatus');
+            var subsProviderEl = document.getElementById('watchSubsProvider');
+
+            // Render a "OpenSubtitles: X · Wyzie: Y" chip after the
+            // subtitle fetch resolves. data-kind drives the colour so
+            // a totally empty result reads visually distinct from a
+            // partial one.
+            function renderSubsProviderChip(counts) {
+                if (!subsProviderEl) return;
+                var os = (counts && counts.opensubtitles) || 0;
+                var wy = (counts && counts.wyzie) || 0;
+                if (os + wy === 0) {
+                    subsProviderEl.hidden = false;
+                    subsProviderEl.textContent = 'No remote subtitles';
+                    subsProviderEl.setAttribute('data-kind', 'none');
+                    return;
+                }
+                subsProviderEl.hidden = false;
+                subsProviderEl.textContent = 'Subs · OS: ' + os + ' · Wyzie: ' + wy;
+                subsProviderEl.setAttribute('data-kind', wy > 0 ? 'success' : 'loading');
+            }
 
             // Surface the embedded-subtitle pipeline state to the user.
             // Without this they can't tell whether SSA extraction is

@@ -699,7 +699,16 @@ namespace AnimeList.Controllers
                     lang = t.Lang,
                     label = t.Label,
                     url = t.Url,
+                    source = t.Source,
                 }).ToList(),
+                // Per-provider counts so the UI can surface a
+                // "OpenSubtitles: X · Wyzie: Y" status chip without
+                // having to derive the breakdown from track labels.
+                providerCounts = new
+                {
+                    opensubtitles = osTask.Result.Count,
+                    wyzie = wyzieTask.Result.Count,
+                },
             });
         }
 

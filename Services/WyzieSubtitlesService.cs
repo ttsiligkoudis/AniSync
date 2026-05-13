@@ -122,7 +122,11 @@ namespace AnimeList.Services
                 });
 
                 // One info line per query so the operator can see the
-                // language breakdown without per-track noise.
+                // language breakdown — including the empty case, so
+                // it's obvious from the logs whether Wyzie was even
+                // reached. The raw response length is included to
+                // distinguish "Wyzie returned []" from "Wyzie returned
+                // results but our parser dropped them all".
                 if (tracks.Count > 0)
                 {
                     var counts = string.Join(" ",
@@ -130,8 +134,14 @@ namespace AnimeList.Services
                               .OrderBy(g => g.Key)
                               .Select(g => $"{g.Key}:{g.Count()}"));
                     _logger.LogInformation(
-                        "Wyzie {Imdb} s{S}e{E}: {Count} tracks → {Counts}",
-                        imdbId, s, episode, tracks.Count, counts);
+                        "Wyzie {Imdb} s{S}e{E}: {Count} tracks → {Counts} (raw={Bytes}B)",
+                        imdbId, s, episode, tracks.Count, counts, body.Length);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Wyzie {Imdb} s{S}e{E}: 0 tracks (raw={Bytes}B, url={Url})",
+                        imdbId, s, episode, body.Length, url);
                 }
                 return tracks;
             }
@@ -154,18 +164,16 @@ namespace AnimeList.Services
                 var url = (string)s.url;
                 if (string.IsNullOrWhiteSpace(url)) continue;
 
-                // Source-based filter — OpenSubtitles uploads already
-                // arrive via the dedicated service; pulling them back
-                // through Wyzie would create visual duplicates with
-                // different URLs but identical content. Subdl /
-                // Addic7ed / etc. are the value-add here.
+                // Source field is just informational at this layer —
+                // the outer controller dedupes by upstream URL, so any
+                // truly duplicate entries against the dedicated
+                // OpenSubtitles addon path collapse there. We used to
+                // filter source="OpenSubtitles" outright but that also
+                // dropped Wyzie's pull from opensubtitles.com proper
+                // (broader catalog than the Stremio v3 addon we use
+                // directly), which was the main thing we wanted Wyzie
+                // for. Keep everything; rely on URL dedup.
                 var source = ((string)s.source ?? string.Empty).Trim();
-                if (source.Equals("OpenSubtitles", StringComparison.OrdinalIgnoreCase) ||
-                    source.Equals("opensubtitles.com", StringComparison.OrdinalIgnoreCase) ||
-                    source.Equals("opensubtitles.org", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
 
                 var rawLang = ((string)s.language ?? string.Empty).Trim();
                 if (string.IsNullOrEmpty(rawLang)) continue;
@@ -216,7 +224,7 @@ namespace AnimeList.Services
                         ? "Wyzie"
                         : $"Wyzie · {list[i].Source}";
                     var displayLabel = $"{label}{suffix} ({srcTag})";
-                    picked.Add(new SubtitleTrack(code, displayLabel, ProxyUrl(list[i].Url)));
+                    picked.Add(new SubtitleTrack(code, displayLabel, ProxyUrl(list[i].Url), "wyzie"));
                 }
                 emitted.Add(code);
             }
