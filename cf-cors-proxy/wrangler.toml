@@ -1,0 +1,8 @@
+name = "anisync-cors-proxy"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Optional: gate the proxy behind a shared secret so random scanners
+# finding the worker URL can't use it as an open proxy. Set with:
+#   npx wrangler secret put PROXY_SECRET
+# Then set CORS_PROXY_SECRET on the AniSync side to the same value.
