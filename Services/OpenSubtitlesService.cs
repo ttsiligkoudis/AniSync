@@ -91,14 +91,23 @@ namespace AnimeList.Services
         }
 
         public async Task<IReadOnlyList<SubtitleTrack>> SearchAsync(
-            string imdbId, int? season, int? episode, CancellationToken ct = default)
+            string imdbId, int? season, int? episode, string filename = null, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(imdbId) || !imdbId.StartsWith("tt"))
             {
                 return [];
             }
 
-            var cacheKey = $"opensubs:list:{imdbId}:{season ?? 0}:{episode ?? 0}";
+            // Filename narrows results to release-matched subs — same
+            // signal Stremio's web player passes. Normalise to a
+            // short, stable cache fingerprint so e.g. two slightly-
+            // different display titles of the same file don't churn
+            // cache entries (we lowercase and strip the extension).
+            var normalisedFilename = !string.IsNullOrWhiteSpace(filename)
+                ? filename.Trim().ToLowerInvariant()
+                : null;
+            var filenameKey = string.IsNullOrEmpty(normalisedFilename) ? "_" : normalisedFilename;
+            var cacheKey = $"opensubs:list:{imdbId}:{season ?? 0}:{episode ?? 0}:{filenameKey}";
             if (_cache.TryGetValue<IReadOnlyList<SubtitleTrack>>(cacheKey, out var hit) && hit != null)
             {
                 return hit;
@@ -107,20 +116,26 @@ namespace AnimeList.Services
             // Stremio addon URL shape: /subtitles/{type}/{stremioId}.json
             // - series → tt{imdb}:{s}:{e}
             // - movie  → tt{imdb}
-            // The optional /extras segment lets clients pass a
-            // filename for better release-matching, but we don't have
-            // the source filename at this point (subtitles are
-            // fetched before the user picks a source) — skip it.
-            string url;
+            // When we know the source filename, append
+            // /filename={encoded}.json — the addon spec passes that
+            // through to OpenSubtitles for release-aware matching, so
+            // the timing of the returned subtitles actually lines up
+            // with the user's file (this is what fixes the "subs are
+            // off" symptom).
+            string streamioPath;
             if (episode.HasValue && episode.Value > 0)
             {
                 var s = season ?? 1;
-                url = $"{AddonBase}/subtitles/series/{Uri.EscapeDataString($"{imdbId}:{s}:{episode.Value}")}.json";
+                streamioPath = $"series/{Uri.EscapeDataString($"{imdbId}:{s}:{episode.Value}")}";
             }
             else
             {
-                url = $"{AddonBase}/subtitles/movie/{Uri.EscapeDataString(imdbId)}.json";
+                streamioPath = $"movie/{Uri.EscapeDataString(imdbId)}";
             }
+
+            var url = string.IsNullOrEmpty(normalisedFilename)
+                ? $"{AddonBase}/subtitles/{streamioPath}.json"
+                : $"{AddonBase}/subtitles/{streamioPath}/filename={Uri.EscapeDataString(normalisedFilename)}.json";
 
             try
             {

@@ -213,11 +213,38 @@
             function playStream(stream) {
                 destroyPlayer();
 
+                // First line of the stream's title is the release
+                // filename — Torrentio puts it there before its size /
+                // seeder annotations. We pass it to /anime/episode-
+                // subtitles so OpenSubtitles can return release-matched
+                // subs (correct timing for THIS file rather than a
+                // generic search hit). Best-effort: any failure or
+                // missing filename just falls through to a generic
+                // imdb:s:e query.
+                var firstLine = (stream.title || stream.name || '').split('\n')[0].trim();
+
+                var subQs = 'id=' + encodeURIComponent(animeId)
+                    + '&episode=' + encodeURIComponent(episode)
+                    + (hasSeasons ? '&season=' + encodeURIComponent(season) : '')
+                    + (firstLine ? '&filename=' + encodeURIComponent(firstLine) : '');
+
+                fetch('/anime/episode-subtitles?' + subQs, {
+                    credentials: 'same-origin',
+                    headers: { 'Accept': 'application/json' },
+                    skipLoader: true,
+                })
+                    .then(function (r) { return r.ok ? r.json() : { subtitles: [] }; })
+                    .catch(function () { return { subtitles: [] }; })
+                    .then(function (data) {
+                        initPlayer(stream, (data && data.subtitles) || []);
+                    });
+            }
+
+            function initPlayer(stream, subtitles) {
                 // ArtPlayer wipes its container on init, so the
                 // placeholder paragraph + any stale DOM go away
                 // automatically. Title flows through to the top-left
                 // overlay; theme tints the active progress + buttons.
-                var subtitles = (lastData && Array.isArray(lastData.subtitles)) ? lastData.subtitles : [];
                 // Pick the default subtitle: first English entry when
                 // present, otherwise the first track. Empty array
                 // means "no subs" — ArtPlayer renders a disabled CC
@@ -308,9 +335,9 @@
                         type: 'vtt',
                         encoding: 'utf-8',
                         // escape: true keeps ArtPlayer HTML-escaping
-                        // subtitle text — Wyzie content is third-party
-                        // and we don't want stray <script> / <img> tags
-                        // landing in the captions overlay.
+                        // subtitle text — OpenSubtitles content is
+                        // third-party and we don't want stray <script>
+                        // / <img> tags landing in the captions overlay.
                         escape: true,
                         name: subtitles[defaultSubIdx].label || subtitles[defaultSubIdx].lang,
                     } : {},

@@ -15,7 +15,10 @@ namespace AnimeList.Services.Interfaces
         /// <summary>
         /// Returns the available subtitle tracks for the given anime
         /// episode. Looks up by IMDb id + season + episode (the
-        /// addon's primary key). Anime entries without an IMDb
+        /// addon's primary key) and, when provided, the source
+        /// filename — the addon uses the filename to return
+        /// release-matched subtitles whose timing actually matches
+        /// the file the user picked. Anime entries without an IMDb
         /// mapping return an empty list. Best-effort: any HTTP /
         /// parse failure returns [] rather than surfacing the error
         /// to the caller.
@@ -24,6 +27,7 @@ namespace AnimeList.Services.Interfaces
             string imdbId,
             int? season,
             int? episode,
+            string filename = null,
             CancellationToken ct = default);
 
         /// <summary>
