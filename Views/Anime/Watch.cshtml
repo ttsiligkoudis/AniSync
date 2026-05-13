@@ -201,14 +201,27 @@
             // all three CDNs. If "latest" ever ships a breaking
             // change here, pin to a known-good major like @@3 / @@1
             // once we know what the current versions actually are.
+            //
+            // matroska-subtitles is a CJS Node package whose
+            // SubtitleParser extends Writable from `readable-stream`.
+            // esm.sh's default UA-sniffed target sometimes transpiles
+            // the two files to different ES levels: SubtitleParser
+            // gets downgraded to ES5 (`_inherits` + `Writable.call(this)`)
+            // while Writable stays an ES6 class, producing the runtime
+            // "Class constructor E cannot be invoked without 'new'"
+            // crash inside the parser. `?bundle&target=esnext` forces
+            // a single bundle at a uniform target so both classes use
+            // the same syntax and `extends` works.
             const [m, j] = await Promise.all([
                 tryImport([
-                    'https://esm.sh/matroska-subtitles',
+                    'https://esm.sh/matroska-subtitles?bundle&target=esnext',
+                    'https://esm.sh/matroska-subtitles?target=esnext',
                     'https://esm.run/matroska-subtitles',
                     'https://cdn.skypack.dev/matroska-subtitles',
                 ]),
                 tryImport([
-                    'https://esm.sh/jassub',
+                    'https://esm.sh/jassub?bundle&target=esnext',
+                    'https://esm.sh/jassub?target=esnext',
                     'https://esm.run/jassub',
                     'https://cdn.skypack.dev/jassub',
                 ]),
