@@ -144,13 +144,27 @@
 
 @section Scripts {
     <script src="https://unpkg.com/artplayer@5/dist/artplayer.js"></script>
-    @* SSA/ASS embedded-subtitle support (matroska-subtitles +
-       jassub) is deferred — both packages ship ESM/Node-only on
-       npm and the UMD CDN URLs we tried 404 / ERR_BLOCKED_BY_ORB,
-       which froze the page because <script src> tags are
-       blocking. The dispatcher + extraction code below stays in
-       place but no-ops via `typeof MatroskaSubtitles === 'undefined'`
-       checks until we wire in a working ESM loader. *@
+    @* SSA / ASS embedded subtitle support. matroska-subtitles parses
+       the MKV stream client-side; jassub (a libass WebAssembly port)
+       renders the result. Both ship ESM/Node-only on npm, so we go
+       through esm.sh which auto-bundles for the browser. <script
+       type="module"> is deferred by default — a load failure on
+       either CDN URL can't freeze the page parser the way plain
+       <script src> can. Each import is wrapped in try/catch so one
+       library's absence doesn't break the other; the extraction +
+       dispatch code below guards on `typeof MatroskaSubtitles ===
+       'undefined'` and `typeof JASSUB === 'undefined'` and silently
+       no-ops when either is missing. *@
+    <script type="module">
+        try {
+            const m = await import('https://esm.sh/matroska-subtitles@3.4.0');
+            window.MatroskaSubtitles = { SubtitleParser: m.SubtitleParser };
+        } catch (e) { console.warn('matroska-subtitles load failed:', e); }
+        try {
+            const j = await import('https://esm.sh/jassub@1.7.16');
+            window.JASSUB = j.default || j.JASSUB || j;
+        } catch (e) { console.warn('jassub load failed:', e); }
+    </script>
     <script>
         (function () {
             var animeId = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(a.id));
