@@ -144,15 +144,13 @@
 
 @section Scripts {
     <script src="https://unpkg.com/artplayer@5/dist/artplayer.js"></script>
-    @* matroska-subtitles streams an MKV via Range requests and
-       extracts embedded subtitle tracks (the SSA / ASS fansubs that
-       Stremio surfaces). jassub is a WebAssembly port of libass for
-       rendering those tracks with their full styling. Both are
-       optional — if either CDN fails or the MKV's Range requests
-       are blocked, the player still works with the OpenSubtitles
-       VTT path. *@
-    <script src="https://cdn.jsdelivr.net/npm/matroska-subtitles@3.4.0/dist/matroska-subtitles.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jassub@1.7.16/dist/jassub.js"></script>
+    @* SSA/ASS embedded-subtitle support (matroska-subtitles +
+       jassub) is deferred — both packages ship ESM/Node-only on
+       npm and the UMD CDN URLs we tried 404 / ERR_BLOCKED_BY_ORB,
+       which froze the page because <script src> tags are
+       blocking. The dispatcher + extraction code below stays in
+       place but no-ops via `typeof MatroskaSubtitles === 'undefined'`
+       checks until we wire in a working ESM loader. *@
     <script>
         (function () {
             var animeId = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(a.id));
