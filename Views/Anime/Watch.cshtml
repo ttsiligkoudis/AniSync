@@ -161,14 +161,43 @@
        'undefined'` and `typeof JASSUB === 'undefined'` and silently
        no-ops when either is missing. *@
     <script type="module">
-        try {
-            const m = await import('https://esm.sh/matroska-subtitles@3.4.0');
-            window.MatroskaSubtitles = { SubtitleParser: m.SubtitleParser };
-        } catch (e) { console.warn('matroska-subtitles load failed:', e); }
-        try {
-            const j = await import('https://esm.sh/jassub@1.7.16');
-            window.JASSUB = j.default || j.JASSUB || j;
-        } catch (e) { console.warn('jassub load failed:', e); }
+        // Resolve `window.subtitleLibsReady` to { matroska, jassub }
+        // when both imports are done (success or failure). The
+        // extraction pipeline awaits this so it never fires the
+        // "support unavailable" status just because the imports
+        // hadn't completed by the time the user picked a source.
+        // Each library has a fallback CDN chain — esm.sh, then
+        // esm.run (jsDelivr ESM), then skypack — so a single
+        // outage doesn't kill embedded subtitles for everyone.
+        async function tryImport(specifiers) {
+            for (const spec of specifiers) {
+                try { return await import(spec); }
+                catch (e) { console.warn('module load failed:', spec, e && e.message); }
+            }
+            return null;
+        }
+        window.subtitleLibsReady = (async () => {
+            const status = { matroska: false, jassub: false };
+            const m = await tryImport([
+                'https://esm.sh/matroska-subtitles@3.4.0',
+                'https://esm.run/matroska-subtitles@3.4.0',
+                'https://cdn.skypack.dev/matroska-subtitles@3.4.0',
+            ]);
+            if (m && m.SubtitleParser) {
+                window.MatroskaSubtitles = { SubtitleParser: m.SubtitleParser };
+                status.matroska = true;
+            }
+            const j = await tryImport([
+                'https://esm.sh/jassub@1.7.16',
+                'https://esm.run/jassub@1.7.16',
+                'https://cdn.skypack.dev/jassub@1.7.16',
+            ]);
+            if (j) {
+                window.JASSUB = j.default || j.JASSUB || j;
+                status.jassub = true;
+            }
+            return status;
+        })();
     </script>
     <script>
         (function () {
@@ -354,19 +383,36 @@
             // surface entries before full parse completes — final
             // (onComplete) fires once cue accumulation is done.
             function extractEmbeddedSubs(url, onTracks, onComplete) {
-                if (typeof MatroskaSubtitles === 'undefined' || !MatroskaSubtitles.SubtitleParser) {
-                    setEmbedStatus('Embedded-subtitle support unavailable', 'error');
-                    onComplete([]);
-                    return null;
-                }
-                var parser;
-                try { parser = new MatroskaSubtitles.SubtitleParser(); }
-                catch (e) {
-                    setEmbedStatus('Embedded-subtitle parser init failed', 'error');
-                    onComplete([]);
-                    return null;
-                }
                 setEmbedStatus('Looking for embedded subtitles…', 'loading');
+
+                var abortCtl = new AbortController();
+
+                // Wait on the global ready promise from the module
+                // bootstrap so we don't bail with "support unavailable"
+                // just because the imports were still in flight when
+                // the user picked a source.
+                var readyPromise = window.subtitleLibsReady
+                    || Promise.resolve({ matroska: false, jassub: false });
+                readyPromise.then(function (status) {
+                    if (abortCtl.signal.aborted) return;
+                    if (!status.matroska || typeof MatroskaSubtitles === 'undefined' || !MatroskaSubtitles.SubtitleParser) {
+                        setEmbedStatus('Embedded-subtitle support unavailable', 'error');
+                        onComplete([]);
+                        return;
+                    }
+                    runExtraction();
+                });
+                return abortCtl;
+
+                function runExtraction() {
+                    if (abortCtl.signal.aborted) return;
+                    var parser;
+                    try { parser = new MatroskaSubtitles.SubtitleParser(); }
+                    catch (e) {
+                        setEmbedStatus('Embedded-subtitle parser init failed', 'error');
+                        onComplete([]);
+                        return;
+                    }
 
                 var trackMeta = [];   // [{ number, language, codecID, header }]
                 var trackCues = {};   // number → array of { time, duration, text }
@@ -421,7 +467,6 @@
                     onComplete([]);
                 });
 
-                var abortCtl = new AbortController();
                 fetch(url, { signal: abortCtl.signal })
                     .then(function (response) {
                         if (!response.ok || !response.body) {
@@ -448,7 +493,7 @@
                         }
                         onComplete([]);
                     });
-                return abortCtl;
+                } // end runExtraction
             }
 
             // Best-effort ISO-639-2/B → friendly name. Returns the
@@ -578,8 +623,11 @@
                         });
                     });
                     embeddedTracks.forEach(function (t) {
+                        // Label format intentionally drops the parens —
+                        // "English SSA" reads as a track type tag at a
+                        // glance, faster than "English (SSA)".
                         options.push({
-                            html: (t.label || 'Embedded') + ' (SSA)',
+                            html: (t.label || 'Embedded') + ' SSA',
                             kind: 'ass',
                             trackData: t.data,
                             "default": false,
@@ -744,6 +792,27 @@
                     function (full) {
                         embeddedTracks = full;
                         refreshSubtitleSelector(buildSubtitleSelector);
+                        // Auto-promote the SSA track when it lands —
+                        // anime fansubs ship with styled embedded
+                        // subs that almost always beat OpenSubtitles
+                        // for accuracy, so default to that without
+                        // requiring an extra click. Prefer the
+                        // English track when present; fall back to
+                        // the first track.
+                        if (full.length > 0) {
+                            var chosen = null;
+                            for (var i = 0; i < full.length; i++) {
+                                if (/^en/i.test(full[i].language || '')) { chosen = full[i]; break; }
+                            }
+                            chosen = chosen || full[0];
+                            if (chosen && chosen.data) {
+                                applySubtitle({
+                                    kind: 'ass',
+                                    html: (chosen.label || 'Embedded') + ' SSA',
+                                    trackData: chosen.data,
+                                });
+                            }
+                        }
                     });
             }
 

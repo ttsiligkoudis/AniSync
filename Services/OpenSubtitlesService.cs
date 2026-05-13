@@ -198,13 +198,20 @@ namespace AnimeList.Services
             }
         }
 
+        // Cap on how many entries we surface per language. The addon
+        // can return 10+ "English" variants for popular shows; menu
+        // sanity wins over completeness. Variant 1 is unlabelled
+        // ("English"), variants 2+ get a numeric suffix
+        // ("English 2", "English 3", …).
+        private const int MaxVariantsPerLanguage = 5;
+
         /// <summary>
         /// Parses the addon's <c>{ subtitles: [{ id, url, lang }] }</c>
-        /// response. Dedupes by language code so the captions menu
-        /// reads as one entry per language rather than five "English"
-        /// rows — the addon often returns multiple sources per
-        /// language, and the first hit (highest-ranked per the
-        /// upstream's own ranking) is good enough as a default.
+        /// response. Emits multiple entries per language so the user
+        /// can pick a different variant when the first one's timing /
+        /// translation is off. The addon returns variants in its own
+        /// quality order, so taking them in that order keeps the
+        /// best-guess pick first.
         /// </summary>
         private static IReadOnlyList<SubtitleTrack> ParseList(string json)
         {
@@ -222,27 +229,52 @@ namespace AnimeList.Services
                 entries.Add((lang, url));
             }
 
-            // Preferred languages first (English at the top, then
-            // Spanish / Portuguese / French / …), then the long tail
-            // alphabetically for anything we didn't enumerate.
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var picked = new List<SubtitleTrack>();
-            foreach (var pref in PreferredLanguages)
-            {
-                foreach (var e in entries)
-                {
-                    if (string.Equals(e.Lang, pref, StringComparison.OrdinalIgnoreCase) && seen.Add(e.Lang))
-                    {
-                        picked.Add(new SubtitleTrack(e.Lang, FriendlyLabel(e.Lang), ProxyUrl(e.Url)));
-                        break;
-                    }
-                }
-            }
+            // Group by language preserving the addon's emit order
+            // within each group (so variant 1 stays the addon-ranked
+            // top hit).
+            var byLang = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
             foreach (var e in entries)
             {
-                if (seen.Add(e.Lang))
+                if (!byLang.TryGetValue(e.Lang, out var list))
                 {
-                    picked.Add(new SubtitleTrack(e.Lang, FriendlyLabel(e.Lang), ProxyUrl(e.Url)));
+                    list = new List<string>();
+                    byLang[e.Lang] = list;
+                }
+                list.Add(e.Url);
+            }
+
+            var picked = new List<SubtitleTrack>();
+            var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void EmitGroup(string lang, List<string> urls)
+            {
+                var baseLabel = FriendlyLabel(lang);
+                var take = Math.Min(MaxVariantsPerLanguage, urls.Count);
+                for (var i = 0; i < take; i++)
+                {
+                    var label = i == 0 ? baseLabel : $"{baseLabel} {i + 1}";
+                    picked.Add(new SubtitleTrack(lang, label, ProxyUrl(urls[i])));
+                }
+                emitted.Add(lang);
+            }
+
+            // Preferred languages first (English at the top, then
+            // Spanish / Portuguese / French / …), each with up to
+            // MaxVariantsPerLanguage entries.
+            foreach (var pref in PreferredLanguages)
+            {
+                if (byLang.TryGetValue(pref, out var urls))
+                {
+                    EmitGroup(pref, urls);
+                }
+            }
+            // Long tail: every language the addon returned that
+            // wasn't already emitted above.
+            foreach (var kv in byLang)
+            {
+                if (!emitted.Contains(kv.Key))
+                {
+                    EmitGroup(kv.Key, kv.Value);
                 }
             }
             return picked;
