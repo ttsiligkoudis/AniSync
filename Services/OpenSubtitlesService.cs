@@ -167,18 +167,23 @@ namespace AnimeList.Services
                 return null;
             }
 
+            // Force the subs5.strem.io UTF-8 transform when applicable
+            // (no-op for other hosts). Cache key still keys on the
+            // pre-transform URL so re-requests with the same upstream
+            // URL hit cache regardless of transform application.
             var cacheKey = $"opensubs:vtt:{url}";
             if (_cache.TryGetValue<string>(cacheKey, out var hit) && hit != null)
             {
                 return hit;
             }
+            var fetchUrl = EnsureUtf8Transform(url);
 
             try
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 cts.CancelAfter(TimeSpan.FromSeconds(8));
                 var client = _clientFactory.CreateClient();
-                var bytes = await client.GetByteArrayAsync(url, cts.Token);
+                var bytes = await client.GetByteArrayAsync(fetchUrl, cts.Token);
                 var text = DecodeText(bytes);
                 var vtt = text.TrimStart().StartsWith("WEBVTT", StringComparison.OrdinalIgnoreCase)
                     ? text
@@ -262,12 +267,52 @@ namespace AnimeList.Services
         {
             if (!Uri.TryCreate(url, UriKind.Absolute, out var u)) return false;
             var host = u.Host.ToLowerInvariant();
-            return host.EndsWith("opensubtitles.org")
+            // subs5.strem.io is the actual SRT-serving host the
+            // opensubtitles-v3 addon returns URLs for; the addon itself
+            // lives on opensubtitles-v3.strem.io. Both call through the
+            // strem.io suffix anyway, but listing the specific subs
+            // host first documents the chain explicitly.
+            return host == "subs5.strem.io"
+                || host.EndsWith("opensubtitles.org")
                 || host.EndsWith("opensubtitles.com")
                 || host.EndsWith("opensubtitles-v3.strem.io")
                 || host.EndsWith("strem.io")
                 || host.EndsWith("subdl.com")
                 || host.EndsWith("wyzie.ru");   // legacy compatibility
+        }
+
+        /// <summary>
+        /// Inserts subs5.strem.io's <c>subencoding-stremio-utf8</c>
+        /// transform into the path when it's missing. The transform
+        /// asks the server to re-encode the subtitle as UTF-8 inline,
+        /// avoiding the Latin-1 / Windows-1252 guess we'd otherwise
+        /// do client-side in DecodeText(). Stremio's player injects
+        /// this segment itself; our proxy mirrors that.
+        /// </summary>
+        private static string EnsureUtf8Transform(string url)
+        {
+            const string transform = "/subencoding-stremio-utf8/";
+            if (string.IsNullOrEmpty(url) || url.Contains(transform, StringComparison.Ordinal))
+            {
+                return url;
+            }
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var u)) return url;
+            // Scoped to subs5.strem.io — other providers (opensubtitles.com /
+            // .org / subdl) serve their own URL shapes and don't accept this
+            // transform.
+            if (!u.Host.Equals("subs5.strem.io", StringComparison.OrdinalIgnoreCase))
+            {
+                return url;
+            }
+            // Stremio's transform sits after /<lang>/download/ — for
+            // example /en/download/src-api/file/123 →
+            // /en/download/subencoding-stremio-utf8/src-api/file/123.
+            const string anchor = "/download/";
+            var idx = u.AbsolutePath.IndexOf(anchor, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return url;
+            var newPath = u.AbsolutePath.Insert(idx + anchor.Length, "subencoding-stremio-utf8/");
+            var builder = new UriBuilder(u) { Path = newPath };
+            return builder.Uri.ToString();
         }
 
         private static string SafeHost(string url)
