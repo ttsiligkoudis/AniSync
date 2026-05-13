@@ -1170,6 +1170,16 @@
                         return;
                     }
                     lastData = data;
+                    // Hide the auto-skip toggle when AniSkip didn't
+                    // return any markers for this episode — the toggle
+                    // would have nothing to act on and just adds chrome
+                    // the user can't use. The corner skip button is
+                    // already gated on the same data inside
+                    // wireSkipOverlay, so it stays hidden too.
+                    if (skipAutoBtn) {
+                        var sk = data && data.skipTimes;
+                        skipAutoBtn.hidden = !sk || (!sk.intro && !sk.outro);
+                    }
                     renderSources(data);
                 })
                 .catch(function () {
