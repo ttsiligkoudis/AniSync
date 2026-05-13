@@ -195,25 +195,29 @@
         }
         window.subtitleLibsReady = (async () => {
             const status = { matroska: false, jassub: false };
-            // Version-less URLs — every CDN resolves to the latest
-            // published npm version. The previous pinned versions
-            // (3.4.0 / 1.7.16) didn't exist on npm and 404'd across
-            // all three CDNs. If "latest" ever ships a breaking
-            // change here, pin to a known-good major like @@3 / @@1
-            // once we know what the current versions actually are.
+            // Vendored bundle first, CDN as fallback. esm.sh's UA-sniffed
+            // target was downgrading matroska-subtitles' SubtitleParser
+            // to ES5 (`_inherits` + `Writable.call(this)`) while leaving
+            // its Writable superclass as an ES6 class — producing the
+            // runtime "Class constructor E cannot be invoked without
+            // 'new'" crash inside the parser as soon as we did
+            // `new SubtitleParser()`. `?bundle&target=esnext` did not
+            // make the issue go away in the wild (esm.sh keeps serving
+            // mismatched targets even with the flag), so we ship our
+            // own esbuild bundle of matroska-subtitles@3.3.2 from
+            // ~/wwwroot/js/. Native `class extends` survives the build,
+            // and we no longer depend on a CDN being healthy. The CDN
+            // URLs stay as a defensive fallback for the rare case the
+            // vendored asset is broken in production.
             //
-            // matroska-subtitles is a CJS Node package whose
-            // SubtitleParser extends Writable from `readable-stream`.
-            // esm.sh's default UA-sniffed target sometimes transpiles
-            // the two files to different ES levels: SubtitleParser
-            // gets downgraded to ES5 (`_inherits` + `Writable.call(this)`)
-            // while Writable stays an ES6 class, producing the runtime
-            // "Class constructor E cannot be invoked without 'new'"
-            // crash inside the parser. `?bundle&target=esnext` forces
-            // a single bundle at a uniform target so both classes use
-            // the same syntax and `extends` works.
+            // jassub: kept on CDN — its WebAssembly worker file makes
+            // vendoring an ESM bundle a separate, larger effort. When
+            // (not if) jassub trips the same transpile mismatch we'll
+            // vendor it too.
+            const matroskaLocal = '@Url.Content("~/js/matroska-subtitles.bundle.js")';
             const [m, j] = await Promise.all([
                 tryImport([
+                    matroskaLocal,
                     'https://esm.sh/matroska-subtitles?bundle&target=esnext',
                     'https://esm.sh/matroska-subtitles?target=esnext',
                     'https://esm.run/matroska-subtitles',
