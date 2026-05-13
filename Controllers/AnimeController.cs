@@ -382,6 +382,16 @@ namespace AnimeList.Controllers
 
             var (prev, next) = ComputePrevNext(anime.videos, current);
 
+            // RD key presence gates the inline player — the source
+            // picker still renders below either way (external links
+            // for non-RD users) but the empty player wrap would be
+            // dead chrome if nothing can hand it a playable URL.
+            bool hasRdKey = false;
+            if (!string.IsNullOrEmpty(uid))
+            {
+                hasRdKey = !string.IsNullOrEmpty(await _configStore.GetRealDebridApiKeyAsync(uid));
+            }
+
             return View("Watch", new WatchViewModel
             {
                 Anime = anime,
@@ -390,6 +400,7 @@ namespace AnimeList.Controllers
                 Next = next,
                 ConfigUid = uid,
                 AnonymousUser = tokenData.anonymousUser,
+                HasRealDebridKey = hasRdKey,
             });
         }
 
@@ -836,5 +847,11 @@ namespace AnimeList.Controllers
         public Video Next { get; set; }
         public string ConfigUid { get; set; }
         public bool AnonymousUser { get; set; }
+        // True when the user has a Real-Debrid API key on file. The
+        // watch page renders the inline player only when this is true —
+        // External services alone (Crunchyroll / Netflix / …) navigate
+        // out via the source picker rows, so the player chrome would
+        // be inert dead weight without RD-resolved streams behind it.
+        public bool HasRealDebridKey { get; set; }
     }
 }
