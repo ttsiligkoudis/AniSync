@@ -2274,6 +2274,39 @@ body.modal-open {
     display: none;
 }
 
+/* AniSkip OP / ED range fill on the ArtPlayer progress bar. The host
+   `.art-control-progress` is position:relative and the `.art-progress-loaded`
+   / `.art-progress-played` children sit at z-index 0 — putting our band
+   above them with z-index 1 lets the user see the upcoming skip zone
+   without losing visibility of buffered / played state. Pointer-events
+   stay off so the band doesn't steal hover / click from ArtPlayer's own
+   seeker. Both colours are deliberately desaturated against the
+   player's purple accent so they read as "regions" rather than UI. */
+.watch-skip-range {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 1;
+    pointer-events: none;
+    border-radius: 2px;
+    opacity: 0.55;
+    transition: opacity 0.15s;
+}
+.watch-skip-range-intro {
+    background: linear-gradient(180deg, rgba(124, 58, 237, 0.55), rgba(124, 58, 237, 0.35));
+    box-shadow: inset 0 0 0 1px rgba(196, 181, 253, 0.35);
+}
+.watch-skip-range-outro {
+    background: linear-gradient(180deg, rgba(244, 114, 182, 0.50), rgba(244, 114, 182, 0.30));
+    box-shadow: inset 0 0 0 1px rgba(251, 207, 232, 0.35);
+}
+/* ArtPlayer enlarges `.art-control-progress` to ~14px on hover; bump
+   the band's opacity in lockstep so it stays legible against the
+   thicker bar. */
+.art-control-progress:hover .watch-skip-range {
+    opacity: 0.75;
+}
+
 .watch-player-toolbar {
     display: flex;
     justify-content: flex-end;
