@@ -25,6 +25,7 @@ namespace AnimeList.Controllers
         private readonly ITorrentioService _torrentioService;
         private readonly IAniSkipService _aniSkipService;
         private readonly ISubtitleService _subtitleService;
+        private readonly IJimakuSubtitlesService _jimakuSubtitleService;
         private readonly ILogger<AnimeController> _logger;
 
         public AnimeController(
@@ -40,6 +41,7 @@ namespace AnimeList.Controllers
             ITorrentioService torrentioService,
             IAniSkipService aniSkipService,
             ISubtitleService subtitleService,
+            IJimakuSubtitlesService jimakuSubtitleService,
             ILogger<AnimeController> logger)
         {
             _tokenService = tokenService;
@@ -54,6 +56,7 @@ namespace AnimeList.Controllers
             _torrentioService = torrentioService;
             _aniSkipService = aniSkipService;
             _subtitleService = subtitleService;
+            _jimakuSubtitleService = jimakuSubtitleService;
             _logger = logger;
         }
 
@@ -649,7 +652,12 @@ namespace AnimeList.Controllers
             }
 
             var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
-            if (string.IsNullOrEmpty(sourceLinks.ImdbId))
+            // OpenSubtitles is IMDb-keyed; Jimaku is AniList-keyed.
+            // Either path can fire independently — if a show has only
+            // one of the two mappings we still want subs from that
+            // provider rather than 200-with-empty.
+            if (string.IsNullOrEmpty(sourceLinks.ImdbId) &&
+                (sourceLinks.AnilistId is null or <= 0))
             {
                 return Json(new { subtitles = Array.Empty<object>() });
             }
@@ -657,27 +665,69 @@ namespace AnimeList.Controllers
             // ImdbSeason on the mapping is the franchise-side season
             // — same fix as Torrentio. URL season is the AniSync cour-
             // internal value (usually 1) and would query the wrong
-            // season of the IMDb listing otherwise.
+            // season of the IMDb listing otherwise. Jimaku doesn't
+            // need this remapping: its AniList entries are already
+            // per-cour, so `episode` is correct as-is.
             var effectiveSeason = sourceLinks.ImdbSeason ?? season;
 
-            try
+            // Fire both providers concurrently — the slower of the
+            // two sets the response latency rather than the sum.
+            var osTask = !string.IsNullOrEmpty(sourceLinks.ImdbId)
+                ? SafeOpenSubtitlesSearch(sourceLinks.ImdbId, effectiveSeason, episode, filename, id)
+                : Task.FromResult<IReadOnlyList<SubtitleTrack>>(Array.Empty<SubtitleTrack>());
+            var jimakuTask = sourceLinks.AnilistId is int anilistId && anilistId > 0
+                ? SafeJimakuSearch(anilistId, episode, filename, id)
+                : Task.FromResult<IReadOnlyList<SubtitleTrack>>(Array.Empty<SubtitleTrack>());
+
+            await Task.WhenAll(osTask, jimakuTask);
+
+            // Merge OpenSubtitles first, then Jimaku. Within a single
+            // language the user gets the OpenSubtitles variants at the
+            // top and Jimaku variants after — matches the rest of the
+            // app where OpenSubtitles is the primary. Dedup by proxy
+            // URL in case the same upstream file ever surfaces from
+            // both providers (extremely unlikely but cheap to guard).
+            var merged = new List<SubtitleTrack>(osTask.Result.Count + jimakuTask.Result.Count);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var t in osTask.Result)
             {
-                var tracks = await _subtitleService.SearchAsync(
-                    sourceLinks.ImdbId, effectiveSeason, episode, filename);
-                return Json(new
-                {
-                    subtitles = tracks.Select(t => (object)new
-                    {
-                        lang = t.Lang,
-                        label = t.Label,
-                        url = t.Url,
-                    }).ToList(),
-                });
+                if (seen.Add(t.Url)) merged.Add(t);
             }
+            foreach (var t in jimakuTask.Result)
+            {
+                if (seen.Add(t.Url)) merged.Add(t);
+            }
+
+            return Json(new
+            {
+                subtitles = merged.Select(t => (object)new
+                {
+                    lang = t.Lang,
+                    label = t.Label,
+                    url = t.Url,
+                }).ToList(),
+            });
+        }
+
+        private async Task<IReadOnlyList<SubtitleTrack>> SafeOpenSubtitlesSearch(
+            string imdbId, int? season, int episode, string filename, string id)
+        {
+            try { return await _subtitleService.SearchAsync(imdbId, season, episode, filename); }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "OpenSubtitles search failed for {Id} ep {Ep}.", id, episode);
-                return Json(new { subtitles = Array.Empty<object>() });
+                return Array.Empty<SubtitleTrack>();
+            }
+        }
+
+        private async Task<IReadOnlyList<SubtitleTrack>> SafeJimakuSearch(
+            int anilistId, int episode, string filename, string id)
+        {
+            try { return await _jimakuSubtitleService.SearchAsync(anilistId, episode, filename); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Jimaku search failed for {Id} ep {Ep}.", id, episode);
+                return Array.Empty<SubtitleTrack>();
             }
         }
 
