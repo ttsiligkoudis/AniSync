@@ -25,7 +25,7 @@ namespace AnimeList.Controllers
         private readonly ITorrentioService _torrentioService;
         private readonly IAniSkipService _aniSkipService;
         private readonly ISubtitleService _subtitleService;
-        private readonly IJimakuSubtitlesService _jimakuSubtitleService;
+        private readonly IWyzieSubtitlesService _wyzieSubtitleService;
         private readonly ILogger<AnimeController> _logger;
 
         public AnimeController(
@@ -41,7 +41,7 @@ namespace AnimeList.Controllers
             ITorrentioService torrentioService,
             IAniSkipService aniSkipService,
             ISubtitleService subtitleService,
-            IJimakuSubtitlesService jimakuSubtitleService,
+            IWyzieSubtitlesService wyzieSubtitleService,
             ILogger<AnimeController> logger)
         {
             _tokenService = tokenService;
@@ -56,7 +56,7 @@ namespace AnimeList.Controllers
             _torrentioService = torrentioService;
             _aniSkipService = aniSkipService;
             _subtitleService = subtitleService;
-            _jimakuSubtitleService = jimakuSubtitleService;
+            _wyzieSubtitleService = wyzieSubtitleService;
             _logger = logger;
         }
 
@@ -652,48 +652,42 @@ namespace AnimeList.Controllers
             }
 
             var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
-            // OpenSubtitles is IMDb-keyed; Jimaku is AniList-keyed.
-            // Either path can fire independently — if a show has only
-            // one of the two mappings we still want subs from that
-            // provider rather than 200-with-empty.
-            if (string.IsNullOrEmpty(sourceLinks.ImdbId) &&
-                (sourceLinks.AnilistId is null or <= 0))
+            if (string.IsNullOrEmpty(sourceLinks.ImdbId))
             {
+                // Both providers are IMDb-keyed (Wyzie via /search?id=tt…,
+                // OpenSubtitles via the Stremio addon's series/tt:s:e
+                // shape). No IMDb mapping = nothing to ask either of.
                 return Json(new { subtitles = Array.Empty<object>() });
             }
 
             // ImdbSeason on the mapping is the franchise-side season
             // — same fix as Torrentio. URL season is the AniSync cour-
             // internal value (usually 1) and would query the wrong
-            // season of the IMDb listing otherwise. Jimaku doesn't
-            // need this remapping: its AniList entries are already
-            // per-cour, so `episode` is correct as-is.
+            // season of the IMDb listing otherwise.
             var effectiveSeason = sourceLinks.ImdbSeason ?? season;
 
             // Fire both providers concurrently — the slower of the
             // two sets the response latency rather than the sum.
-            var osTask = !string.IsNullOrEmpty(sourceLinks.ImdbId)
-                ? SafeOpenSubtitlesSearch(sourceLinks.ImdbId, effectiveSeason, episode, filename, id)
-                : Task.FromResult<IReadOnlyList<SubtitleTrack>>(Array.Empty<SubtitleTrack>());
-            var jimakuTask = sourceLinks.AnilistId is int anilistId && anilistId > 0
-                ? SafeJimakuSearch(anilistId, episode, filename, id)
-                : Task.FromResult<IReadOnlyList<SubtitleTrack>>(Array.Empty<SubtitleTrack>());
+            var osTask = SafeOpenSubtitlesSearch(sourceLinks.ImdbId, effectiveSeason, episode, filename, id);
+            var wyzieTask = SafeWyzieSearch(sourceLinks.ImdbId, effectiveSeason, episode, id);
 
-            await Task.WhenAll(osTask, jimakuTask);
+            await Task.WhenAll(osTask, wyzieTask);
 
-            // Merge OpenSubtitles first, then Jimaku. Within a single
+            // Merge OpenSubtitles first, then Wyzie. Within a single
             // language the user gets the OpenSubtitles variants at the
-            // top and Jimaku variants after — matches the rest of the
-            // app where OpenSubtitles is the primary. Dedup by proxy
-            // URL in case the same upstream file ever surfaces from
-            // both providers (extremely unlikely but cheap to guard).
-            var merged = new List<SubtitleTrack>(osTask.Result.Count + jimakuTask.Result.Count);
+            // top and Wyzie variants after — OpenSubtitles is still
+            // the primary, Wyzie fills the long tail with Subdl /
+            // Addic7ed uploads. Dedup by proxy URL — the URL embeds
+            // the upstream URL verbatim, so identical upstreams (same
+            // file surfaced through both routes) collapse to one menu
+            // entry.
+            var merged = new List<SubtitleTrack>(osTask.Result.Count + wyzieTask.Result.Count);
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var t in osTask.Result)
             {
                 if (seen.Add(t.Url)) merged.Add(t);
             }
-            foreach (var t in jimakuTask.Result)
+            foreach (var t in wyzieTask.Result)
             {
                 if (seen.Add(t.Url)) merged.Add(t);
             }
@@ -720,13 +714,13 @@ namespace AnimeList.Controllers
             }
         }
 
-        private async Task<IReadOnlyList<SubtitleTrack>> SafeJimakuSearch(
-            int anilistId, int episode, string filename, string id)
+        private async Task<IReadOnlyList<SubtitleTrack>> SafeWyzieSearch(
+            string imdbId, int? season, int episode, string id)
         {
-            try { return await _jimakuSubtitleService.SearchAsync(anilistId, episode, filename); }
+            try { return await _wyzieSubtitleService.SearchAsync(imdbId, season, episode); }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Jimaku search failed for {Id} ep {Ep}.", id, episode);
+                _logger.LogWarning(ex, "Wyzie search failed for {Id} ep {Ep}.", id, episode);
                 return Array.Empty<SubtitleTrack>();
             }
         }

@@ -21,12 +21,6 @@ namespace AnimeList.Services
         private readonly IHttpClientFactory _clientFactory;
         private readonly IMemoryCache _cache;
         private readonly ILogger<OpenSubtitlesService> _logger;
-        // Optional Jimaku API key, used only by the proxy fetch when
-        // an upstream URL points at jimaku.cc. The Jimaku search side
-        // lives in JimakuSubtitlesService; we keep the key reachable
-        // here too so /anime/subtitle stays a single proxy endpoint
-        // regardless of which provider produced the URL.
-        private readonly string _jimakuApiKey;
 
         private const string AddonBase = "https://opensubtitles-v3.strem.io";
         private static readonly TimeSpan ListCacheTtl = TimeSpan.FromHours(2);
@@ -89,15 +83,11 @@ namespace AnimeList.Services
         public OpenSubtitlesService(
             IHttpClientFactory clientFactory,
             IMemoryCache cache,
-            IConfiguration configuration,
             ILogger<OpenSubtitlesService> logger)
         {
             _clientFactory = clientFactory;
             _cache = cache;
             _logger = logger;
-            _jimakuApiKey = (configuration["JIMAKU_API_KEY"]
-                ?? Environment.GetEnvironmentVariable("JIMAKU_API_KEY")
-                ?? string.Empty).Trim();
         }
 
         public async Task<IReadOnlyList<SubtitleTrack>> SearchAsync(
@@ -193,16 +183,7 @@ namespace AnimeList.Services
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 cts.CancelAfter(TimeSpan.FromSeconds(8));
                 var client = _clientFactory.CreateClient();
-                using var req = new HttpRequestMessage(HttpMethod.Get, fetchUrl);
-                // Per-host auth — Jimaku's download URLs gate on the
-                // same API key as the search endpoint. Other hosts in
-                // the allowlist serve unsigned URLs that 401 if we
-                // send an unexpected Authorization header, so scope
-                // this strictly to jimaku.cc.
-                AttachAuthHeader(req, fetchUrl);
-                using var res = await client.SendAsync(req, cts.Token);
-                res.EnsureSuccessStatusCode();
-                var bytes = await res.Content.ReadAsByteArrayAsync(cts.Token);
+                var bytes = await client.GetByteArrayAsync(fetchUrl, cts.Token);
                 var text = DecodeText(bytes);
                 var vtt = text.TrimStart().StartsWith("WEBVTT", StringComparison.OrdinalIgnoreCase)
                     ? text
@@ -329,16 +310,7 @@ namespace AnimeList.Services
                 || host.EndsWith("opensubtitles-v3.strem.io")
                 || host.EndsWith("strem.io")
                 || host.EndsWith("subdl.com")
-                || host.EndsWith("wyzie.ru")    // legacy compatibility
-                || host.EndsWith("jimaku.cc");  // anime-specialised provider
-        }
-
-        private void AttachAuthHeader(HttpRequestMessage req, string url)
-        {
-            if (string.IsNullOrEmpty(_jimakuApiKey)) return;
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var u)) return;
-            if (!u.Host.EndsWith("jimaku.cc", StringComparison.OrdinalIgnoreCase)) return;
-            req.Headers.TryAddWithoutValidation("Authorization", _jimakuApiKey);
+                || host.EndsWith("wyzie.ru");   // Wyzie aggregator + its own subtitle CDN
         }
 
         /// <summary>
