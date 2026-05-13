@@ -2314,7 +2314,14 @@ body.modal-open {
 }
 
 /* Auto-skip toggle — pill with a small inline indicator that fills when
-   active. Persists in localStorage so the user only flips it once. */
+   active. Persists in localStorage so the user only flips it once.
+   The .watch-toggle class sets display:inline-flex which would
+   override the browser's `[hidden]` rule (author stylesheet wins over
+   user-agent), so the explicit `[hidden]` rule below is mandatory for
+   JS-controlled hide to actually hide. */
+.watch-toggle[hidden] {
+    display: none;
+}
 .watch-toggle {
     display: inline-flex;
     align-items: center;
