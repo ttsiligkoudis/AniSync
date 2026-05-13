@@ -463,6 +463,15 @@
                         return;
                     }
                     runExtraction();
+                }).catch(function (e) {
+                    // Defensive: anything thrown synchronously inside
+                    // runExtraction's setup (parser ctor, listener wiring)
+                    // would otherwise surface as an Uncaught (in promise)
+                    // rejection. Treat as a soft failure — the status
+                    // pill already reflects the specific cause when one
+                    // is known, so just make sure onComplete fires.
+                    console.warn('embedded sub readiness chain failed:', e);
+                    onComplete([]);
                 });
                 return abortCtl;
 
@@ -553,10 +562,22 @@
                         return pump();
                     })
                     .catch(function (e) {
-                        // AbortError on source switch is expected;
-                        // surface anything else but don't fail the
-                        // player.
-                        if (e && e.name !== 'AbortError') {
+                        // AbortError on source switch is expected.
+                        // TypeError "Failed to fetch" is almost always
+                        // CORS on a debrid CDN: the <video> tag plays
+                        // the same URL fine (media elements don't
+                        // enforce CORS) but fetch() is strict and
+                        // *.real-debrid.com / *.strem.fun don't send
+                        // Access-Control-Allow-Origin. Hide the pill
+                        // silently in that case and let OpenSubtitles
+                        // fill in — a red "fetch failed" pill on an
+                        // otherwise-playable stream is just noise.
+                        if (!e || e.name === 'AbortError') {
+                            // expected — source switch / unmount
+                        } else if (e.name === 'TypeError') {
+                            console.info('embedded sub stream unreachable (likely CORS on debrid CDN):', e.message);
+                            setEmbedStatus(null);
+                        } else {
                             console.warn('embedded sub stream failed:', e);
                             setEmbedStatus('Embedded-subtitle fetch failed', 'error');
                         }
