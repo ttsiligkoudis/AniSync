@@ -1,5 +1,6 @@
 using AnimeList.Services.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace AnimeList.Services
@@ -11,15 +12,18 @@ namespace AnimeList.Services
     /// episode by scanning their filename — Jimaku doesn't enforce a
     /// schema on uploads so episode numbers live in the filename
     /// (commonly <c>"[Group] Show - 03 (1080p).en.srt"</c> or
-    /// <c>"Show.S01E03.srt"</c>). Language is inferred from filename
-    /// markers; Japanese is the default when nothing else is tagged
-    /// (Jimaku is a JP-learner-leaning archive).
+    /// <c>"Show.S01E03.srt"</c>). Language is determined by sniffing
+    /// a few KB of the actual subtitle bytes — filename-only heuristics
+    /// misfire on Jimaku because uploaders rarely tag language in the
+    /// name; an <c>[Erai-raws]</c>-style filename can be JP closed
+    /// captions just as easily as English fansubs.
     /// </summary>
     public class JimakuSubtitlesService : IJimakuSubtitlesService
     {
         private const string ApiBase = "https://jimaku.cc/api";
 
         private static readonly TimeSpan ListCacheTtl = TimeSpan.FromHours(2);
+        private static readonly TimeSpan LangCacheTtl = TimeSpan.FromDays(7);
         private static readonly TimeSpan NoKeyLogOnceWindow = TimeSpan.FromHours(1);
 
         // Same shape OpenSubtitlesService uses — caps the menu length
@@ -27,23 +31,55 @@ namespace AnimeList.Services
         // variant is unlabelled, 2+ get a numeric suffix.
         private const int MaxVariantsPerLanguage = 5;
 
-        // Friendly names for the language picker. Jimaku doesn't
-        // return a structured lang code, so we sniff filenames for
-        // ISO-639-1/2/3 markers and English-name fragments and map
-        // them through this table. Anything we can't classify is
-        // bucketed as Japanese (Jimaku's default upload language).
-        private static readonly (Regex Pattern, string Code, string Label)[] LanguageRules =
+        // First N bytes pulled when sniffing language. SRT cue blocks
+        // are short — 4 KB usually yields 10+ subtitle cues which is
+        // plenty to tell hiragana / katakana / kanji from Latin script.
+        private const int SniffByteLimit = 4096;
+
+        // CJK ratio threshold — files with at least this many CJK
+        // characters per total decoded chars are Japanese (also
+        // catches Chinese / Korean — distinguished separately via
+        // script-specific Unicode ranges below). 3% is conservative:
+        // even English subs that quote a Japanese term land well
+        // below this on a 4 KB sample.
+        private const double CjkRatioThreshold = 0.03;
+
+        // Strong filename markers — when present we trust them and
+        // skip the byte sniff (saves a round trip per file). Anything
+        // else falls through to the content classifier.
+        private static readonly (Regex Pattern, string Code)[] StrongFilenameMarkers =
         [
-            (new Regex(@"(?<![A-Za-z])(?:en|eng|english)(?![A-Za-z])", RegexOptions.IgnoreCase | RegexOptions.Compiled), "eng", "English"),
-            (new Regex(@"(?<![A-Za-z])(?:es|spa|esp|spanish|español)(?![A-Za-z])", RegexOptions.IgnoreCase | RegexOptions.Compiled), "spa", "Spanish"),
-            (new Regex(@"(?<![A-Za-z])(?:pt|por|portuguese|portugu[eê]s)(?![A-Za-z])", RegexOptions.IgnoreCase | RegexOptions.Compiled), "por", "Portuguese"),
-            (new Regex(@"(?<![A-Za-z])(?:fr|fre|fra|french|français)(?![A-Za-z])", RegexOptions.IgnoreCase | RegexOptions.Compiled), "fre", "French"),
-            (new Regex(@"(?<![A-Za-z])(?:de|ger|deu|german|deutsch)(?![A-Za-z])", RegexOptions.IgnoreCase | RegexOptions.Compiled), "ger", "German"),
-            (new Regex(@"(?<![A-Za-z])(?:it|ita|italian|italiano)(?![A-Za-z])", RegexOptions.IgnoreCase | RegexOptions.Compiled), "ita", "Italian"),
-            (new Regex(@"(?<![A-Za-z])(?:zh|chi|zho|chinese|中文)(?![A-Za-z])", RegexOptions.IgnoreCase | RegexOptions.Compiled), "chi", "Chinese"),
-            (new Regex(@"(?<![A-Za-z])(?:ko|kor|korean|한국어)(?![A-Za-z])", RegexOptions.IgnoreCase | RegexOptions.Compiled), "kor", "Korean"),
-            (new Regex(@"(?<![A-Za-z])(?:ja|jp|jpn|japanese|日本語)(?![A-Za-z])", RegexOptions.IgnoreCase | RegexOptions.Compiled), "jpn", "Japanese"),
+            (new Regex(@"(?:^|[\.\s_\-\[\(])(?:ja|jp|jpn|japanese|日本語|字幕)(?:[\.\s_\-\]\)]|$)", RegexOptions.IgnoreCase | RegexOptions.Compiled), "jpn"),
+            (new Regex(@"(?:^|[\.\s_\-\[\(])(?:en|eng|english)(?:[\.\s_\-\]\)]|$)", RegexOptions.IgnoreCase | RegexOptions.Compiled), "eng"),
+            (new Regex(@"(?:^|[\.\s_\-\[\(])(?:es|spa|spanish|español)(?:[\.\s_\-\]\)]|$)", RegexOptions.IgnoreCase | RegexOptions.Compiled), "spa"),
+            (new Regex(@"(?:^|[\.\s_\-\[\(])(?:pt|por|portuguese)(?:[\.\s_\-\]\)]|$)", RegexOptions.IgnoreCase | RegexOptions.Compiled), "por"),
+            (new Regex(@"(?:^|[\.\s_\-\[\(])(?:fr|fre|fra|french)(?:[\.\s_\-\]\)]|$)", RegexOptions.IgnoreCase | RegexOptions.Compiled), "fre"),
+            (new Regex(@"(?:^|[\.\s_\-\[\(])(?:de|ger|deu|german)(?:[\.\s_\-\]\)]|$)", RegexOptions.IgnoreCase | RegexOptions.Compiled), "ger"),
+            (new Regex(@"(?:^|[\.\s_\-\[\(])(?:it|ita|italian)(?:[\.\s_\-\]\)]|$)", RegexOptions.IgnoreCase | RegexOptions.Compiled), "ita"),
+            (new Regex(@"(?:^|[\.\s_\-\[\(])(?:zh|chi|zho|chinese|中文|繁中|简中)(?:[\.\s_\-\]\)]|$)", RegexOptions.IgnoreCase | RegexOptions.Compiled), "chi"),
+            (new Regex(@"(?:^|[\.\s_\-\[\(])(?:ko|kor|korean|한국어)(?:[\.\s_\-\]\)]|$)", RegexOptions.IgnoreCase | RegexOptions.Compiled), "kor"),
         ];
+
+        private static readonly Dictionary<string, string> LanguageLabels =
+            new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["eng"] = "English",
+            ["jpn"] = "Japanese",
+            ["spa"] = "Spanish",
+            ["por"] = "Portuguese",
+            ["fre"] = "French",
+            ["ger"] = "German",
+            ["ita"] = "Italian",
+            ["chi"] = "Chinese",
+            ["kor"] = "Korean",
+        };
+
+        // English first, then anything else — the user explicitly
+        // wants EN as the primary fallback when OpenSubtitles misses.
+        // Japanese moves toward the bottom because most users
+        // selecting Jimaku tracks are doing it for English coverage.
+        private static readonly string[] LanguageOrder =
+            ["eng", "spa", "por", "fre", "ger", "ita", "chi", "kor", "jpn"];
 
         private readonly IHttpClientFactory _clientFactory;
         private readonly IMemoryCache _cache;
@@ -107,7 +143,11 @@ namespace AnimeList.Services
             try
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(TimeSpan.FromSeconds(8));
+                // 12s envelope: entries fetch (~1s) + files fetch (~1s) +
+                // parallel per-file language sniff (~3s) plus headroom.
+                // Each sniff has its own 3s cap so a single slow file
+                // can't drag the whole list past this budget.
+                cts.CancelAfter(TimeSpan.FromSeconds(12));
                 var client = _clientFactory.CreateClient();
 
                 var entryIds = await SearchEntriesAsync(client, anilistId, cts.Token);
@@ -135,7 +175,8 @@ namespace AnimeList.Services
                 var allFiles = (await Task.WhenAll(fileTasks)).SelectMany(x => x).ToList();
 
                 var matched = FilterByEpisode(allFiles, episode);
-                var tracks = BuildTracks(matched);
+                var classified = await ClassifyLanguagesAsync(matched, client, cts.Token);
+                var tracks = BuildTracks(classified);
 
                 _cache.Set(cacheKey, tracks, new MemoryCacheEntryOptions
                 {
@@ -259,30 +300,193 @@ namespace AnimeList.Services
             return filtered;
         }
 
-        private static IReadOnlyList<SubtitleTrack> BuildTracks(List<JimakuFile> files)
+        /// <summary>
+        /// Classifies each file's language. Strong filename markers
+        /// (<c>.en.srt</c> / <c>.ja.ass</c> / etc.) short-circuit the
+        /// expensive path. Everything else gets a Range-limited GET
+        /// of the first few KB so we can look at the actual bytes —
+        /// Jimaku uploaders rarely tag language in the filename, so
+        /// without this every English fansub got mislabelled as
+        /// Japanese (the previous default). Per-URL cache is 7-day:
+        /// the language of a given upload never changes.
+        /// </summary>
+        private async Task<List<(string Code, JimakuFile File)>> ClassifyLanguagesAsync(
+            List<JimakuFile> files, HttpClient client, CancellationToken ct)
         {
             if (files.Count == 0) return [];
 
-            // Group by detected language, preserving Jimaku's listing
-            // order within each language (last_modified DESC server-
-            // side, so newest uploads surface first).
-            var grouped = new Dictionary<string, List<JimakuFile>>(StringComparer.OrdinalIgnoreCase);
-            foreach (var f in files)
+            var tasks = files.Select(async f =>
             {
-                var (code, _) = DetectLanguage(f.Name);
+                var fromName = MarkerFromFilename(f.Name);
+                if (fromName != null) return (fromName, f);
+
+                var cacheKey = $"jimaku:lang:{f.Url}";
+                if (_cache.TryGetValue<string>(cacheKey, out var cached) && cached != null)
+                {
+                    return (cached, f);
+                }
+
+                var sniffed = await SniffLanguageAsync(client, f.Url, ct);
+                _cache.Set(cacheKey, sniffed, new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = LangCacheTtl,
+                });
+                return (sniffed, f);
+            }).ToArray();
+
+            var results = await Task.WhenAll(tasks);
+            return results.ToList();
+        }
+
+        private async Task<string> SniffLanguageAsync(HttpClient client, string url, CancellationToken ct)
+        {
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(3));
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.TryAddWithoutValidation("Authorization", _apiKey);
+                req.Headers.TryAddWithoutValidation("Range", $"bytes=0-{SniffByteLimit - 1}");
+                using var res = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+                if (!res.IsSuccessStatusCode && res.StatusCode != System.Net.HttpStatusCode.PartialContent)
+                {
+                    _logger.LogDebug("Jimaku language sniff non-OK {Status} for {Url}", (int)res.StatusCode, url);
+                    return "eng"; // safest fallback — see comment below
+                }
+                var bytes = await res.Content.ReadAsByteArrayAsync(cts.Token);
+                if (bytes.Length == 0) return "eng";
+
+                // SRT bodies are usually UTF-8 (with or without BOM)
+                // or Shift-JIS for older Japanese uploads. Try UTF-8
+                // first with replacement, then fall back to Shift-JIS
+                // if the UTF-8 decode produced lots of replacement
+                // chars (signals it wasn't actually UTF-8).
+                string text;
+                try
+                {
+                    text = Encoding.UTF8.GetString(bytes);
+                    if (text.Count(c => c == '�') > 20)
+                    {
+                        text = TryDecodeShiftJis(bytes) ?? text;
+                    }
+                }
+                catch
+                {
+                    text = TryDecodeShiftJis(bytes) ?? Encoding.Latin1.GetString(bytes);
+                }
+
+                return ClassifyByScript(text);
+            }
+            catch (OperationCanceledException)
+            {
+                // Sniff timed out or the outer ct fired during source
+                // switch. Either way we shouldn't pin "Japanese" as
+                // a default — given the user's priority is English,
+                // it's far less surprising to surface an unsniffed
+                // file as English (worst case the user picks it,
+                // sees moonrunes, picks another).
+                return "eng";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Jimaku language sniff failed for {Url}", url);
+                return "eng";
+            }
+        }
+
+        private static string TryDecodeShiftJis(byte[] bytes)
+        {
+            try
+            {
+                // Shift-JIS isn't registered by default on .NET Core;
+                // CodePagesEncodingProvider would need explicit setup.
+                // Skip it gracefully when unavailable — the UTF-8 path
+                // with replacement chars is already enough to classify
+                // (CJK chars decode as replacement, which the script
+                // counter ignores, dropping CJK ratio and surfacing as
+                // English).
+                return Encoding.GetEncoding(932).GetString(bytes);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Picks a language code from the decoded text by counting
+        /// characters in script-specific Unicode blocks. Hiragana or
+        /// katakana → Japanese (hangul / hanzi-only get checked first
+        /// so Chinese / Korean uploads don't bleed into the Japanese
+        /// bucket). Falls back to English when no CJK script clears
+        /// the threshold — Jimaku does host English fansubs, they
+        /// just rarely advertise it in the filename.
+        /// </summary>
+        private static string ClassifyByScript(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "eng";
+            int total = 0, hiragana = 0, katakana = 0, han = 0, hangul = 0;
+            foreach (var c in text)
+            {
+                total++;
+                if (c >= 0x3040 && c <= 0x309F) hiragana++;
+                else if (c >= 0x30A0 && c <= 0x30FF) katakana++;
+                else if (c >= 0x4E00 && c <= 0x9FFF) han++;
+                else if ((c >= 0xAC00 && c <= 0xD7A3) || (c >= 0x1100 && c <= 0x11FF)) hangul++;
+            }
+            if (total == 0) return "eng";
+
+            var hangulRatio = (double)hangul / total;
+            if (hangulRatio >= CjkRatioThreshold) return "kor";
+
+            // Hiragana + katakana are exclusive to Japanese, so any
+            // meaningful presence pins JP regardless of han count.
+            var kanaRatio = (double)(hiragana + katakana) / total;
+            if (kanaRatio >= CjkRatioThreshold) return "jpn";
+
+            // Pure-han text (no kana) is Chinese — Japanese ALWAYS
+            // mixes kana with kanji in actual subtitle bodies.
+            var hanRatio = (double)han / total;
+            if (hanRatio >= CjkRatioThreshold) return "chi";
+
+            return "eng";
+        }
+
+        private static string MarkerFromFilename(string filename)
+        {
+            foreach (var (rx, code) in StrongFilenameMarkers)
+            {
+                if (rx.IsMatch(filename)) return code;
+            }
+            return null;
+        }
+
+        private static IReadOnlyList<SubtitleTrack> BuildTracks(List<(string Code, JimakuFile File)> classified)
+        {
+            if (classified.Count == 0) return [];
+
+            // Group by language, preserving Jimaku's listing order
+            // within each language (last_modified DESC server-side,
+            // so newest uploads surface first).
+            var grouped = new Dictionary<string, List<JimakuFile>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (code, file) in classified)
+            {
                 if (!grouped.TryGetValue(code, out var list))
                 {
                     list = new List<JimakuFile>();
                     grouped[code] = list;
                 }
-                list.Add(f);
+                list.Add(file);
             }
 
             var picked = new List<SubtitleTrack>();
-            foreach (var kv in grouped)
+            var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void Emit(string code)
             {
-                var label = FriendlyLabel(kv.Key);
-                var take = Math.Min(MaxVariantsPerLanguage, kv.Value.Count);
+                if (!grouped.TryGetValue(code, out var list)) return;
+                var label = FriendlyLabel(code);
+                var take = Math.Min(MaxVariantsPerLanguage, list.Count);
                 for (var i = 0; i < take; i++)
                 {
                     var suffix = i == 0 ? string.Empty : $" {i + 1}";
@@ -292,30 +496,24 @@ namespace AnimeList.Services
                     // returned an English variant and one is timed
                     // wrong — flipping providers is one click away.
                     var displayLabel = $"{label}{suffix} (Jimaku)";
-                    picked.Add(new SubtitleTrack(kv.Key, displayLabel, ProxyUrl(kv.Value[i].Url)));
+                    picked.Add(new SubtitleTrack(code, displayLabel, ProxyUrl(list[i].Url)));
                 }
+                emitted.Add(code);
+            }
+
+            foreach (var pref in LanguageOrder) Emit(pref);
+            foreach (var kv in grouped)
+            {
+                if (!emitted.Contains(kv.Key)) Emit(kv.Key);
             }
             return picked;
         }
 
-        private static (string Code, string Label) DetectLanguage(string filename)
-        {
-            foreach (var (rx, code, label) in LanguageRules)
-            {
-                if (rx.IsMatch(filename)) return (code, label);
-            }
-            // Jimaku's house default is JP — most uploads are Japanese
-            // closed captions for language learners.
-            return ("jpn", "Japanese");
-        }
-
         private static string FriendlyLabel(string code)
         {
-            foreach (var (_, c, label) in LanguageRules)
-            {
-                if (string.Equals(c, code, StringComparison.OrdinalIgnoreCase)) return label;
-            }
-            return code.ToUpperInvariant();
+            return LanguageLabels.TryGetValue(code, out var label)
+                ? label
+                : code.ToUpperInvariant();
         }
 
         private static string ProxyUrl(string upstreamUrl)
