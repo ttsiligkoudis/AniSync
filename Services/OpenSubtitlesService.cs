@@ -253,7 +253,7 @@ namespace AnimeList.Services
                 for (var i = 0; i < take; i++)
                 {
                     var label = i == 0 ? baseLabel : $"{baseLabel} {i + 1}";
-                    picked.Add(new SubtitleTrack(lang, label, ProxyUrl(urls[i])));
+                    picked.Add(new SubtitleTrack(lang, label, ProxyUrl(urls[i]), "opensubtitles"));
                 }
                 emitted.Add(lang);
             }
