@@ -2075,10 +2075,46 @@ body.modal-open {
     justify-content: center;
 }
 
+/* Empty state shown before any source is picked. Renders the
+   episode thumbnail as a poster-frame preview with the "Pick a
+   source" prompt overlaid in the lower portion — same visual feel
+   as a paused player so the user understands the frame is the
+   target, the action is below. */
 .watch-player-empty {
-    color: rgba(255, 255, 255, 0.5);
-    text-align: center;
-    padding: 1rem;
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.85);
+    overflow: hidden;
+}
+
+.watch-player-poster {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: brightness(0.55);
+}
+
+/* onerror handler in the view adds .is-missing — hide the broken
+   poster so the prompt + default black background carry the empty
+   state without a missing-image icon. */
+.watch-player-poster.is-missing {
+    display: none;
+}
+
+.watch-player-prompt {
+    position: relative;
+    margin: 0 1rem 1.5rem;
+    padding: 0.55rem 1rem;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 999px;
+    font-size: 0.85rem;
 }
 
 .watch-player-fallback {

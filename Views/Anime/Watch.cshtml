@@ -50,38 +50,56 @@
     <p class="watch-meta">@seasonLabel @if (!string.IsNullOrEmpty(ep.released) && ep.released.Length >= 10) { <span class="watch-meta-dot">·</span> <span>@ep.released[..10]</span> }</p>
 </section>
 
-<section class="watch-player-wrap">
-    @* ArtPlayer owns the contents of #watchPlayer once a source is
-       picked — it replaces children with its own <video> + chrome.
-       The empty-state placeholder swaps out at that moment. The skip
-       button is a sibling now (not a child) so ArtPlayer's wipe
-       doesn't take it down; the wrap is position:relative so the
-       button can still corner-anchor over the player area. *@
-    <div id="watchPlayer" class="watch-player">
-        <div class="watch-player-empty">
-            <p>Pick a source below to start watching.</p>
+@* Only mount the inline player when the user actually has a way to
+   resolve a playable URL — i.e. a Real-Debrid key on file. External-
+   services alone navigate out via the source picker rows below, so
+   the player would be a dead frame with nothing behind it. *@
+@if (Model.HasRealDebridKey)
+{
+    <section class="watch-player-wrap">
+        @* ArtPlayer owns the contents of #watchPlayer once a source is
+           picked — it replaces children with its own <video> + chrome.
+           The empty-state placeholder swaps out at that moment. The
+           skip button is a sibling so ArtPlayer's wipe doesn't take
+           it down; we appendChild() it back into the player host
+           after init so it corner-anchors over the video frame. *@
+        <div id="watchPlayer" class="watch-player">
+            <div class="watch-player-empty">
+                @* Use the episode thumbnail as a preview-frame before
+                   any source is picked — same image the detail-page
+                   episode row carries, so the user gets visual
+                   confirmation they're on the right episode. Falls back
+                   to a plain "pick a source" prompt when the upstream
+                   meta has no thumbnail (older / niche entries). *@
+                @if (!string.IsNullOrEmpty(ep.thumbnail))
+                {
+                    <img class="watch-player-poster" src="@ep.thumbnail" alt="" loading="lazy"
+                         onerror="this.classList.add('is-missing');" />
+                }
+                <span class="watch-player-prompt">Pick a source below to start watching.</span>
+            </div>
         </div>
-    </div>
-    @* AniSkip overlay: corner-anchored button rendered by JS when the
-       playhead enters an intro / outro range. Hidden by default —
-       wireSkipOverlay() bails cleanly when no skip markers are
-       available for the episode. *@
-    <button id="watchSkipButton" class="watch-skip-btn" type="button" hidden>Skip intro →</button>
-    <div class="watch-player-toolbar">
-        @* Auto-skip preference lives in localStorage so it persists
-           across episodes — click once, intros / outros get jumped
-           silently for every subsequent episode. *@
-        <button id="watchSkipAuto" class="watch-toggle" type="button" aria-pressed="false">
-            <span class="watch-toggle-dot" aria-hidden="true"></span>
-            <span>Auto-skip intro / outro</span>
-        </button>
-    </div>
-    <div id="watchPlayerFallback" class="watch-player-fallback" hidden>
-        @* Rendered by JS when the <video> element fires an error
-           (codec mismatch — most often MKV with HEVC on Firefox/Safari
-           or anything AV1-encoded on older browsers). *@
-    </div>
-</section>
+        @* AniSkip overlay: corner-anchored button rendered by JS when
+           the playhead enters an intro / outro range. Hidden by default
+           — wireSkipOverlay() bails cleanly when no skip markers are
+           available for the episode. *@
+        <button id="watchSkipButton" class="watch-skip-btn" type="button" hidden>Skip intro →</button>
+        <div class="watch-player-toolbar">
+            @* Auto-skip preference lives in localStorage so it persists
+               across episodes — click once, intros / outros get jumped
+               silently for every subsequent episode. *@
+            <button id="watchSkipAuto" class="watch-toggle" type="button" aria-pressed="false">
+                <span class="watch-toggle-dot" aria-hidden="true"></span>
+                <span>Auto-skip intro / outro</span>
+            </button>
+        </div>
+        <div id="watchPlayerFallback" class="watch-player-fallback" hidden>
+            @* Rendered by JS when the <video> element fires an error
+               (codec mismatch — most often MKV with HEVC on Firefox/Safari
+               or anything AV1-encoded on older browsers). *@
+        </div>
+    </section>
+}
 
 <nav class="watch-nav">
     @if (Model.Prev != null)
@@ -236,6 +254,15 @@
                     }
                 }
 
+                // Mobile devices already paint the native fullscreen
+                // mode landscape via autoOrientation, so the web-
+                // fullscreen icon next to it is duplicative chrome. On
+                // desktop it stays — sometimes a viewer wants the
+                // letterboxed in-page big-frame view without losing
+                // the URL bar. matchMedia is the standard "are we on
+                // a phone-shaped viewport" check.
+                var isMobile = window.matchMedia('(max-width: 640px)').matches;
+
                 // Reusable SVG markup for the ±10s control buttons —
                 // pre-encoded inline so ArtPlayer can drop them into
                 // its toolbar without an extra fetch. Both icons mirror
@@ -260,7 +287,7 @@
                     playbackRate: true,
                     aspectRatio: false,
                     fullscreen: true,
-                    fullscreenWeb: true,
+                    fullscreenWeb: !isMobile,
                     subtitleOffset: true,
                     miniProgressBar: true,
                     autoOrientation: true,
