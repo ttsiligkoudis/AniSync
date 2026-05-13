@@ -223,7 +223,7 @@ builder.Services.AddSingleton<ITorrentioService, TorrentioService>();
 // Singleton so the (imdb, season, episode) → tracks cache + VTT body
 // cache outlive individual requests — anime episodes are watched
 // repeatedly and the same /watch view re-fetches on every visit.
-builder.Services.AddSingleton<IWyzieSubtitleService, WyzieSubtitleService>();
+builder.Services.AddSingleton<ISubtitleService, OpenSubtitlesService>();
 builder.Services.AddScoped<ISyncService, SyncService>();
 // Singleton — its (malId, episode) → markers cache is the whole point. Per-request
 // scoping would defeat the cache. The service depends only on IHttpClientFactory

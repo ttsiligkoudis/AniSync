@@ -24,7 +24,7 @@ namespace AnimeList.Controllers
         private readonly IAnilistFallback _anilistFallback;
         private readonly ITorrentioService _torrentioService;
         private readonly IAniSkipService _aniSkipService;
-        private readonly IWyzieSubtitleService _subtitleService;
+        private readonly ISubtitleService _subtitleService;
         private readonly ILogger<AnimeController> _logger;
 
         public AnimeController(
@@ -39,7 +39,7 @@ namespace AnimeList.Controllers
             IAnilistFallback anilistFallback,
             ITorrentioService torrentioService,
             IAniSkipService aniSkipService,
-            IWyzieSubtitleService subtitleService,
+            ISubtitleService subtitleService,
             ILogger<AnimeController> logger)
         {
             _tokenService = tokenService;
