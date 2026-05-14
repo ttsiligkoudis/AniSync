@@ -66,15 +66,15 @@ namespace AnimeList.Services
                     revision          INTEGER NOT NULL DEFAULT 0,
                     scrobble_token    TEXT,
                     plex_username     TEXT,
-                    -- Real-Debrid API key. Plaintext for v1; encrypt at rest
-                    -- before public launch (TODO: see Configuration.cs).
-                    real_debrid_api_key TEXT,
-                    -- MediaFusion personal manifest URL pasted by the user from
-                    -- their MediaFusion configure page. We can't generate it
-                    -- ourselves (the URL embeds an encrypted user-data segment
-                    -- bound to their MF password) — it's stored verbatim and
-                    -- the service strips /manifest.json before hitting /stream.
-                    mediafusion_manifest_url TEXT,
+                    -- JSON array of { url, name } pairs — the user's
+                    -- configured Stremio stream addons (Torrentio /
+                    -- MediaFusion / Comet / Jackettio / AIOStreams /
+                    -- …). Episode lookups fan out across every entry.
+                    -- Replaces the v1 real_debrid_api_key +
+                    -- mediafusion_manifest_url columns — addon-specific
+                    -- config (keys, encrypted blobs, indexer toggles)
+                    -- lives inside each manifest URL now.
+                    stream_addons     TEXT,
                     created_at        INTEGER NOT NULL,
                     updated_at        INTEGER NOT NULL
                 );
@@ -88,11 +88,11 @@ namespace AnimeList.Services
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_configs_scrobble_token
                     ON configs(scrobble_token)   WHERE scrobble_token   IS NOT NULL;
 
-                -- Reactive cache of Torrentio info hashes whose RD-resolve
+                -- Reactive cache of torrent info hashes whose debrid-resolve
                 -- landed on a DMCA placeholder (or otherwise non-debrid CDN).
                 -- Populated by AnimeController.ResolveStream / MarkWatched
-                -- via TorrentioService.MarkHashUnplayableAsync. Read by
-                -- TorrentioService when filtering source-picker results.
+                -- via IBadHashCache.MarkAsync. Read by AddonStreamService
+                -- when filtering source-picker results.
                 -- Persisted (rather than living only in process memory) so
                 -- that fly.io redeploys / multi-instance scale-out don't
                 -- lose the list — without persistence, the user clicks a
@@ -113,8 +113,7 @@ namespace AnimeList.Services
             // were minted before that column was added and SQLite's
             // CREATE IF NOT EXISTS doesn't alter existing tables. The
             // try/catch covers the "already exists" race on a fresh DB.
-            EnsureColumn(conn, "configs", "real_debrid_api_key", "TEXT");
-            EnsureColumn(conn, "configs", "mediafusion_manifest_url", "TEXT");
+            EnsureColumn(conn, "configs", "stream_addons", "TEXT");
         }
 
         private static void EnsureColumn(SqliteConnection conn, string table, string column, string typeAndConstraints)
@@ -460,66 +459,75 @@ namespace AnimeList.Services
             return await cmd.ExecuteScalarAsync() as string;
         }
 
-        public async Task SetRealDebridApiKeyAsync(string uid, string apiKey)
+        public async Task<List<StreamAddon>> GetStreamAddonsAsync(string uid)
         {
-            if (string.IsNullOrEmpty(uid)) return;
+            if (string.IsNullOrEmpty(uid)) return new List<StreamAddon>();
 
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT stream_addons FROM configs WHERE uid = $uid LIMIT 1";
+            cmd.Parameters.AddWithValue("$uid", uid);
+            var json = await cmd.ExecuteScalarAsync() as string;
+            return DeserializeStreamAddons(json);
+        }
+
+        public async Task<bool> AddStreamAddonAsync(string uid, StreamAddon addon)
+        {
+            if (string.IsNullOrEmpty(uid) || addon == null || string.IsNullOrEmpty(addon.Url))
+                return false;
+
+            // Read-modify-write — addon add/remove is user-driven (one
+            // click per addon on the Configure page), so the
+            // concurrency surface is negligible. Skip if the URL is
+            // already in the list (idempotent) to spare the user
+            // having to deduplicate by hand.
+            var existing = await GetStreamAddonsAsync(uid);
+            if (existing.Any(a => string.Equals(a.Url, addon.Url, StringComparison.OrdinalIgnoreCase)))
+                return false;
+
+            existing.Add(addon);
+            await WriteStreamAddonsAsync(uid, existing);
+            return true;
+        }
+
+        public async Task<bool> RemoveStreamAddonAsync(string uid, string addonUrl)
+        {
+            if (string.IsNullOrEmpty(uid) || string.IsNullOrEmpty(addonUrl)) return false;
+
+            var existing = await GetStreamAddonsAsync(uid);
+            var removed = existing.RemoveAll(
+                a => string.Equals(a.Url, addonUrl, StringComparison.OrdinalIgnoreCase));
+            if (removed == 0) return false;
+
+            await WriteStreamAddonsAsync(uid, existing);
+            return true;
+        }
+
+        private async Task WriteStreamAddonsAsync(string uid, List<StreamAddon> addons)
+        {
             using var conn = new SqliteConnection(_connectionString);
             await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 UPDATE configs
-                   SET real_debrid_api_key = $k, updated_at = $ts
+                   SET stream_addons = $j, updated_at = $ts
                  WHERE uid = $uid
                 """;
-            cmd.Parameters.AddWithValue("$k",
-                string.IsNullOrWhiteSpace(apiKey) ? (object)DBNull.Value : apiKey.Trim());
+            // NULL out the column when the list is empty so we don't
+            // keep "[]" around as dead bytes forever.
+            cmd.Parameters.AddWithValue("$j",
+                addons.Count == 0 ? (object)DBNull.Value : SerializeObject(addons));
             cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             cmd.Parameters.AddWithValue("$uid", uid);
             await cmd.ExecuteNonQueryAsync();
         }
 
-        public async Task<string> GetRealDebridApiKeyAsync(string uid)
+        private static List<StreamAddon> DeserializeStreamAddons(string json)
         {
-            if (string.IsNullOrEmpty(uid)) return null;
-
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT real_debrid_api_key FROM configs WHERE uid = $uid LIMIT 1";
-            cmd.Parameters.AddWithValue("$uid", uid);
-            return await cmd.ExecuteScalarAsync() as string;
-        }
-
-        public async Task SetMediaFusionManifestUrlAsync(string uid, string manifestUrl)
-        {
-            if (string.IsNullOrEmpty(uid)) return;
-
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                UPDATE configs
-                   SET mediafusion_manifest_url = $u, updated_at = $ts
-                 WHERE uid = $uid
-                """;
-            cmd.Parameters.AddWithValue("$u",
-                string.IsNullOrWhiteSpace(manifestUrl) ? (object)DBNull.Value : manifestUrl.Trim());
-            cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-            cmd.Parameters.AddWithValue("$uid", uid);
-            await cmd.ExecuteNonQueryAsync();
-        }
-
-        public async Task<string> GetMediaFusionManifestUrlAsync(string uid)
-        {
-            if (string.IsNullOrEmpty(uid)) return null;
-
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT mediafusion_manifest_url FROM configs WHERE uid = $uid LIMIT 1";
-            cmd.Parameters.AddWithValue("$uid", uid);
-            return await cmd.ExecuteScalarAsync() as string;
+            if (string.IsNullOrEmpty(json)) return new List<StreamAddon>();
+            try { return DeserializeObject<List<StreamAddon>>(json) ?? new List<StreamAddon>(); }
+            catch { return new List<StreamAddon>(); }
         }
 
         public async Task DeleteAsync(string uid)

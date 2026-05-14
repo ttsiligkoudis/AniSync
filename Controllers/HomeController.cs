@@ -18,6 +18,7 @@ public class HomeController : Controller
     private readonly IKitsuService _kitsuService;
     private readonly IMalService _malService;
     private readonly IAnilistFallback _anilistFallback;
+    private readonly IAddonStreamService _addonStreamService;
     private readonly IUserListCache _listCache;
     private readonly IMemoryCache _dashboardCache;
 
@@ -34,6 +35,7 @@ public class HomeController : Controller
         IKitsuService kitsuService,
         IMalService malService,
         IAnilistFallback anilistFallback,
+        IAddonStreamService addonStreamService,
         IUserListCache listCache,
         IMemoryCache dashboardCache)
     {
@@ -43,6 +45,7 @@ public class HomeController : Controller
         _kitsuService = kitsuService;
         _malService = malService;
         _anilistFallback = anilistFallback;
+        _addonStreamService = addonStreamService;
         _listCache = listCache;
         _dashboardCache = dashboardCache;
     }
@@ -311,8 +314,7 @@ public class HomeController : Controller
         string encodedTokenData = null;
         string scrobbleToken = null;
         string plexUsername = null;
-        bool hasRealDebridKey = false;
-        bool hasMediaFusionUrl = false;
+        List<StreamAddon> streamAddons = new();
 
         if (tokenData != null)
         {
@@ -377,8 +379,7 @@ public class HomeController : Controller
                 // pastes into Plex/Jellyfin/Emby is /api/v1/scrobble/{scrobbleToken}.
                 scrobbleToken = await _configStore.EnsureScrobbleTokenAsync(configUid);
                 plexUsername = await _configStore.GetPlexUsernameAsync(configUid);
-                hasRealDebridKey = !string.IsNullOrEmpty(await _configStore.GetRealDebridApiKeyAsync(configUid));
-                hasMediaFusionUrl = !string.IsNullOrEmpty(await _configStore.GetMediaFusionManifestUrlAsync(configUid));
+                streamAddons = await _configStore.GetStreamAddonsAsync(configUid);
 
                 // Hydrate the session from the config-URL-derived tokenData when the user
                 // arrives via a v5 install URL (or any path that resolves identity from the
@@ -439,8 +440,7 @@ public class HomeController : Controller
             LinkedTokens = linkedTokens,
             ScrobbleToken = scrobbleToken,
             PlexUsername = plexUsername,
-            HasRealDebridKey = hasRealDebridKey,
-            HasMediaFusionUrl = hasMediaFusionUrl,
+            StreamAddons = streamAddons,
             Configuration = configuration,
         });
     }
@@ -511,45 +511,48 @@ public class HomeController : Controller
     }
 
     /// <summary>
-    /// Stores the user's Real-Debrid API key. Empty / whitespace apiKey clears
-    /// the stored key. Used by the /configure RD card's Save and Clear buttons.
+    /// Adds a Stremio stream addon to the user's list. Server fetches the
+    /// manifest URL once to validate it advertises stream support and to
+    /// pull the display name, then persists the (url, name) pair. Returns
+    /// the stored entry so the client can append it to the rendered list
+    /// without a separate refresh round-trip.
     /// </summary>
-    [HttpPost("Home/SetRealDebridApiKey")]
-    public async Task<JsonResult> SetRealDebridApiKey([FromBody] RealDebridKeyRequest request)
+    [HttpPost("Home/AddStreamAddon")]
+    public async Task<JsonResult> AddStreamAddon([FromBody] StreamAddonRequest request)
     {
         if (string.IsNullOrEmpty(request?.uid))
             return new JsonResult(new { success = false, error = "missing uid" });
+        var manifestUrl = (request.manifestUrl ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(manifestUrl))
+            return new JsonResult(new { success = false, error = "manifest URL required" });
 
-        await _configStore.SetRealDebridApiKeyAsync(request.uid, request.apiKey);
-        return new JsonResult(new { success = true, hasKey = !string.IsNullOrWhiteSpace(request.apiKey) });
+        var addon = await _addonStreamService.FetchManifestAsync(manifestUrl);
+        if (addon == null)
+        {
+            return new JsonResult(new { success = false,
+                error = "couldn't fetch a Stremio stream-addon manifest at that URL" });
+        }
+
+        var added = await _configStore.AddStreamAddonAsync(request.uid, addon);
+        return new JsonResult(new { success = true, added, addon });
     }
 
     /// <summary>
-    /// Stores the user's MediaFusion manifest URL. Empty / whitespace clears
-    /// the stored URL. Light validation: must parse as an absolute http(s) URL
-    /// and end on /manifest.json — both pre-conditions the service strips
-    /// before hitting /stream, so anything that doesn't satisfy them won't
-    /// produce streams anyway.
+    /// Removes a Stremio stream addon by manifest URL. Returns whether
+    /// anything was removed; UIs that already optimistically removed the
+    /// row can ignore the result.
     /// </summary>
-    [HttpPost("Home/SetMediaFusionUrl")]
-    public async Task<JsonResult> SetMediaFusionUrl([FromBody] MediaFusionUrlRequest request)
+    [HttpPost("Home/RemoveStreamAddon")]
+    public async Task<JsonResult> RemoveStreamAddon([FromBody] StreamAddonRequest request)
     {
         if (string.IsNullOrEmpty(request?.uid))
             return new JsonResult(new { success = false, error = "missing uid" });
+        var manifestUrl = (request.manifestUrl ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(manifestUrl))
+            return new JsonResult(new { success = false, error = "manifest URL required" });
 
-        var url = (request.manifestUrl ?? string.Empty).Trim();
-        if (!string.IsNullOrEmpty(url))
-        {
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed)
-                || (parsed.Scheme != "http" && parsed.Scheme != "https")
-                || !url.EndsWith("/manifest.json", StringComparison.OrdinalIgnoreCase))
-            {
-                return new JsonResult(new { success = false, error = "expected an https://.../manifest.json URL" });
-            }
-        }
-
-        await _configStore.SetMediaFusionManifestUrlAsync(request.uid, url);
-        return new JsonResult(new { success = true, hasUrl = !string.IsNullOrEmpty(url) });
+        var removed = await _configStore.RemoveStreamAddonAsync(request.uid, manifestUrl);
+        return new JsonResult(new { success = true, removed });
     }
 
     /// <summary>
@@ -670,22 +673,12 @@ public class PlexUsernameRequest
     public string username { get; set; }
 }
 
-public class RealDebridKeyRequest
+public class StreamAddonRequest
 {
     public string uid { get; set; }
-    // Plaintext API key on the way up (HTTPS-protected); empty / null clears
-    // the stored key. The server never re-emits the value to the client after
-    // first save — the configure page renders a presence-only badge.
-    public string apiKey { get; set; }
-}
-
-public class MediaFusionUrlRequest
-{
-    public string uid { get; set; }
-    // Personal manifest URL the user copies out of MediaFusion's configure
-    // page. Empty / null clears the stored URL. Re-emitted to the client only
-    // as a presence flag — the URL embeds the user's encrypted MF config, so
-    // we treat it the same as the RD key in terms of round-trip visibility.
+    // Full Stremio addon manifest URL ending in /manifest.json. For add,
+    // the server fetches it once to validate and derive the display name;
+    // for remove, it's the lookup key (string-compared, case-insensitive).
     public string manifestUrl { get; set; }
 }
 

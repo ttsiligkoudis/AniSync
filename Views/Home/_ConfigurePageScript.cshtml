@@ -629,114 +629,64 @@
         }
     });
 
-    // ── Real-Debrid API key ───────────────────────────────────────────
-    // Two states (set / edit) share the same row so the swap on Replace /
-    // Save / Clear is a pair of jQuery .show() / .hide() calls; the server
-    // never sends the plaintext back, so the "set" state is a pure
-    // presence badge.
-    function rdKeyShowEditState() {
-        $('#rdKeyInput').val('');
-        $('#rdKeySetState').hide();
-        $('#rdKeyEditState').show();
-        $('#rdKeyInput').trigger('focus');
-    }
-    function rdKeyShowSetState() {
-        $('#rdKeyEditState').hide();
-        $('#rdKeySetState').show();
+    // ── Stream addons ─────────────────────────────────────────────────
+    // List-style management: paste a Stremio manifest URL into the input,
+    // hit Add, server validates + persists, we append a row. Per-row
+    // Remove deletes the entry. The original rows are server-rendered on
+    // first load; this JS only handles mutations.
+    function buildAddonRow(addon) {
+        var $li = $('<li class="stream-addon-row"></li>').attr('data-url', addon.url || addon.Url);
+        var $meta = $('<div class="stream-addon-meta"></div>');
+        $meta.append($('<span class="stream-addon-name"></span>').text(addon.name || addon.Name || '(addon)'));
+        $meta.append($('<span class="stream-addon-url"></span>').text(addon.url || addon.Url || ''));
+        $li.append($meta);
+        $li.append('<button class="btn-ghost btn-ghost-sm stream-addon-remove" type="button" style="white-space: nowrap;">Remove</button>');
+        return $li;
     }
 
-    $('#rdKeyReplaceBtn').on('click', rdKeyShowEditState);
-
-    $('#rdKeySaveBtn').on('click', async function () {
+    $('#streamAddonAddBtn').on('click', async function () {
         if (!configUid) return;
-        var apiKey = ($('#rdKeyInput').val() || '').trim();
-        if (!apiKey) { alert('Paste your Real-Debrid API key first.'); return; }
+        var url = ($('#streamAddonInput').val() || '').trim();
+        if (!url) { alert('Paste a Stremio addon manifest URL first.'); return; }
         var $btn = $(this);
+        $btn.prop('disabled', true);
         try {
-            var resp = await fetch('/Home/SetRealDebridApiKey', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ uid: configUid, apiKey: apiKey }),
-            });
-            if (!resp.ok) throw new Error('save failed: ' + resp.status);
-            var data = await resp.json();
-            if (!data.success) throw new Error(data.error || 'save failed');
-            rdKeyShowSetState();
-        } catch (e) {
-            alert('Could not save Real-Debrid key: ' + e.message);
-        } finally {
-            $btn.prop('disabled', false);
-        }
-    });
-
-    $('#rdKeyClearBtn').on('click', async function () {
-        if (!configUid) return;
-        if (!confirm('Remove your Real-Debrid API key? Episode pickers and the Stremio addon will stop surfacing debrid streams.')) return;
-        try {
-            var resp = await fetch('/Home/SetRealDebridApiKey', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ uid: configUid, apiKey: '' }),
-            });
-            if (!resp.ok) throw new Error('clear failed: ' + resp.status);
-            rdKeyShowEditState();
-        } catch (e) {
-            alert('Could not clear Real-Debrid key: ' + e.message);
-        }
-    });
-
-    // ── MediaFusion manifest URL ─────────────────────────────────────
-    // Same set/edit state machine as the RD card. URL is never echoed
-    // back after save (it embeds the user's encrypted MediaFusion
-    // config), so the "set" state is a pure presence badge.
-    function mfUrlShowEditState() {
-        $('#mfUrlInput').val('');
-        $('#mfUrlSetState').hide();
-        $('#mfUrlEditState').show();
-        $('#mfUrlInput').trigger('focus');
-    }
-    function mfUrlShowSetState() {
-        $('#mfUrlEditState').hide();
-        $('#mfUrlSetState').show();
-    }
-
-    $('#mfUrlReplaceBtn').on('click', mfUrlShowEditState);
-
-    $('#mfUrlSaveBtn').on('click', async function () {
-        if (!configUid) return;
-        var url = ($('#mfUrlInput').val() || '').trim();
-        if (!url) { alert('Paste your MediaFusion manifest URL first.'); return; }
-        var $btn = $(this);
-        try {
-            var resp = await fetch('/Home/SetMediaFusionUrl', {
+            var resp = await fetch('/Home/AddStreamAddon', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ uid: configUid, manifestUrl: url }),
             });
-            if (!resp.ok) throw new Error('save failed: ' + resp.status);
+            if (!resp.ok) throw new Error('add failed: ' + resp.status);
             var data = await resp.json();
-            if (!data.success) throw new Error(data.error || 'save failed');
-            mfUrlShowSetState();
+            if (!data.success) throw new Error(data.error || 'add failed');
+            if (data.added && data.addon) {
+                $('#streamAddonList').append(buildAddonRow(data.addon));
+            }
+            $('#streamAddonInput').val('');
         } catch (e) {
-            alert('Could not save MediaFusion URL: ' + e.message);
+            alert('Could not add stream addon: ' + e.message);
         } finally {
             $btn.prop('disabled', false);
         }
     });
 
-    $('#mfUrlClearBtn').on('click', async function () {
+    // Delegated so server-rendered rows AND newly-added rows both work.
+    $('#streamAddonList').on('click', '.stream-addon-remove', async function () {
         if (!configUid) return;
-        if (!confirm('Remove your MediaFusion URL? Episode pickers and the Stremio addon will only surface Torrentio streams.')) return;
+        var $row = $(this).closest('.stream-addon-row');
+        var url = $row.attr('data-url');
+        if (!url) return;
+        if (!confirm('Remove this stream addon? Episode pickers will stop surfacing its streams.')) return;
         try {
-            var resp = await fetch('/Home/SetMediaFusionUrl', {
+            var resp = await fetch('/Home/RemoveStreamAddon', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ uid: configUid, manifestUrl: '' }),
+                body: JSON.stringify({ uid: configUid, manifestUrl: url }),
             });
-            if (!resp.ok) throw new Error('clear failed: ' + resp.status);
-            mfUrlShowEditState();
+            if (!resp.ok) throw new Error('remove failed: ' + resp.status);
+            $row.remove();
         } catch (e) {
-            alert('Could not clear MediaFusion URL: ' + e.message);
+            alert('Could not remove stream addon: ' + e.message);
         }
     });
 

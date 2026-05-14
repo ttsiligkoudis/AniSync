@@ -1661,6 +1661,51 @@ body.modal-open {
     align-items: stretch;
 }
 
+/* Stream-addon list rendered above the Add input. Mirrors the visual
+   weight of a manifest-url-row but with a left-aligned name + URL
+   instead of an input, and a Remove button on the right. */
+.stream-addon-list {
+    list-style: none;
+    margin: 0 0 0.5rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.stream-addon-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.55rem 0.75rem;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+}
+
+.stream-addon-meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.stream-addon-name {
+    color: #e6e6e6;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.stream-addon-url {
+    color: rgba(196, 184, 255, 0.6);
+    font-family: 'SFMono-Regular', Menlo, Monaco, 'Courier New', monospace;
+    font-size: 0.7rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .manifest-url-input {
     flex: 1;
     min-width: 0;

@@ -23,8 +23,8 @@ namespace AnimeList.Controllers
         private readonly IConfigStore _configStore;
         private readonly IFillerListService _fillerListService;
         private readonly IAnilistFallback _anilistFallback;
-        private readonly ITorrentioService _torrentioService;
-        private readonly IMediaFusionService _mediaFusionService;
+        private readonly IAddonStreamService _addonStreamService;
+        private readonly IBadHashCache _badHashCache;
         private readonly IAniSkipService _aniSkipService;
         private readonly ISubtitleService _subtitleService;
         private readonly IWyzieSubtitlesService _wyzieSubtitleService;
@@ -42,8 +42,8 @@ namespace AnimeList.Controllers
             IConfigStore configStore,
             IFillerListService fillerListService,
             IAnilistFallback anilistFallback,
-            ITorrentioService torrentioService,
-            IMediaFusionService mediaFusionService,
+            IAddonStreamService addonStreamService,
+            IBadHashCache badHashCache,
             IAniSkipService aniSkipService,
             ISubtitleService subtitleService,
             IWyzieSubtitlesService wyzieSubtitleService,
@@ -60,8 +60,8 @@ namespace AnimeList.Controllers
             _configStore = configStore;
             _fillerListService = fillerListService;
             _anilistFallback = anilistFallback;
-            _torrentioService = torrentioService;
-            _mediaFusionService = mediaFusionService;
+            _addonStreamService = addonStreamService;
+            _badHashCache = badHashCache;
             _aniSkipService = aniSkipService;
             _subtitleService = subtitleService;
             _wyzieSubtitleService = wyzieSubtitleService;
@@ -248,13 +248,13 @@ namespace AnimeList.Controllers
             // populate different sections of the picker. Both off →
             // there's nothing to render on /watch, so the episode rows
             // stay inert here.
-            bool hasRdKey = false;
+            bool hasAddons = false;
             bool externalEnabled = false;
             if (!string.IsNullOrEmpty(uid))
             {
                 var watchConfig = await GetConfigByUidAsync(uid, _configStore);
                 externalEnabled = watchConfig?.showExternalStreams == true;
-                hasRdKey = !string.IsNullOrEmpty(await _configStore.GetRealDebridApiKeyAsync(uid));
+                hasAddons = (await _configStore.GetStreamAddonsAsync(uid)).Count > 0;
             }
 
             return View(new AnimeDetailViewModel
@@ -266,7 +266,7 @@ namespace AnimeList.Controllers
                 Entry = entry,
                 SourceLinks = sourceLinks,
                 DeferredSupplementaryLinks = deferredSupplementaryLinks,
-                HasStreamSources = hasRdKey || externalEnabled,
+                HasStreamSources = hasAddons || externalEnabled,
             });
         }
 
@@ -395,14 +395,14 @@ namespace AnimeList.Controllers
 
             var (prev, next) = ComputePrevNext(anime.videos, current);
 
-            // RD key presence gates the inline player — the source
+            // Stream-addon presence gates the inline player — the source
             // picker still renders below either way (external links
-            // for non-RD users) but the empty player wrap would be
-            // dead chrome if nothing can hand it a playable URL.
-            bool hasRdKey = false;
+            // for users without addons) but the empty player wrap would
+            // be dead chrome if nothing can hand it a playable URL.
+            bool hasAddons = false;
             if (!string.IsNullOrEmpty(uid))
             {
-                hasRdKey = !string.IsNullOrEmpty(await _configStore.GetRealDebridApiKeyAsync(uid));
+                hasAddons = (await _configStore.GetStreamAddonsAsync(uid)).Count > 0;
             }
 
             return View("Watch", new WatchViewModel
@@ -413,7 +413,7 @@ namespace AnimeList.Controllers
                 Next = next,
                 ConfigUid = uid,
                 AnonymousUser = tokenData.anonymousUser,
-                HasRealDebridKey = hasRdKey,
+                HasStreamAddons = hasAddons,
             });
         }
 
@@ -472,30 +472,24 @@ namespace AnimeList.Controllers
         /// show.
         /// </summary>
         /// <summary>
-        /// Combines Torrentio + MediaFusion stream lists into one ranked
-        /// view. De-dupes by lowercased infoHash, keeping the higher-
-        /// seeder entry on conflict — same SHA-1 means the same torrent
-        /// regardless of which addon surfaced it, so a head-to-head
-        /// usually just resolves to "MediaFusion saw more Nyaa peers"
-        /// or vice versa. Streams without an infoHash are kept as-is
-        /// (no key to dedupe against). Re-bucketed by quality and
-        /// capped per bucket so the merged result mirrors the per-
-        /// provider rank+cap rather than emitting 2× entries.
+        /// Combines stream lists from every configured addon into one
+        /// ranked view. De-dupes by lowercased infoHash, keeping the
+        /// higher-seeder entry on conflict — same SHA-1 means the same
+        /// torrent regardless of which addon surfaced it, so a head-
+        /// to-head usually just resolves to "addon A saw more peers
+        /// than addon B" rather than meaningfully different sources.
+        /// Streams without an infoHash dedupe by URL (rare; means an
+        /// addon emitted a non-torrent entry). Re-bucketed by quality
+        /// and capped per bucket so the merged result mirrors the per-
+        /// addon rank+cap rather than emitting N× entries when many
+        /// addons are configured.
         /// </summary>
-        private static List<TorrentioStream> MergeDebridStreams(
-            IReadOnlyList<TorrentioStream> a, IReadOnlyList<TorrentioStream> b)
+        private static List<AddonStream> MergeAddonStreams(IReadOnlyList<AddonStream> all)
         {
             const int PerQualityCap = 5;
             string[] qualityOrder = ["2160p", "1440p", "1080p", "720p"];
 
-            // Group by infoHash so we can pick the higher-seeder duplicate.
-            // null/empty infoHash → use the URL as the key so we still
-            // dedupe across providers when the URL happens to match.
-            var combined = new List<TorrentioStream>(a.Count + b.Count);
-            combined.AddRange(a);
-            combined.AddRange(b);
-
-            var deduped = combined
+            var deduped = all
                 .GroupBy(s => string.IsNullOrEmpty(s.InfoHash)
                     ? "url::" + (s.Url ?? Guid.NewGuid().ToString())
                     : "hash::" + s.InfoHash.ToLowerInvariant())
@@ -509,7 +503,7 @@ namespace AnimeList.Controllers
                     .Take(PerQualityCap)
                     .ToList());
 
-            var ranked = new List<TorrentioStream>(qualityOrder.Length * PerQualityCap);
+            var ranked = new List<AddonStream>(qualityOrder.Length * PerQualityCap);
             foreach (var q in qualityOrder)
             {
                 if (byQuality.TryGetValue(q, out var bucket))
@@ -580,37 +574,41 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
-            // Per-user provider keys — RD for Torrentio's resolve
-            // segment, MediaFusion manifest URL for the MF fan-out.
-            // Both optional and additive: anonymous installs see no
-            // debrid sources; a user with only one configured still
-            // gets that provider's streams.
-            string apiKey = null;
-            string mediaFusionUrl = null;
-            if (!string.IsNullOrEmpty(uid))
-            {
-                apiKey = await _configStore.GetRealDebridApiKeyAsync(uid);
-                mediaFusionUrl = await _configStore.GetMediaFusionManifestUrlAsync(uid);
-            }
+            // Stream addons — one fan-out per configured manifest URL.
+            // Anonymous installs and users with no addons see no debrid
+            // sources; the source picker falls back to external links
+            // only (if those are enabled separately).
+            var addons = !string.IsNullOrEmpty(uid)
+                ? await _configStore.GetStreamAddonsAsync(uid)
+                : new List<StreamAddon>();
 
             var debridStreams = Array.Empty<object>() as IReadOnlyList<object>;
-            if (!string.IsNullOrEmpty(apiKey) || !string.IsNullOrEmpty(mediaFusionUrl))
+            if (addons.Count > 0)
             {
                 var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
 
-                // Fan out to both providers in parallel — independent
-                // endpoints, no shared rate-limit, and the combined
-                // latency floors at max(Torrentio, MediaFusion)
-                // rather than summing.
-                var torrentioTask = !string.IsNullOrEmpty(apiKey)
-                    ? _torrentioService.GetStreamsAsync(apiKey, sourceLinks, season, episode)
-                    : Task.FromResult<IReadOnlyList<TorrentioStream>>(Array.Empty<TorrentioStream>());
-                var mediaFusionTask = !string.IsNullOrEmpty(mediaFusionUrl)
-                    ? _mediaFusionService.GetStreamsAsync(mediaFusionUrl, sourceLinks, season, episode)
-                    : Task.FromResult<IReadOnlyList<TorrentioStream>>(Array.Empty<TorrentioStream>());
-                await Task.WhenAll(torrentioTask, mediaFusionTask);
+                // Fan out in parallel — addons are independent
+                // endpoints with no shared rate-limit, so total latency
+                // floors at max(addon latency) rather than summing.
+                var fetchTasks = addons
+                    .Select(a => _addonStreamService.GetStreamsAsync(a.Url, sourceLinks, season, episode))
+                    .ToArray();
+                await Task.WhenAll(fetchTasks);
 
-                var merged = MergeDebridStreams(torrentioTask.Result, mediaFusionTask.Result);
+                // Override each stream's URL-host-derived Provider
+                // fallback with the addon's persisted display name
+                // (pulled from manifest.name on save), since the addon
+                // doesn't echo its name on the /stream response.
+                var labelledStreams = new List<AddonStream>();
+                for (int i = 0; i < addons.Count; i++)
+                {
+                    foreach (var s in fetchTasks[i].Result)
+                    {
+                        labelledStreams.Add(s with { Provider = addons[i].Name });
+                    }
+                }
+
+                var merged = MergeAddonStreams(labelledStreams);
                 debridStreams = merged.Select(s => (object)new
                 {
                     name = s.Name,
@@ -622,6 +620,7 @@ namespace AnimeList.Controllers
                     seeders = s.Seeders,
                     language = s.Language,
                     provider = s.Provider,
+                    infoHash = s.InfoHash,
                 }).ToList();
             }
 
@@ -915,13 +914,12 @@ namespace AnimeList.Controllers
             {
                 if (await LooksLikePlaceholderSourceAsync(req.SourceUrl, HttpContext.RequestAborted))
                 {
-                    var hash = TorrentioService.ExtractInfoHashFromUrl(req.SourceUrl);
-                    if (!string.IsNullOrEmpty(hash))
+                    if (!string.IsNullOrEmpty(req.InfoHash))
                     {
-                        await _torrentioService.MarkHashUnplayableAsync(hash);
+                        await _badHashCache.MarkAsync(req.InfoHash);
                     }
                     _logger.LogInformation(
-                        "Refused mark-watched for {Id} S{Season}E{Episode}: source URL looks like RD DMCA placeholder.",
+                        "Refused mark-watched for {Id} S{Season}E{Episode}: source URL looks like a debrid placeholder.",
                         req.Id, req.Season, req.Episode);
                     return Json(new { ok = false, reason = "placeholder" });
                 }
@@ -1014,6 +1012,16 @@ namespace AnimeList.Controllers
             /// client-side.
             /// </summary>
             public string SourceUrl { get; set; }
+            /// <summary>
+            /// InfoHash of the source the user picked, when known.
+            /// Travels with <see cref="SourceUrl"/> so when the
+            /// placeholder probe fires we can mark the upstream
+            /// torrent unplayable without re-parsing it out of the
+            /// URL (which only worked for Torrentio-shaped URLs in
+            /// the first place — other addons resolve to debrid
+            /// CDNs that strip the hash from the path).
+            /// </summary>
+            public string InfoHash { get; set; }
         }
 
         /// <summary>
@@ -1028,7 +1036,7 @@ namespace AnimeList.Controllers
         /// the client a CDN URL the Worker can stream from.
         /// </summary>
         [HttpGet("/anime/resolve-stream")]
-        public async Task<IActionResult> ResolveStream(string url, CancellationToken ct)
+        public async Task<IActionResult> ResolveStream(string url, string hash, CancellationToken ct)
         {
             if (string.IsNullOrWhiteSpace(url) ||
                 !Uri.TryCreate(url, UriKind.Absolute, out var u))
@@ -1119,15 +1127,14 @@ namespace AnimeList.Controllers
                         finalHost.EndsWith("offcloud.com");
                     if (!isDebridCdn || looksPlaceholder)
                     {
-                        var hash = TorrentioService.ExtractInfoHashFromUrl(url);
                         if (!string.IsNullOrEmpty(hash))
                         {
-                            await _torrentioService.MarkHashUnplayableAsync(hash);
+                            await _badHashCache.MarkAsync(hash);
                             var reason = looksPlaceholder
                                 ? $"placeholder-sized response ({totalSize}B) from {finalHost}"
                                 : $"resolve landed on non-CDN host {finalHost}";
                             _logger.LogInformation(
-                                "Marked Torrentio hash {Hash} as unplayable: {Reason}.",
+                                "Marked hash {Hash} as unplayable: {Reason}.",
                                 hash, reason);
                         }
                     }
@@ -1319,11 +1326,12 @@ namespace AnimeList.Controllers
         public Video Next { get; set; }
         public string ConfigUid { get; set; }
         public bool AnonymousUser { get; set; }
-        // True when the user has a Real-Debrid API key on file. The
-        // watch page renders the inline player only when this is true —
-        // External services alone (Crunchyroll / Netflix / …) navigate
-        // out via the source picker rows, so the player chrome would
-        // be inert dead weight without RD-resolved streams behind it.
-        public bool HasRealDebridKey { get; set; }
+        // True when the user has at least one Stremio stream addon
+        // configured. The watch page renders the inline player only when
+        // this is true — External services alone (Crunchyroll / Netflix
+        // / …) navigate out via the source picker rows, so the player
+        // chrome would be inert dead weight without addon-resolved
+        // streams behind it.
+        public bool HasStreamAddons { get; set; }
     }
 }

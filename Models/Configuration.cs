@@ -57,12 +57,5 @@
         // entries manually moved to Watching stay visible unless the user opts in
         // to filtering them out via the /configure Site Preferences toggle.
         public bool hideUnreleasedFromWatching { get; set; }
-
-        // Real-Debrid API key. When set on a v5 (uid-backed) install, the site's
-        // episode-streams endpoint and the Stremio addon's /stream surface both
-        // proxy to Torrentio with this key so RD-cached torrents come back as
-        // playable direct URLs. Plaintext at rest for v1 — matches the
-        // scrobble_token posture; encrypt at rest before public launch.
-        public string realDebridApiKey { get; set; }
     }
 }
