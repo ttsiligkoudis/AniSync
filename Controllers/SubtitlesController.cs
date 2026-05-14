@@ -7,19 +7,23 @@ namespace AnimeList.Controllers
     public class SubtitlesController : ControllerBase
     {
         private readonly ITokenService _tokenService;
-        private readonly IAnilistService _anilistService;
-        private readonly IKitsuService _kitsuService;
-        private readonly IMalService _malService;
         private readonly IConfigStore _configStore;
         private readonly ISyncService _syncService;
         private readonly ILogger<SubtitlesController> _logger;
 
-        public SubtitlesController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, IConfigStore configStore, ISyncService syncService, ILogger<SubtitlesController> logger)
+        // The per-service tracker writes (AniList / MAL / Kitsu) used
+        // to live here, but the auto-track recipe now goes through
+        // ISyncService.SaveProgressAndFanOutAsync so it's shared with
+        // AnimeController.MarkWatched. Dropping the three direct
+        // dependencies keeps the constructor honest about what this
+        // controller actually needs.
+        public SubtitlesController(
+            ITokenService tokenService,
+            IConfigStore configStore,
+            ISyncService syncService,
+            ILogger<SubtitlesController> logger)
         {
             _tokenService = tokenService;
-            _anilistService = anilistService;
-            _kitsuService = kitsuService;
-            _malService = malService;
             _configStore = configStore;
             _syncService = syncService;
             _logger = logger;
@@ -48,23 +52,13 @@ namespace AnimeList.Controllers
                     || season is null || episode is null)
                     return empty;
 
-                switch (tokenData.anime_service)
-                {
-                    case AnimeService.Anilist:
-                        await _anilistService.SaveAnimeEntryAsync(tokenData, animeId, season, episode.Value);
-                        break;
-                    case AnimeService.MyAnimeList:
-                        await _malService.SaveAnimeEntryAsync(tokenData, animeId, season, episode.Value);
-                        break;
-                    default:
-                        await _kitsuService.SaveAnimeEntryAsync(tokenData, animeId, season, episode.Value);
-                        break;
-                }
-
-                // Mirror the auto-tracked progress to linked secondary providers. Status is left
-                // null so each target service preserves its existing entry status (or creates a
-                // sensible default when the entry is new — the per-service default is "watching").
-                await _syncService.FanOutSaveAsync(tokenData, animeId, season, episode.Value);
+                // Save to primary tracker + fan out to linked secondaries.
+                // Shared with AnimeController.MarkWatched (web-app 70 % /
+                // external-launch triggers) so the anime_service dispatch +
+                // fan-out recipe lives in one place. Status is left null so
+                // each target preserves its existing entry status (or
+                // creates "watching" when the entry is new).
+                await _syncService.SaveProgressAndFanOutAsync(tokenData, animeId, season, episode.Value);
 
                 return empty;
             }

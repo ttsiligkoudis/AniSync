@@ -26,6 +26,23 @@ namespace AnimeList.Services
             _logger = logger;
         }
 
+        public async Task SaveProgressAndFanOutAsync(TokenData primary, string animeId, int? season, int episode)
+        {
+            switch (primary.anime_service)
+            {
+                case AnimeService.Anilist:
+                    await _anilistService.SaveAnimeEntryAsync(primary, animeId, season, episode);
+                    break;
+                case AnimeService.MyAnimeList:
+                    await _malService.SaveAnimeEntryAsync(primary, animeId, season, episode);
+                    break;
+                default:
+                    await _kitsuService.SaveAnimeEntryAsync(primary, animeId, season, episode);
+                    break;
+            }
+            await FanOutSaveAsync(primary, animeId, season, episode);
+        }
+
         public async Task FanOutSaveAsync(TokenData primary, string animeId, int? season, int progress,
             string status = null, double? score = null, string notes = null, int? rewatchCount = null,
             DateTime? startedAt = null, DateTime? finishedAt = null)
