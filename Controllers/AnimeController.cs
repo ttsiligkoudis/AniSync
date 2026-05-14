@@ -1,4 +1,5 @@
 using AnimeList.Models;
+using AnimeList.Services;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -841,14 +842,14 @@ namespace AnimeList.Controllers
                 // out instead of showing as a dead row.
                 if (Uri.TryCreate(finalUrl, UriKind.Absolute, out var finalUri))
                 {
-                    var host = finalUri.Host.ToLowerInvariant();
+                    var finalHost = finalUri.Host.ToLowerInvariant();
                     var isDebridCdn =
-                        host.EndsWith("real-debrid.com") ||
-                        host.EndsWith("alldebrid.com") ||
-                        host.EndsWith("debrid-link.com") ||
-                        host.EndsWith("premiumize.me") ||
-                        host.EndsWith("torbox.app") ||
-                        host.EndsWith("offcloud.com");
+                        finalHost.EndsWith("real-debrid.com") ||
+                        finalHost.EndsWith("alldebrid.com") ||
+                        finalHost.EndsWith("debrid-link.com") ||
+                        finalHost.EndsWith("premiumize.me") ||
+                        finalHost.EndsWith("torbox.app") ||
+                        finalHost.EndsWith("offcloud.com");
                     if (!isDebridCdn)
                     {
                         var hash = TorrentioService.ExtractInfoHashFromUrl(url);
@@ -857,7 +858,7 @@ namespace AnimeList.Controllers
                             _torrentioService.MarkHashUnplayable(hash);
                             _logger.LogInformation(
                                 "Marked Torrentio hash {Hash} as unplayable (resolve landed on non-CDN host {Host}).",
-                                hash, host);
+                                hash, finalHost);
                         }
                     }
                 }
