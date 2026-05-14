@@ -54,5 +54,7 @@ namespace AnimeList.Services.Interfaces
         bool Playable,
         string BingeGroup,
         int Seeders,
-        string Language);
+        string Language,
+        string InfoHash = null,
+        int? FileIdx = null);
 }
