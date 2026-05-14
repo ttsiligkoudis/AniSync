@@ -565,59 +565,91 @@
             //      the 302 from its own (non-Cloudflare) network and
             //      returns the final URL. Reliable; the only cost is
             //      one tiny extra HTTP roundtrip per source pick.
+            //      Retries with backoff because Torrentio sometimes
+            //      isn't warm yet when we ask — the user's <video>
+            //      may not have hit the resolver itself yet, so RD
+            //      hasn't generated a download URL. Subsequent
+            //      attempts catch up after the player starts loading.
             //
             //   2. Resource Timing API — watch for an entry on a
             //      debrid-CDN host. <video> sometimes records the
             //      post-redirect URL here, depending on browser; on
             //      Chrome it usually doesn't. Kept as a faster path
-            //      when it does work, plus as a fallback if the
-            //      server endpoint fails.
+            //      when it does work.
             //
-            // Whichever resolves first wins. Falls back to the
-            // original URL after the timeout so the pipeline at
-            // least tries to run (and fails gracefully) rather than
-            // hanging.
+            // Whichever resolves first wins. On total failure we
+            // REJECT rather than fall back to the original Torrentio
+            // URL — going to Torrentio through the Worker just hits
+            // Cloudflare's bot-block again with a 403 and the embed-
+            // status pill stays stuck on "Looking…" forever. Caller
+            // treats reject as "skip extraction quietly."
             var CDN_HOST_RE = /(?:^|\.)(?:real-debrid\.com|alldebrid\.com|debrid-link\.com|premiumize\.me|torbox\.app|offcloud\.com)$/i;
             function resolveStreamUrl(originalUrl, signal) {
-                return new Promise(function (resolve) {
-                    var TIMEOUT_MS = 10000;
+                return new Promise(function (resolve, reject) {
+                    var TIMEOUT_MS = 25000;     // total budget incl. retries
+                    var MAX_ATTEMPTS = 5;
                     var done = false;
                     var observer = null;
+                    var attempts = 0;
+                    var retryTimer = null;
 
-                    function finish(u) {
+                    function finish(u, viaReject) {
                         if (done) return;
                         done = true;
                         if (observer) { try { observer.disconnect(); } catch (_) {} }
-                        resolve(u);
+                        if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+                        if (viaReject) reject(u); else resolve(u);
                     }
 
-                    // Server-side resolver — primary path. AniSync's
-                    // origin isn't on Cloudflare's bot blocklist, so
-                    // the 302 follow goes through cleanly.
-                    fetch('/anime/resolve-stream?url=' + encodeURIComponent(originalUrl), {
-                        credentials: 'same-origin',
-                        headers: { 'Accept': 'application/json' },
-                        signal: signal,
-                        // The watch page already has visible loading
-                        // chrome for the source pick; the global
-                        // overlay on top would just double up.
-                        skipLoader: true,
-                    })
-                        .then(function (r) { return r.ok ? r.json() : null; })
-                        .then(function (data) {
-                            if (done) return;
-                            var u = data && data.resolvedUrl;
-                            if (!u) return;
-                            try {
-                                if (CDN_HOST_RE.test(new URL(u).hostname)) {
-                                    finish(u);
-                                }
-                            } catch (_) {}
+                    function tryServerResolve() {
+                        attempts++;
+                        fetch('/anime/resolve-stream?url=' + encodeURIComponent(originalUrl), {
+                            credentials: 'same-origin',
+                            headers: { 'Accept': 'application/json' },
+                            signal: signal,
+                            // The watch page already has visible
+                            // loading chrome for the source pick; the
+                            // global overlay on top would just double
+                            // up.
+                            skipLoader: true,
                         })
-                        .catch(function () { /* swallow — Performance API may still pick it up */ });
+                            .then(function (r) { return r.ok ? r.json() : null; })
+                            .then(function (data) {
+                                if (done) return;
+                                var u = data && data.resolvedUrl;
+                                if (u) {
+                                    try {
+                                        if (CDN_HOST_RE.test(new URL(u).hostname)) {
+                                            finish(u);
+                                            return;
+                                        }
+                                    } catch (_) {}
+                                }
+                                // Server returned but didn't give us
+                                // a CDN host — Torrentio likely hadn't
+                                // resolved yet. Back off and try
+                                // again; later attempts usually
+                                // succeed once the player has touched
+                                // the resolver itself.
+                                scheduleRetry();
+                            })
+                            .catch(function () { scheduleRetry(); });
+                    }
 
-                    // Resource Timing fallback (browsers that DO
-                    // record the post-redirect URL via <video>).
+                    function scheduleRetry() {
+                        if (done) return;
+                        if (attempts >= MAX_ATTEMPTS) {
+                            finish(new Error('resolve failed after ' + MAX_ATTEMPTS + ' attempts'), true);
+                            return;
+                        }
+                        // 1s, 2s, 3s, 4s — gives the upstream chain
+                        // time to warm.
+                        retryTimer = setTimeout(tryServerResolve, 1000 * attempts);
+                    }
+
+                    // Resource Timing fast-path. Wins on browsers
+                    // that DO record the post-redirect URL via
+                    // <video>; harmless otherwise.
                     function findResolved() {
                         try {
                             var entries = performance.getEntriesByType('resource');
@@ -640,12 +672,18 @@
                             if (h) finish(h);
                         });
                         observer.observe({ entryTypes: ['resource'] });
-                    } catch (_) { /* fall back to timeout-only */ }
+                    } catch (_) { /* fall back to server-side path */ }
+
+                    tryServerResolve();
 
                     if (signal) {
-                        signal.addEventListener('abort', function () { finish(originalUrl); });
+                        signal.addEventListener('abort', function () {
+                            finish(new Error('aborted'), true);
+                        });
                     }
-                    setTimeout(function () { finish(originalUrl); }, TIMEOUT_MS);
+                    setTimeout(function () {
+                        finish(new Error('resolve timeout'), true);
+                    }, TIMEOUT_MS);
                 });
             }
 
@@ -717,6 +755,18 @@
                         console.warn('embedded sub readiness chain failed:', e);
                         onComplete([]);
                     });
+                }, function (err) {
+                    // Stream-URL resolve rejected — typically means
+                    // Torrentio didn't surface a CDN URL within the
+                    // retry budget. Going to Torrentio through the
+                    // Worker would just hit Cloudflare's bot-block
+                    // again, so skip extraction quietly: hide the
+                    // pill, fire onComplete([]), let OpenSubtitles /
+                    // Wyzie carry the subtitle UX for this pick.
+                    if (abortCtl.signal.aborted) return;
+                    console.info('embedded sub extraction skipped — resolve never returned a CDN URL:', err && err.message);
+                    setEmbedStatus(null);
+                    onComplete([]);
                 });
                 return abortCtl;
 
@@ -742,15 +792,30 @@
 
                 parser.once('tracks', function (tracks) {
                     trackMeta = tracks.map(function (t) {
+                        // Track names are the most reliable English-
+                        // detection signal on releases that left
+                        // language tagged as "und" — fansubs usually
+                        // set the TrackName to something like
+                        // "English [SubsPlease]" even when they
+                        // skip the Language element. Capture it
+                        // explicitly so the auto-promote and menu
+                        // label paths can read it.
+                        var name = t.name || '';
                         return {
                             number: t.number,
                             language: t.language || 'und',
+                            name: name,
                             codecID: t.type || '',
                             header: t.header || '',
-                            // Friendly label for the selector — use
-                            // an ISO-639-2/B → name mapping where we
-                            // have one, otherwise echo the raw code.
-                            label: prettyLanguage(t.language),
+                            // Friendly label: track name (when the
+                            // mux set one) wins because it's almost
+                            // always a real word — "English",
+                            // "Signs & Songs", "[GroupName]". Falls
+                            // back to ISO-639-2/B → friendly when
+                            // there's no name to lean on. Anime
+                            // sometimes ships with non-standard or
+                            // empty language entries.
+                            label: name || prettyLanguage(t.language),
                         };
                     });
                     try {
@@ -1141,19 +1206,19 @@
                     // SSA arriving 30s in) shows up as checked in the
                     // menu instead of staying on whatever was selected
                     // at video load.
+                    //
+                    // Order: None → embedded SSA → external VTT.
+                    // Embedded tracks come from the user's actual file
+                    // so they're release-matched by definition and
+                    // beat OpenSubtitles / Wyzie on accuracy almost
+                    // always. Surfacing them right after "None" puts
+                    // the highest-quality options at the top of the
+                    // menu where the user looks first.
                     var options = [{
                         html: 'None',
                         kind: 'none',
                         "default": currentSubKind === 'none',
                     }];
-                    subtitles.forEach(function (t) {
-                        options.push({
-                            html: t.label || t.lang || 'Subtitles',
-                            kind: 'vtt',
-                            url: t.url,
-                            "default": currentSubKind === 'vtt' && currentSubKey === t.url,
-                        });
-                    });
                     embeddedTracks.forEach(function (t) {
                         // Label format intentionally drops the parens —
                         // "English SSA" reads as a track type tag at a
@@ -1164,6 +1229,14 @@
                             kind: 'ass',
                             trackData: t.data,
                             "default": currentSubKind === 'ass' && currentSubKey === label,
+                        });
+                    });
+                    subtitles.forEach(function (t) {
+                        options.push({
+                            html: t.label || t.lang || 'Subtitles',
+                            kind: 'vtt',
+                            url: t.url,
+                            "default": currentSubKind === 'vtt' && currentSubKey === t.url,
                         });
                     });
                     return options;
@@ -1337,10 +1410,21 @@
                         // Arabic auto-pick is worse than just
                         // surfacing the embedded entries in the menu
                         // for the user to pick from manually.
+                        //
+                        // Detection looks at BOTH the language tag
+                        // and the TrackName, because fansub muxers
+                        // routinely leave Language="und" while
+                        // setting TrackName="English [SubsPlease]"
+                        // or similar. Either signal alone is enough.
                         var englishTrack = null;
                         for (var i = 0; i < full.length; i++) {
-                            if (/^en/i.test(full[i].language || '')) {
-                                englishTrack = full[i];
+                            var t = full[i];
+                            var lang = (t.language || '').toLowerCase();
+                            var name = (t.name || '').toLowerCase();
+                            if (lang.indexOf('en') === 0 ||
+                                /\benglish\b/.test(name) ||
+                                /\beng\b/.test(name)) {
+                                englishTrack = t;
                                 break;
                             }
                         }
