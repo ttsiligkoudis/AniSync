@@ -26,6 +26,7 @@ namespace AnimeList.Services
     {
         private readonly IHttpClientFactory _clientFactory;
         private readonly IMemoryCache _cache;
+        private readonly IConfigStore _configStore;
         private readonly ILogger<TorrentioService> _logger;
 
         private const string BaseUrl = "https://torrentio.strem.fun";
@@ -57,19 +58,25 @@ namespace AnimeList.Services
         // the source picker.
         private const int PerQualityCap = 5;
 
-        // Process-wide bad-hash cache. When a stream resolve hands
-        // back a URL that doesn't land on a debrid CDN (i.e. RD
-        // redirected to its error page because the file got
-        // DMCA-removed), the controller calls MarkHashUnplayable
-        // and we remember the hash for the TTL below. Subsequent
-        // GetStreamsAsync calls drop entries whose infoHash matches.
-        // ConcurrentDictionary so concurrent requests on different
-        // episodes don't race against each other. Static so the
-        // memory survives across requests within a process — the
-        // service itself is a singleton anyway, but explicit-static
-        // makes the intent obvious.
-        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _badHashes = new();
+        // Persisted bad-hash list with an in-memory snapshot. The
+        // source of truth lives in SqliteConfigStore.bad_hashes so
+        // marks survive process restarts and are shared across
+        // multi-instance deployments — without persistence, the
+        // user clicked a bad source on instance A, the page reload
+        // hit instance B with an empty dictionary, and the dead row
+        // reappeared. _badHashSet caches the live set in-process
+        // and is refreshed from the store at most once per
+        // BadHashRefreshInterval so the filter doesn't hit SQLite
+        // on every Torrentio request. MarkHashUnplayableAsync also
+        // eagerly adds to the snapshot so the calling instance
+        // applies the filter immediately without waiting for the
+        // next refresh tick.
         private static readonly TimeSpan _badHashTtl = TimeSpan.FromHours(1);
+        private static readonly TimeSpan BadHashRefreshInterval = TimeSpan.FromMinutes(1);
+        private static volatile HashSet<string> _badHashSet = new(StringComparer.OrdinalIgnoreCase);
+        private static DateTime _badHashLoadedAt = DateTime.MinValue;
+        private static readonly SemaphoreSlim _badHashRefreshGate = new(1, 1);
+
         // Matches the 40-character hex SHA-1 inside a Torrentio
         // resolve URL: /realdebrid/<APIKEY>/<HASH>/null/<FILEIDX>/…
         // Used by callers parsing failed-resolve URLs to identify
@@ -77,37 +84,83 @@ namespace AnimeList.Services
         private static readonly Regex _hashFromUrl = new(@"/([a-f0-9]{40})(?:/|$)",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-        public void MarkHashUnplayable(string infoHash)
+        public async Task MarkHashUnplayableAsync(string infoHash)
         {
             if (string.IsNullOrEmpty(infoHash) || infoHash.Length != 40) return;
-            _badHashes[infoHash.ToLowerInvariant()] = DateTime.UtcNow + _badHashTtl;
-        }
-
-        private static bool IsBadHash(string infoHash)
-        {
-            if (string.IsNullOrEmpty(infoHash)) return false;
             var key = infoHash.ToLowerInvariant();
-            if (_badHashes.TryGetValue(key, out var expiry))
+            try
             {
-                if (expiry > DateTime.UtcNow) return true;
-                _badHashes.TryRemove(key, out _);
+                await _configStore.MarkBadHashAsync(key, DateTime.UtcNow + _badHashTtl);
             }
-            return false;
+            catch (Exception ex)
+            {
+                // Persistence failure shouldn't break the user's
+                // current session — fall back to in-memory only so
+                // the source picker still drops the row for the
+                // lifetime of this process.
+                _logger.LogWarning(ex, "Failed to persist bad hash {Hash}; keeping in-memory only.", key);
+            }
+
+            // Copy-on-write so concurrent readers iterating the
+            // snapshot don't observe a partially-updated set.
+            var updated = new HashSet<string>(_badHashSet, StringComparer.OrdinalIgnoreCase) { key };
+            _badHashSet = updated;
         }
 
         /// <summary>
-        /// Applies the process-wide bad-hash filter to a stream list.
-        /// Called on both the fresh-fetch and cache-hit paths so a
-        /// hash marked unplayable mid-cache-window still gets dropped
-        /// from the next request's response — without this, the
-        /// 10-minute Torrentio cache shielded freshly-marked hashes
-        /// from the filter and they kept showing up after reload.
+        /// Returns the current bad-hash snapshot, refreshing from
+        /// the config store if the last load was more than
+        /// <see cref="BadHashRefreshInterval"/> ago. Single-flighted
+        /// via a semaphore so concurrent Torrentio requests only
+        /// trigger one SQLite read per refresh window. Fails open:
+        /// a store error leaves the previous snapshot in place and
+        /// logs at warning level.
         /// </summary>
-        private List<TorrentioStream> ApplyBadHashFilter(IReadOnlyList<TorrentioStream> streams, string idPath)
+        private async Task<HashSet<string>> GetBadHashSnapshotAsync()
         {
-            if (_badHashes.IsEmpty) return new List<TorrentioStream>(streams);
+            if (DateTime.UtcNow - _badHashLoadedAt < BadHashRefreshInterval)
+                return _badHashSet;
+
+            await _badHashRefreshGate.WaitAsync();
+            try
+            {
+                if (DateTime.UtcNow - _badHashLoadedAt < BadHashRefreshInterval)
+                    return _badHashSet;
+
+                try
+                {
+                    var live = await _configStore.GetActiveBadHashesAsync(DateTime.UtcNow);
+                    _badHashSet = new HashSet<string>(live, StringComparer.OrdinalIgnoreCase);
+                    _badHashLoadedAt = DateTime.UtcNow;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to refresh bad-hash list from store — using stale snapshot.");
+                }
+                return _badHashSet;
+            }
+            finally
+            {
+                _badHashRefreshGate.Release();
+            }
+        }
+
+        /// <summary>
+        /// Applies the bad-hash filter to a stream list using the
+        /// supplied snapshot. Called on both the fresh-fetch and
+        /// cache-hit paths so a hash marked unplayable mid-cache-window
+        /// still gets dropped from the next request's response —
+        /// without this, the 10-minute Torrentio cache shielded
+        /// freshly-marked hashes from the filter and they kept showing
+        /// up after reload.
+        /// </summary>
+        private List<TorrentioStream> ApplyBadHashFilter(IReadOnlyList<TorrentioStream> streams, HashSet<string> badSet, string idPath)
+        {
+            if (badSet.Count == 0) return new List<TorrentioStream>(streams);
             var beforeBad = streams.Count;
-            var filtered = streams.Where(s => !IsBadHash(s.InfoHash)).ToList();
+            var filtered = streams
+                .Where(s => string.IsNullOrEmpty(s.InfoHash) || !badSet.Contains(s.InfoHash))
+                .ToList();
             if (filtered.Count < beforeBad)
             {
                 _logger.LogInformation(
@@ -172,10 +225,12 @@ namespace AnimeList.Services
         public TorrentioService(
             IHttpClientFactory clientFactory,
             IMemoryCache cache,
+            IConfigStore configStore,
             ILogger<TorrentioService> logger)
         {
             _clientFactory = clientFactory;
             _cache = cache;
+            _configStore = configStore;
             _logger = logger;
         }
 
@@ -204,15 +259,20 @@ namespace AnimeList.Services
             // accidental log of the cache state stays sanitised.
             var keyFingerprint = ShortFingerprint(apiKey);
             var cacheKey = $"torrentio:{keyFingerprint}:{idPath}";
+
+            // Refresh-from-store happens once per request (max once
+            // per BadHashRefreshInterval across all callers) so the
+            // filter sees marks made by *other* app instances or
+            // earlier process lifetimes. Apply the bad-hash filter
+            // on every cache hit too, not just on fresh fetches:
+            // a hash that gets marked unplayable between the
+            // Torrentio fetch and the user's reload would otherwise
+            // stick around in the cached list until the 10-minute
+            // cache expires.
+            var badHashes = await GetBadHashSnapshotAsync();
             if (_cache.TryGetValue<IReadOnlyList<TorrentioStream>>(cacheKey, out var hit) && hit != null)
             {
-                // Apply the bad-hash filter on every cache hit too,
-                // not just on fresh fetches. Otherwise a hash that
-                // gets marked unplayable between the Torrentio fetch
-                // and the user's reload sticks around in the cached
-                // list until the 10-minute cache expires — defeating
-                // the whole point of the reactive bad-hash mechanism.
-                return ApplyBadHashFilter(hit, idPath);
+                return ApplyBadHashFilter(hit, badHashes, idPath);
             }
 
             var url = $"{BaseUrl}/realdebrid={Uri.EscapeDataString(apiKey)}/stream/{idType}/{idPath}.json";
@@ -264,7 +324,7 @@ namespace AnimeList.Services
                 {
                     AbsoluteExpirationRelativeToNow = CacheTtl,
                 });
-                return ApplyBadHashFilter(parsed, idPath);
+                return ApplyBadHashFilter(parsed, badHashes, idPath);
             }
             catch (OperationCanceledException)
             {

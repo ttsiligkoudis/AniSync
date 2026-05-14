@@ -846,7 +846,7 @@ namespace AnimeList.Controllers
                     var hash = TorrentioService.ExtractInfoHashFromUrl(req.SourceUrl);
                     if (!string.IsNullOrEmpty(hash))
                     {
-                        _torrentioService.MarkHashUnplayable(hash);
+                        await _torrentioService.MarkHashUnplayableAsync(hash);
                     }
                     _logger.LogInformation(
                         "Refused mark-watched for {Id} S{Season}E{Episode}: source URL looks like RD DMCA placeholder.",
@@ -1050,7 +1050,7 @@ namespace AnimeList.Controllers
                         var hash = TorrentioService.ExtractInfoHashFromUrl(url);
                         if (!string.IsNullOrEmpty(hash))
                         {
-                            _torrentioService.MarkHashUnplayable(hash);
+                            await _torrentioService.MarkHashUnplayableAsync(hash);
                             var reason = looksPlaceholder
                                 ? $"placeholder-sized response ({totalSize}B) from {finalHost}"
                                 : $"resolve landed on non-CDN host {finalHost}";

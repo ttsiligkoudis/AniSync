@@ -81,6 +81,23 @@ namespace AnimeList.Services
                     ON configs(mal_user_key)     WHERE mal_user_key     IS NOT NULL;
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_configs_scrobble_token
                     ON configs(scrobble_token)   WHERE scrobble_token   IS NOT NULL;
+
+                -- Reactive cache of Torrentio info hashes whose RD-resolve
+                -- landed on a DMCA placeholder (or otherwise non-debrid CDN).
+                -- Populated by AnimeController.ResolveStream / MarkWatched
+                -- via TorrentioService.MarkHashUnplayableAsync. Read by
+                -- TorrentioService when filtering source-picker results.
+                -- Persisted (rather than living only in process memory) so
+                -- that fly.io redeploys / multi-instance scale-out don't
+                -- lose the list — without persistence, the user clicks a
+                -- bad source on instance A, the page reloads against
+                -- instance B, and the bad row reappears.
+                CREATE TABLE IF NOT EXISTS bad_hashes (
+                    info_hash  TEXT PRIMARY KEY,
+                    expires_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_bad_hashes_expires
+                    ON bad_hashes(expires_at);
                 """;
             create.ExecuteNonQuery();
 
@@ -700,6 +717,57 @@ namespace AnimeList.Services
             AnimeService.Kitsu       => "kitsu_user_key",
             _ => null,
         };
+
+        public async Task MarkBadHashAsync(string infoHash, DateTime expiresAtUtc)
+        {
+            if (string.IsNullOrEmpty(infoHash)) return;
+            var hash = infoHash.ToLowerInvariant();
+            var exp = new DateTimeOffset(expiresAtUtc.ToUniversalTime(), TimeSpan.Zero).ToUnixTimeSeconds();
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            // UPSERT that extends an existing row's TTL when the new
+            // expiry is later than the stored one. Lets repeated bad-
+            // source clicks push the entry forward without ever
+            // shortening a live ban.
+            cmd.CommandText = """
+                INSERT INTO bad_hashes (info_hash, expires_at) VALUES ($h, $e)
+                ON CONFLICT(info_hash) DO UPDATE SET expires_at = excluded.expires_at
+                                               WHERE excluded.expires_at > bad_hashes.expires_at
+                """;
+            cmd.Parameters.AddWithValue("$h", hash);
+            cmd.Parameters.AddWithValue("$e", exp);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<IReadOnlyList<string>> GetActiveBadHashesAsync(DateTime nowUtc)
+        {
+            var nowSecs = new DateTimeOffset(nowUtc.ToUniversalTime(), TimeSpan.Zero).ToUnixTimeSeconds();
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+
+            // Opportunistic GC — the table never gets huge but there's no
+            // reason to let expired rows accumulate forever either.
+            using (var purge = conn.CreateCommand())
+            {
+                purge.CommandText = "DELETE FROM bad_hashes WHERE expires_at <= $n";
+                purge.Parameters.AddWithValue("$n", nowSecs);
+                await purge.ExecuteNonQueryAsync();
+            }
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT info_hash FROM bad_hashes WHERE expires_at > $n";
+            cmd.Parameters.AddWithValue("$n", nowSecs);
+            var result = new List<string>();
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                result.Add(reader.GetString(0));
+            }
+            return result;
+        }
 
         /// <summary>
         /// 16 random bytes encoded as URL-safe base64 (22 chars, no padding).
