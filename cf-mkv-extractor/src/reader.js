@@ -107,11 +107,43 @@ export class RangeReader {
                 }
             }
         } finally {
-            // Release the upstream connection promptly so CF doesn't
-            // hold the body buffer alive waiting for us to finish.
-            try { await reader.cancel(); } catch (_) {}
+            // Fire-and-forget cancel: awaiting the cancel can deadlock
+            // when the upstream connection has already dropped (the
+            // promise never resolves and CF surfaces it as
+            // "Network connection lost" against the worker as a whole).
+            // Synchronously kick it off so the upstream socket gets
+            // released eventually, but don't block on it.
+            try { reader.cancel(); } catch (_) {}
         }
         return written === maxBytes ? buf : buf.subarray(0, written);
+    }
+
+    /**
+     * read() with one retry on transient network errors. Use this
+     * for fetches we can't proceed without (head / tracks / cues);
+     * cluster batches stay on the no-retry path to preserve the
+     * subrequest budget under CF Free's 50/invocation cap.
+     */
+    async readCritical(start, length) {
+        try {
+            return await this.read(start, length);
+        } catch (e) {
+            const msg = (e && e.message) || String(e);
+            // Worth retrying on transient errors that signal the
+            // upstream dropped us mid-stream — RD's edges sometimes
+            // do this under load and recover on the next attempt.
+            // Don't retry on structural errors (bad URL, 4xx, etc.)
+            // because retrying won't change the outcome.
+            const transient =
+                msg.includes('Network connection lost') ||
+                msg.includes('fetch failed') ||
+                msg.includes('Memory limit') ||
+                msg.includes('upstream HTTP 5');
+            if (!transient) throw e;
+            // Brief backoff so the upstream has a moment to recover.
+            await new Promise(r => setTimeout(r, 350));
+            return await this.read(start, length);
+        }
     }
 
     /**
