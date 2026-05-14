@@ -61,6 +61,7 @@ namespace AnimeList.Services
             ["ko"] = ("kor", "Korean"),
             ["kor"] = ("kor", "Korean"),
             ["korean"] = ("kor", "Korean"),
+            ["und"] = ("und", "Undetermined"),
         };
 
         // Preferred language ordering inside the player menu —
@@ -98,13 +99,15 @@ namespace AnimeList.Services
                 return hit;
             }
 
-            // language=en biases Wyzie's aggregation toward English
-            // uploads when the upstream source supports per-language
-            // querying. For sources that don't, the result list still
-            // includes other languages — we'll bucket them and let
-            // the menu's preferred-language ordering handle it.
+            // No language filter — Wyzie's language= parameter
+            // accepts ISO codes inconsistently (some upstreams want
+            // "en", others "eng", others the English name). Passing
+            // any one risks filtering everything out for the
+            // upstreams that disagree. Just take everything and let
+            // the menu's preferred-language ordering surface English
+            // first.
             var url = $"{ApiBase}/search?id={Uri.EscapeDataString(imdbId)}"
-                + $"&season={s}&episode={episode}&language=en";
+                + $"&season={s}&episode={episode}";
 
             try
             {
@@ -139,9 +142,13 @@ namespace AnimeList.Services
                 }
                 else
                 {
+                    // Truncate so an unexpectedly-massive HTML error
+                    // page doesn't flood the log; 400 chars is enough
+                    // to see the JSON envelope or a CF challenge.
+                    var sample = body == null ? string.Empty : body.Length > 400 ? body.Substring(0, 400) : body;
                     _logger.LogInformation(
-                        "Wyzie {Imdb} s{S}e{E}: 0 tracks (raw={Bytes}B, url={Url})",
-                        imdbId, s, episode, body.Length, url);
+                        "Wyzie {Imdb} s{S}e{E}: 0 tracks (raw={Bytes}B, url={Url}, body={Body})",
+                        imdbId, s, episode, body == null ? 0 : body.Length, url, sample);
                 }
                 return tracks;
             }
@@ -155,36 +162,56 @@ namespace AnimeList.Services
         private static IReadOnlyList<SubtitleTrack> ParseList(string json)
         {
             if (string.IsNullOrWhiteSpace(json)) return [];
-            dynamic arr = DeserializeObject<dynamic>(json);
+            dynamic arr;
+            try { arr = DeserializeObject<dynamic>(json); }
+            catch { return []; }
             if (arr == null) return [];
 
             var entries = new List<(string Code, string Source, string Release, string Url)>();
             foreach (var s in arr)
             {
-                var url = (string)s.url;
+                // Wyzie's schema has shifted a few times — accept the
+                // most common field names. `url` is the canonical
+                // current name; `download` / `downloadUrl` are
+                // historical variants we've seen on related mirrors.
+                var url = TryString(s, "url") ?? TryString(s, "download") ?? TryString(s, "downloadUrl");
                 if (string.IsNullOrWhiteSpace(url)) continue;
 
                 // Source field is just informational at this layer —
-                // the outer controller dedupes by upstream URL, so any
-                // truly duplicate entries against the dedicated
-                // OpenSubtitles addon path collapse there. We used to
-                // filter source="OpenSubtitles" outright but that also
-                // dropped Wyzie's pull from opensubtitles.com proper
-                // (broader catalog than the Stremio v3 addon we use
-                // directly), which was the main thing we wanted Wyzie
-                // for. Keep everything; rely on URL dedup.
-                var source = ((string)s.source ?? string.Empty).Trim();
+                // the outer controller dedupes by upstream URL.
+                var source = (TryString(s, "source") ?? string.Empty).Trim();
 
-                var rawLang = ((string)s.language ?? string.Empty).Trim();
-                if (string.IsNullOrEmpty(rawLang)) continue;
-                var (code, _) = MapLanguage(rawLang);
-                if (string.IsNullOrEmpty(code)) continue;
+                // Language hints — Wyzie usually returns ISO-639-2/B
+                // codes in `language`, but the `display` field
+                // ("English", "Spanish (Latin America)", …) is a
+                // useful fallback when the code is missing. If both
+                // are missing the entry is still returned but bucketed
+                // as "und"; the user can still pick it from the menu.
+                var rawLang = (TryString(s, "language")
+                                ?? TryString(s, "display")
+                                ?? string.Empty).Trim();
+                var (code, _) = string.IsNullOrEmpty(rawLang)
+                    ? ("und", "Undetermined")
+                    : MapLanguage(rawLang);
 
-                var release = ((string)s.release ?? (string)s.display ?? string.Empty).Trim();
+                var release = (TryString(s, "release")
+                                ?? TryString(s, "display")
+                                ?? string.Empty).Trim();
                 entries.Add((code, source, release, url));
             }
 
             return GroupAndCap(entries);
+        }
+
+        private static string TryString(dynamic obj, string field)
+        {
+            try
+            {
+                var v = obj[field];
+                if (v == null) return null;
+                return (string)v;
+            }
+            catch { return null; }
         }
 
         private static IReadOnlyList<SubtitleTrack> GroupAndCap(
