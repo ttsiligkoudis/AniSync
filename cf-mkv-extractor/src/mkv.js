@@ -34,13 +34,24 @@ const TRACKS_FETCH = 256 * 1024;
 // Cues are usually proportional to file length — a few hundred KB up
 // to a couple of MB. 4 MB covers the worst case we've seen.
 const CUES_FETCH = 4 * 1024 * 1024;
-// Per-cluster fetch. Subtitle-only clusters are tiny; clusters with
-// video frames can be a few hundred KB. 1 MB is generous and gives
-// the parser room to skip non-sub blocks without re-fetching.
-const CLUSTER_FETCH = 1 * 1024 * 1024;
-// Conservative cap on total bytes we'll pull, so a pathological MKV
-// can't drain the user's RD quota even if our parser misbehaves.
-const MAX_TOTAL_FETCH = 60 * 1024 * 1024;
+// Per-cluster fetch — anime HEVC 1080p clusters can carry several MB
+// of video data; 4 MB is usually enough to also contain the cluster's
+// subtitle blocks (which spec-recommended layout puts after the video
+// frames they share a timestamp with).
+const CLUSTER_FETCH = 4 * 1024 * 1024;
+// Coalesce sub-cluster offsets whose gap is smaller than this into a
+// single Range request. Trades a bit of extra bandwidth for far fewer
+// subrequests.
+const CLUSTER_BATCH_GAP = 4 * 1024 * 1024;
+// Cloudflare Workers Free caps us at 50 subrequests per invocation.
+// Reserve a few for head / tracks / cues / size-probe and leave a
+// safety margin. If the raw batch count exceeds this we coarsen by
+// merging the smallest-gap adjacent batches until we fit.
+const MAX_CLUSTER_BATCHES = 35;
+// Hard ceiling on total bytes pulled so a pathological MKV can't
+// drain the user's RD quota even if our coalescing produces a giant
+// batch.
+const MAX_TOTAL_FETCH = 200 * 1024 * 1024;
 
 export async function extractSubtitles(reader) {
     await reader.probeSize();
@@ -132,10 +143,55 @@ export async function extractSubtitles(reader) {
     const cuesByTrack = new Map(subtitleTracks.map(t => [t.number, []]));
     let totalFetched = HEAD_BYTES + TRACKS_FETCH + CUES_FETCH;
 
+    // Coalesce nearby cluster offsets into Range batches so a long
+    // episode with many cue points doesn't blow Cloudflare Workers'
+    // 50-subrequest-per-invocation cap. Two-pass:
+    //   (a) Greedy: adjacent offsets within CLUSTER_BATCH_GAP share
+    //       one batch.
+    //   (b) Coarsen: if the resulting batch count exceeds
+    //       MAX_CLUSTER_BATCHES, repeatedly merge the smallest-gap
+    //       neighbour pair until we fit the budget.
+    // After all batches are fetched and cached in RangeReader, the
+    // per-cluster `read()` calls below are in-memory hits — no
+    // additional subrequests.
+    const batches = [];
+    for (const off of clusterAbsOffsets) {
+        const cur = batches[batches.length - 1];
+        if (cur && off - cur.end < CLUSTER_BATCH_GAP) {
+            cur.end = off + CLUSTER_FETCH;
+        } else {
+            batches.push({ start: off, end: off + CLUSTER_FETCH });
+        }
+    }
+    while (batches.length > MAX_CLUSTER_BATCHES) {
+        let mergeIdx = 0;
+        let minGap = Infinity;
+        for (let i = 0; i < batches.length - 1; i++) {
+            const gap = batches[i + 1].start - batches[i].end;
+            if (gap < minGap) { minGap = gap; mergeIdx = i; }
+        }
+        batches[mergeIdx].end = batches[mergeIdx + 1].end;
+        batches.splice(mergeIdx + 1, 1);
+    }
+    for (const b of batches) {
+        const len = b.end - b.start;
+        if (totalFetched + len > MAX_TOTAL_FETCH) break;
+        try {
+            await reader.read(b.start, len);
+            totalFetched += len;
+        } catch (_) { /* batch missing — clusters in it will be skipped */ }
+    }
+
     for (const clusterAbs of clusterAbsOffsets) {
-        if (totalFetched >= MAX_TOTAL_FETCH) break;
-        const clusterBuf = await reader.read(clusterAbs, CLUSTER_FETCH);
-        totalFetched += CLUSTER_FETCH;
+        let clusterBuf;
+        try {
+            // Re-uses cached bytes from the batches above when the
+            // cluster fits inside one. If it doesn't (the batch was
+            // skipped due to MAX_TOTAL_FETCH), this would issue a
+            // fresh fetch — guard with another total-fetch check.
+            if (totalFetched >= MAX_TOTAL_FETCH) break;
+            clusterBuf = await reader.read(clusterAbs, CLUSTER_FETCH);
+        } catch (_) { continue; }
         let clusterEl;
         try { clusterEl = readElement(clusterBuf, 0); }
         catch (e) { continue; }
@@ -154,11 +210,17 @@ export async function extractSubtitles(reader) {
             let child;
             try { child = readElement(clusterBuf, childOff); }
             catch (_) { break; }
-            // If the element body would extend past what we fetched,
-            // skip — sub blocks are small and fit in our slab; video
-            // blocks routinely don't but we wouldn't decode them anyway.
-            if (child.size === Infinity || child.dataOffset + child.size > clusterBuf.length) {
-                childOff = child.dataOffset + Math.min(child.size, clusterBuf.length - child.dataOffset);
+            // Big video SimpleBlocks routinely exceed what we have in
+            // our slab. The element HEADER tells us how far past the
+            // buffer the body extends — use that to advance childOff
+            // by the full element size so we keep alignment for blocks
+            // that come AFTER this one. (Without the skip-by-size we'd
+            // lose track of where the next element starts.)
+            // Unknown-size elements (rare on writes) we can't skip
+            // past — give up on the rest of this cluster.
+            if (child.size === Infinity) break;
+            if (child.dataOffset + child.size > clusterBuf.length) {
+                childOff = child.dataOffset + child.size;
                 if (childOff >= clusterEnd) break;
                 continue;
             }
