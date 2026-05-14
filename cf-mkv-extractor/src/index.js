@@ -80,7 +80,21 @@ export default {
 
         const reader = new RangeReader(target);
         try {
-            const result = await extractSubtitles(reader);
+            // Optional ?lang= filter.
+            //   "auto"          — keep only the first track whose
+            //                     language starts with "en" or whose
+            //                     name contains "english"/"eng"
+            //                     (mirrors the client's auto-promote
+            //                     rule). Saves worker memory and
+            //                     response size proportional to the
+            //                     number of tracks we'd otherwise
+            //                     accumulate cues for.
+            //   "eng" / "spa"…  — explicit ISO-639-2/B language code,
+            //                     filter to tracks matching it.
+            //   omitted         — return every subtitle track (legacy
+            //                     behaviour).
+            const langParam = (url.searchParams.get('lang') || '').toLowerCase();
+            const result = await extractSubtitles(reader, { lang: langParam || null });
             return new Response(JSON.stringify({
                 tracks: result.tracks,
                 extracted: true,
