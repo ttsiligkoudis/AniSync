@@ -1874,14 +1874,16 @@
                     var scheme = u.protocol.replace(':', '');
                     var rest = u.host + u.pathname + u.search + u.hash;
                     var title = displayName || 'AniSync stream';
-                    // S.subs is the VLC-for-Android intent extra that
-                    // pre-loads a subtitle URL alongside the video.
-                    // S.subs.name is the friendly label shown in the
-                    // app's tracks menu. Other Android players (MX
-                    // Player, Just Player) ignore it harmlessly.
+                    // VLC for Android's VideoActivity reads the
+                    // subtitle URL from the EXTRA_SUBTITLES_LOCATION
+                    // extra (`subtitles_location`, snake_case). The
+                    // `subs` extra we tried earlier isn't part of
+                    // the documented contract and silently does
+                    // nothing. Other Android players (MX Player,
+                    // Just Player) use different extras still;
+                    // they'll just ignore this one harmlessly.
                     var subExtra = sidecarSub
-                        ? ';S.subs=' + encodeURIComponent(sidecarSub) +
-                          ';S.subs.name=' + encodeURIComponent('AniSync subs')
+                        ? ';S.subtitles_location=' + encodeURIComponent(sidecarSub)
                         : '';
                     var intent = 'intent://' + rest +
                         '#Intent' +
@@ -1940,14 +1942,16 @@
                     .replace(/\s+/g, ' ')
                     .trim()
                     .substring(0, 80) || 'stream';
-                // #EXTVLCOPT:sub-file=URL is the VLC playlist
-                // extension that pre-loads an external subtitle
-                // alongside the stream URL. Recognised by VLC
-                // (desktop + Android), mpv, and most modern players
-                // that consume .m3u; ignored harmlessly by anything
-                // else (the video still plays without subs).
+                // #EXTVLCOPT:input-slave=URI tells VLC to load a
+                // second input alongside the main stream — typically
+                // a subtitle file. Crucially, it accepts URLs,
+                // unlike sub-file=, which VLC resolves as a path
+                // RELATIVE TO THE M3U'S LOCATION (so an HTTP URL
+                // ends up prefixed with file:///C:/.../Downloads/
+                // and fails). Ignored by players that don't speak
+                // EXTVLCOPT (video still plays, just no subs).
                 var subLine = sidecarSub
-                    ? '#EXTVLCOPT:sub-file=' + sidecarSub + '\n'
+                    ? '#EXTVLCOPT:input-slave=' + sidecarSub + '\n'
                     : '';
                 var m3u =
                     '#EXTM3U\n' +
