@@ -28,6 +28,7 @@ namespace AnimeList.Controllers
         private readonly ISubtitleService _subtitleService;
         private readonly IWyzieSubtitlesService _wyzieSubtitleService;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly ISyncService _syncService;
         private readonly ILogger<AnimeController> _logger;
 
         public AnimeController(
@@ -45,6 +46,7 @@ namespace AnimeList.Controllers
             ISubtitleService subtitleService,
             IWyzieSubtitlesService wyzieSubtitleService,
             IHttpClientFactory httpClientFactory,
+            ISyncService syncService,
             ILogger<AnimeController> logger)
         {
             _tokenService = tokenService;
@@ -61,6 +63,7 @@ namespace AnimeList.Controllers
             _subtitleService = subtitleService;
             _wyzieSubtitleService = wyzieSubtitleService;
             _httpClientFactory = httpClientFactory;
+            _syncService = syncService;
             _logger = logger;
         }
 
@@ -770,6 +773,94 @@ namespace AnimeList.Controllers
             // ignoring it.
             Response.Headers["Content-Disposition"] = "inline; filename=\"subtitle.vtt\"";
             return Content(vtt, "text/vtt", System.Text.Encoding.UTF8);
+        }
+
+        /// <summary>
+        /// Marks an anime episode as watched on the user's primary
+        /// tracking service plus any linked secondaries. Called by the
+        /// watch page when:
+        ///   * the in-player progress crosses 70 % of duration, or
+        ///   * the user clicks the "Open with…" button to hand the
+        ///     stream off to an external player (we can't see their
+        ///     progress after that, so we commit at hand-off time).
+        ///
+        /// Idempotent — calling it twice for the same id+episode is a
+        /// cheap no-op on the tracker side (SaveAnimeEntryAsync writes
+        /// the same row). Honours the per-user disableAutoTrack flag:
+        /// when set, the endpoint returns 200 with reason=opted-out
+        /// and skips the upstream calls entirely. Anonymous and
+        /// not-signed-in callers also get a clean reason-coded 200
+        /// rather than 401 so the client doesn't surface anything
+        /// alarming for users who chose to watch without an account.
+        /// </summary>
+        [HttpPost("/anime/mark-watched")]
+        public async Task<IActionResult> MarkWatched([FromBody] MarkWatchedRequest req)
+        {
+            if (req is null || string.IsNullOrWhiteSpace(req.Id) || req.Episode <= 0)
+            {
+                return BadRequest(new { ok = false, reason = "invalid-request" });
+            }
+
+            var tokenData = await _tokenService.GetAccessTokenAsync();
+            if (tokenData is null || string.IsNullOrWhiteSpace(tokenData.access_token))
+            {
+                return Json(new { ok = false, reason = "no-auth" });
+            }
+            if (tokenData.anonymousUser)
+            {
+                return Json(new { ok = false, reason = "anonymous" });
+            }
+
+            // Honour the per-user "Auto-track progress" toggle that
+            // already gates the subtitle-driven progress save. Same
+            // helper the addon's SubtitlesController uses, just keyed
+            // by UID (web-app session) instead of decoded config blob.
+            try
+            {
+                var cfg = await GetConfigByUidAsync(tokenData.tokenUid, _configStore);
+                if (cfg?.disableAutoTrack == true)
+                {
+                    return Json(new { ok = false, reason = "opted-out" });
+                }
+            }
+            catch { /* flag read failed — proceed; better to over-track than miss */ }
+
+            try
+            {
+                switch (tokenData.anime_service)
+                {
+                    case AnimeService.Anilist:
+                        await _anilistService.SaveAnimeEntryAsync(tokenData, req.Id, req.Season, req.Episode);
+                        break;
+                    case AnimeService.MyAnimeList:
+                        await _malService.SaveAnimeEntryAsync(tokenData, req.Id, req.Season, req.Episode);
+                        break;
+                    default:
+                        await _kitsuService.SaveAnimeEntryAsync(tokenData, req.Id, req.Season, req.Episode);
+                        break;
+                }
+                // Mirror to linked secondaries — same pattern the
+                // Stremio addon's subtitle-fetch handler uses.
+                await _syncService.FanOutSaveAsync(tokenData, req.Id, req.Season, req.Episode);
+                _logger.LogInformation(
+                    "Marked watched: {Id} S{Season}E{Episode} on {Service}.",
+                    req.Id, req.Season, req.Episode, tokenData.anime_service);
+                return Json(new { ok = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "MarkWatched failed for {Id} S{Season}E{Episode}.",
+                    req.Id, req.Season, req.Episode);
+                return Json(new { ok = false, reason = "save-failed" });
+            }
+        }
+
+        public class MarkWatchedRequest
+        {
+            public string Id { get; set; }
+            public int? Season { get; set; }
+            public int Episode { get; set; }
         }
 
         /// <summary>

@@ -301,6 +301,56 @@
             var episode = @Model.Current.episode;
             var hasSeasons = @(hasSeasons ? "true" : "false");
 
+            // One-shot guard so the 70 %-progress check, the external
+            // launcher, and any future trigger don't double-fire the
+            // mark-watched POST for the same episode. Cleared on a
+            // full page reload (Prev / Next navigation), which is the
+            // right boundary — different episode = mark again.
+            var episodeMarkedAsWatched = false;
+            function markEpisodeAsWatched(reason) {
+                if (episodeMarkedAsWatched) return;
+                episodeMarkedAsWatched = true;
+                try {
+                    fetch('/anime/mark-watched', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                        body: JSON.stringify({
+                            id: animeId,
+                            season: hasSeasons ? season : null,
+                            episode: episode
+                        }),
+                        // Don't flash the global loader on background
+                        // tracking writes.
+                        skipLoader: true,
+                    })
+                        .then(function (r) { return r.ok ? r.json() : null; })
+                        .then(function (data) {
+                            try {
+                                console.log('[AniSync] mark-watched (' + reason + '):', data || '(no body)');
+                            } catch (_) {}
+                            if (data && data.ok === false) {
+                                // Auth / opted-out / save-failed all
+                                // come back as ok:false with a reason.
+                                // Allow a retry on transient failures
+                                // by clearing the guard.
+                                if (data.reason === 'save-failed') {
+                                    episodeMarkedAsWatched = false;
+                                }
+                            }
+                        })
+                        .catch(function (e) {
+                            // Network blip — let the next trigger
+                            // retry. Don't block playback on it.
+                            console.info('[AniSync] mark-watched failed, will retry on next trigger:', e && e.message);
+                            episodeMarkedAsWatched = false;
+                        });
+                } catch (e) {
+                    console.info('[AniSync] mark-watched threw:', e && e.message);
+                    episodeMarkedAsWatched = false;
+                }
+            }
+
             var sourcesBody = document.getElementById('watchSourcesBody');
             var playerHost  = document.getElementById('watchPlayer');
             var fallbackHost = document.getElementById('watchPlayerFallback');
@@ -1651,6 +1701,23 @@
                     hideFallback();
                 });
 
+                // Auto-track: mark the episode as watched on the
+                // user's primary tracker once playback crosses 70 %
+                // of duration. timeupdate fires every ~250 ms which
+                // is more than enough; the markEpisodeAsWatched
+                // helper is idempotent + flag-guarded so multiple
+                // fires inside the threshold cost nothing.
+                art.on('video:timeupdate', function () {
+                    if (episodeMarkedAsWatched) return;
+                    var v = art && art.video;
+                    if (!v) return;
+                    var dur = v.duration;
+                    if (!isFinite(dur) || dur <= 0) return;
+                    if ((v.currentTime || 0) / dur >= 0.7) {
+                        markEpisodeAsWatched('70%-progress');
+                    }
+                });
+
                 // Move the skip-intro overlay button into the player
                 // host now that ArtPlayer has mounted its DOM there.
                 // playerHost is position:relative; the button is
@@ -1953,6 +2020,12 @@
             //   regressing the zero-config experience for users who
             //   never set anything up.
             function openWithExternalPlayer(streamUrl, displayName) {
+                // The user clicked "Open with…" — they're committing
+                // to watch this episode in an external app we can't
+                // observe. Commit the watched mark now rather than
+                // wait for a 70 %-progress signal we'll never get.
+                markEpisodeAsWatched('external-launch');
+
                 // Decide what to pass as the sidecar subtitle. Three
                 // outcomes:
                 //   * Player is already open AND user has a VTT
