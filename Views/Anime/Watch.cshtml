@@ -1799,23 +1799,73 @@
             //   regressing the zero-config experience for users who
             //   never set anything up.
             function openWithExternalPlayer(streamUrl, displayName) {
-                // Pluck the active VTT subtitle (when one is
-                // selected) so we can hand it off to the external
-                // player along with the video URL. Embedded SSA
-                // tracks live inside the MKV already so the player
-                // sees them natively; only the OpenSubtitles / Wyzie
-                // VTT entries need to be passed as a sidecar URL.
-                // currentSubKey is our same-origin proxy URL — turn
-                // it into an absolute URL the external player can
-                // hit (the proxy serves text/vtt with CORS-friendly
-                // headers, which VLC / mpv / Infuse all consume).
-                var sidecarSub = null;
-                if (currentSubKind === 'vtt' && currentSubKey) {
-                    try {
-                        sidecarSub = new URL(currentSubKey, window.location.origin).toString();
-                    } catch (_) { sidecarSub = null; }
+                // Decide what to pass as the sidecar subtitle. Three
+                // outcomes:
+                //   * Player is already open AND user has a VTT
+                //     entry picked → reuse currentSubKey directly
+                //     (no refetch).
+                //   * Player is open AND user picked None / an
+                //     embedded SSA track → null (None = no subs;
+                //     embedded lives in the MKV already).
+                //   * Player NOT open yet (user clicked the external
+                //     action straight off the source list) → kick
+                //     off /anime/episode-subtitles for this stream,
+                //     mirror the auto-preselect logic to pick the
+                //     first English entry, then launch. Same
+                //     decision the in-app player would have made.
+                if (art) {
+                    dispatchExternalLaunch(streamUrl, displayName, sidecarFromCurrentPick());
+                    return;
                 }
+                fetchEnglishSidecarForStream(displayName).then(function (sub) {
+                    dispatchExternalLaunch(streamUrl, displayName, sub);
+                });
+            }
 
+            function sidecarFromCurrentPick() {
+                if (currentSubKind !== 'vtt' || !currentSubKey) return null;
+                try { return new URL(currentSubKey, window.location.origin).toString(); }
+                catch (_) { return null; }
+            }
+
+            // Hits the existing /anime/episode-subtitles endpoint
+            // with the same query the in-app player uses, then walks
+            // the response for the first lang ^= "en" entry — same
+            // rule as initPlayer's defaultSubIdx pick. Returns the
+            // absolute proxy URL (or null on any failure / no
+            // English match) so the external launcher can append it
+            // to the m3u / intent.
+            function fetchEnglishSidecarForStream(filename) {
+                return new Promise(function (resolve) {
+                    var qs = 'id=' + encodeURIComponent(animeId)
+                        + '&episode=' + encodeURIComponent(episode)
+                        + (hasSeasons ? '&season=' + encodeURIComponent(season) : '')
+                        + (filename ? '&filename=' + encodeURIComponent(filename) : '');
+                    fetch('/anime/episode-subtitles?' + qs, {
+                        credentials: 'same-origin',
+                        headers: { 'Accept': 'application/json' },
+                        skipLoader: true,
+                    })
+                        .then(function (r) { return r.ok ? r.json() : null; })
+                        .then(function (data) {
+                            var subs = (data && data.subtitles) || [];
+                            for (var i = 0; i < subs.length; i++) {
+                                if (/^en/i.test(subs[i].lang || '')) {
+                                    try {
+                                        resolve(new URL(subs[i].url, window.location.origin).toString());
+                                    } catch (_) {
+                                        resolve(null);
+                                    }
+                                    return;
+                                }
+                            }
+                            resolve(null);
+                        })
+                        .catch(function () { resolve(null); });
+                });
+            }
+
+            function dispatchExternalLaunch(streamUrl, displayName, sidecarSub) {
                 var ua = navigator.userAgent || '';
                 if (/Android/i.test(ua) && !/Windows Phone/i.test(ua)) {
                     var u;
