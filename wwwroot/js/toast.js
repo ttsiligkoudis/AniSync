@@ -13,7 +13,9 @@
 (function () {
     'use strict';
 
-    function showToast(text) {
+    var DEFAULT_DURATION_MS = 3000;
+
+    function showToast(text, durationMs) {
         var container = document.getElementById('toast-container');
         if (!container || !text) return;
         var el = document.createElement('div');
@@ -22,8 +24,13 @@
         el.textContent = text;
         container.appendChild(el);
         // CSS animation handles the fade-in/fade-out; the JS just removes the
-        // element after the animation finishes so DOM stays tidy.
-        setTimeout(function () { el.remove(); }, 3000);
+        // element after the animation finishes so DOM stays tidy. Caller can
+        // pass a longer duration for messages that carry multi-step
+        // instructions and need actual reading time.
+        var lifespan = typeof durationMs === 'number' && durationMs > 0
+            ? durationMs
+            : DEFAULT_DURATION_MS;
+        setTimeout(function () { el.remove(); }, lifespan);
     }
 
     // Pop a queued toast from the previous page render, if any.
