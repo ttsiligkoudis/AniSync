@@ -29,27 +29,29 @@ import {
 // eleven), so we can spend the freed budget on larger Range requests.
 // Bigger fetches = fewer connections to open = fewer chances for
 // RD's edges to drop us mid-stream with "Network connection lost".
-// Still well under the 128 MB Worker memory cap even with the
-// in-flight stream buffer + cache + framework overhead.
+// Still under the 128 MB Worker memory cap even with the in-flight
+// stream buffer + cache + framework overhead — peak math is in the
+// commit history and works out to ~80 MB worst case.
 const HEAD_BYTES = 256 * 1024;
 const TRACKS_FETCH = 256 * 1024;
-const CUES_FETCH = 3 * 1024 * 1024;
-const CLUSTER_FETCH = 3 * 1024 * 1024;
-const CLUSTER_BATCH_GAP = 3 * 1024 * 1024;
-// Per-batch span. Sized to fit comfortably in memory (peak: stream
-// buffer 12 MB + cache up to 24 MB + cues/tracks/head ≈ 4 MB +
-// framework ≈ 50 MB) and to keep individual fetches shorter than the
-// window where RD's edges seem to start dropping connections.
-const MAX_BATCH_SIZE = 12 * 1024 * 1024;
+const CUES_FETCH = 4 * 1024 * 1024;
+const CLUSTER_FETCH = 6 * 1024 * 1024;
+const CLUSTER_BATCH_GAP = 6 * 1024 * 1024;
+// Per-batch span. Sized to maximise the bytes-per-connection ratio
+// (each fetch carries more sub data → fewer total connections →
+// fewer mid-stream-drop opportunities) while staying clear of the
+// 128 MB Worker memory cap when combined with the cache, framework
+// overhead, and in-flight Response body.
+const MAX_BATCH_SIZE = 24 * 1024 * 1024;
 // Cloudflare Workers Free caps us at 50 subrequests per invocation.
-// Bigger batches → fewer batches needed → MAX_CLUSTER_BATCHES is
-// rarely the binding constraint, but kept conservative so retries
+// Bigger batches → far fewer batches needed → MAX_CLUSTER_BATCHES
+// is rarely the binding constraint, but kept conservative so retries
 // against transient failures stay within the cap.
-const MAX_CLUSTER_BATCHES = 25;
-// Total bytes ceiling. Higher than before since the single-track
-// pipeline doesn't accumulate gigantic in-memory structures and we
-// have ~100 MB of usable margin under the 128 MB Worker cap.
-const MAX_TOTAL_FETCH = 100 * 1024 * 1024;
+const MAX_CLUSTER_BATCHES = 20;
+// Total bytes ceiling. Bumped to absorb the bigger per-batch size
+// while still leaving enough headroom under the 128 MB Worker cap
+// after cache + framework + in-flight buffer.
+const MAX_TOTAL_FETCH = 120 * 1024 * 1024;
 // Delay inserted between consecutive cluster-batch fetches. Small
 // enough to be invisible from the user's perspective (~2s of extra
 // wall-clock on a typical extraction) but enough to break up the

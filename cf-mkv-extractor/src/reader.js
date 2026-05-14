@@ -36,14 +36,14 @@ export class RangeReader {
         this._chunks.push({ start, bytes });
         // Keep cache bounded. Cloudflare Workers' 128 MB memory cap
         // is shared with the in-flight Response body + framework
-        // overhead. 24 MB resident leaves comfortable headroom for
-        // one in-flight 12 MB stream-cap buffer + the head/tracks/
-        // cues slabs + framework. Single-track extraction (lang=auto)
-        // keeps the cuesByTrack Map well under 1 MB, so we don't
-        // have to budget aggressively for accumulated state.
+        // overhead. 40 MB resident leaves headroom for one in-flight
+        // 24 MB stream-cap buffer + the head/tracks/cues slabs +
+        // framework. Single-track extraction (lang=auto) keeps the
+        // cuesByTrack Map well under 1 MB, so we don't have to budget
+        // aggressively for accumulated state.
         let cached = 0;
         for (const c of this._chunks) cached += c.bytes.length;
-        while (cached > 24 * 1024 * 1024 && this._chunks.length > 2) {
+        while (cached > 40 * 1024 * 1024 && this._chunks.length > 2) {
             cached -= this._chunks.shift().bytes.length;
         }
         return bytes;
