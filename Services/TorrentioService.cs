@@ -96,6 +96,28 @@ namespace AnimeList.Services
         }
 
         /// <summary>
+        /// Applies the process-wide bad-hash filter to a stream list.
+        /// Called on both the fresh-fetch and cache-hit paths so a
+        /// hash marked unplayable mid-cache-window still gets dropped
+        /// from the next request's response — without this, the
+        /// 10-minute Torrentio cache shielded freshly-marked hashes
+        /// from the filter and they kept showing up after reload.
+        /// </summary>
+        private List<TorrentioStream> ApplyBadHashFilter(IReadOnlyList<TorrentioStream> streams, string idPath)
+        {
+            if (_badHashes.IsEmpty) return new List<TorrentioStream>(streams);
+            var beforeBad = streams.Count;
+            var filtered = streams.Where(s => !IsBadHash(s.InfoHash)).ToList();
+            if (filtered.Count < beforeBad)
+            {
+                _logger.LogInformation(
+                    "Bad-hash filter dropped {Dropped}/{Total} streams for {Path}.",
+                    beforeBad - filtered.Count, beforeBad, idPath);
+            }
+            return filtered;
+        }
+
+        /// <summary>
         /// Public hash-extractor for resolve-URL inspection by
         /// controllers — pulls the 40-char SHA-1 out of a Torrentio
         /// resolve URL. Returns null when no hash is present.
@@ -184,7 +206,13 @@ namespace AnimeList.Services
             var cacheKey = $"torrentio:{keyFingerprint}:{idPath}";
             if (_cache.TryGetValue<IReadOnlyList<TorrentioStream>>(cacheKey, out var hit) && hit != null)
             {
-                return hit;
+                // Apply the bad-hash filter on every cache hit too,
+                // not just on fresh fetches. Otherwise a hash that
+                // gets marked unplayable between the Torrentio fetch
+                // and the user's reload sticks around in the cached
+                // list until the 10-minute cache expires — defeating
+                // the whole point of the reactive bad-hash mechanism.
+                return ApplyBadHashFilter(hit, idPath);
             }
 
             var url = $"{BaseUrl}/realdebrid={Uri.EscapeDataString(apiKey)}/stream/{idType}/{idPath}.json";
@@ -222,33 +250,21 @@ namespace AnimeList.Services
                 // source picker on transient API issues.
                 parsed = await FilterRdCachedAsync(apiKey, parsed, cts.Token);
 
-                // Bad-hash filter — process-local memory of hashes
-                // that previously failed to resolve cleanly. Catches
-                // the case where Torrentio AND RD's instantAvailability
-                // both claim cached but the file is actually gone:
-                // first user to click learns the truth, MarkHashUnplayable
-                // records it, and subsequent list renders drop it for
-                // the next hour.
-                if (_badHashes.Count > 0)
-                {
-                    var beforeBad = parsed.Count;
-                    parsed = parsed.Where(s => !IsBadHash(s.InfoHash)).ToList();
-                    if (parsed.Count < beforeBad)
-                    {
-                        _logger.LogInformation(
-                            "Bad-hash filter dropped {Dropped}/{Total} streams for {Path}.",
-                            beforeBad - parsed.Count, beforeBad, idPath);
-                    }
-                }
-
-                // Cache even empty results — repeated clicks on the same
-                // episode shouldn't hammer Torrentio when no streams exist
-                // (rare ids, brand-new episodes).
+                // Cache pre-bad-hash filter so future MarkHashUnplayable
+                // calls can take effect on reload without waiting for
+                // the 10-minute cache to expire. ApplyBadHashFilter
+                // re-applies on every read (cache hit and miss).
+                // Cache even empty results — repeated clicks on the
+                // same episode shouldn't hammer Torrentio when no
+                // streams exist (rare ids, brand-new episodes).
+                // ApplyBadHashFilter is applied on read so newly-
+                // marked hashes take effect without waiting for the
+                // 10-minute cache to expire.
                 _cache.Set(cacheKey, parsed, new MemoryCacheEntryOptions
                 {
                     AbsoluteExpirationRelativeToNow = CacheTtl,
                 });
-                return parsed;
+                return ApplyBadHashFilter(parsed, idPath);
             }
             catch (OperationCanceledException)
             {

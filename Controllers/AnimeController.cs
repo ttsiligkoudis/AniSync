@@ -830,6 +830,31 @@ namespace AnimeList.Controllers
             }
             catch { /* flag read failed — proceed; better to over-track than miss */ }
 
+            // Optional source verification. The external-launcher
+            // trigger sends the source URL it's about to hand off
+            // so we can probe it BEFORE persisting the mark — the
+            // in-app player has no way to verify a cold click on a
+            // bad source (no video element yet to check
+            // duration < 60s), so the verification happens server-
+            // side here. If we detect the RD DMCA placeholder, also
+            // mark the hash bad while we're at it so the next list
+            // render prunes it.
+            if (!string.IsNullOrEmpty(req.SourceUrl))
+            {
+                if (await LooksLikePlaceholderSourceAsync(req.SourceUrl, HttpContext.RequestAborted))
+                {
+                    var hash = TorrentioService.ExtractInfoHashFromUrl(req.SourceUrl);
+                    if (!string.IsNullOrEmpty(hash))
+                    {
+                        _torrentioService.MarkHashUnplayable(hash);
+                    }
+                    _logger.LogInformation(
+                        "Refused mark-watched for {Id} S{Season}E{Episode}: source URL looks like RD DMCA placeholder.",
+                        req.Id, req.Season, req.Episode);
+                    return Json(new { ok = false, reason = "placeholder" });
+                }
+            }
+
             try
             {
                 // Single call into the shared SyncService helper:
@@ -853,11 +878,70 @@ namespace AnimeList.Controllers
             }
         }
 
+        /// <summary>
+        /// Probes a source URL with the same Range 0-0 mechanism
+        /// ResolveStream uses, and reports whether the total file
+        /// size looks like RD's DMCA placeholder (≤50 MB). Used by
+        /// MarkWatched's external-launch path to refuse marking a
+        /// known-bad source before the user has had a chance to
+        /// see it fail in the in-app player.
+        ///
+        /// Probe is best-effort: on any HTTP / network failure we
+        /// return false (don't block the mark) so transient issues
+        /// don't break tracking.
+        /// </summary>
+        private async Task<bool> LooksLikePlaceholderSourceAsync(string url, CancellationToken ct)
+        {
+            const long SuspiciouslySmallBytes = 50 * 1024 * 1024;
+            try
+            {
+                using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                probeCts.CancelAfter(TimeSpan.FromSeconds(8));
+
+                var client = _httpClientFactory.CreateClient();
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
+                req.Headers.UserAgent.ParseAdd(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/120.0 Safari/537.36");
+                using var res = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, probeCts.Token);
+
+                long? totalSize = null;
+                if (res.Content.Headers.ContentRange?.HasLength == true)
+                {
+                    totalSize = res.Content.Headers.ContentRange.Length;
+                }
+                else if (res.StatusCode == System.Net.HttpStatusCode.OK
+                         && res.Content.Headers.ContentLength.HasValue)
+                {
+                    totalSize = res.Content.Headers.ContentLength.Value;
+                }
+                return totalSize.HasValue && totalSize.Value < SuspiciouslySmallBytes;
+            }
+            catch
+            {
+                return false; // probe failed — don't block mark on transient issues
+            }
+        }
+
         public class MarkWatchedRequest
         {
             public string Id { get; set; }
             public int? Season { get; set; }
             public int Episode { get; set; }
+            /// <summary>
+            /// Optional source URL. When present, the server probes
+            /// the URL with a Range 0-0 request and refuses to mark
+            /// if the response looks like the RD DMCA placeholder
+            /// (small total size, typically 30s of "file removed"
+            /// video). Lets the external-launch trigger guard
+            /// against false-marking when the user clicks Open
+            /// with… on a known-bad source before having played it
+            /// in-app. The in-player 70 %-progress trigger doesn't
+            /// need this because it already checks duration ≥ 60s
+            /// client-side.
+            /// </summary>
+            public string SourceUrl { get; set; }
         }
 
         /// <summary>
@@ -934,8 +1018,11 @@ namespace AnimeList.Controllers
                 //
                 // Anything < SUSPICIOUSLY_SMALL is almost certainly
                 // RD's placeholder: real anime episodes are 100 MB+
-                // even at low bitrate.
-                const long SuspiciouslySmallBytes = 15 * 1024 * 1024;
+                // even at low bitrate. Set generously (50 MB) so we
+                // catch placeholders encoded at higher bitrates than
+                // the typical 1 Mbps — even a 30s clip at 12 Mbps
+                // would only hit 45 MB.
+                const long SuspiciouslySmallBytes = 50 * 1024 * 1024;
                 long? totalSize = null;
                 if (res.Content.Headers.ContentRange?.HasLength == true)
                 {
