@@ -241,10 +241,17 @@
                     'https://cdn.skypack.dev/matroska-subtitles',
                 ]),
                 tryImport([
-                    'https://esm.sh/jassub?bundle&target=esnext',
-                    'https://esm.sh/jassub?target=esnext',
-                    'https://esm.run/jassub',
-                    'https://cdn.skypack.dev/jassub',
+                    // Pinned: newer jassub (1.7.18+) ships features
+                    // that break in our environment — useLocalFonts
+                    // tries to postMessage a function reference (not
+                    // cloneable), and the WebCodecs render path needs
+                    // CORS-clean video which RD doesn't provide.
+                    // 1.7.17 still has the same option API to opt
+                    // out of those via the constructor config below.
+                    'https://esm.sh/jassub@1.7.17?bundle&target=esnext',
+                    'https://esm.sh/jassub@1.7.17?target=esnext',
+                    'https://esm.run/jassub@1.7.17',
+                    'https://cdn.skypack.dev/jassub@1.7.17',
                 ]),
             ]);
             if (m) {
@@ -321,8 +328,12 @@
             // in the module bootstrap so the worker + wasm stay in
             // step with whatever jassub package the dynamic import
             // ended up resolving.
-            var JASSUB_WORKER = 'https://cdn.jsdelivr.net/npm/jassub/dist/jassub-worker.js';
-            var JASSUB_WASM   = 'https://cdn.jsdelivr.net/npm/jassub/dist/jassub-worker.wasm';
+            // Same version pinning as the ESM bootstrap above. Without
+            // a tag, jsdelivr serves the latest jassub which has
+            // useLocalFonts + WebCodecs paths enabled by default;
+            // both fail in our setup.
+            var JASSUB_WORKER = 'https://cdn.jsdelivr.net/npm/jassub@1.7.17/dist/jassub-worker.js';
+            var JASSUB_WASM   = 'https://cdn.jsdelivr.net/npm/jassub@1.7.17/dist/jassub-worker.wasm';
 
             // Browsers refuse `new Worker(crossOriginUrl)` even when
             // the script ships with `Access-Control-Allow-Origin: *`
@@ -440,6 +451,24 @@
                                 subContent: capturedItem.trackData,
                                 workerUrl: workerUrl,
                                 wasmUrl: JASSUB_WASM,
+                                // Disable the OS-font-query feature.
+                                // Newer jassub tries to postMessage a
+                                // function reference into the worker
+                                // for local-font resolution; functions
+                                // can't be structured-cloned and the
+                                // entire init bails with DataCloneError.
+                                useLocalFonts: false,
+                                // Force the software/canvas render
+                                // path. The default OffscreenCanvas +
+                                // WebCodecs path constructs VideoFrame
+                                // objects from the <video>, which the
+                                // browser refuses when the source is
+                                // cross-origin without CORS (every
+                                // debrid stream). Software rendering
+                                // doesn't touch the video pixels —
+                                // only its dimensions + currentTime.
+                                offscreenRender: false,
+                                asyncRender: false,
                             });
                         } catch (e) {
                             console.warn('jassub init failed:', e);
