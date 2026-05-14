@@ -2299,6 +2299,13 @@
                         var firstLine = (s.title || s.name || '').split('\n')[0];
                         meta.appendChild(el('span', { class: 'episode-stream-title' }, firstLine));
                         var sub = el('span', { class: 'episode-stream-sub' });
+                        // Provider badge so the user can tell which addon
+                        // (Torrentio / MediaFusion) emitted the row. Comes
+                        // first so the eye picks up the source before the
+                        // size + seeders.
+                        if (s.provider) {
+                            sub.appendChild(el('span', { class: 'episode-stream-provider' }, s.provider));
+                        }
                         if (s.size) sub.appendChild(el('span', { class: 'episode-stream-size' }, s.size));
                         if (typeof s.seeders === 'number' && s.seeders > 0) {
                             sub.appendChild(el('span', { class: 'episode-stream-seeders' }, '👤 ' + s.seeders));

@@ -2037,6 +2037,20 @@ body.modal-open {
     font-size: 0.75rem;
 }
 
+/* Provider pill — same shape as the language tag so the row reads as a
+   chain of evenly-weighted hint badges. Slightly warmer tint to set it
+   apart from the language pill at a glance. */
+.episode-stream-provider {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.05rem 0.4rem;
+    background: rgba(255, 165, 0, 0.12);
+    border-radius: 0.35rem;
+    color: rgba(255, 200, 120, 0.9);
+    font-size: 0.72rem;
+    font-weight: 500;
+}
+
 /* Language pill — slightly heavier visual weight than the muted size /
    seeders because flag emojis are tiny on their own and benefit from a
    contained background to read as a deliberate tag. */

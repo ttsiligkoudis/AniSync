@@ -46,7 +46,7 @@ namespace AnimeList.Services.Interfaces
     }
 
     /// <summary>
-    /// Slim projection of a Torrentio stream entry — just what the web
+    /// Slim projection of a debrid stream entry — just what the web
     /// modal + the Stremio addon's /stream endpoint need to render a
     /// pickable row. <see cref="Url"/> is the RD-resolved direct file
     /// URL; <see cref="Playable"/> tells the web side whether the
@@ -55,9 +55,13 @@ namespace AnimeList.Services.Interfaces
     /// <see cref="Seeders"/> drives the per-resolution top-N ranking
     /// (higher seeders = more popular = more likely to be a clean
     /// release). <see cref="Language"/> is a best-effort extraction
-    /// from Torrentio's title — flag emojis when present, else any
-    /// MULTi / DUAL token Torrentio appended; null when nothing
-    /// recognisable was emitted.
+    /// from the upstream title — flag emojis when present, else any
+    /// MULTi / DUAL token; null when nothing recognisable was emitted.
+    /// <see cref="Provider"/> identifies which addon emitted the entry
+    /// ("Torrentio" / "MediaFusion") so the UI can render a small
+    /// source badge and the merge step can de-dupe sensibly. Named
+    /// <c>TorrentioStream</c> for historical reasons — kept stable to
+    /// avoid a cross-cutting rename.
     /// </summary>
     public record TorrentioStream(
         string Name,
@@ -70,5 +74,6 @@ namespace AnimeList.Services.Interfaces
         int Seeders,
         string Language,
         string InfoHash = null,
-        int? FileIdx = null);
+        int? FileIdx = null,
+        string Provider = "Torrentio");
 }
