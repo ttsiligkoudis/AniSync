@@ -50,6 +50,13 @@ const MAX_CLUSTER_BATCHES = 25;
 // pipeline doesn't accumulate gigantic in-memory structures and we
 // have ~100 MB of usable margin under the 128 MB Worker cap.
 const MAX_TOTAL_FETCH = 100 * 1024 * 1024;
+// Delay inserted between consecutive cluster-batch fetches. Small
+// enough to be invisible from the user's perspective (~2s of extra
+// wall-clock on a typical extraction) but enough to break up the
+// burst pattern that triggers RD's edge load balancers into dropping
+// mid-stream. Doesn't count against the Worker CPU budget — `await
+// new Promise(setTimeout)` is a yield point.
+const BATCH_PACING_MS = 100;
 
 export async function extractSubtitles(reader, options) {
     const opts = options || {};
@@ -278,6 +285,19 @@ export async function extractSubtitles(reader, options) {
         // small head / tracks / cues slabs regardless of how many
         // batches we process.
         reader.evict(b.start, b.end);
+
+        // Pace successive batches. Back-to-back Range requests from
+        // a single Worker IP appear to make RD's edge load balancers
+        // grumpy — they intermittently drop connections mid-stream
+        // with "Network connection lost". A small inter-batch delay
+        // spreads the traffic enough to avoid the burst pattern
+        // without meaningfully slowing extraction (≤ 2s extra on a
+        // ~20-batch episode). await on a Promise-timeout is a yield
+        // point, not CPU time — doesn't count against the Worker
+        // CPU budget. Skip the delay after the last batch.
+        if (bi < batches.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, BATCH_PACING_MS));
+        }
     }
 
     // ── 7. Stitch it together ─────────────────────────────────────
