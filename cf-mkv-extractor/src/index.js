@@ -50,6 +50,30 @@ function hostAllowed(hostname) {
 
 export default {
     async fetch(request, env) {
+        // Last-resort try/catch around the entire handler. The
+        // inner try (around extractSubtitles) catches everything our
+        // own code can throw, but unforeseen errors — sync throws
+        // from URL parsing, oddball runtime exceptions, framework
+        // bugs — would otherwise escape and surface as a CF 5xx,
+        // which counts against the failure-rate breaker that
+        // surfaces as 503 to subsequent users. Anything we can't
+        // map to a clean response still returns 200 with an
+        // "extracted: false" payload so the client falls back and
+        // CF's monitoring stays happy.
+        try {
+            return await handleFetch(request, env);
+        } catch (e) {
+            return new Response(JSON.stringify({
+                tracks: [],
+                extracted: false,
+                reason: 'worker_error',
+                error: (e && e.message) || String(e),
+            }), { status: 200, headers: corsHeaders() });
+        }
+    },
+};
+
+async function handleFetch(request, env) {
         if (request.method === 'OPTIONS') {
             return new Response(null, { status: 204, headers: corsHeaders() });
         }
@@ -135,5 +159,4 @@ export default {
                 error: msg,
             }), { status: 200, headers: corsHeaders() });
         }
-    },
-};
+}
