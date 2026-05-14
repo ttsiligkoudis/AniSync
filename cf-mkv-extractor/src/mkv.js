@@ -50,11 +50,10 @@ const CLUSTER_BATCH_GAP = 2 * 1024 * 1024;
 // cliff even on long episodes where many batches chain back-to-back.
 const MAX_BATCH_SIZE = 8 * 1024 * 1024;
 // Cloudflare Workers Free caps us at 50 subrequests per invocation.
-// Reserve a few for head / tracks / cues / size-probe and leave a
-// safety margin. If the raw batch count exceeds this we coarsen by
-// merging the smallest-gap adjacent batches until we fit — but never
-// past MAX_BATCH_SIZE.
-const MAX_CLUSTER_BATCHES = 35;
+// Reserve a few for head / tracks / cues / size-probe AND for the
+// up-to-one retry each of those critical fetches may do on a
+// transient connection drop. Leaves us headroom under the cap.
+const MAX_CLUSTER_BATCHES = 30;
 // Hard ceiling on total bytes pulled. Lower still since per-batch
 // memory dominates the OOM risk and the user's 700 MB+ files were
 // blowing past the cap with the looser ceiling.
@@ -64,7 +63,7 @@ export async function extractSubtitles(reader) {
     await reader.probeSize();
 
     // ── 1. Read the file head ─────────────────────────────────────
-    const head = await reader.read(0, HEAD_BYTES);
+    const head = await reader.readCritical(0, HEAD_BYTES);
 
     // ── 2. Skip EBML header, locate Segment ───────────────────────
     let off = 0;
@@ -117,7 +116,7 @@ export async function extractSubtitles(reader) {
         throw new Error('SeekHead has no Tracks pointer');
     }
     const tracksAbs = absoluteFromSegment(tracksOff);
-    const tracksBuf = await reader.read(tracksAbs, TRACKS_FETCH);
+    const tracksBuf = await reader.readCritical(tracksAbs, TRACKS_FETCH);
     const tracksEl = readElement(tracksBuf, 0);
     if (tracksEl.id !== ID.Tracks) {
         throw new Error(`expected Tracks at ${tracksAbs}, got id 0x${tracksEl.id.toString(16)}`);
@@ -135,7 +134,7 @@ export async function extractSubtitles(reader) {
         throw new Error('SeekHead has no Cues pointer — file has no index');
     }
     const cuesAbs = absoluteFromSegment(cuesOff);
-    const cuesBuf = await reader.read(cuesAbs, CUES_FETCH);
+    const cuesBuf = await reader.readCritical(cuesAbs, CUES_FETCH);
     const cuesEl = readElement(cuesBuf, 0);
     if (cuesEl.id !== ID.Cues) {
         throw new Error(`expected Cues at ${cuesAbs}, got id 0x${cuesEl.id.toString(16)}`);
