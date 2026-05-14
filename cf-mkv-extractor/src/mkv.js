@@ -24,40 +24,26 @@ import {
     TRACK_TYPE_SUBTITLE,
 } from './ebml.js';
 
-// Initial head read — big enough to cover EBML header + Segment start +
-// usually the entire SeekHead. SeekHead is small (~few hundred bytes).
-const HEAD_BYTES = 256 * 1024;
-// When Tracks is referenced via SeekHead we range-fetch this much from
-// the Tracks offset. Tracks element is usually small but CodecPrivate
-// for ASS tracks can be a few KB each across multiple tracks.
-const TRACKS_FETCH = 256 * 1024;
-// Cues are usually proportional to file length — a few hundred KB up
-// to a couple of MB. 4 MB covers the worst case we've seen.
-const CUES_FETCH = 4 * 1024 * 1024;
-// Per-cluster fetch. Smaller than before — anime HEVC 1080p clusters
-// can carry several MB of video data, but the subtitle blocks
-// themselves are tiny and live near the cluster header in
-// well-formed mux outputs. 2 MB covers the common case without
-// stuffing a full GOP into memory.
-const CLUSTER_FETCH = 2 * 1024 * 1024;
-// Coalesce sub-cluster offsets whose gap is smaller than this into a
-// single Range request. Trades a bit of extra bandwidth for far fewer
-// subrequests.
-const CLUSTER_BATCH_GAP = 2 * 1024 * 1024;
-// Hard cap on a single batch's span. Workers Free has a 128 MB memory
-// ceiling shared with the in-flight Response body and framework
-// overhead. 8 MB per batch keeps peak resident set well under the
-// cliff even on long episodes where many batches chain back-to-back.
-const MAX_BATCH_SIZE = 8 * 1024 * 1024;
+// Smaller everything. Each Range request to RD's CDN is a chance for
+// the connection to drop mid-stream ("Network connection lost"); the
+// shorter the connection's lifespan, the less likely we are to lose
+// it. We trade some bandwidth efficiency for reliability on flaky
+// upstreams.
+const HEAD_BYTES = 128 * 1024;
+const TRACKS_FETCH = 128 * 1024;
+const CUES_FETCH = 2 * 1024 * 1024;
+const CLUSTER_FETCH = 1 * 1024 * 1024;
+const CLUSTER_BATCH_GAP = 1 * 1024 * 1024;
+// Hard cap on a single batch's span. Smaller batches → faster
+// individual fetches → fewer mid-stream drops, and trivially under
+// the Workers Free 128 MB memory cliff regardless of cache state.
+const MAX_BATCH_SIZE = 4 * 1024 * 1024;
 // Cloudflare Workers Free caps us at 50 subrequests per invocation.
-// Reserve a few for head / tracks / cues / size-probe AND for the
-// up-to-one retry each of those critical fetches may do on a
-// transient connection drop. Leaves us headroom under the cap.
+// Reserve room for head / tracks / cues / size-probe and their
+// retries.
 const MAX_CLUSTER_BATCHES = 30;
-// Hard ceiling on total bytes pulled. Lower still since per-batch
-// memory dominates the OOM risk and the user's 700 MB+ files were
-// blowing past the cap with the looser ceiling.
-const MAX_TOTAL_FETCH = 80 * 1024 * 1024;
+// Hard ceiling on total bytes pulled.
+const MAX_TOTAL_FETCH = 60 * 1024 * 1024;
 
 export async function extractSubtitles(reader) {
     await reader.probeSize();
