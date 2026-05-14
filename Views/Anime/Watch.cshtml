@@ -576,10 +576,25 @@
                     if (!u) { resolve(null); return; }
                     fetch(u, { signal: signal, skipLoader: true })
                         .then(function (r) {
-                            if (r.status === 200) return r.json();
-                            return null;
+                            if (r.status === 200) return r.json().then(function (j) { return { ok: true, data: j }; });
+                            return r.json().catch(function () { return {}; }).then(function (errJson) {
+                                return { ok: false, status: r.status, err: errJson };
+                            });
                         })
-                        .then(function (data) {
+                        .then(function (result) {
+                            if (!result.ok) {
+                                // Surface the failure clearly so it's
+                                // obvious in DevTools that we're
+                                // intentionally falling through to the
+                                // cf-cors-proxy streaming path rather
+                                // than the page being broken.
+                                console.info(
+                                    '[AniSync] mkv-extractor failed (' + result.status + '), falling back to streaming proxy:',
+                                    (result.err && result.err.error) || '(no detail)');
+                                resolve(null);
+                                return;
+                            }
+                            var data = result.data;
                             if (!data || !data.tracks) { resolve(null); return; }
                             try {
                                 console.log(
@@ -593,7 +608,10 @@
                             } catch (_) {}
                             resolve(data);
                         })
-                        .catch(function () { resolve(null); });
+                        .catch(function (e) {
+                            console.info('[AniSync] mkv-extractor network error, falling back to streaming proxy:', e && e.message);
+                            resolve(null);
+                        });
                 });
             }
 
