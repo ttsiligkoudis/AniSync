@@ -1110,7 +1110,13 @@
                 var messages = {
                     decode: "Your browser can't decode this stream — the codec isn't supported. Open it in an external player, or try a different source below.",
                     network: "The stream couldn't be reached. The debrid link may have expired — pick the source again, or try a different one.",
-                    timeout: "This source hasn't started playing yet. It might just be slow — wait a bit, retry, or try another source below.",
+                    timeout: IS_IOS_SAFARI
+                        // iPad / iPhone Safari refuses to play most
+                        // MKV files outright. Don't pretend it's
+                        // just "slow" — tell the user up front that
+                        // an external player is the right move.
+                        ? "Safari on iPad / iPhone can't play most MKV streams. Tap Open externally to launch it in VLC, Infuse, or another video app."
+                        : "This source hasn't started playing yet. It might just be slow — wait a bit, retry, or try another source below.",
                 };
                 var message = messages[reason] || "Couldn't play this stream. Try another source below, or open it externally.";
                 fallbackHost.appendChild(el('p', { class: 'hint-text', style: 'margin: 0 0 0.75rem;' }, message));
@@ -1127,20 +1133,18 @@
                 });
                 row.appendChild(retry);
 
-                var open = el('a', {
-                    class: 'btn-ghost btn-ghost-sm',
-                    href: stream.url, target: '_blank', rel: 'noopener noreferrer',
-                }, 'Open externally');
-                row.appendChild(open);
-
-                var copy = el('button', { type: 'button', class: 'btn-ghost btn-ghost-sm' }, 'Copy URL');
-                copy.addEventListener('click', function () {
-                    navigator.clipboard.writeText(stream.url).then(function () {
-                        copy.textContent = 'Copied';
-                        setTimeout(function () { copy.textContent = 'Copy URL'; }, 1200);
-                    }).catch(function () { /* swallow — user can pick another action */ });
+                // Open externally — same dispatcher as the per-row
+                // external-action button on the source list.
+                // Android: native app chooser. Desktop: vlc:// probe
+                // with .m3u download fallback. Keeps the two
+                // entrypoints behaviour-identical so muscle memory
+                // works either way.
+                var firstLine = (stream.title || stream.name || '').split('\n')[0].trim();
+                var open = el('button', { type: 'button', class: 'btn-ghost btn-ghost-sm' }, 'Open externally');
+                open.addEventListener('click', function () {
+                    openWithExternalPlayer(stream.url, firstLine);
                 });
-                row.appendChild(copy);
+                row.appendChild(open);
 
                 fallbackHost.appendChild(row);
             }
@@ -1153,12 +1157,23 @@
 
             // Stream watchdog. Fires when the chosen source hasn't
             // produced any sign of life (loadedmetadata / playing)
-            // within STREAM_WATCHDOG_MS. 25s is a balance: long
-            // enough to absorb a slow CDN warm-up and the Torrentio
-            // → RD resolve chain, short enough that a user staring
-            // at a hung spinner isn't left guessing whether to
-            // wait or try something else.
-            var STREAM_WATCHDOG_MS = 25000;
+            // within STREAM_WATCHDOG_MS. The default 25s absorbs a
+            // slow CDN warm-up and the Torrentio → RD resolve chain
+            // without panicking; iOS Safari gets a much tighter 8s
+            // because that browser silently refuses to attempt MKV
+            // playback (no error event fires) and there's no point
+            // making the user wait if we know the decode won't
+            // happen — surfacing the Open externally button fast
+            // gets them to VLC / Infuse sooner.
+            var IS_IOS_SAFARI = (function () {
+                var ua = navigator.userAgent || '';
+                if (/iPad|iPhone|iPod/.test(ua)) return true;
+                // iPadOS 13+ pretends to be Mac in the UA; touch
+                // points are the give-away.
+                if (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) return true;
+                return false;
+            })();
+            var STREAM_WATCHDOG_MS = IS_IOS_SAFARI ? 8000 : 25000;
             var streamWatchdog = null;
             function startStreamWatchdog(stream) {
                 cancelStreamWatchdog();
@@ -1181,6 +1196,25 @@
 
             function playStream(stream) {
                 destroyPlayer();
+
+                // Scroll the player into view so the user gets a
+                // visible signal that "click → play" happened, even
+                // when their click landed below the fold (long
+                // source lists on mobile push the player off-screen).
+                // The "Looking for embedded subtitles…" pill and the
+                // first-frame paint then land in their viewport
+                // rather than going unnoticed. `block: 'start'`
+                // pins the top of the player area to the top of the
+                // viewport; `behavior: 'smooth'` makes the motion
+                // legible. Falls back to instant jump on browsers
+                // without smooth-scroll support.
+                if (playerHost && playerHost.scrollIntoView) {
+                    try {
+                        playerHost.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    } catch (_) {
+                        playerHost.scrollIntoView(true);
+                    }
+                }
 
                 // First line of the stream's title is the release
                 // filename — Torrentio puts it there before its size /
