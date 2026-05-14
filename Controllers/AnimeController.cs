@@ -813,14 +813,19 @@ namespace AnimeList.Controllers
 
             // Honour the per-user "Auto-track progress" toggle that
             // already gates the subtitle-driven progress save. Same
-            // helper the addon's SubtitlesController uses, just keyed
-            // by UID (web-app session) instead of decoded config blob.
+            // helper the addon's SubtitlesController uses, but keyed
+            // by UID since the web-app session has no decoded config
+            // blob — resolve the UID from token identity first.
             try
             {
-                var cfg = await GetConfigByUidAsync(tokenData.tokenUid, _configStore);
-                if (cfg?.disableAutoTrack == true)
+                var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                if (!string.IsNullOrEmpty(uid))
                 {
-                    return Json(new { ok = false, reason = "opted-out" });
+                    var cfg = await GetConfigByUidAsync(uid, _configStore);
+                    if (cfg?.disableAutoTrack == true)
+                    {
+                        return Json(new { ok = false, reason = "opted-out" });
+                    }
                 }
             }
             catch { /* flag read failed — proceed; better to over-track than miss */ }
