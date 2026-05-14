@@ -57,6 +57,56 @@ namespace AnimeList.Services
         // the source picker.
         private const int PerQualityCap = 5;
 
+        // Process-wide bad-hash cache. When a stream resolve hands
+        // back a URL that doesn't land on a debrid CDN (i.e. RD
+        // redirected to its error page because the file got
+        // DMCA-removed), the controller calls MarkHashUnplayable
+        // and we remember the hash for the TTL below. Subsequent
+        // GetStreamsAsync calls drop entries whose infoHash matches.
+        // ConcurrentDictionary so concurrent requests on different
+        // episodes don't race against each other. Static so the
+        // memory survives across requests within a process — the
+        // service itself is a singleton anyway, but explicit-static
+        // makes the intent obvious.
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _badHashes = new();
+        private static readonly TimeSpan _badHashTtl = TimeSpan.FromHours(1);
+        // Matches the 40-character hex SHA-1 inside a Torrentio
+        // resolve URL: /realdebrid/<APIKEY>/<HASH>/null/<FILEIDX>/…
+        // Used by callers parsing failed-resolve URLs to identify
+        // which torrent hash to mark unplayable.
+        private static readonly Regex _hashFromUrl = new(@"/([a-f0-9]{40})(?:/|$)",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        public void MarkHashUnplayable(string infoHash)
+        {
+            if (string.IsNullOrEmpty(infoHash) || infoHash.Length != 40) return;
+            _badHashes[infoHash.ToLowerInvariant()] = DateTime.UtcNow + _badHashTtl;
+        }
+
+        private static bool IsBadHash(string infoHash)
+        {
+            if (string.IsNullOrEmpty(infoHash)) return false;
+            var key = infoHash.ToLowerInvariant();
+            if (_badHashes.TryGetValue(key, out var expiry))
+            {
+                if (expiry > DateTime.UtcNow) return true;
+                _badHashes.TryRemove(key, out _);
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Public hash-extractor for resolve-URL inspection by
+        /// controllers — pulls the 40-char SHA-1 out of a Torrentio
+        /// resolve URL. Returns null when no hash is present.
+        /// </summary>
+        public static string ExtractInfoHashFromUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return null;
+            var m = _hashFromUrl.Match(url);
+            return m.Success ? m.Groups[1].Value.ToLowerInvariant() : null;
+        }
+
         // Torrentio embeds the file size as a 💾 token followed by a number +
         // unit (GB / MB). One regex pulls it out of either `name` or `title`.
         private static readonly Regex SizeRegex = new(@"💾\s*([\d.,]+)\s*(GB|MB|KB|TB)",
@@ -171,6 +221,25 @@ namespace AnimeList.Services
                 // the unfiltered list so we don't show an empty
                 // source picker on transient API issues.
                 parsed = await FilterRdCachedAsync(apiKey, parsed, cts.Token);
+
+                // Bad-hash filter — process-local memory of hashes
+                // that previously failed to resolve cleanly. Catches
+                // the case where Torrentio AND RD's instantAvailability
+                // both claim cached but the file is actually gone:
+                // first user to click learns the truth, MarkHashUnplayable
+                // records it, and subsequent list renders drop it for
+                // the next hour.
+                if (_badHashes.Count > 0)
+                {
+                    var beforeBad = parsed.Count;
+                    parsed = parsed.Where(s => !IsBadHash(s.InfoHash)).ToList();
+                    if (parsed.Count < beforeBad)
+                    {
+                        _logger.LogInformation(
+                            "Bad-hash filter dropped {Dropped}/{Total} streams for {Path}.",
+                            beforeBad - parsed.Count, beforeBad, idPath);
+                    }
+                }
 
                 // Cache even empty results — repeated clicks on the same
                 // episode shouldn't hammer Torrentio when no streams exist

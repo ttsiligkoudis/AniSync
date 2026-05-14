@@ -29,6 +29,18 @@ namespace AnimeList.Services.Interfaces
             int? season,
             int? episode,
             CancellationToken ct = default);
+
+        /// <summary>
+        /// Marks a torrent's <paramref name="infoHash"/> as "no longer
+        /// playable" — Real-Debrid removed the file (typically DMCA)
+        /// since Torrentio cached its instantAvailability snapshot.
+        /// Hashes marked here are filtered out of subsequent
+        /// <see cref="GetStreamsAsync"/> responses for a short window
+        /// (~1h), so users stop seeing the dead-link row in the
+        /// source picker. Idempotent and best-effort; passing
+        /// null/empty/non-hash strings is a no-op.
+        /// </summary>
+        void MarkHashUnplayable(string infoHash);
     }
 
     /// <summary>

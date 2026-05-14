@@ -832,6 +832,36 @@ namespace AnimeList.Controllers
                 // all redirects when AllowAutoRedirect is true
                 // (default). Falls back to the original on any error.
                 var finalUrl = res.RequestMessage?.RequestUri?.ToString() ?? url;
+
+                // If the redirect chain didn't land on a debrid CDN,
+                // the file is no longer playable — RD typically
+                // redirects DMCA-removed entries to its error page
+                // host. Mark this hash as bad so the next time the
+                // user reloads the source list it gets pre-filtered
+                // out instead of showing as a dead row.
+                if (Uri.TryCreate(finalUrl, UriKind.Absolute, out var finalUri))
+                {
+                    var host = finalUri.Host.ToLowerInvariant();
+                    var isDebridCdn =
+                        host.EndsWith("real-debrid.com") ||
+                        host.EndsWith("alldebrid.com") ||
+                        host.EndsWith("debrid-link.com") ||
+                        host.EndsWith("premiumize.me") ||
+                        host.EndsWith("torbox.app") ||
+                        host.EndsWith("offcloud.com");
+                    if (!isDebridCdn)
+                    {
+                        var hash = TorrentioService.ExtractInfoHashFromUrl(url);
+                        if (!string.IsNullOrEmpty(hash))
+                        {
+                            _torrentioService.MarkHashUnplayable(hash);
+                            _logger.LogInformation(
+                                "Marked Torrentio hash {Hash} as unplayable (resolve landed on non-CDN host {Host}).",
+                                hash, host);
+                        }
+                    }
+                }
+
                 return Json(new { resolvedUrl = finalUrl });
             }
             catch (Exception ex)
