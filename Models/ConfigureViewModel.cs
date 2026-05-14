@@ -48,20 +48,14 @@ namespace AnimeList.Models
         public string PlexUsername { get; init; }
 
         /// <summary>
-        /// Presence-only flag for the user's Real-Debrid API key. The plaintext
-        /// value is never re-emitted to the client after first save — the
-        /// configure UI renders a "•••••• (set)" badge + Replace button when
-        /// this is true, the entry input otherwise.
+        /// The user's configured Stremio stream addons (Torrentio /
+        /// MediaFusion / Comet / Jackettio / AIOStreams / …). The
+        /// Configure page renders this as a list with an Add input
+        /// at the bottom and a Remove button per row. Always non-null
+        /// — the controller hands the view an empty list when nothing
+        /// is configured.
         /// </summary>
-        public bool HasRealDebridKey { get; init; }
-
-        /// <summary>
-        /// Presence-only flag for the user's MediaFusion personal manifest URL.
-        /// Same treatment as <see cref="HasRealDebridKey"/> — the URL embeds an
-        /// encrypted user-config segment, so we render a "set" badge + Replace
-        /// button rather than echoing the URL back into the input.
-        /// </summary>
-        public bool HasMediaFusionUrl { get; init; }
+        public List<StreamAddon> StreamAddons { get; init; } = new();
 
         /// <summary>
         /// Persisted toggle flags. Always non-null — the controller hands the view a

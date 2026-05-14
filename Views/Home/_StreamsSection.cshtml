@@ -1,8 +1,8 @@
 @model AnimeList.Models.ConfigureViewModel
 @{
     // isStremio = true when this partial renders on /stremio (toggles
-    // affect the Stremio addon stream surface). false on /advanced (where
-    // the same RD + external-services toggles still apply but the
+    // affect the Stremio addon stream surface). false on /advanced
+    // (where the same external-services toggle still applies but the
     // Manage Entry stream — a Stremio-only affordance — is hidden so
     // /advanced doesn't show a setting it can't change anywhere else
     // for the user reading that page).
@@ -13,10 +13,8 @@
 @*
     Shared Streams settings card. Mounted by Stremio.cshtml and
     Advanced.cshtml so both surfaces present the same affordances for
-    everything that influences the Stream slots on /{config}/stream/...
-    (Real-Debrid -> Torrentio resolution, external streaming sites)
-    plus, on /stremio only, the Manage Entry quick-edit Stream the
-    addon emits per episode.
+    everything that influences the source picker on each /watch page
+    plus the Manage Entry quick-edit Stream the Stremio addon emits.
 *@
 <section class="section-card">
     <span class="section-title">Streams</span>
@@ -27,17 +25,11 @@
         }
         else
         {
-            <text>Stream sources surfaced on the in-app episode picker and the Stremio addon.</text>
+            <text>Stream sources surfaced on the in-app episode picker.</text>
         }
     </p>
 
     <div class="streams-grid">
-        @* Manage Entry is a Stremio-only Stream type — emitted by
-           StreamController and consumed by Stremio's player UI. The
-           toggle has no meaning on /advanced (which doesn't render
-           inside Stremio), so it's hidden there. Auto-track + External
-           still apply to /advanced because RD streams and external
-           links also surface on the web app's episode picker. *@
         @if (!Model.AnonymousUser)
         {
             @if (isStremio)
@@ -78,50 +70,41 @@
         </div>
     </div>
 
-    @* Real-Debrid card. When a key is on file we render a presence-only
-       "•••••• (set)" badge + Replace / Clear; clicking Replace swaps in
-       the input. Plaintext is never re-emitted to the client after
-       first save — the controller returns `hasRealDebridKey`, not the
-       value itself. Hidden for anonymous installs entirely (no uid to
+    @* Stream addons card. Each entry is a Stremio-compatible stream
+       addon (Torrentio, MediaFusion, Comet, Jackettio, AIOStreams, …).
+       The user pastes the addon's personal manifest URL — addon-specific
+       config (Real-Debrid keys, indexer toggles, language filters) all
+       live inside that URL, so AniSync stays out of the per-provider
+       business. Hidden for anonymous installs entirely (no uid to
        persist against). *@
     @if (!Model.AnonymousUser && !string.IsNullOrEmpty(Model.ConfigUid))
     {
-        <p class="manifest-url-label" style="margin-top: 1.5rem;">Real-Debrid API key (optional)</p>
-        <div id="rdKeySetState" class="manifest-url-row" style="@(Model.HasRealDebridKey ? "" : "display: none;")">
-            <input class="manifest-url-input" type="text" value="•••••••• (set)" disabled />
-            <button id="rdKeyReplaceBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;">Replace</button>
-            <button id="rdKeyClearBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;">Clear</button>
-        </div>
-        <div id="rdKeyEditState" class="manifest-url-row" style="@(Model.HasRealDebridKey ? "display: none;" : "")">
-            <input id="rdKeyInput" class="manifest-url-input" type="text"
-                   placeholder="Paste your Real-Debrid API key" autocomplete="off" />
-            <button id="rdKeySaveBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;">Save</button>
-        </div>
-        <p class="option-name-sub" style="margin-top: 0.5rem;">
-            Get your key at <a href="https://real-debrid.com/apitoken" target="_blank" rel="noopener">real-debrid.com/apitoken</a>.
-            With a key on file, the episode picker on each anime page and the Stremio addon's stream list
-            both surface RD-cached torrents (via Torrentio) as playable sources.
-        </p>
-
-        @* MediaFusion card. Pasted manifest URL behaves like a second
-           debrid stream source — the addon indexes Nyaa.si / AniDex /
-           ElfCache which Torrentio under-covers for anime, and AniSync
-           merges its results with Torrentio's on each episode lookup. *@
-        <p class="manifest-url-label" style="margin-top: 1.5rem;">MediaFusion manifest URL (optional)</p>
-        <div id="mfUrlSetState" class="manifest-url-row" style="@(Model.HasMediaFusionUrl ? "" : "display: none;")">
-            <input class="manifest-url-input" type="text" value="•••••••• (set)" disabled />
-            <button id="mfUrlReplaceBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;">Replace</button>
-            <button id="mfUrlClearBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;">Clear</button>
-        </div>
-        <div id="mfUrlEditState" class="manifest-url-row" style="@(Model.HasMediaFusionUrl ? "display: none;" : "")">
-            <input id="mfUrlInput" class="manifest-url-input" type="text"
-                   placeholder="https://mediafusion.elfhosted.com/.../manifest.json" autocomplete="off" />
-            <button id="mfUrlSaveBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;">Save</button>
+        <p class="manifest-url-label" style="margin-top: 1.5rem;">Stream addons</p>
+        <ul id="streamAddonList" class="stream-addon-list">
+            @foreach (var addon in Model.StreamAddons)
+            {
+                <li class="stream-addon-row" data-url="@addon.Url">
+                    <div class="stream-addon-meta">
+                        <span class="stream-addon-name">@addon.Name</span>
+                        <span class="stream-addon-url">@addon.Url</span>
+                    </div>
+                    <button class="btn-ghost btn-ghost-sm stream-addon-remove" type="button" style="white-space: nowrap;">Remove</button>
+                </li>
+            }
+        </ul>
+        <div class="manifest-url-row">
+            <input id="streamAddonInput" class="manifest-url-input" type="text"
+                   placeholder="https://….example.com/…/manifest.json" autocomplete="off" />
+            <button id="streamAddonAddBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;">Add</button>
         </div>
         <p class="option-name-sub" style="margin-top: 0.5rem;">
-            Build your personal URL at <a href="https://mediafusion.elfhosted.com" target="_blank" rel="noopener">mediafusion.elfhosted.com</a>
-            (pick Real-Debrid as the streaming provider, enable the Nyaa / AniDex indexers, then copy the install URL).
-            Adds anime-tracker coverage on top of Torrentio.
+            Paste a Stremio stream-addon manifest URL — Torrentio
+            (<a href="https://torrentio.strem.fun" target="_blank" rel="noopener">torrentio.strem.fun</a>),
+            MediaFusion (<a href="https://mediafusion.elfhosted.com" target="_blank" rel="noopener">mediafusion.elfhosted.com</a>),
+            Comet, Jackettio, or
+            <a href="https://github.com/Viren070/AIOStreams" target="_blank" rel="noopener">AIOStreams</a>
+            (one URL that bundles many addons). Episode lookups fan out across every entry in
+            this list, with duplicates merged by torrent hash.
         </p>
     }
 </section>

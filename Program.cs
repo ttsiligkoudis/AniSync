@@ -216,14 +216,19 @@ builder.Services.AddScoped<IMalService, MalService>();
 builder.Services.AddScoped<ITmdbService, TmdbService>();
 builder.Services.AddScoped<ICinemetaService, CinemetaService>();
 builder.Services.AddScoped<IAnilistFallback, AnilistFallback>();
-// Singleton so the (apiKey-fingerprint, stremio-id) → streams cache outlives
-// individual requests — Torrentio responses are stable enough that a 10-min
-// cache slashes the upstream call rate when a user paginates through episodes.
-builder.Services.AddSingleton<ITorrentioService, TorrentioService>();
-// Same singleton lifetime + caching rationale as TorrentioService.
-// MediaFusion adds anime-tracker coverage (Nyaa, AniDex) on top of
-// Torrentio. The 10-minute response cache lives on the service.
-builder.Services.AddSingleton<IMediaFusionService, MediaFusionService>();
+// Singleton so the (manifestUrl-fingerprint, stremio-id) → streams cache
+// outlives individual requests — addon responses are stable enough that a
+// 10-min cache slashes the upstream call rate when a user paginates through
+// episodes. One generic service handles every Stremio-compatible stream
+// addon (Torrentio / MediaFusion / Comet / Jackettio / AIOStreams / …);
+// per-addon config lives inside each manifest URL the user pastes on the
+// Configure page.
+builder.Services.AddSingleton<IAddonStreamService, AddonStreamService>();
+// Singleton snapshot over the persisted bad_hashes table — refreshed
+// from SQLite at most once per minute; eager-added to on mark. Shared
+// between AddonStreamService (filtering its fetches) and AnimeController
+// (writing marks on placeholder detection).
+builder.Services.AddSingleton<IBadHashCache, BadHashCache>();
 // Singleton so the (imdb, season, episode) → tracks cache + VTT body
 // cache outlive individual requests — anime episodes are watched
 // repeatedly and the same /watch view re-fetches on every visit.
