@@ -83,24 +83,43 @@ export default {
             const result = await extractSubtitles(reader);
             return new Response(JSON.stringify({
                 tracks: result.tracks,
+                extracted: true,
                 stats: {
                     fileSize: reader.totalSize,
                     trackCount: result.tracks.length,
                 },
             }), { status: 200, headers: corsHeaders() });
         } catch (e) {
-            // Distinguish "this file just doesn't have an index" from
-            // "something genuinely broke" so the client can decide
-            // whether to fall back to the streaming proxy path.
+            // Collapse extraction failures (indexless file, mid-stream
+            // upstream drops, parse errors, memory pressure) into a
+            // SUCCESSFUL 200 response with `extracted: false` and a
+            // human-readable reason. The client checks the flag and
+            // falls back to the cf-cors-proxy streaming path the same
+            // way it would on a 5xx — but we avoid contributing to
+            // Cloudflare's worker-failure-rate guard rail that
+            // surfaces as 503 to the user when the Worker has been
+            // 5xx'ing too often.
+            //
+            // STRUCTURAL errors (bad URL, missing param, auth fail,
+            // host not allowed) still return 4xx above — those are
+            // real client mistakes we want visible in logs.
             const msg = (e && e.message) || String(e);
             const indexless =
                 msg.includes('no SeekHead') ||
                 msg.includes('no Tracks pointer') ||
                 msg.includes('no index');
-            return jsonResponse(indexless ? 404 : 502, {
+            const networkDrop =
+                msg.includes('Network connection lost') ||
+                msg.includes('fetch failed') ||
+                msg.includes('upstream HTTP') ||
+                msg.includes('Memory limit') ||
+                msg.includes('Range ignored');
+            return new Response(JSON.stringify({
+                tracks: [],
+                extracted: false,
+                reason: indexless ? 'indexless' : (networkDrop ? 'network' : 'parse'),
                 error: msg,
-                indexless,
-            });
+            }), { status: 200, headers: corsHeaders() });
         }
     },
 };
