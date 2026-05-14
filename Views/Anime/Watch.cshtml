@@ -445,6 +445,21 @@
                         // picked a different subtitle in the meantime
                         // — bail if the world has moved on.
                         if (!art || art.video !== capturedVideo) return;
+                        // Most JASSUB failures aren't synchronous (the
+                        // constructor returns and the actual XHR /
+                        // VideoFrame errors fire inside the worker as
+                        // unhandled rejections). To still recover, kick
+                        // off the VTT fallback after a short delay if
+                        // we haven't seen a working render — and on
+                        // any 'error' event the JASSUB instance emits.
+                        var jassubFellBack = false;
+                        function fallBackToVtt(reason) {
+                            if (jassubFellBack) return;
+                            jassubFellBack = true;
+                            console.warn('falling back to VTT rendering:', reason);
+                            tearDownJassub();
+                            renderAssAsVtt(capturedItem);
+                        }
                         try {
                             jassubInstance = new JASSUB({
                                 video: capturedVideo,
@@ -469,9 +484,44 @@
                                 // only its dimensions + currentTime.
                                 offscreenRender: false,
                                 asyncRender: false,
+                                // Without a fallback font URL, libass-
+                                // wasm tries to XHR each referenced
+                                // font with an empty URL and throws
+                                // SyntaxError on XMLHttpRequest.open().
+                                // Provide a known Latin font so any
+                                // unresolved style name lands on a
+                                // valid glyph set. Note: CJK glyphs
+                                // (anime karaoke titles) will still
+                                // tofu — fixing those needs a Noto
+                                // Sans CJK fallback which is ~5 MB.
+                                fallbackFont: 'https://cdn.jsdelivr.net/npm/@fontsource/roboto@5/files/roboto-latin-400-normal.woff2',
+                                availableFonts: {},
                             });
+                            // Async error path — covers the worker
+                            // throwing XHR / VideoFrame exceptions
+                            // after the constructor returns.
+                            if (jassubInstance && typeof jassubInstance.on === 'function') {
+                                jassubInstance.on('error', function (err) {
+                                    fallBackToVtt('jassub error event: ' + (err && err.message || err));
+                                });
+                            }
+                            // Belt-and-braces: if the renderer hasn't
+                            // produced anything within 3s (likely
+                            // because the WebCodecs path threw inside
+                            // the worker), drop to VTT. The renderer
+                            // exposes a canvas on the instance — when
+                            // it works, the canvas has been resized
+                            // to the video dimensions.
+                            setTimeout(function () {
+                                if (jassubFellBack || !jassubInstance) return;
+                                var c = jassubInstance.canvas || (jassubInstance._canvas);
+                                if (!c || !c.width) {
+                                    fallBackToVtt('jassub canvas never sized');
+                                }
+                            }, 3000);
                         } catch (e) {
                             console.warn('jassub init failed:', e);
+                            fallBackToVtt('sync ctor threw: ' + e.message);
                         }
                     }).catch(function (e) {
                         console.warn('jassub init failed (worker prep):', e);
@@ -924,6 +974,101 @@
                 return h + ':' + pad2(m) + ':' + pad2(s) + '.' + pad2(cs);
             }
             function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+            // ASS → WebVTT converter, used as the safety net when
+            // JASSUB can't initialise (CORS-tainted video, missing
+            // fonts, postMessage non-cloneables, etc). Strips all the
+            // styling JASSUB would have honoured and emits plain-text
+            // VTT that ArtPlayer's native pipeline can load. Loses
+            // colour / position / karaoke effects; keeps the dialogue
+            // readable, which is what users actually need when the
+            // styled path doesn't survive the environment.
+            //
+            // Each ASS Dialogue: row has 9 commas before the text
+            // body (Layer, Start, End, Style, Name, MarginL, MarginR,
+            // MarginV, Effect, Text). Times convert from h:MM:SS.cc
+            // (ASS, centiseconds) to hh:mm:ss.mmm (VTT, milliseconds).
+            // Override tags ({\…}) get stripped wholesale; \N becomes
+            // a real newline.
+            var ASS_TIME_RE = /^(\d+):(\d+):(\d+)\.(\d+)$/;
+            var ASS_OVERRIDE_RE = /\{[^}]*\}/g;
+            function assTimeToSeconds(s) {
+                var m = ASS_TIME_RE.exec((s || '').trim());
+                if (!m) return null;
+                var h = parseInt(m[1], 10);
+                var mm = parseInt(m[2], 10);
+                var ss = parseInt(m[3], 10);
+                // ASS uses centiseconds; pad-right then truncate to ms.
+                var frac = (m[4] + '00').slice(0, 3);
+                return h * 3600 + mm * 60 + ss + parseInt(frac, 10) / 1000;
+            }
+            function vttTimestamp(totalSec) {
+                if (!isFinite(totalSec) || totalSec < 0) totalSec = 0;
+                var h = Math.floor(totalSec / 3600);
+                var m = Math.floor((totalSec % 3600) / 60);
+                var s = totalSec % 60;
+                var ms = Math.round((s - Math.floor(s)) * 1000);
+                s = Math.floor(s);
+                if (ms === 1000) { ms = 0; s++; }
+                function pad(n, w) { var x = String(n); while (x.length < w) x = '0' + x; return x; }
+                return pad(h, 2) + ':' + pad(m, 2) + ':' + pad(s, 2) + '.' + pad(ms, 3);
+            }
+            function assToVtt(assText) {
+                if (!assText) return 'WEBVTT\n\n';
+                var lines = assText.replace(/\r\n/g, '\n').split('\n');
+                var out = ['WEBVTT', ''];
+                for (var i = 0; i < lines.length; i++) {
+                    var line = lines[i];
+                    if (!/^Dialogue:/i.test(line)) continue;
+                    var body = line.replace(/^Dialogue:\s*/i, '');
+                    var commas = 0;
+                    var split = -1;
+                    for (var j = 0; j < body.length && commas < 9; j++) {
+                        if (body[j] === ',') {
+                            commas++;
+                            if (commas === 9) split = j;
+                        }
+                    }
+                    if (split < 0) continue;
+                    var fields = body.substring(0, split).split(',');
+                    if (fields.length < 9) continue;
+                    var start = assTimeToSeconds(fields[1]);
+                    var end   = assTimeToSeconds(fields[2]);
+                    if (start === null || end === null || end <= start) continue;
+                    var text = body.substring(split + 1)
+                        .replace(ASS_OVERRIDE_RE, '')
+                        .replace(/\\N/g, '\n')
+                        .replace(/\\h/g, ' ')
+                        .trim();
+                    if (!text) continue;
+                    out.push(vttTimestamp(start) + ' --> ' + vttTimestamp(end));
+                    out.push(text);
+                    out.push('');
+                }
+                return out.join('\n');
+            }
+
+            // Track-data → blob: URL cache so flipping back to an
+            // SSA entry the user already picked doesn't rebuild the
+            // VTT each time. Keyed by the ASS doc itself (length
+            // suffices as a fingerprint here).
+            var _vttBlobCache = {};
+            function renderAssAsVtt(item) {
+                if (!art || !item || !item.trackData) return;
+                var cacheKey = item.trackData.length + ':' + (item.html || '');
+                var url = _vttBlobCache[cacheKey];
+                if (!url) {
+                    var vtt = assToVtt(item.trackData);
+                    url = URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
+                    _vttBlobCache[cacheKey] = url;
+                }
+                try {
+                    art.subtitle.show = true;
+                    art.subtitle.switch(url, { name: (item.html || 'Embedded') + ' (VTT)', type: 'vtt' });
+                } catch (e) {
+                    console.warn('VTT fallback failed:', e);
+                }
+            }
 
             function showFallback(stream) {
                 fallbackHost.hidden = false;
