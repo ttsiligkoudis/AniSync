@@ -24,7 +24,6 @@ namespace AnimeList.Services
     {
         private readonly IHttpClientFactory _clientFactory;
         private readonly IMemoryCache _cache;
-        private readonly IBadHashCache _badHashCache;
         private readonly ILogger<AddonStreamService> _logger;
 
         private static readonly TimeSpan StreamsCacheTtl = TimeSpan.FromMinutes(10);
@@ -75,12 +74,10 @@ namespace AnimeList.Services
         public AddonStreamService(
             IHttpClientFactory clientFactory,
             IMemoryCache cache,
-            IBadHashCache badHashCache,
             ILogger<AddonStreamService> logger)
         {
             _clientFactory = clientFactory;
             _cache = cache;
-            _badHashCache = badHashCache;
             _logger = logger;
         }
 
@@ -196,15 +193,9 @@ namespace AnimeList.Services
             var keyFingerprint = ShortFingerprint(manifestUrl);
             var cacheKey = $"addon:{keyFingerprint}:{idPath}";
 
-            // Pull the current bad-hash snapshot once per request and
-            // apply on both cache-hit and fresh-fetch paths. Without
-            // this the 10-minute response cache shields freshly-marked
-            // hashes from filtering until expiry.
-            var badHashes = await _badHashCache.GetSnapshotAsync();
-
             if (_cache.TryGetValue<IReadOnlyList<AddonStream>>(cacheKey, out var hit) && hit != null)
             {
-                return ApplyBadHashFilter(hit, badHashes, idPath);
+                return hit;
             }
 
             var streamsUrl = $"{addonRoot}/stream/{idType}/{idPath}.json";
@@ -226,14 +217,11 @@ namespace AnimeList.Services
                 var content = await response.Content.ReadAsStringAsync(cts.Token);
                 var parsed = ParseStreams(content, addonRoot);
 
-                // Cache pre-bad-hash filter so newly-marked hashes can
-                // be filtered out on subsequent reads without waiting
-                // for the 10-minute TTL.
                 _cache.Set(cacheKey, parsed, new MemoryCacheEntryOptions
                 {
                     AbsoluteExpirationRelativeToNow = StreamsCacheTtl,
                 });
-                return ApplyBadHashFilter(parsed, badHashes, idPath);
+                return parsed;
             }
             catch (OperationCanceledException)
             {
@@ -482,23 +470,6 @@ namespace AnimeList.Services
             {
                 return true;
             }
-        }
-
-        private List<AddonStream> ApplyBadHashFilter(
-            IReadOnlyList<AddonStream> streams, HashSet<string> badSet, string idPath)
-        {
-            if (badSet.Count == 0) return new List<AddonStream>(streams);
-            var before = streams.Count;
-            var filtered = streams
-                .Where(s => string.IsNullOrEmpty(s.InfoHash) || !badSet.Contains(s.InfoHash))
-                .ToList();
-            if (filtered.Count < before)
-            {
-                _logger.LogInformation(
-                    "Bad-hash filter dropped {Dropped}/{Total} addon streams for {Path}.",
-                    before - filtered.Count, before, idPath);
-            }
-            return filtered;
         }
 
         private static string ShortFingerprint(string s)

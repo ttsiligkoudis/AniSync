@@ -153,23 +153,5 @@ namespace AnimeList.Services.Interfaces
         /// flags / linked tokens / install URL.
         /// </summary>
         Task<(TokenData newPrimary, string reason)> SwapPrimaryAsync(string uid, AnimeService newPrimaryService, bool resolveCollision = false);
-
-        /// <summary>
-        /// Records a Torrentio info hash as "no longer playable through Real-Debrid"
-        /// until <paramref name="expiresAtUtc"/>. UPSERT semantics — if the hash is
-        /// already stored with a later expiry, the existing TTL is kept. Persisted
-        /// so the list survives process restarts and is shared across app instances;
-        /// in-process callers should also keep a short-lived in-memory snapshot
-        /// (refreshed every minute or so) to avoid a SQLite hit on every filter call.
-        /// </summary>
-        Task MarkBadHashAsync(string infoHash, DateTime expiresAtUtc);
-
-        /// <summary>
-        /// Returns all lowercase info hashes whose ban is still live relative to
-        /// <paramref name="nowUtc"/>. Implementations also purge expired rows
-        /// opportunistically on each call, so the table stays bounded even
-        /// without a separate cleanup job.
-        /// </summary>
-        Task<IReadOnlyList<string>> GetActiveBadHashesAsync(DateTime nowUtc);
     }
 }
