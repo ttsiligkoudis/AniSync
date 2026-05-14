@@ -102,5 +102,26 @@
             With a key on file, the episode picker on each anime page and the Stremio addon's stream list
             both surface RD-cached torrents (via Torrentio) as playable sources.
         </p>
+
+        @* MediaFusion card. Pasted manifest URL behaves like a second
+           debrid stream source — the addon indexes Nyaa.si / AniDex /
+           ElfCache which Torrentio under-covers for anime, and AniSync
+           merges its results with Torrentio's on each episode lookup. *@
+        <p class="manifest-url-label" style="margin-top: 1.5rem;">MediaFusion manifest URL (optional)</p>
+        <div id="mfUrlSetState" class="manifest-url-row" style="@(Model.HasMediaFusionUrl ? "" : "display: none;")">
+            <input class="manifest-url-input" type="text" value="•••••••• (set)" disabled />
+            <button id="mfUrlReplaceBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;">Replace</button>
+            <button id="mfUrlClearBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;">Clear</button>
+        </div>
+        <div id="mfUrlEditState" class="manifest-url-row" style="@(Model.HasMediaFusionUrl ? "display: none;" : "")">
+            <input id="mfUrlInput" class="manifest-url-input" type="text"
+                   placeholder="https://mediafusion.elfhosted.com/.../manifest.json" autocomplete="off" />
+            <button id="mfUrlSaveBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;">Save</button>
+        </div>
+        <p class="option-name-sub" style="margin-top: 0.5rem;">
+            Build your personal URL at <a href="https://mediafusion.elfhosted.com" target="_blank" rel="noopener">mediafusion.elfhosted.com</a>
+            (pick Real-Debrid as the streaming provider, enable the Nyaa / AniDex indexers, then copy the install URL).
+            Adds anime-tracker coverage on top of Torrentio.
+        </p>
     }
 </section>

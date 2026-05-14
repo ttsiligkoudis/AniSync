@@ -56,6 +56,14 @@ namespace AnimeList.Models
         public bool HasRealDebridKey { get; init; }
 
         /// <summary>
+        /// Presence-only flag for the user's MediaFusion personal manifest URL.
+        /// Same treatment as <see cref="HasRealDebridKey"/> — the URL embeds an
+        /// encrypted user-config segment, so we render a "set" badge + Replace
+        /// button rather than echoing the URL back into the input.
+        /// </summary>
+        public bool HasMediaFusionUrl { get; init; }
+
+        /// <summary>
         /// Persisted toggle flags. Always non-null — the controller hands the view a
         /// default-initialised instance when nothing is loaded yet.
         /// </summary>

@@ -312,6 +312,7 @@ public class HomeController : Controller
         string scrobbleToken = null;
         string plexUsername = null;
         bool hasRealDebridKey = false;
+        bool hasMediaFusionUrl = false;
 
         if (tokenData != null)
         {
@@ -377,6 +378,7 @@ public class HomeController : Controller
                 scrobbleToken = await _configStore.EnsureScrobbleTokenAsync(configUid);
                 plexUsername = await _configStore.GetPlexUsernameAsync(configUid);
                 hasRealDebridKey = !string.IsNullOrEmpty(await _configStore.GetRealDebridApiKeyAsync(configUid));
+                hasMediaFusionUrl = !string.IsNullOrEmpty(await _configStore.GetMediaFusionManifestUrlAsync(configUid));
 
                 // Hydrate the session from the config-URL-derived tokenData when the user
                 // arrives via a v5 install URL (or any path that resolves identity from the
@@ -438,6 +440,7 @@ public class HomeController : Controller
             ScrobbleToken = scrobbleToken,
             PlexUsername = plexUsername,
             HasRealDebridKey = hasRealDebridKey,
+            HasMediaFusionUrl = hasMediaFusionUrl,
             Configuration = configuration,
         });
     }
@@ -519,6 +522,34 @@ public class HomeController : Controller
 
         await _configStore.SetRealDebridApiKeyAsync(request.uid, request.apiKey);
         return new JsonResult(new { success = true, hasKey = !string.IsNullOrWhiteSpace(request.apiKey) });
+    }
+
+    /// <summary>
+    /// Stores the user's MediaFusion manifest URL. Empty / whitespace clears
+    /// the stored URL. Light validation: must parse as an absolute http(s) URL
+    /// and end on /manifest.json — both pre-conditions the service strips
+    /// before hitting /stream, so anything that doesn't satisfy them won't
+    /// produce streams anyway.
+    /// </summary>
+    [HttpPost("Home/SetMediaFusionUrl")]
+    public async Task<JsonResult> SetMediaFusionUrl([FromBody] MediaFusionUrlRequest request)
+    {
+        if (string.IsNullOrEmpty(request?.uid))
+            return new JsonResult(new { success = false, error = "missing uid" });
+
+        var url = (request.manifestUrl ?? string.Empty).Trim();
+        if (!string.IsNullOrEmpty(url))
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed)
+                || (parsed.Scheme != "http" && parsed.Scheme != "https")
+                || !url.EndsWith("/manifest.json", StringComparison.OrdinalIgnoreCase))
+            {
+                return new JsonResult(new { success = false, error = "expected an https://.../manifest.json URL" });
+            }
+        }
+
+        await _configStore.SetMediaFusionManifestUrlAsync(request.uid, url);
+        return new JsonResult(new { success = true, hasUrl = !string.IsNullOrEmpty(url) });
     }
 
     /// <summary>
@@ -646,6 +677,16 @@ public class RealDebridKeyRequest
     // the stored key. The server never re-emits the value to the client after
     // first save — the configure page renders a presence-only badge.
     public string apiKey { get; set; }
+}
+
+public class MediaFusionUrlRequest
+{
+    public string uid { get; set; }
+    // Personal manifest URL the user copies out of MediaFusion's configure
+    // page. Empty / null clears the stored URL. Re-emitted to the client only
+    // as a presence flag — the URL embeds the user's encrypted MF config, so
+    // we treat it the same as the RD key in terms of round-trip visibility.
+    public string manifestUrl { get; set; }
 }
 
 public class ConfigBackup

@@ -220,6 +220,10 @@ builder.Services.AddScoped<IAnilistFallback, AnilistFallback>();
 // individual requests — Torrentio responses are stable enough that a 10-min
 // cache slashes the upstream call rate when a user paginates through episodes.
 builder.Services.AddSingleton<ITorrentioService, TorrentioService>();
+// Same singleton lifetime + caching rationale as TorrentioService.
+// MediaFusion adds anime-tracker coverage (Nyaa, AniDex) on top of
+// Torrentio. The 10-minute response cache lives on the service.
+builder.Services.AddSingleton<IMediaFusionService, MediaFusionService>();
 // Singleton so the (imdb, season, episode) → tracks cache + VTT body
 // cache outlive individual requests — anime episodes are watched
 // repeatedly and the same /watch view re-fetches on every visit.

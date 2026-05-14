@@ -69,6 +69,12 @@ namespace AnimeList.Services
                     -- Real-Debrid API key. Plaintext for v1; encrypt at rest
                     -- before public launch (TODO: see Configuration.cs).
                     real_debrid_api_key TEXT,
+                    -- MediaFusion personal manifest URL pasted by the user from
+                    -- their MediaFusion configure page. We can't generate it
+                    -- ourselves (the URL embeds an encrypted user-data segment
+                    -- bound to their MF password) — it's stored verbatim and
+                    -- the service strips /manifest.json before hitting /stream.
+                    mediafusion_manifest_url TEXT,
                     created_at        INTEGER NOT NULL,
                     updated_at        INTEGER NOT NULL
                 );
@@ -108,6 +114,7 @@ namespace AnimeList.Services
             // CREATE IF NOT EXISTS doesn't alter existing tables. The
             // try/catch covers the "already exists" race on a fresh DB.
             EnsureColumn(conn, "configs", "real_debrid_api_key", "TEXT");
+            EnsureColumn(conn, "configs", "mediafusion_manifest_url", "TEXT");
         }
 
         private static void EnsureColumn(SqliteConnection conn, string table, string column, string typeAndConstraints)
@@ -480,6 +487,37 @@ namespace AnimeList.Services
             await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT real_debrid_api_key FROM configs WHERE uid = $uid LIMIT 1";
+            cmd.Parameters.AddWithValue("$uid", uid);
+            return await cmd.ExecuteScalarAsync() as string;
+        }
+
+        public async Task SetMediaFusionManifestUrlAsync(string uid, string manifestUrl)
+        {
+            if (string.IsNullOrEmpty(uid)) return;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE configs
+                   SET mediafusion_manifest_url = $u, updated_at = $ts
+                 WHERE uid = $uid
+                """;
+            cmd.Parameters.AddWithValue("$u",
+                string.IsNullOrWhiteSpace(manifestUrl) ? (object)DBNull.Value : manifestUrl.Trim());
+            cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$uid", uid);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<string> GetMediaFusionManifestUrlAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return null;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT mediafusion_manifest_url FROM configs WHERE uid = $uid LIMIT 1";
             cmd.Parameters.AddWithValue("$uid", uid);
             return await cmd.ExecuteScalarAsync() as string;
         }

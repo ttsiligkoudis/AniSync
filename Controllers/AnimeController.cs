@@ -24,6 +24,7 @@ namespace AnimeList.Controllers
         private readonly IFillerListService _fillerListService;
         private readonly IAnilistFallback _anilistFallback;
         private readonly ITorrentioService _torrentioService;
+        private readonly IMediaFusionService _mediaFusionService;
         private readonly IAniSkipService _aniSkipService;
         private readonly ISubtitleService _subtitleService;
         private readonly IWyzieSubtitlesService _wyzieSubtitleService;
@@ -42,6 +43,7 @@ namespace AnimeList.Controllers
             IFillerListService fillerListService,
             IAnilistFallback anilistFallback,
             ITorrentioService torrentioService,
+            IMediaFusionService mediaFusionService,
             IAniSkipService aniSkipService,
             ISubtitleService subtitleService,
             IWyzieSubtitlesService wyzieSubtitleService,
@@ -59,6 +61,7 @@ namespace AnimeList.Controllers
             _fillerListService = fillerListService;
             _anilistFallback = anilistFallback;
             _torrentioService = torrentioService;
+            _mediaFusionService = mediaFusionService;
             _aniSkipService = aniSkipService;
             _subtitleService = subtitleService;
             _wyzieSubtitleService = wyzieSubtitleService;
@@ -468,6 +471,55 @@ namespace AnimeList.Controllers
         /// doesn't land on an unaired episode picker that has nothing to
         /// show.
         /// </summary>
+        /// <summary>
+        /// Combines Torrentio + MediaFusion stream lists into one ranked
+        /// view. De-dupes by lowercased infoHash, keeping the higher-
+        /// seeder entry on conflict — same SHA-1 means the same torrent
+        /// regardless of which addon surfaced it, so a head-to-head
+        /// usually just resolves to "MediaFusion saw more Nyaa peers"
+        /// or vice versa. Streams without an infoHash are kept as-is
+        /// (no key to dedupe against). Re-bucketed by quality and
+        /// capped per bucket so the merged result mirrors the per-
+        /// provider rank+cap rather than emitting 2× entries.
+        /// </summary>
+        private static List<TorrentioStream> MergeDebridStreams(
+            IReadOnlyList<TorrentioStream> a, IReadOnlyList<TorrentioStream> b)
+        {
+            const int PerQualityCap = 5;
+            string[] qualityOrder = ["2160p", "1440p", "1080p", "720p"];
+
+            // Group by infoHash so we can pick the higher-seeder duplicate.
+            // null/empty infoHash → use the URL as the key so we still
+            // dedupe across providers when the URL happens to match.
+            var combined = new List<TorrentioStream>(a.Count + b.Count);
+            combined.AddRange(a);
+            combined.AddRange(b);
+
+            var deduped = combined
+                .GroupBy(s => string.IsNullOrEmpty(s.InfoHash)
+                    ? "url::" + (s.Url ?? Guid.NewGuid().ToString())
+                    : "hash::" + s.InfoHash.ToLowerInvariant())
+                .Select(g => g.OrderByDescending(s => s.Seeders).First())
+                .ToList();
+
+            var byQuality = deduped
+                .GroupBy(s => s.Quality)
+                .ToDictionary(g => g.Key, g => g
+                    .OrderByDescending(s => s.Seeders)
+                    .Take(PerQualityCap)
+                    .ToList());
+
+            var ranked = new List<TorrentioStream>(qualityOrder.Length * PerQualityCap);
+            foreach (var q in qualityOrder)
+            {
+                if (byQuality.TryGetValue(q, out var bucket))
+                {
+                    ranked.AddRange(bucket);
+                }
+            }
+            return ranked;
+        }
+
         private static (Video Prev, Video Next) ComputePrevNext(List<Video> videos, Video current)
         {
             var today = DateTime.UtcNow.Date;
@@ -528,19 +580,38 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
-            // RD only for authenticated v5 installs — matches StreamController.
+            // Per-user provider keys — RD for Torrentio's resolve
+            // segment, MediaFusion manifest URL for the MF fan-out.
+            // Both optional and additive: anonymous installs see no
+            // debrid sources; a user with only one configured still
+            // gets that provider's streams.
             string apiKey = null;
+            string mediaFusionUrl = null;
             if (!string.IsNullOrEmpty(uid))
             {
                 apiKey = await _configStore.GetRealDebridApiKeyAsync(uid);
+                mediaFusionUrl = await _configStore.GetMediaFusionManifestUrlAsync(uid);
             }
 
             var debridStreams = Array.Empty<object>() as IReadOnlyList<object>;
-            if (!string.IsNullOrEmpty(apiKey))
+            if (!string.IsNullOrEmpty(apiKey) || !string.IsNullOrEmpty(mediaFusionUrl))
             {
                 var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
-                var raw = await _torrentioService.GetStreamsAsync(apiKey, sourceLinks, season, episode);
-                debridStreams = raw.Select(s => (object)new
+
+                // Fan out to both providers in parallel — independent
+                // endpoints, no shared rate-limit, and the combined
+                // latency floors at max(Torrentio, MediaFusion)
+                // rather than summing.
+                var torrentioTask = !string.IsNullOrEmpty(apiKey)
+                    ? _torrentioService.GetStreamsAsync(apiKey, sourceLinks, season, episode)
+                    : Task.FromResult<IReadOnlyList<TorrentioStream>>(Array.Empty<TorrentioStream>());
+                var mediaFusionTask = !string.IsNullOrEmpty(mediaFusionUrl)
+                    ? _mediaFusionService.GetStreamsAsync(mediaFusionUrl, sourceLinks, season, episode)
+                    : Task.FromResult<IReadOnlyList<TorrentioStream>>(Array.Empty<TorrentioStream>());
+                await Task.WhenAll(torrentioTask, mediaFusionTask);
+
+                var merged = MergeDebridStreams(torrentioTask.Result, mediaFusionTask.Result);
+                debridStreams = merged.Select(s => (object)new
                 {
                     name = s.Name,
                     title = s.Title,
@@ -550,6 +621,7 @@ namespace AnimeList.Controllers
                     playable = s.Playable,
                     seeders = s.Seeders,
                     language = s.Language,
+                    provider = s.Provider,
                 }).ToList();
             }
 
