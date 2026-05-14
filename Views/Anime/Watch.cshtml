@@ -1748,13 +1748,22 @@
             //   native chooser. Setting a default in the chooser
             //   becomes the user's preference going forward.
             //
-            // Everywhere else (Windows / macOS / Linux / iOS):
-            //   Generate a one-line .m3u playlist as a Blob and
-            //   trigger a download. Whichever player owns the .m3u
-            //   association opens the stream — VLC, MPC-HC, mpv,
-            //   PotPlayer, IINA, etc. The user picks via the OS's
-            //   "Open with" menu on the downloaded file if they
-            //   want a different one.
+            // Windows / macOS / Linux / iOS:
+            //   Two-stage: first attempt vlc://<URL> through a hidden
+            //   iframe. When the user has registered VLC's URL handler
+            //   (one-time .reg import on Windows; usually default on
+            //   Linux via mimeapps.list; macOS via VLC.app's
+            //   LSHandlers) the OS launches VLC instantly and the
+            //   page loses focus. If we don't detect the focus
+            //   handoff within ~1.2s the protocol is presumed
+            //   unregistered and we fall back to a .m3u Blob download
+            //   — same behaviour the action had before, just gated
+            //   on the registration probe.
+            //
+            //   This gives users with a registered handler one-click
+            //   direct launch (matching Android's feel) without
+            //   regressing the zero-config experience for users who
+            //   never set anything up.
             function openWithExternalPlayer(streamUrl, displayName) {
                 var ua = navigator.userAgent || '';
                 if (/Android/i.test(ua) && !/Windows Phone/i.test(ua)) {
@@ -1764,9 +1773,6 @@
                     var scheme = u.protocol.replace(':', '');
                     var rest = u.host + u.pathname + u.search + u.hash;
                     var title = displayName || 'AniSync stream';
-                    // No package= → Android dispatches against the
-                    // global handler set, surfacing the native chooser
-                    // when more than one app can play the URL.
                     var intent = 'intent://' + rest +
                         '#Intent' +
                         ';scheme=' + scheme +
@@ -1778,9 +1784,46 @@
                     return;
                 }
 
-                // .m3u download path. Filename uses the display name
-                // (sanitised, capped) so VLC's recent-files list and
-                // the OS's download UI show something readable.
+                // Desktop / iOS path: probe vlc:// first, fall back
+                // to .m3u download.
+                var launched = false;
+                function markLaunched() { launched = true; }
+                // Either signal is enough — when an external app
+                // takes over, the browser tab loses focus and goes
+                // hidden. Using { once: true } so we don't have to
+                // clean up if both fire.
+                window.addEventListener('blur', markLaunched, { once: true });
+                document.addEventListener('visibilitychange', function vh() {
+                    if (document.visibilityState === 'hidden') {
+                        markLaunched();
+                        document.removeEventListener('visibilitychange', vh);
+                    }
+                });
+
+                // Hidden iframe rather than location.href: the
+                // unregistered-protocol failure mode for iframes is
+                // silent (no popup dialog from the browser to dismiss).
+                // Registered handlers fire just the same.
+                var probe = document.createElement('iframe');
+                probe.style.display = 'none';
+                probe.src = 'vlc://' + streamUrl;
+                document.body.appendChild(probe);
+
+                setTimeout(function () {
+                    try { document.body.removeChild(probe); } catch (_) {}
+                    if (launched) return;
+                    // Handler wasn't registered (or didn't dispatch).
+                    // Fall back to the .m3u download — whichever
+                    // player owns the .m3u file association opens
+                    // the stream when the user clicks the download.
+                    downloadM3uForStream(streamUrl, displayName);
+                }, 1200);
+            }
+
+            function downloadM3uForStream(streamUrl, displayName) {
+                // Filename uses the display name (sanitised, capped)
+                // so VLC's recent-files list and the OS's download
+                // UI show something readable.
                 var safeName = (displayName || 'stream')
                     .replace(/[\\/:*?"<>|]/g, '_')
                     .replace(/\s+/g, ' ')
