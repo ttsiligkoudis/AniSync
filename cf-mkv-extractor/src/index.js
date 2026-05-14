@@ -49,7 +49,7 @@ function hostAllowed(hostname) {
 }
 
 export default {
-    async fetch(request, env) {
+    async fetch(request, env, ctx) {
         // Last-resort try/catch around the entire handler. The
         // inner try (around extractSubtitles) catches everything our
         // own code can throw, but unforeseen errors — sync throws
@@ -61,7 +61,7 @@ export default {
         // "extracted: false" payload so the client falls back and
         // CF's monitoring stays happy.
         try {
-            return await handleFetch(request, env);
+            return await handleFetch(request, env, ctx);
         } catch (e) {
             return new Response(JSON.stringify({
                 tracks: [],
@@ -73,12 +73,38 @@ export default {
     },
 };
 
-async function handleFetch(request, env) {
+// How long a successful extraction stays cached on CF's edge. Two
+// hours matches the typical RD-token validity window: re-watches of
+// the same source within that window hit cache and skip RD entirely.
+// After that the URL would have rotated upstream anyway so cached
+// hits would 404 on the bytes.
+const EXTRACT_CACHE_SECONDS = 2 * 60 * 60;
+
+async function handleFetch(request, env, ctx) {
         if (request.method === 'OPTIONS') {
             return new Response(null, { status: 204, headers: corsHeaders() });
         }
         if (request.method !== 'GET') {
             return jsonResponse(405, { error: 'method not allowed' });
+        }
+
+        // CF Cache API check up front. The default cache keys by full
+        // request URL, so identical `?url=...&secret=...&lang=...`
+        // requests share a cache entry. Cache hits cost nothing — no
+        // subrequest, no CPU, no upstream traffic. Only successful
+        // extractions are cached (see Cache-Control header below);
+        // failures fall through so we re-try on the next attempt.
+        const cache = caches.default;
+        const cached = await cache.match(request);
+        if (cached) {
+            // Tag the response so DevTools shows the cache hit
+            // unambiguously — the body is unchanged otherwise.
+            const headers = new Headers(cached.headers);
+            headers.set('x-anisync-cache', 'hit');
+            return new Response(cached.body, {
+                status: cached.status,
+                headers,
+            });
         }
 
         const url = new URL(request.url);
@@ -119,14 +145,30 @@ async function handleFetch(request, env) {
             //                     behaviour).
             const langParam = (url.searchParams.get('lang') || '').toLowerCase();
             const result = await extractSubtitles(reader, { lang: langParam || null });
-            return new Response(JSON.stringify({
+            // Build with Cache-Control so cache.put accepts it. Two
+            // hours covers typical re-watch sessions; after that the
+            // RD URL has rotated and any cached entry would be moot.
+            const successBody = JSON.stringify({
                 tracks: result.tracks,
                 extracted: true,
                 stats: {
                     fileSize: reader.totalSize,
                     trackCount: result.tracks.length,
                 },
-            }), { status: 200, headers: corsHeaders() });
+            });
+            const response = new Response(successBody, {
+                status: 200,
+                headers: corsHeaders({
+                    'Cache-Control': `public, max-age=${EXTRACT_CACHE_SECONDS}`,
+                    'x-anisync-cache': 'miss',
+                }),
+            });
+            // ctx.waitUntil lets the cache write happen after we've
+            // returned to the client — zero added latency. Use
+            // response.clone() because Response bodies are
+            // single-consumer.
+            ctx.waitUntil(cache.put(request, response.clone()));
+            return response;
         } catch (e) {
             // Collapse extraction failures (indexless file, mid-stream
             // upstream drops, parse errors, memory pressure) into a
