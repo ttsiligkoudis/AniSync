@@ -38,9 +38,11 @@ namespace AnimeList.Services.Interfaces
         /// <see cref="GetStreamsAsync"/> responses for a short window
         /// (~1h), so users stop seeing the dead-link row in the
         /// source picker. Idempotent and best-effort; passing
-        /// null/empty/non-hash strings is a no-op.
+        /// null/empty/non-hash strings is a no-op. Persisted to the
+        /// config store so the ban survives process restarts and is
+        /// shared across app instances.
         /// </summary>
-        void MarkHashUnplayable(string infoHash);
+        Task MarkHashUnplayableAsync(string infoHash);
     }
 
     /// <summary>
