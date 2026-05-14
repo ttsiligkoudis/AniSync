@@ -1,5 +1,6 @@
 using AnimeList.Services.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
+using Newtonsoft.Json.Linq;
 
 namespace AnimeList.Services
 {
@@ -162,40 +163,43 @@ namespace AnimeList.Services
         private static IReadOnlyList<SubtitleTrack> ParseList(string json)
         {
             if (string.IsNullOrWhiteSpace(json)) return [];
-            dynamic arr;
-            try { arr = DeserializeObject<dynamic>(json); }
+            JArray arr;
+            try { arr = JArray.Parse(json); }
             catch { return []; }
-            if (arr == null) return [];
 
             var entries = new List<(string Code, string Source, string Release, string Url)>();
-            foreach (var s in arr)
+            foreach (var token in arr)
             {
+                if (token is not JObject obj) continue;
+
                 // Wyzie's schema has shifted a few times — accept the
                 // most common field names. `url` is the canonical
                 // current name; `download` / `downloadUrl` are
                 // historical variants we've seen on related mirrors.
-                var url = TryString(s, "url") ?? TryString(s, "download") ?? TryString(s, "downloadUrl");
+                var url = TryString(obj, "url")
+                       ?? TryString(obj, "download")
+                       ?? TryString(obj, "downloadUrl");
                 if (string.IsNullOrWhiteSpace(url)) continue;
 
                 // Source field is just informational at this layer —
                 // the outer controller dedupes by upstream URL.
-                var source = (TryString(s, "source") ?? string.Empty).Trim();
+                var source = (TryString(obj, "source") ?? string.Empty).Trim();
 
                 // Language hints — Wyzie usually returns ISO-639-2/B
                 // codes in `language`, but the `display` field
                 // ("English", "Spanish (Latin America)", …) is a
                 // useful fallback when the code is missing. If both
-                // are missing the entry is still returned but bucketed
-                // as "und"; the user can still pick it from the menu.
-                var rawLang = (TryString(s, "language")
-                                ?? TryString(s, "display")
+                // are missing the entry is still bucketed as "und"
+                // so the user can still pick it from the menu.
+                var rawLang = (TryString(obj, "language")
+                                ?? TryString(obj, "display")
                                 ?? string.Empty).Trim();
-                var (code, _) = string.IsNullOrEmpty(rawLang)
-                    ? ("und", "Undetermined")
-                    : MapLanguage(rawLang);
+                string code = string.IsNullOrEmpty(rawLang)
+                    ? "und"
+                    : MapLanguage(rawLang).Code;
 
-                var release = (TryString(s, "release")
-                                ?? TryString(s, "display")
+                var release = (TryString(obj, "release")
+                                ?? TryString(obj, "display")
                                 ?? string.Empty).Trim();
                 entries.Add((code, source, release, url));
             }
@@ -203,15 +207,12 @@ namespace AnimeList.Services
             return GroupAndCap(entries);
         }
 
-        private static string TryString(dynamic obj, string field)
+        private static string TryString(JObject obj, string field)
         {
-            try
-            {
-                var v = obj[field];
-                if (v == null) return null;
-                return (string)v;
-            }
-            catch { return null; }
+            return obj.TryGetValue(field, StringComparison.OrdinalIgnoreCase, out var v)
+                && v.Type != JTokenType.Null
+                ? v.ToString()
+                : null;
         }
 
         private static IReadOnlyList<SubtitleTrack> GroupAndCap(
