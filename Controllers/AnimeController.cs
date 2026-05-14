@@ -746,6 +746,7 @@ namespace AnimeList.Controllers
         /// that reject anonymous CORS requests).
         /// </summary>
         [HttpGet("/anime/subtitle")]
+        [HttpGet("/anime/subtitle.vtt")]
         public async Task<IActionResult> Subtitle(string url)
         {
             if (string.IsNullOrWhiteSpace(url))
@@ -759,6 +760,14 @@ namespace AnimeList.Controllers
             }
             // 1-hour client cache so re-seeks / re-renders don't refetch.
             Response.Headers["Cache-Control"] = "public, max-age=3600";
+            // Suggest a sensible filename for external players that
+            // sniff Content-Disposition (VLC does this when the URL
+            // path itself doesn't end in a known subtitle extension).
+            // Combined with the /anime/subtitle.vtt path alias this
+            // gives VLC two strong format signals so it actually
+            // auto-loads our HTTP sidecar instead of fetching and
+            // ignoring it.
+            Response.Headers["Content-Disposition"] = "inline; filename=\"subtitle.vtt\"";
             return Content(vtt, "text/vtt", System.Text.Encoding.UTF8);
         }
 
