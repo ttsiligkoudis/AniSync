@@ -1799,6 +1799,23 @@
             //   regressing the zero-config experience for users who
             //   never set anything up.
             function openWithExternalPlayer(streamUrl, displayName) {
+                // Pluck the active VTT subtitle (when one is
+                // selected) so we can hand it off to the external
+                // player along with the video URL. Embedded SSA
+                // tracks live inside the MKV already so the player
+                // sees them natively; only the OpenSubtitles / Wyzie
+                // VTT entries need to be passed as a sidecar URL.
+                // currentSubKey is our same-origin proxy URL — turn
+                // it into an absolute URL the external player can
+                // hit (the proxy serves text/vtt with CORS-friendly
+                // headers, which VLC / mpv / Infuse all consume).
+                var sidecarSub = null;
+                if (currentSubKind === 'vtt' && currentSubKey) {
+                    try {
+                        sidecarSub = new URL(currentSubKey, window.location.origin).toString();
+                    } catch (_) { sidecarSub = null; }
+                }
+
                 var ua = navigator.userAgent || '';
                 if (/Android/i.test(ua) && !/Windows Phone/i.test(ua)) {
                     var u;
@@ -1807,12 +1824,22 @@
                     var scheme = u.protocol.replace(':', '');
                     var rest = u.host + u.pathname + u.search + u.hash;
                     var title = displayName || 'AniSync stream';
+                    // S.subs is the VLC-for-Android intent extra that
+                    // pre-loads a subtitle URL alongside the video.
+                    // S.subs.name is the friendly label shown in the
+                    // app's tracks menu. Other Android players (MX
+                    // Player, Just Player) ignore it harmlessly.
+                    var subExtra = sidecarSub
+                        ? ';S.subs=' + encodeURIComponent(sidecarSub) +
+                          ';S.subs.name=' + encodeURIComponent('AniSync subs')
+                        : '';
                     var intent = 'intent://' + rest +
                         '#Intent' +
                         ';scheme=' + scheme +
                         ';action=android.intent.action.VIEW' +
                         ';type=video/*' +
                         ';S.title=' + encodeURIComponent(title) +
+                        subExtra +
                         ';end';
                     window.location.href = intent;
                     return;
@@ -1850,11 +1877,11 @@
                     // Fall back to the .m3u download — whichever
                     // player owns the .m3u file association opens
                     // the stream when the user clicks the download.
-                    downloadM3uForStream(streamUrl, displayName);
+                    downloadM3uForStream(streamUrl, displayName, sidecarSub);
                 }, 1200);
             }
 
-            function downloadM3uForStream(streamUrl, displayName) {
+            function downloadM3uForStream(streamUrl, displayName, sidecarSub) {
                 // Filename uses the display name (sanitised, capped)
                 // so VLC's recent-files list and the OS's download
                 // UI show something readable.
@@ -1863,8 +1890,18 @@
                     .replace(/\s+/g, ' ')
                     .trim()
                     .substring(0, 80) || 'stream';
+                // #EXTVLCOPT:sub-file=URL is the VLC playlist
+                // extension that pre-loads an external subtitle
+                // alongside the stream URL. Recognised by VLC
+                // (desktop + Android), mpv, and most modern players
+                // that consume .m3u; ignored harmlessly by anything
+                // else (the video still plays without subs).
+                var subLine = sidecarSub
+                    ? '#EXTVLCOPT:sub-file=' + sidecarSub + '\n'
+                    : '';
                 var m3u =
                     '#EXTM3U\n' +
+                    subLine +
                     '#EXTINF:-1,' + safeName + '\n' +
                     streamUrl + '\n';
                 var blob = new Blob([m3u], { type: 'audio/x-mpegurl' });
