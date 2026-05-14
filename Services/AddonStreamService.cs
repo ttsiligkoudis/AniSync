@@ -71,6 +71,19 @@ namespace AnimeList.Services
         private static readonly HashSet<string> PlayableExts =
             new(StringComparer.OrdinalIgnoreCase) { ".mp4", ".webm", ".m4v" };
 
+        // Codec / container tokens that the in-browser <video> element
+        // doesn't decode (Chrome / Firefox on desktop and Android). Anime
+        // releases are overwhelmingly H.265/HEVC or AV1 inside MKV, and
+        // attempting inline playback for those just burns ArtPlayer's
+        // reconnect budget on five guaranteed-to-fail loads before the
+        // codec-not-supported message lands. Matching any of these tokens
+        // in the stream's name+description routes the row straight to the
+        // "Open externally" affordance instead. Word-boundary anchored so
+        // we don't false-match "shevc" or "av1d" or similar.
+        private static readonly Regex NonBrowserCodecRegex = new(
+            @"\b(?:hevc|x265|h\.?265|av1|mkv|matroska|10[\s-]?bit)\b",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
         public AddonStreamService(
             IHttpClientFactory clientFactory,
             IMemoryCache cache,
@@ -336,7 +349,7 @@ namespace AnimeList.Services
                 var size = DetectSize(combined);
                 var seeders = DetectSeeders(combined);
                 var language = DetectLanguage(combined);
-                var playable = IsBrowserPlayable(url);
+                var playable = IsBrowserPlayable(url, combined);
 
                 string bingeGroup = null;
                 if (s["behaviorHints"] is JObject hints)
@@ -454,8 +467,20 @@ namespace AnimeList.Services
             return null;
         }
 
-        private static bool IsBrowserPlayable(string url)
+        private static bool IsBrowserPlayable(string url, string nameAndDescription)
         {
+            // First check the textual hints. Most debrid-CDN URLs are
+            // token-paths with no extension, so we can't rely on the
+            // URL alone — but the addon's name/title routinely carries
+            // codec tokens (Torrentio puts them in the name line under
+            // the quality, MediaFusion in the description). Catching
+            // HEVC / AV1 / MKV here saves us five guaranteed-to-fail
+            // reconnect cycles in ArtPlayer before the codec error
+            // surfaces.
+            if (!string.IsNullOrEmpty(nameAndDescription)
+                && NonBrowserCodecRegex.IsMatch(nameAndDescription))
+                return false;
+
             try
             {
                 var uri = new Uri(url);

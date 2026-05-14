@@ -2084,7 +2084,10 @@ body.modal-open {
 
 /* Provider pill — same shape as the language tag so the row reads as a
    chain of evenly-weighted hint badges. Slightly warmer tint to set it
-   apart from the language pill at a glance. */
+   apart from the language pill at a glance. nowrap keeps multi-word
+   names like "Torrentio RD" on a single line when the sub row also
+   carries size + seeders + language flags — without it the flex-wrap
+   on the sub container breaks the badge text at the inner space. */
 .episode-stream-provider {
     display: inline-flex;
     align-items: center;
@@ -2094,6 +2097,7 @@ body.modal-open {
     color: rgba(255, 200, 120, 0.9);
     font-size: 0.72rem;
     font-weight: 500;
+    white-space: nowrap;
 }
 
 /* Language pill — slightly heavier visual weight than the muted size /
