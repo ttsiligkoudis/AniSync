@@ -34,12 +34,14 @@ export class RangeReader {
         // Otherwise fetch fresh.
         const bytes = await this._fetch(start, length);
         this._chunks.push({ start, bytes });
-        // Keep cache bounded — total file might be 700+ MB and we
-        // only ever need ~30 MB of subtitle data. Drop oldest if we
-        // ever exceed 80 MB cached.
+        // Keep cache bounded. Cloudflare Workers' 128 MB memory cap
+        // is shared with the in-flight Response body + framework
+        // overhead, so we keep our resident set comfortably below
+        // half of that — fits one big batch + the head/tracks/cues
+        // slabs with margin for the next fetch.
         let cached = 0;
         for (const c of this._chunks) cached += c.bytes.length;
-        while (cached > 80 * 1024 * 1024 && this._chunks.length > 2) {
+        while (cached > 32 * 1024 * 1024 && this._chunks.length > 2) {
             cached -= this._chunks.shift().bytes.length;
         }
         return bytes;
@@ -67,6 +69,21 @@ export class RangeReader {
         }
         const buf = new Uint8Array(await res.arrayBuffer());
         return buf;
+    }
+
+    /**
+     * Drops any cached chunk that starts inside [start, end). Used
+     * by the extractor to release a batch's bytes the moment its
+     * clusters have been parsed — keeps peak memory well below
+     * Cloudflare's 128 MB Worker cap during long extractions.
+     */
+    evict(start, end) {
+        for (let i = this._chunks.length - 1; i >= 0; i--) {
+            const c = this._chunks[i];
+            if (c.start >= start && c.start < end) {
+                this._chunks.splice(i, 1);
+            }
+        }
     }
 
     /**

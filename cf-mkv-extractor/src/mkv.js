@@ -43,15 +43,21 @@ const CLUSTER_FETCH = 4 * 1024 * 1024;
 // single Range request. Trades a bit of extra bandwidth for far fewer
 // subrequests.
 const CLUSTER_BATCH_GAP = 4 * 1024 * 1024;
+// Hard cap on a single batch's span. Workers Free has a 128 MB memory
+// ceiling shared with the in-flight Response body and the framework;
+// staying under 16 MB per batch keeps peak well below the cliff even
+// when the previous batch is still in cache during the next fetch.
+const MAX_BATCH_SIZE = 16 * 1024 * 1024;
 // Cloudflare Workers Free caps us at 50 subrequests per invocation.
 // Reserve a few for head / tracks / cues / size-probe and leave a
 // safety margin. If the raw batch count exceeds this we coarsen by
-// merging the smallest-gap adjacent batches until we fit.
+// merging the smallest-gap adjacent batches until we fit — but never
+// past MAX_BATCH_SIZE.
 const MAX_CLUSTER_BATCHES = 35;
-// Hard ceiling on total bytes pulled so a pathological MKV can't
-// drain the user's RD quota even if our coalescing produces a giant
-// batch.
-const MAX_TOTAL_FETCH = 200 * 1024 * 1024;
+// Hard ceiling on total bytes pulled. Lower than before since per-batch
+// memory dominates the OOM risk; 120 MB across the whole extraction is
+// plenty for the index-clusters we actually care about.
+const MAX_TOTAL_FETCH = 120 * 1024 * 1024;
 
 export async function extractSubtitles(reader) {
     await reader.probeSize();
@@ -147,51 +153,59 @@ export async function extractSubtitles(reader) {
     // episode with many cue points doesn't blow Cloudflare Workers'
     // 50-subrequest-per-invocation cap. Two-pass:
     //   (a) Greedy: adjacent offsets within CLUSTER_BATCH_GAP share
-    //       one batch.
-    //   (b) Coarsen: if the resulting batch count exceeds
-    //       MAX_CLUSTER_BATCHES, repeatedly merge the smallest-gap
-    //       neighbour pair until we fit the budget.
-    // After all batches are fetched and cached in RangeReader, the
-    // per-cluster `read()` calls below are in-memory hits — no
-    // additional subrequests.
+    //       one batch — capped at MAX_BATCH_SIZE so no single fetch
+    //       blows the 128 MB Worker memory cap.
+    //   (b) Coarsen: if greedy still produced more than
+    //       MAX_CLUSTER_BATCHES batches, repeatedly merge the
+    //       smallest-gap neighbour pair until we fit the budget,
+    //       refusing any merge that would push the resulting batch
+    //       past MAX_BATCH_SIZE.
+    // We then fetch + process + evict each batch sequentially so the
+    // resident set stays small even on long extractions.
     const batches = [];
     for (const off of clusterAbsOffsets) {
         const cur = batches[batches.length - 1];
-        if (cur && off - cur.end < CLUSTER_BATCH_GAP) {
+        if (cur
+            && off - cur.end < CLUSTER_BATCH_GAP
+            && (off + CLUSTER_FETCH) - cur.start <= MAX_BATCH_SIZE) {
             cur.end = off + CLUSTER_FETCH;
         } else {
             batches.push({ start: off, end: off + CLUSTER_FETCH });
         }
     }
     while (batches.length > MAX_CLUSTER_BATCHES) {
-        let mergeIdx = 0;
+        let mergeIdx = -1;
         let minGap = Infinity;
         for (let i = 0; i < batches.length - 1; i++) {
+            const mergedSize = batches[i + 1].end - batches[i].start;
+            if (mergedSize > MAX_BATCH_SIZE) continue;
             const gap = batches[i + 1].start - batches[i].end;
             if (gap < minGap) { minGap = gap; mergeIdx = i; }
         }
+        if (mergeIdx < 0) break; // every adjacent merge would overflow the size cap
         batches[mergeIdx].end = batches[mergeIdx + 1].end;
         batches.splice(mergeIdx + 1, 1);
     }
-    for (const b of batches) {
+
+    // Group cluster offsets by which batch contains them so each
+    // batch can be processed in isolation and evicted right after.
+    const clustersInBatch = batches.map(b =>
+        clusterAbsOffsets.filter(off => off >= b.start && off + CLUSTER_FETCH <= b.end)
+    );
+
+    for (let bi = 0; bi < batches.length; bi++) {
+        const b = batches[bi];
         const len = b.end - b.start;
         if (totalFetched + len > MAX_TOTAL_FETCH) break;
         try {
             await reader.read(b.start, len);
             totalFetched += len;
-        } catch (_) { /* batch missing — clusters in it will be skipped */ }
-    }
+        } catch (_) { continue; /* batch failed — its clusters are lost */ }
 
-    for (const clusterAbs of clusterAbsOffsets) {
-        let clusterBuf;
-        try {
-            // Re-uses cached bytes from the batches above when the
-            // cluster fits inside one. If it doesn't (the batch was
-            // skipped due to MAX_TOTAL_FETCH), this would issue a
-            // fresh fetch — guard with another total-fetch check.
-            if (totalFetched >= MAX_TOTAL_FETCH) break;
-            clusterBuf = await reader.read(clusterAbs, CLUSTER_FETCH);
-        } catch (_) { continue; }
+        for (const clusterAbs of clustersInBatch[bi]) {
+            let clusterBuf;
+            try { clusterBuf = await reader.read(clusterAbs, CLUSTER_FETCH); }
+            catch (_) { continue; }
         let clusterEl;
         try { clusterEl = readElement(clusterBuf, 0); }
         catch (e) { continue; }
@@ -252,6 +266,13 @@ export async function extractSubtitles(reader) {
 
             childOff = child.dataOffset + child.size;
         }
+        }
+
+        // Evict this batch's bytes before fetching the next one —
+        // keeps resident memory bounded at roughly one batch + the
+        // small head / tracks / cues slabs regardless of how many
+        // batches we process.
+        reader.evict(b.start, b.end);
     }
 
     // ── 7. Stitch it together ─────────────────────────────────────
