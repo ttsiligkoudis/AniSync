@@ -704,7 +704,7 @@ namespace AnimeList.Controllers
             return Json(new
             {
                 anonymous = tokenData.anonymousUser,
-                rdConfigured = !string.IsNullOrEmpty(apiKey),
+                addonsConfigured = addons.Count > 0,
                 debridStreams,
                 externalLinks,
                 skipTimes,

@@ -2359,9 +2359,9 @@
 
                 if (debrid.length === 0 && external.length === 0) {
                     var msg = data && data.anonymous
-                        ? "Sign in and add a Real-Debrid key in Settings to find streaming sources for this episode."
-                        : (data && !data.rdConfigured
-                            ? "No streaming sources found. Add a Real-Debrid key in Settings to surface RD-cached torrents via Torrentio."
+                        ? "Sign in and add a Stremio stream addon (Torrentio, MediaFusion, …) in Settings to find streaming sources for this episode."
+                        : (data && !data.addonsConfigured
+                            ? "No streaming sources found. Add a Stremio stream addon (Torrentio, MediaFusion, Comet, AIOStreams, …) in Settings to surface debrid-cached torrents."
                             : "No streaming sources found for this episode.");
                     sourcesBody.appendChild(el('p', { class: 'hint-text' }, msg));
                 }
