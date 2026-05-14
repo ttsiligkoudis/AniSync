@@ -576,37 +576,50 @@
                     if (!u) { resolve(null); return; }
                     fetch(u, { signal: signal, skipLoader: true })
                         .then(function (r) {
-                            if (r.status === 200) return r.json().then(function (j) { return { ok: true, data: j }; });
-                            return r.json().catch(function () { return {}; }).then(function (errJson) {
-                                return { ok: false, status: r.status, err: errJson };
+                            // The Worker returns 200 with
+                            // { extracted: false, reason } when the
+                            // file is indexless / had a network drop
+                            // / a parse error — same downstream
+                            // behaviour as a 5xx, but a 200 keeps the
+                            // Worker out of Cloudflare's
+                            // failure-rate guard rail (which
+                            // otherwise surfaces as 503s after a few
+                            // failures pile up). 4xx still means a
+                            // real structural problem we want to see.
+                            return r.json().then(function (j) {
+                                return { status: r.status, body: j };
+                            }).catch(function () {
+                                return { status: r.status, body: null };
                             });
                         })
                         .then(function (result) {
-                            if (!result.ok) {
-                                // Surface the failure clearly so it's
-                                // obvious in DevTools that we're
-                                // intentionally falling through to the
-                                // cf-cors-proxy streaming path rather
-                                // than the page being broken.
+                            var body = result.body;
+                            if (result.status !== 200 || !body) {
                                 console.info(
-                                    '[AniSync] mkv-extractor failed (' + result.status + '), falling back to streaming proxy:',
-                                    (result.err && result.err.error) || '(no detail)');
+                                    '[AniSync] mkv-extractor structural failure (' + result.status + '), falling back to streaming proxy:',
+                                    (body && body.error) || '(no detail)');
                                 resolve(null);
                                 return;
                             }
-                            var data = result.data;
-                            if (!data || !data.tracks) { resolve(null); return; }
+                            if (body.extracted === false) {
+                                console.info(
+                                    '[AniSync] mkv-extractor fell through (reason=' + body.reason + '), using streaming proxy:',
+                                    body.error || '(no detail)');
+                                resolve(null);
+                                return;
+                            }
+                            if (!body.tracks) { resolve(null); return; }
                             try {
                                 console.log(
                                     '[AniSync] mkv-extractor:',
-                                    data.tracks.length, 'tracks',
-                                    '(file=' + (data.stats && data.stats.fileSize) + 'B)',
-                                    data.tracks.map(function (t) {
+                                    body.tracks.length, 'tracks',
+                                    '(file=' + (body.stats && body.stats.fileSize) + 'B)',
+                                    body.tracks.map(function (t) {
                                         return { num: t.number, lang: t.language, name: t.name, cues: (t.cues || []).length };
                                     })
                                 );
                             } catch (_) {}
-                            resolve(data);
+                            resolve(body);
                         })
                         .catch(function (e) {
                             console.info('[AniSync] mkv-extractor network error, falling back to streaming proxy:', e && e.message);
