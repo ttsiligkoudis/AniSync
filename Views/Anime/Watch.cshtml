@@ -546,7 +546,15 @@
             // the worker isn't configured / the host isn't supported).
             function viaMkvExtractor(cdnUrl) {
                 if (!MKV_EXTRACTOR_URL) return null;
-                var u = MKV_EXTRACTOR_URL.replace(/\/$/, '') + '/?url=' + encodeURIComponent(cdnUrl);
+                // lang=auto tells the Worker to return ONLY the first
+                // English subtitle track (matching language=en* OR
+                // name=english/eng). The client's existing
+                // auto-promote rule would discard the other tracks
+                // anyway and skipping them server-side saves Worker
+                // memory + JSON size + sometimes Cluster fetches.
+                var u = MKV_EXTRACTOR_URL.replace(/\/$/, '')
+                    + '/?url=' + encodeURIComponent(cdnUrl)
+                    + '&lang=auto';
                 if (MKV_EXTRACTOR_SECRET) u += '&secret=' + encodeURIComponent(MKV_EXTRACTOR_SECRET);
                 return u;
             }

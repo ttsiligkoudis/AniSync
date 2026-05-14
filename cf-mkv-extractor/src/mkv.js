@@ -45,7 +45,8 @@ const MAX_CLUSTER_BATCHES = 30;
 // Hard ceiling on total bytes pulled.
 const MAX_TOTAL_FETCH = 60 * 1024 * 1024;
 
-export async function extractSubtitles(reader) {
+export async function extractSubtitles(reader, options) {
+    const opts = options || {};
     await reader.probeSize();
 
     // ── 1. Read the file head ─────────────────────────────────────
@@ -108,9 +109,21 @@ export async function extractSubtitles(reader) {
         throw new Error(`expected Tracks at ${tracksAbs}, got id 0x${tracksEl.id.toString(16)}`);
     }
     const tracks = parseTracks(tracksBuf, tracksEl.dataOffset, tracksEl.dataOffset + tracksEl.size);
-    const subtitleTracks = tracks.filter(t => t.type === TRACK_TYPE_SUBTITLE && t.codecID);
+    let subtitleTracks = tracks.filter(t => t.type === TRACK_TYPE_SUBTITLE && t.codecID);
     if (subtitleTracks.length === 0) {
         return { tracks: [] };
+    }
+    // Optional language filter. Cuts the per-cluster parse cost and
+    // the JSON response size by however many tracks we drop. The
+    // bandwidth saving is smaller because Clusters carry every
+    // track's data interleaved, but in files where Cues are indexed
+    // per-track this can also reduce the unique Cluster offsets we
+    // have to fetch.
+    if (opts.lang) {
+        subtitleTracks = filterTracksByLang(subtitleTracks, opts.lang);
+        if (subtitleTracks.length === 0) {
+            return { tracks: [] };
+        }
     }
     const subTrackNumbers = new Set(subtitleTracks.map(t => t.number));
 
@@ -482,4 +495,42 @@ function decodeSubtitle(payload, codecID) {
 function decodeHeader(codecPrivate, codecID) {
     if (!codecPrivate || codecPrivate.length === 0) return '';
     return new TextDecoder('utf-8', { fatal: false }).decode(codecPrivate);
+}
+
+/**
+ * Filters a TrackEntry list down to those matching a language hint:
+ *
+ *   "auto"  — keep only the FIRST track whose language tag starts
+ *             with "en" or whose name contains "english"/"eng".
+ *             Mirrors the client's auto-promote rule.
+ *   "eng"   — keep tracks with language matching the ISO-639-2/B
+ *             code (also matches ISO-639-1 "en" via prefix).
+ *   anything else — same explicit-code rule; unknown codes filter
+ *             to empty (caller handles).
+ *
+ * Track NAME is checked alongside language so fansubs that left
+ * Language="und" but set TrackName="English [GroupName]" still
+ * match — same dual-signal the client's auto-promote uses.
+ */
+function filterTracksByLang(subtitleTracks, lang) {
+    const isEnglish = (t) => {
+        const l = (t.language || '').toLowerCase();
+        const n = (t.name || '').toLowerCase();
+        return l.startsWith('en') || /\benglish\b/.test(n) || /\beng\b/.test(n);
+    };
+    if (lang === 'auto') {
+        for (const t of subtitleTracks) {
+            if (isEnglish(t)) return [t];
+        }
+        return [];
+    }
+    // Explicit ISO code path. Match by language prefix so e.g.
+    // lang=spa keeps both "spa" and any "es-*" regional tags.
+    const code = lang.toLowerCase();
+    const shortCode = code.length >= 2 ? code.substring(0, 2) : code;
+    return subtitleTracks.filter(t => {
+        const l = (t.language || '').toLowerCase();
+        if (!l) return false;
+        return l === code || l.startsWith(shortCode);
+    });
 }
