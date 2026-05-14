@@ -1881,6 +1881,20 @@
                 setTimeout(function () {
                     try { URL.revokeObjectURL(blobUrl); } catch (_) {}
                 }, 5000);
+
+                // iOS Safari's download UX is clunky compared to
+                // Android's intent picker — Safari drops the file in
+                // Files and the user has to long-press → Share →
+                // Open in… to actually hand it off to VLC / Infuse.
+                // Drop a 9-second toast spelling out the steps so
+                // first-time iOS users aren't left wondering where
+                // the file went.
+                if (IS_IOS_SAFARI && window.AniSyncToast) {
+                    window.AniSyncToast.show(
+                        'Downloaded. In Files, long-press the .m3u → Share → Open in… → VLC / Infuse.',
+                        9000
+                    );
+                }
             }
 
 
