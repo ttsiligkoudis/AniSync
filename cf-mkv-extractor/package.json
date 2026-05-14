@@ -1,0 +1,13 @@
+{
+  "name": "anisync-mkv-extractor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker that range-fetches an MKV from a debrid CDN, walks its EBML index, and returns the embedded SSA / ASS subtitles as JSON. ~10-30 MB of network instead of the full 700 MB MKV.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3.78.0"
+  }
+}
