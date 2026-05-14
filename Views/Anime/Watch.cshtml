@@ -485,6 +485,63 @@
                 }
             }
 
+            // Watches the browser's Resource Timing entries for a URL
+            // on a debrid CDN host and resolves to that URL once one
+            // appears. Used when the Stream URL we hold is a
+            // Torrentio resolver (strem.fun) — Torrentio is behind
+            // Cloudflare's WAF which bot-blocks the Worker, but the
+            // post-redirect *.real-debrid.com CDN is fine. <video>
+            // follows the redirect natively when the source starts
+            // loading; we wait for that and use the resolved URL.
+            //
+            // Falls back to the original URL after the timeout so the
+            // pipeline at least tries to run (and fails gracefully)
+            // rather than hanging.
+            var CDN_HOST_RE = /(?:^|\.)(?:real-debrid\.com|alldebrid\.com|debrid-link\.com|premiumize\.me|torbox\.app|offcloud\.com)$/i;
+            function resolveStreamUrl(originalUrl, signal) {
+                return new Promise(function (resolve) {
+                    var TIMEOUT_MS = 8000;
+
+                    function findResolved() {
+                        try {
+                            var entries = performance.getEntriesByType('resource');
+                            for (var i = entries.length - 1; i >= 0; i--) {
+                                var name = entries[i].name;
+                                try {
+                                    if (CDN_HOST_RE.test(new URL(name).hostname)) return name;
+                                } catch (_) { /* not a URL */ }
+                            }
+                        } catch (_) { /* timing API unavailable */ }
+                        return null;
+                    }
+
+                    var hit = findResolved();
+                    if (hit) { resolve(hit); return; }
+
+                    var done = false;
+                    var observer = null;
+                    function finish(u) {
+                        if (done) return;
+                        done = true;
+                        if (observer) { try { observer.disconnect(); } catch (_) {} }
+                        resolve(u);
+                    }
+
+                    try {
+                        observer = new PerformanceObserver(function () {
+                            var h = findResolved();
+                            if (h) finish(h);
+                        });
+                        observer.observe({ entryTypes: ['resource'] });
+                    } catch (_) { /* fall back to timeout-only */ }
+
+                    if (signal) {
+                        signal.addEventListener('abort', function () { finish(originalUrl); });
+                    }
+                    setTimeout(function () { finish(originalUrl); }, TIMEOUT_MS);
+                });
+            }
+
             // Stream the MKV via Range-aware fetch into
             // matroska-subtitles, accumulate per-track cues, and on
             // completion build a renderable ASS document for each
@@ -493,58 +550,66 @@
             // surface entries before full parse completes — final
             // (onComplete) fires once cue accumulation is done.
             function extractEmbeddedSubs(url, onTracks, onComplete) {
-                // Debrid CDNs and the Torrentio resolver don't send
-                // Access-Control-Allow-Origin on their media URLs, so
-                // direct `fetch()` throws TypeError("Failed to fetch")
-                // — even though the <video> tag plays the same URL
-                // fine. Two outcomes here:
-                //   * CORS_PROXY_URL configured (Cloudflare Worker
-                //     in cf-cors-proxy/ deployed) → route bytes
-                //     through the proxy. The worker adds the missing
-                //     CORS header and the matroska-subtitles
-                //     pipeline runs normally.
-                //   * Not configured → skip the pipeline entirely
-                //     to avoid polluting the console with browser-
-                //     injected CORS / ERR_FAILED warnings on every
-                //     source switch.
-                if (isCorsBlockedHost(url)) {
-                    var proxied = viaCorsProxy(url);
-                    if (!proxied) {
-                        setEmbedStatus(null);
-                        onComplete([]);
-                        var noop = new AbortController();
-                        return noop;
-                    }
-                    url = proxied;
-                }
-
-                setEmbedStatus('Looking for embedded subtitles…', 'loading');
-
                 var abortCtl = new AbortController();
 
-                // Wait on the global ready promise from the module
-                // bootstrap so we don't bail with "support unavailable"
-                // just because the imports were still in flight when
-                // the user picked a source.
-                var readyPromise = window.subtitleLibsReady
-                    || Promise.resolve({ matroska: false, jassub: false });
-                readyPromise.then(function (status) {
-                    if (abortCtl.signal.aborted) return;
-                    if (!status.matroska || typeof MatroskaSubtitles === 'undefined' || !MatroskaSubtitles.SubtitleParser) {
-                        setEmbedStatus('Embedded-subtitle support unavailable', 'error');
+                // Resolve the URL we'll actually fetch from. Three
+                // outcomes for CORS-blocked hosts (debrid CDNs +
+                // Torrentio resolver):
+                //   * No CORS_PROXY_URL → skip silently. The pill
+                //     stays hidden, OpenSubtitles fills the menu.
+                //   * Proxy configured + Torrentio URL → wait for
+                //     <video> to follow the redirect and capture the
+                //     resolved debrid-CDN URL via Resource Timing,
+                //     then route THAT through the proxy. (Going
+                //     through the Worker directly to Torrentio trips
+                //     Cloudflare's bot-block; going to RD doesn't.)
+                //   * Proxy configured + URL already on a debrid CDN
+                //     → route directly through the proxy.
+                var urlPromise;
+                if (isCorsBlockedHost(url)) {
+                    if (!CORS_PROXY_URL) {
+                        setEmbedStatus(null);
                         onComplete([]);
-                        return;
+                        return abortCtl;
                     }
-                    runExtraction();
-                }).catch(function (e) {
-                    // Defensive: anything thrown synchronously inside
-                    // runExtraction's setup (parser ctor, listener wiring)
-                    // would otherwise surface as an Uncaught (in promise)
-                    // rejection. Treat as a soft failure — the status
-                    // pill already reflects the specific cause when one
-                    // is known, so just make sure onComplete fires.
-                    console.warn('embedded sub readiness chain failed:', e);
-                    onComplete([]);
+                    setEmbedStatus('Waiting for stream URL…', 'loading');
+                    var originalUrl = url;
+                    urlPromise = resolveStreamUrl(originalUrl, abortCtl.signal).then(function (resolved) {
+                        return viaCorsProxy(resolved) || viaCorsProxy(originalUrl);
+                    });
+                } else {
+                    urlPromise = Promise.resolve(url);
+                }
+
+                urlPromise.then(function (finalUrl) {
+                    if (abortCtl.signal.aborted) return;
+                    url = finalUrl;
+                    setEmbedStatus('Looking for embedded subtitles…', 'loading');
+
+                    // Wait on the global ready promise from the module
+                    // bootstrap so we don't bail with "support unavailable"
+                    // just because the imports were still in flight when
+                    // the user picked a source.
+                    var readyPromise = window.subtitleLibsReady
+                        || Promise.resolve({ matroska: false, jassub: false });
+                    readyPromise.then(function (status) {
+                        if (abortCtl.signal.aborted) return;
+                        if (!status.matroska || typeof MatroskaSubtitles === 'undefined' || !MatroskaSubtitles.SubtitleParser) {
+                            setEmbedStatus('Embedded-subtitle support unavailable', 'error');
+                            onComplete([]);
+                            return;
+                        }
+                        runExtraction();
+                    }).catch(function (e) {
+                        // Defensive: anything thrown synchronously inside
+                        // runExtraction's setup (parser ctor, listener wiring)
+                        // would otherwise surface as an Uncaught (in promise)
+                        // rejection. Treat as a soft failure — the status
+                        // pill already reflects the specific cause when one
+                        // is known, so just make sure onComplete fires.
+                        console.warn('embedded sub readiness chain failed:', e);
+                        onComplete([]);
+                    });
                 });
                 return abortCtl;
 
