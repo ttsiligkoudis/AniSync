@@ -34,30 +34,31 @@ const TRACKS_FETCH = 256 * 1024;
 // Cues are usually proportional to file length — a few hundred KB up
 // to a couple of MB. 4 MB covers the worst case we've seen.
 const CUES_FETCH = 4 * 1024 * 1024;
-// Per-cluster fetch — anime HEVC 1080p clusters can carry several MB
-// of video data; 4 MB is usually enough to also contain the cluster's
-// subtitle blocks (which spec-recommended layout puts after the video
-// frames they share a timestamp with).
-const CLUSTER_FETCH = 4 * 1024 * 1024;
+// Per-cluster fetch. Smaller than before — anime HEVC 1080p clusters
+// can carry several MB of video data, but the subtitle blocks
+// themselves are tiny and live near the cluster header in
+// well-formed mux outputs. 2 MB covers the common case without
+// stuffing a full GOP into memory.
+const CLUSTER_FETCH = 2 * 1024 * 1024;
 // Coalesce sub-cluster offsets whose gap is smaller than this into a
 // single Range request. Trades a bit of extra bandwidth for far fewer
 // subrequests.
-const CLUSTER_BATCH_GAP = 4 * 1024 * 1024;
+const CLUSTER_BATCH_GAP = 2 * 1024 * 1024;
 // Hard cap on a single batch's span. Workers Free has a 128 MB memory
-// ceiling shared with the in-flight Response body and the framework;
-// staying under 16 MB per batch keeps peak well below the cliff even
-// when the previous batch is still in cache during the next fetch.
-const MAX_BATCH_SIZE = 16 * 1024 * 1024;
+// ceiling shared with the in-flight Response body and framework
+// overhead. 8 MB per batch keeps peak resident set well under the
+// cliff even on long episodes where many batches chain back-to-back.
+const MAX_BATCH_SIZE = 8 * 1024 * 1024;
 // Cloudflare Workers Free caps us at 50 subrequests per invocation.
 // Reserve a few for head / tracks / cues / size-probe and leave a
 // safety margin. If the raw batch count exceeds this we coarsen by
 // merging the smallest-gap adjacent batches until we fit — but never
 // past MAX_BATCH_SIZE.
 const MAX_CLUSTER_BATCHES = 35;
-// Hard ceiling on total bytes pulled. Lower than before since per-batch
-// memory dominates the OOM risk; 120 MB across the whole extraction is
-// plenty for the index-clusters we actually care about.
-const MAX_TOTAL_FETCH = 120 * 1024 * 1024;
+// Hard ceiling on total bytes pulled. Lower still since per-batch
+// memory dominates the OOM risk and the user's 700 MB+ files were
+// blowing past the cap with the looser ceiling.
+const MAX_TOTAL_FETCH = 80 * 1024 * 1024;
 
 export async function extractSubtitles(reader) {
     await reader.probeSize();

@@ -36,12 +36,12 @@ export class RangeReader {
         this._chunks.push({ start, bytes });
         // Keep cache bounded. Cloudflare Workers' 128 MB memory cap
         // is shared with the in-flight Response body + framework
-        // overhead, so we keep our resident set comfortably below
-        // half of that — fits one big batch + the head/tracks/cues
-        // slabs with margin for the next fetch.
+        // overhead. Hold ~16 MB resident at most so even an
+        // in-flight 8 MB fetch + leftover cache + worker overhead
+        // stays well under the cliff.
         let cached = 0;
         for (const c of this._chunks) cached += c.bytes.length;
-        while (cached > 32 * 1024 * 1024 && this._chunks.length > 2) {
+        while (cached > 16 * 1024 * 1024 && this._chunks.length > 2) {
             cached -= this._chunks.shift().bytes.length;
         }
         return bytes;
@@ -67,8 +67,51 @@ export class RangeReader {
                 if (cl && res.status === 200) this.totalSize = parseInt(cl, 10);
             }
         }
-        const buf = new Uint8Array(await res.arrayBuffer());
-        return buf;
+        // If the upstream returned 200 OK instead of 206, the Range
+        // header was ignored — the body is the entire file starting
+        // at byte 0. CF's arrayBuffer() then predicts the read would
+        // overflow the worker's memory cap and emits
+        // "Memory limit would be exceeded before EOF" instantly.
+        // Bail with a structured error so the caller can fall back
+        // instead of OOMing for the user. (RD's standard CDN does
+        // honour Range; this guards against a few of their mirrors
+        // that misbehave.)
+        if (res.status === 200 && start > 0) {
+            try { res.body.cancel && res.body.cancel(); } catch (_) {}
+            throw new Error(`upstream returned 200 (Range ignored) for range ${start}-${start + length - 1}; cannot fetch arbitrary offset`);
+        }
+        // Stream the body chunk-by-chunk with a HARD CAP at the
+        // requested length. Even if the upstream Content-Length lies
+        // or the server streams more bytes than asked, we stop
+        // reading at `length` and cancel the stream — keeps peak
+        // memory bounded to one batch regardless of upstream weirdness.
+        return await this._readStreamCapped(res, length);
+    }
+
+    async _readStreamCapped(res, maxBytes) {
+        const reader = res.body.getReader();
+        const buf = new Uint8Array(maxBytes);
+        let written = 0;
+        try {
+            while (written < maxBytes) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                const room = maxBytes - written;
+                if (value.length <= room) {
+                    buf.set(value, written);
+                    written += value.length;
+                } else {
+                    buf.set(value.subarray(0, room), written);
+                    written = maxBytes;
+                    break;
+                }
+            }
+        } finally {
+            // Release the upstream connection promptly so CF doesn't
+            // hold the body buffer alive waiting for us to finish.
+            try { await reader.cancel(); } catch (_) {}
+        }
+        return written === maxBytes ? buf : buf.subarray(0, written);
     }
 
     /**
