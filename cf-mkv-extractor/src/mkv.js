@@ -24,26 +24,32 @@ import {
     TRACK_TYPE_SUBTITLE,
 } from './ebml.js';
 
-// Smaller everything. Each Range request to RD's CDN is a chance for
-// the connection to drop mid-stream ("Network connection lost"); the
-// shorter the connection's lifespan, the less likely we are to lose
-// it. We trade some bandwidth efficiency for reliability on flaky
-// upstreams.
-const HEAD_BYTES = 128 * 1024;
-const TRACKS_FETCH = 128 * 1024;
-const CUES_FETCH = 2 * 1024 * 1024;
-const CLUSTER_FETCH = 1 * 1024 * 1024;
-const CLUSTER_BATCH_GAP = 1 * 1024 * 1024;
-// Hard cap on a single batch's span. Smaller batches → faster
-// individual fetches → fewer mid-stream drops, and trivially under
-// the Workers Free 128 MB memory cliff regardless of cache state.
-const MAX_BATCH_SIZE = 4 * 1024 * 1024;
+// With lang=auto in the default flow the per-Worker memory pressure
+// drops significantly (cuesByTrack carries one track instead of all
+// eleven), so we can spend the freed budget on larger Range requests.
+// Bigger fetches = fewer connections to open = fewer chances for
+// RD's edges to drop us mid-stream with "Network connection lost".
+// Still well under the 128 MB Worker memory cap even with the
+// in-flight stream buffer + cache + framework overhead.
+const HEAD_BYTES = 256 * 1024;
+const TRACKS_FETCH = 256 * 1024;
+const CUES_FETCH = 3 * 1024 * 1024;
+const CLUSTER_FETCH = 3 * 1024 * 1024;
+const CLUSTER_BATCH_GAP = 3 * 1024 * 1024;
+// Per-batch span. Sized to fit comfortably in memory (peak: stream
+// buffer 12 MB + cache up to 24 MB + cues/tracks/head ≈ 4 MB +
+// framework ≈ 50 MB) and to keep individual fetches shorter than the
+// window where RD's edges seem to start dropping connections.
+const MAX_BATCH_SIZE = 12 * 1024 * 1024;
 // Cloudflare Workers Free caps us at 50 subrequests per invocation.
-// Reserve room for head / tracks / cues / size-probe and their
-// retries.
-const MAX_CLUSTER_BATCHES = 30;
-// Hard ceiling on total bytes pulled.
-const MAX_TOTAL_FETCH = 60 * 1024 * 1024;
+// Bigger batches → fewer batches needed → MAX_CLUSTER_BATCHES is
+// rarely the binding constraint, but kept conservative so retries
+// against transient failures stay within the cap.
+const MAX_CLUSTER_BATCHES = 25;
+// Total bytes ceiling. Higher than before since the single-track
+// pipeline doesn't accumulate gigantic in-memory structures and we
+// have ~100 MB of usable margin under the 128 MB Worker cap.
+const MAX_TOTAL_FETCH = 100 * 1024 * 1024;
 
 export async function extractSubtitles(reader, options) {
     const opts = options || {};
