@@ -1985,42 +1985,6 @@ body.modal-open {
     color: #fff;
 }
 
-.episode-stream-action.is-success {
-    color: rgb(134, 239, 172);
-    border-color: rgba(34, 197, 94, 0.45);
-}
-
-/* Popup menu shown when the external-launcher action is clicked.
-   Lives directly under <body> so it's not clipped by the source
-   panel's overflow rules and survives source-list re-renders. */
-.episode-stream-external-menu {
-    position: absolute;
-    z-index: 50;
-    min-width: 12rem;
-    background: rgba(20, 20, 28, 0.98);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 0.6rem;
-    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
-    padding: 0.25rem;
-    display: flex;
-    flex-direction: column;
-}
-
-.episode-stream-external-menu a {
-    display: block;
-    padding: 0.5rem 0.75rem;
-    color: rgba(255, 255, 255, 0.85);
-    font-size: 0.85rem;
-    text-decoration: none;
-    border-radius: 0.4rem;
-}
-
-.episode-stream-external-menu a:hover,
-.episode-stream-external-menu a:focus {
-    background: rgba(124, 58, 237, 0.25);
-    color: #fff;
-}
-
 .episode-stream-pick:hover,
 .episode-stream-pick:focus {
     background: rgba(255, 255, 255, 0.07);
@@ -2513,6 +2477,29 @@ body.modal-open {
     .episode-stream-quality {
         min-width: 2.75rem;
         font-size: 0.68rem;
+    }
+    /* Multi-language releases (10+ flag emojis) wrap the
+       language chip onto a second line on narrow screens,
+       making the row twice as tall as its siblings and
+       breaking the list rhythm. Clamp the sub-line to one
+       row and let the language chip ellipsis when it can't
+       fit — size / seeders chips stay full-width since they
+       carry information we don't want truncated. */
+    .episode-stream-sub {
+        flex-wrap: nowrap;
+        overflow: hidden;
+    }
+    .episode-stream-size,
+    .episode-stream-seeders {
+        flex-shrink: 0;
+    }
+    .episode-stream-language {
+        flex-shrink: 1;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 }
 
