@@ -429,103 +429,29 @@
                     return;
                 }
                 if (item.kind === 'ass') {
-                    // ArtPlayer's native overlay stays off while
-                    // jassub paints over the video.
+                    // Render embedded SSA/ASS tracks via the VTT
+                    // fallback rather than JASSUB. We tried JASSUB
+                    // 1.7.17 with every conservative flag (no local
+                    // fonts, no offscreen render, no async, explicit
+                    // fallback font) — it still trips a
+                    // `SecurityError: VideoFrames can't be created
+                    // from tainted sources` because the WebCodecs
+                    // render path samples pixels from a cross-origin
+                    // <video> (no CORS = tainted = no VideoFrame).
+                    // The constructor returns "successfully" so our
+                    // canvas-sized watchdog doesn't catch it, and
+                    // libass-wasm spams fontselect failures on top.
+                    //
+                    // VTT loses styling (font / colour / position /
+                    // karaoke effects) but ArtPlayer's native pipeline
+                    // renders it on every browser without any
+                    // CORS/WebCodecs/local-font moving parts. The
+                    // dialogue is readable, which is what users
+                    // actually need from an embedded sub when
+                    // OpenSubtitles / Wyzie don't have a match.
                     art.subtitle.show = false;
-                    if (typeof JASSUB === 'undefined' || !art.video) return;
-                    // workerUrl must resolve to a same-origin blob: URL
-                    // before Worker construction — see getJassubWorkerUrl()
-                    // for the cross-origin workaround. The fetch + Blob
-                    // are cheap after the first call (cached) so the
-                    // async hop is one-shot per page load.
-                    var capturedVideo = art.video;
-                    var capturedItem = item;
-                    getJassubWorkerUrl().then(function (workerUrl) {
-                        // The user may have torn down the player or
-                        // picked a different subtitle in the meantime
-                        // — bail if the world has moved on.
-                        if (!art || art.video !== capturedVideo) return;
-                        // Most JASSUB failures aren't synchronous (the
-                        // constructor returns and the actual XHR /
-                        // VideoFrame errors fire inside the worker as
-                        // unhandled rejections). To still recover, kick
-                        // off the VTT fallback after a short delay if
-                        // we haven't seen a working render — and on
-                        // any 'error' event the JASSUB instance emits.
-                        var jassubFellBack = false;
-                        function fallBackToVtt(reason) {
-                            if (jassubFellBack) return;
-                            jassubFellBack = true;
-                            console.warn('falling back to VTT rendering:', reason);
-                            tearDownJassub();
-                            renderAssAsVtt(capturedItem);
-                        }
-                        try {
-                            jassubInstance = new JASSUB({
-                                video: capturedVideo,
-                                subContent: capturedItem.trackData,
-                                workerUrl: workerUrl,
-                                wasmUrl: JASSUB_WASM,
-                                // Disable the OS-font-query feature.
-                                // Newer jassub tries to postMessage a
-                                // function reference into the worker
-                                // for local-font resolution; functions
-                                // can't be structured-cloned and the
-                                // entire init bails with DataCloneError.
-                                useLocalFonts: false,
-                                // Force the software/canvas render
-                                // path. The default OffscreenCanvas +
-                                // WebCodecs path constructs VideoFrame
-                                // objects from the <video>, which the
-                                // browser refuses when the source is
-                                // cross-origin without CORS (every
-                                // debrid stream). Software rendering
-                                // doesn't touch the video pixels —
-                                // only its dimensions + currentTime.
-                                offscreenRender: false,
-                                asyncRender: false,
-                                // Without a fallback font URL, libass-
-                                // wasm tries to XHR each referenced
-                                // font with an empty URL and throws
-                                // SyntaxError on XMLHttpRequest.open().
-                                // Provide a known Latin font so any
-                                // unresolved style name lands on a
-                                // valid glyph set. Note: CJK glyphs
-                                // (anime karaoke titles) will still
-                                // tofu — fixing those needs a Noto
-                                // Sans CJK fallback which is ~5 MB.
-                                fallbackFont: 'https://cdn.jsdelivr.net/npm/@@fontsource/roboto@@5/files/roboto-latin-400-normal.woff2',
-                                availableFonts: {},
-                            });
-                            // Async error path — covers the worker
-                            // throwing XHR / VideoFrame exceptions
-                            // after the constructor returns.
-                            if (jassubInstance && typeof jassubInstance.on === 'function') {
-                                jassubInstance.on('error', function (err) {
-                                    fallBackToVtt('jassub error event: ' + (err && err.message || err));
-                                });
-                            }
-                            // Belt-and-braces: if the renderer hasn't
-                            // produced anything within 3s (likely
-                            // because the WebCodecs path threw inside
-                            // the worker), drop to VTT. The renderer
-                            // exposes a canvas on the instance — when
-                            // it works, the canvas has been resized
-                            // to the video dimensions.
-                            setTimeout(function () {
-                                if (jassubFellBack || !jassubInstance) return;
-                                var c = jassubInstance.canvas || (jassubInstance._canvas);
-                                if (!c || !c.width) {
-                                    fallBackToVtt('jassub canvas never sized');
-                                }
-                            }, 3000);
-                        } catch (e) {
-                            console.warn('jassub init failed:', e);
-                            fallBackToVtt('sync ctor threw: ' + e.message);
-                        }
-                    }).catch(function (e) {
-                        console.warn('jassub init failed (worker prep):', e);
-                    });
+                    renderAssAsVtt(item);
+                    return;
                 }
             }
 
@@ -954,15 +880,23 @@
                 var hasStyles = header && header.indexOf('[V4+ Styles]') >= 0;
                 if (!hasStyles) header = MINIMAL_ASS_HEADER;
                 if (!cues || cues.length === 0) return header;
-                var lines = cues.map(function (c) {
+                var lines = [];
+                for (var i = 0; i < cues.length; i++) {
+                    var c = cues[i];
+                    // Drop empty / whitespace-only cues. matroska-
+                    // subtitles emits these for some encodes and
+                    // they trigger libass' "fontselect failed for
+                    // glyph 0x0" noise downstream.
+                    var rawText = (c.text || '').trim();
+                    if (!rawText) continue;
                     var start = formatAssTime(c.time);
                     var end   = formatAssTime(c.time + (c.duration || 0));
                     // SRT-derived cues use \n for line breaks; ASS
                     // expects literal \N. Skip when the source is
                     // already ASS-styled (no raw newlines in those).
-                    var text = (c.text || '').replace(/\r?\n/g, '\\N');
-                    return 'Dialogue: 0,' + start + ',' + end + ',Default,,0,0,0,,' + text;
-                });
+                    var text = rawText.replace(/\r?\n/g, '\\N');
+                    lines.push('Dialogue: 0,' + start + ',' + end + ',Default,,0,0,0,,' + text);
+                }
                 return header + '\n' + lines.join('\n') + '\n';
             }
             function formatAssTime(ms) {
