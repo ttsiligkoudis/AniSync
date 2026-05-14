@@ -1804,7 +1804,7 @@
                 var btn = el('button', {
                     type: 'button',
                     class: 'episode-stream-action episode-stream-action-external',
-                    title: 'Watch in external player',
+                    title: 'Open in browser or another app',
                 });
                 btn.innerHTML = EXTERNAL_ICON_SVG;
                 btn.addEventListener('click', function (e) {
@@ -1832,13 +1832,15 @@
                     document.body.removeChild(a);
                 }));
 
-                // VLC — platform-specific launcher. Android uses
-                // intent:// (handled natively by VLC for Android);
-                // desktop/iOS gets a .m3u download that opens VLC
-                // via the OS file association (default on any normal
-                // VLC install — no URL-handler registration needed).
-                externalMenu.appendChild(buildMenuItem('Open in VLC', function () {
-                    openInVlc(url, displayName);
+                // Open with — defers to the OS's native picker so
+                // the user lands in whichever player they prefer
+                // (VLC, MX Player, mpv, IINA, Just Player, …). On
+                // Android we dispatch an unrestricted intent so the
+                // system app-chooser fires; on desktop / iOS we
+                // download a .m3u, which the OS opens with whatever
+                // player owns the .m3u file association.
+                externalMenu.appendChild(buildMenuItem('Open with…', function () {
+                    openWithExternalPlayer(url, displayName);
                 }));
 
                 document.body.appendChild(externalMenu);
@@ -1865,22 +1867,28 @@
                 return a;
             }
 
-            // Cross-platform "Open in VLC" launcher.
+            // Cross-platform "Open with…" launcher — defers to the
+            // OS's native app picker rather than hard-coding a single
+            // player.
             //
             // Android:
-            //   intent:// URL with package=org.videolan.vlc. Handled
-            //   natively by VLC for Android when installed; if not,
-            //   Chrome shows the "VLC isn't installed" prompt. No
-            //   protocol registration needed.
+            //   intent:// URL with `action=android.intent.action.VIEW`
+            //   and type=video/*, but WITHOUT a package= constraint.
+            //   Android resolves the intent against every installed
+            //   handler that matches; when there's more than one
+            //   (which is the common case once a viewer has VLC + MX
+            //   Player / Just Player / etc.), the system shows the
+            //   native chooser. Setting a default in the chooser
+            //   becomes the user's preference going forward.
             //
             // Everywhere else (Windows / macOS / Linux / iOS):
-            //   Generate a one-line .m3u playlist as a Blob, trigger
-            //   a download via a temporary <a download>. VLC takes
-            //   the .m3u file association on install — opening the
-            //   download launches VLC with the stream. This sidesteps
-            //   the vlc:// URL-handler-not-registered problem on
-            //   Windows where vlc:// links silently fail to dispatch.
-            function openInVlc(streamUrl, displayName) {
+            //   Generate a one-line .m3u playlist as a Blob and
+            //   trigger a download. Whichever player owns the .m3u
+            //   association opens the stream — VLC, MPC-HC, mpv,
+            //   PotPlayer, IINA, etc. The user picks via the OS's
+            //   "Open with" menu on the downloaded file if they
+            //   want a different one.
+            function openWithExternalPlayer(streamUrl, displayName) {
                 var ua = navigator.userAgent || '';
                 if (/Android/i.test(ua) && !/Windows Phone/i.test(ua)) {
                     var u;
@@ -1889,10 +1897,13 @@
                     var scheme = u.protocol.replace(':', '');
                     var rest = u.host + u.pathname + u.search + u.hash;
                     var title = displayName || 'AniSync stream';
+                    // No package= → Android dispatches against the
+                    // global handler set, surfacing the native chooser
+                    // when more than one app can play the URL.
                     var intent = 'intent://' + rest +
                         '#Intent' +
                         ';scheme=' + scheme +
-                        ';package=org.videolan.vlc' +
+                        ';action=android.intent.action.VIEW' +
                         ';type=video/*' +
                         ';S.title=' + encodeURIComponent(title) +
                         ';end';
