@@ -646,6 +646,17 @@
                             label: prettyLanguage(t.language),
                         };
                     });
+                    try {
+                        console.log('[AniSync] embedded tracks seen:', trackMeta.map(function (t) {
+                            return {
+                                number: t.number,
+                                language: t.language,
+                                codecID: t.codecID,
+                                headerLength: (t.header || '').length,
+                                hasStyles: (t.header || '').indexOf('[V4+ Styles]') >= 0,
+                            };
+                        }));
+                    } catch (_) {}
                     if (trackMeta.length > 0) {
                         setEmbedStatus(
                             'Found ' + trackMeta.length + ' embedded track' + (trackMeta.length === 1 ? '' : 's') + ' — parsing cues…',
@@ -668,6 +679,17 @@
                             data: buildAssDocument(t.header, trackCues[t.number] || []),
                         });
                     });
+                    try {
+                        console.log('[AniSync] embedded extraction finished:', output.map(function (t) {
+                            return {
+                                number: t.number,
+                                language: t.language,
+                                codecID: t.codecID,
+                                cueCount: (trackCues[t.number] || []).length,
+                                dataLength: t.data.length,
+                            };
+                        }));
+                    } catch (_) {}
                     if (output.length > 0) {
                         setEmbedStatus(
                             output.length + ' embedded track' + (output.length === 1 ? '' : 's') + ' ready',
@@ -745,15 +767,43 @@
             // accumulated cues into a complete .ass document that
             // jassub can render. Each cue's `text` is already the
             // Dialogue line text after the timestamp; we just prefix
+            // Minimal ASS skeleton injected when the track header is
+            // missing a [V4+ Styles] section. Necessary for S_TEXT/UTF8
+            // tracks (plain text, no CodecPrivate) and for any release
+            // whose ASS header was stripped before mux. JASSUB silently
+            // renders nothing when the document lacks Script Info +
+            // Styles, even if Dialogue: lines are present — so we
+            // backfill a reasonable default.
+            var MINIMAL_ASS_HEADER = [
+                '[Script Info]',
+                'ScriptType: v4.00+',
+                'PlayResX: 1920',
+                'PlayResY: 1080',
+                'ScaledBorderAndShadow: yes',
+                '',
+                '[V4+ Styles]',
+                'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+                'Style: Default,Arial,42,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,1,2,40,40,60,1',
+                '',
+                '[Events]',
+                'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+            ].join('\n');
+
             // with the standard Dialogue header per ASS spec.
             function buildAssDocument(header, cues) {
-                if (!cues || cues.length === 0) return header || '';
+                var hasStyles = header && header.indexOf('[V4+ Styles]') >= 0;
+                if (!hasStyles) header = MINIMAL_ASS_HEADER;
+                if (!cues || cues.length === 0) return header;
                 var lines = cues.map(function (c) {
                     var start = formatAssTime(c.time);
                     var end   = formatAssTime(c.time + (c.duration || 0));
-                    return 'Dialogue: 0,' + start + ',' + end + ',Default,,0,0,0,,' + (c.text || '');
+                    // SRT-derived cues use \n for line breaks; ASS
+                    // expects literal \N. Skip when the source is
+                    // already ASS-styled (no raw newlines in those).
+                    var text = (c.text || '').replace(/\r?\n/g, '\\N');
+                    return 'Dialogue: 0,' + start + ',' + end + ',Default,,0,0,0,,' + text;
                 });
-                return (header || '') + '\n' + lines.join('\n') + '\n';
+                return header + '\n' + lines.join('\n') + '\n';
             }
             function formatAssTime(ms) {
                 if (!ms || ms < 0) ms = 0;
