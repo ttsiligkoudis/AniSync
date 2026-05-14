@@ -1,6 +1,8 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
+using Newtonsoft.Json.Linq;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -47,7 +49,13 @@ namespace AnimeList.Services
         // first so the user's eye lands on the best available quality.
         // Anything not listed here is dropped (480p, SD, unknown).
         private static readonly string[] AllowedQualities = ["2160p", "1440p", "1080p", "720p"];
-        private const int PerQualityCap = 2;
+        // How many entries per quality bucket survive the rank+cap.
+        // Was 2 — too tight: anime episodes frequently have 3-4
+        // 1080p releases, and when the top two happen to be RD-
+        // DMCA'd the user is left with the dead-link rows we
+        // surfaced. 5 gives genuine alternatives without flooding
+        // the source picker.
+        private const int PerQualityCap = 5;
 
         // Torrentio embeds the file size as a 💾 token followed by a number +
         // unit (GB / MB). One regex pulls it out of either `name` or `title`.
@@ -155,6 +163,15 @@ namespace AnimeList.Services
                 var content = await response.Content.ReadAsStringAsync(cts.Token);
                 var parsed = ParseStreams(content);
 
+                // Filter out entries that Real-Debrid no longer has
+                // cached (typically DMCA-removed since Torrentio
+                // cached its own instantAvailability snapshot). The
+                // helper fails open: if RD's API misbehaves or
+                // returns an empty result for everything, it returns
+                // the unfiltered list so we don't show an empty
+                // source picker on transient API issues.
+                parsed = await FilterRdCachedAsync(apiKey, parsed, cts.Token);
+
                 // Cache even empty results — repeated clicks on the same
                 // episode shouldn't hammer Torrentio when no streams exist
                 // (rare ids, brand-new episodes).
@@ -173,6 +190,108 @@ namespace AnimeList.Services
             {
                 _logger.LogWarning(ex, "Torrentio call failed ({Path}).", idPath);
                 return [];
+            }
+        }
+
+        /// <summary>
+        /// Cross-checks Torrentio's stream list against Real-Debrid's
+        /// current <c>instantAvailability</c> map, dropping entries
+        /// RD no longer has cached. Solves the "Torrentio says
+        /// [RD+] cached but RD removed the file for DMCA" mismatch
+        /// that surfaces as "File was removed from debrid service"
+        /// errors when the user actually clicks the source.
+        ///
+        /// Fail-open: any RD-API failure (4xx, 5xx, network, unknown
+        /// shape) returns the input list unchanged so a transient
+        /// RD blip doesn't blank the source picker. Also returns
+        /// the unfiltered list if the filter would have produced
+        /// zero entries — RD has been progressively reducing what
+        /// <c>instantAvailability</c> exposes; an empty filter
+        /// result more likely means the API changed than that none
+        /// of N+ Torrentio entries are cached.
+        /// </summary>
+        private async Task<List<TorrentioStream>> FilterRdCachedAsync(
+            string apiKey, List<TorrentioStream> streams, CancellationToken ct)
+        {
+            if (streams.Count == 0 || string.IsNullOrEmpty(apiKey)) return streams;
+            var hashes = streams
+                .Select(s => s.InfoHash)
+                .Where(h => !string.IsNullOrEmpty(h) && h.Length == 40)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (hashes.Count == 0) return streams;
+
+            try
+            {
+                // map: lowercase hash → set of file indices that RD has
+                // currently cached for that torrent. Empty means
+                // "torrent metadata exists but no files are cached".
+                var cachedMap = new Dictionary<string, HashSet<int>>(StringComparer.OrdinalIgnoreCase);
+                const int batchSize = 40;
+                for (var i = 0; i < hashes.Count; i += batchSize)
+                {
+                    var batch = hashes.GetRange(i, Math.Min(batchSize, hashes.Count - i));
+                    var url = $"https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/{string.Join("/", batch)}";
+
+                    var client = _clientFactory.CreateClient();
+                    using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                    using var res = await client.SendAsync(req, ct);
+                    if (!res.IsSuccessStatusCode)
+                    {
+                        _logger.LogWarning("RD instantAvailability {Status} (batch of {N}) — falling back unfiltered.",
+                            (int)res.StatusCode, batch.Count);
+                        return streams;
+                    }
+                    var body = await res.Content.ReadAsStringAsync(ct);
+                    if (string.IsNullOrWhiteSpace(body) || body == "[]") continue;
+
+                    JObject root;
+                    try { root = JObject.Parse(body); }
+                    catch { return streams; }
+
+                    foreach (var prop in root.Properties())
+                    {
+                        var indices = new HashSet<int>();
+                        if (prop.Value is JObject hashObj && hashObj["rd"] is JArray rdArr)
+                        {
+                            foreach (var variant in rdArr.OfType<JObject>())
+                            {
+                                foreach (var v in variant.Properties())
+                                {
+                                    if (int.TryParse(v.Name, out var idx)) indices.Add(idx);
+                                }
+                            }
+                        }
+                        cachedMap[prop.Name.ToLowerInvariant()] = indices;
+                    }
+                }
+
+                var filtered = streams.Where(s =>
+                {
+                    if (string.IsNullOrEmpty(s.InfoHash)) return true; // unknown — keep
+                    if (!cachedMap.TryGetValue(s.InfoHash, out var indices)) return false;
+                    if (indices.Count == 0) return false;
+                    if (s.FileIdx.HasValue) return indices.Contains(s.FileIdx.Value);
+                    return true; // hash cached, fileIdx unknown — keep
+                }).ToList();
+
+                if (filtered.Count == 0)
+                {
+                    _logger.LogInformation(
+                        "RD instantAvailability filter would have dropped all {N} streams — likely API behaviour shift, returning unfiltered.",
+                        streams.Count);
+                    return streams;
+                }
+                _logger.LogInformation(
+                    "RD instantAvailability kept {Kept}/{Total} streams after DMCA-cache check.",
+                    filtered.Count, streams.Count);
+                return filtered;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "RD instantAvailability filter failed — returning unfiltered list.");
+                return streams;
             }
         }
 
@@ -262,6 +381,22 @@ namespace AnimeList.Services
                 try { bingeGroup = (string)s.behaviorHints?.bingeGroup; }
                 catch { /* missing object — leave null */ }
 
+                // infoHash + fileIdx feed the RD instantAvailability
+                // filter so we drop entries RD has DMCA-removed since
+                // Torrentio cached its instant-availability snapshot.
+                // Both fields exist on every modern Torrentio response;
+                // tolerate their absence so a schema rev doesn't break
+                // the parser.
+                string infoHash = null;
+                int? fileIdx = null;
+                try { infoHash = ((string)s.infoHash)?.ToLowerInvariant(); }
+                catch { }
+                try {
+                    var fi = s.fileIdx;
+                    if (fi != null) fileIdx = (int)fi;
+                }
+                catch { }
+
                 raw.Add(new TorrentioStream(
                     Name: name,
                     Title: title,
@@ -271,7 +406,9 @@ namespace AnimeList.Services
                     Playable: playable,
                     BingeGroup: bingeGroup,
                     Seeders: seeders,
-                    Language: language));
+                    Language: language,
+                    InfoHash: infoHash,
+                    FileIdx: fileIdx));
             }
 
             return RankAndCap(raw);
