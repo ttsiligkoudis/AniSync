@@ -1711,160 +1711,27 @@
             // SVG icons reused by the per-row action buttons. Inline
             // so they pick up `currentColor` from the host button's
             // text colour — no separate icon font / sprite needed.
-            var COPY_ICON_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
             var EXTERNAL_ICON_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
 
-            // The external-player popup. Single instance attached to
-            // <body> rather than per-row so it can position absolutely
-            // and outlive the row's DOM (we mutate sourcesBody.innerHTML
-            // on every refresh which would otherwise nuke an inline
-            // menu mid-interaction).
-            var externalMenu = null;
-            function closeExternalMenu() {
-                if (externalMenu && externalMenu.parentNode) {
-                    externalMenu.parentNode.removeChild(externalMenu);
-                }
-                externalMenu = null;
-            }
-            document.addEventListener('click', function (e) {
-                if (!externalMenu) return;
-                if (!externalMenu.contains(e.target) && !e.target.closest('.episode-stream-action-external')) {
-                    closeExternalMenu();
-                }
-            });
-            document.addEventListener('keydown', function (e) {
-                if (e.key === 'Escape') closeExternalMenu();
-            });
-
-            // Build the copy button. Uses the async Clipboard API
-            // when available (HTTPS / localhost) with a textarea
-            // fallback for older / insecure-context cases — the
-            // dashboard isn't always served over HTTPS in self-host
-            // setups so falling back rather than failing keeps the
-            // button useful everywhere. Visual feedback by swapping
-            // the icon to a check for 1.5s.
-            function buildCopyAction(url) {
-                var btn = el('button', {
-                    type: 'button',
-                    class: 'episode-stream-action',
-                    title: 'Copy stream URL',
-                });
-                btn.innerHTML = COPY_ICON_SVG;
-                btn.addEventListener('click', function (e) {
-                    e.stopPropagation();
-                    closeExternalMenu();
-                    copyToClipboard(url).then(function (ok) {
-                        if (!ok) return;
-                        var prev = btn.innerHTML;
-                        btn.classList.add('is-success');
-                        btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
-                        setTimeout(function () {
-                            btn.classList.remove('is-success');
-                            btn.innerHTML = prev;
-                        }, 1500);
-                    });
-                });
-                return btn;
-            }
-
-            function copyToClipboard(text) {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    return navigator.clipboard.writeText(text)
-                        .then(function () { return true; })
-                        .catch(function () { return copyFallback(text); });
-                }
-                return Promise.resolve(copyFallback(text));
-            }
-            function copyFallback(text) {
-                try {
-                    var ta = document.createElement('textarea');
-                    ta.value = text;
-                    ta.style.position = 'fixed';
-                    ta.style.opacity = '0';
-                    document.body.appendChild(ta);
-                    ta.select();
-                    var ok = document.execCommand('copy');
-                    document.body.removeChild(ta);
-                    return ok;
-                } catch (_) {
-                    return false;
-                }
-            }
-
-            // Build the external-player launcher. Click → small menu
-            // with one row per player. Each row maps to a URL scheme
-            // the corresponding app registers (VLC / Infuse / IINA /
-            // Outplayer) plus a "browser tab" fallback. Schemes are
-            // tried by setting `location.href` to the custom URL — if
-            // the app is installed the OS hands the URL off to it; if
-            // not, the browser does nothing visible (we surface the
-            // copy button right next to it so the user can still grab
-            // the URL).
+            // Build the external-player launcher. One click → defers
+            // straight to openWithExternalPlayer, which dispatches an
+            // Android intent (system app-chooser) on mobile or
+            // downloads a .m3u (OS file-association → user's preferred
+            // player) on desktop / iOS. No interstitial dropdown —
+            // both options the menu used to offer fall out of the
+            // single launcher path now.
             function buildExternalAction(url, displayName) {
                 var btn = el('button', {
                     type: 'button',
                     class: 'episode-stream-action episode-stream-action-external',
-                    title: 'Open in browser or another app',
+                    title: 'Open with another app',
                 });
                 btn.innerHTML = EXTERNAL_ICON_SVG;
                 btn.addEventListener('click', function (e) {
                     e.stopPropagation();
-                    openExternalMenu(btn, url, displayName);
+                    openWithExternalPlayer(url, displayName);
                 });
                 return btn;
-            }
-
-            function openExternalMenu(anchorBtn, url, displayName) {
-                if (externalMenu) { closeExternalMenu(); return; }
-                externalMenu = document.createElement('div');
-                externalMenu.className = 'episode-stream-external-menu';
-
-                // Browser tab — universal fallback. `<a target="_blank">`
-                // lets the browser decide what to do with the URL;
-                // mkv typically downloads, mp4 / direct-stream plays.
-                externalMenu.appendChild(buildMenuItem('Open in browser tab', function () {
-                    var a = document.createElement('a');
-                    a.href = url;
-                    a.target = '_blank';
-                    a.rel = 'noopener noreferrer';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                }));
-
-                // Open with — defers to the OS's native picker so
-                // the user lands in whichever player they prefer
-                // (VLC, MX Player, mpv, IINA, Just Player, …). On
-                // Android we dispatch an unrestricted intent so the
-                // system app-chooser fires; on desktop / iOS we
-                // download a .m3u, which the OS opens with whatever
-                // player owns the .m3u file association.
-                externalMenu.appendChild(buildMenuItem('Open with…', function () {
-                    openWithExternalPlayer(url, displayName);
-                }));
-
-                document.body.appendChild(externalMenu);
-                var rect = anchorBtn.getBoundingClientRect();
-                var menuRect = externalMenu.getBoundingClientRect();
-                var top = rect.bottom + window.scrollY + 4;
-                var left = rect.right + window.scrollX - menuRect.width;
-                // Keep the menu on-screen if the anchor sits near the
-                // right edge of a narrow viewport.
-                if (left < 8) left = 8;
-                externalMenu.style.top = top + 'px';
-                externalMenu.style.left = left + 'px';
-            }
-
-            function buildMenuItem(label, onClick) {
-                var a = document.createElement('a');
-                a.href = '#';
-                a.textContent = label;
-                a.addEventListener('click', function (e) {
-                    e.preventDefault();
-                    onClick();
-                    setTimeout(closeExternalMenu, 0);
-                });
-                return a;
             }
 
             // Cross-platform "Open with…" launcher — defers to the
@@ -1973,14 +1840,11 @@
                         li.appendChild(btn);
 
                         // Side actions: copy link + open externally.
-                        // Sit alongside the main pick button rather
-                        // than inside it so the click targets don't
-                        // overlap. Both operate on s.url directly —
-                        // it's the debrid CDN URL, which is what the
-                        // user wants to hand off to VLC / Infuse /
-                        // pasteboard / etc.
+                        // Side action: single "open externally"
+                        // button. Sits alongside the main pick button
+                        // rather than inside it so the click targets
+                        // don't overlap.
                         var actions = el('div', { class: 'episode-stream-actions' });
-                        actions.appendChild(buildCopyAction(s.url));
                         actions.appendChild(buildExternalAction(s.url, firstLine));
                         li.appendChild(actions);
 
