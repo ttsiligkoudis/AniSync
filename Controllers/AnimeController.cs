@@ -827,21 +827,13 @@ namespace AnimeList.Controllers
 
             try
             {
-                switch (tokenData.anime_service)
-                {
-                    case AnimeService.Anilist:
-                        await _anilistService.SaveAnimeEntryAsync(tokenData, req.Id, req.Season, req.Episode);
-                        break;
-                    case AnimeService.MyAnimeList:
-                        await _malService.SaveAnimeEntryAsync(tokenData, req.Id, req.Season, req.Episode);
-                        break;
-                    default:
-                        await _kitsuService.SaveAnimeEntryAsync(tokenData, req.Id, req.Season, req.Episode);
-                        break;
-                }
-                // Mirror to linked secondaries — same pattern the
-                // Stremio addon's subtitle-fetch handler uses.
-                await _syncService.FanOutSaveAsync(tokenData, req.Id, req.Season, req.Episode);
+                // Single call into the shared SyncService helper:
+                // dispatches to the right primary-tracker SaveAnimeEntry
+                // (AniList / MAL / Kitsu by tokenData.anime_service)
+                // AND fans out to linked secondaries. Same code path
+                // SubtitlesController uses for the Stremio addon's
+                // subtitle-fetch auto-track hook.
+                await _syncService.SaveProgressAndFanOutAsync(tokenData, req.Id, req.Season, req.Episode);
                 _logger.LogInformation(
                     "Marked watched: {Id} S{Season}E{Episode} on {Service}.",
                     req.Id, req.Season, req.Episode, tokenData.anime_service);

@@ -20,6 +20,22 @@ namespace AnimeList.Services.Interfaces
             DateTime? startedAt = null, DateTime? finishedAt = null);
 
         /// <summary>
+        /// Writes an episode-watched mark to the user's PRIMARY tracker (dispatching to
+        /// AniList / MAL / Kitsu by <see cref="TokenData.anime_service"/>) and then fans
+        /// out the same progress to every linked secondary. Single entry point so the
+        /// "switch on anime_service → SaveAnimeEntryAsync → FanOutSaveAsync" recipe
+        /// isn't duplicated between SubtitlesController (Stremio subtitle hook),
+        /// AnimeController.MarkWatched (web-app 70 % / external-launch), and any
+        /// future trigger.
+        ///
+        /// Honour-the-toggle is the caller's responsibility — this method always writes
+        /// when invoked. Per-service primary-save failures propagate to the caller; fan-out
+        /// failures stay best-effort the same way <see cref="FanOutSaveAsync"/> handles
+        /// them.
+        /// </summary>
+        Task SaveProgressAndFanOutAsync(TokenData primary, string animeId, int? season, int episode);
+
+        /// <summary>
         /// Mirrors a delete against the linked providers attached to <paramref name="primary"/>.
         /// </summary>
         Task FanOutDeleteAsync(TokenData primary, string animeId, int? season);
