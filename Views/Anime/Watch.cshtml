@@ -307,7 +307,7 @@
             // full page reload (Prev / Next navigation), which is the
             // right boundary — different episode = mark again.
             var episodeMarkedAsWatched = false;
-            function markEpisodeAsWatched(reason) {
+            function markEpisodeAsWatched(reason, sourceUrl) {
                 if (episodeMarkedAsWatched) return;
                 episodeMarkedAsWatched = true;
                 try {
@@ -318,7 +318,16 @@
                         body: JSON.stringify({
                             id: animeId,
                             season: hasSeasons ? season : null,
-                            episode: episode
+                            episode: episode,
+                            // Optional: when provided, the server
+                            // probes the URL with Range 0-0 and
+                            // refuses to mark if it looks like the
+                            // RD DMCA placeholder. The external-
+                            // launch path passes the stream URL; the
+                            // 70 %-progress path doesn't need this
+                            // because it already does duration ≥ 60s
+                            // client-side.
+                            sourceUrl: sourceUrl || null
                         }),
                         // Don't flash the global loader on background
                         // tracking writes.
@@ -330,11 +339,17 @@
                                 console.log('[AniSync] mark-watched (' + reason + '):', data || '(no body)');
                             } catch (_) {}
                             if (data && data.ok === false) {
-                                // Auth / opted-out / save-failed all
-                                // come back as ok:false with a reason.
-                                // Allow a retry on transient failures
-                                // by clearing the guard.
-                                if (data.reason === 'save-failed') {
+                                // ok:false comes with a reason.
+                                //   save-failed → transient; clear
+                                //     the guard so the next trigger
+                                //     retries.
+                                //   placeholder → source was the RD
+                                //     DMCA placeholder; clear so a
+                                //     subsequent click on a real
+                                //     source can still mark.
+                                //   no-auth / anonymous / opted-out
+                                //     → stable; keep the guard set.
+                                if (data.reason === 'save-failed' || data.reason === 'placeholder') {
                                     episodeMarkedAsWatched = false;
                                 }
                             }
@@ -2035,17 +2050,22 @@
                 // observe. Commit the watched mark now rather than
                 // wait for a 70 %-progress signal we'll never get.
                 //
-                // Suppress when the in-app player happens to already
-                // be loaded with the RD DMCA placeholder (30s "file
-                // removed" video). If the user is bailing out of the
-                // dead row into an external player they're trying
-                // another source, not confirming this one. The
-                // 60-second floor matches the 70 %-progress branch.
+                // Two-layer guard against marking a placeholder:
+                //   1. If the in-app player is loaded and showing a
+                //      < 60 s clip, that's the RD DMCA placeholder
+                //      — skip the mark client-side without even
+                //      asking the server.
+                //   2. Otherwise pass `streamUrl` to the mark
+                //      endpoint. The server probes it with Range
+                //      0-0 and refuses to mark if it sees a
+                //      suspiciously small Content-Range total
+                //      (covers the cold-click case where there's no
+                //      player loaded yet to do a duration check).
                 var curVideo = art && art.video;
                 var curDuration = curVideo && curVideo.duration;
                 var onPlaceholder = isFinite(curDuration) && curDuration > 0 && curDuration < 60;
                 if (!onPlaceholder) {
-                    markEpisodeAsWatched('external-launch');
+                    markEpisodeAsWatched('external-launch', streamUrl);
                 }
 
                 // Decide what to pass as the sidecar subtitle. Three
