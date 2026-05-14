@@ -24,7 +24,6 @@ namespace AnimeList.Controllers
         private readonly IFillerListService _fillerListService;
         private readonly IAnilistFallback _anilistFallback;
         private readonly IAddonStreamService _addonStreamService;
-        private readonly IBadHashCache _badHashCache;
         private readonly IAniSkipService _aniSkipService;
         private readonly ISubtitleService _subtitleService;
         private readonly IWyzieSubtitlesService _wyzieSubtitleService;
@@ -43,7 +42,6 @@ namespace AnimeList.Controllers
             IFillerListService fillerListService,
             IAnilistFallback anilistFallback,
             IAddonStreamService addonStreamService,
-            IBadHashCache badHashCache,
             IAniSkipService aniSkipService,
             ISubtitleService subtitleService,
             IWyzieSubtitlesService wyzieSubtitleService,
@@ -61,7 +59,6 @@ namespace AnimeList.Controllers
             _fillerListService = fillerListService;
             _anilistFallback = anilistFallback;
             _addonStreamService = addonStreamService;
-            _badHashCache = badHashCache;
             _aniSkipService = aniSkipService;
             _subtitleService = subtitleService;
             _wyzieSubtitleService = wyzieSubtitleService;
@@ -620,7 +617,6 @@ namespace AnimeList.Controllers
                     seeders = s.Seeders,
                     language = s.Language,
                     provider = s.Provider,
-                    infoHash = s.InfoHash,
                 }).ToList();
             }
 
@@ -914,10 +910,6 @@ namespace AnimeList.Controllers
             {
                 if (await LooksLikePlaceholderSourceAsync(req.SourceUrl, HttpContext.RequestAborted))
                 {
-                    if (!string.IsNullOrEmpty(req.InfoHash))
-                    {
-                        await _badHashCache.MarkAsync(req.InfoHash);
-                    }
                     _logger.LogInformation(
                         "Refused mark-watched for {Id} S{Season}E{Episode}: source URL looks like a debrid placeholder.",
                         req.Id, req.Season, req.Episode);
@@ -1002,7 +994,7 @@ namespace AnimeList.Controllers
             /// <summary>
             /// Optional source URL. When present, the server probes
             /// the URL with a Range 0-0 request and refuses to mark
-            /// if the response looks like the RD DMCA placeholder
+            /// if the response looks like a debrid DMCA placeholder
             /// (small total size, typically 30s of "file removed"
             /// video). Lets the external-launch trigger guard
             /// against false-marking when the user clicks Open
@@ -1012,16 +1004,6 @@ namespace AnimeList.Controllers
             /// client-side.
             /// </summary>
             public string SourceUrl { get; set; }
-            /// <summary>
-            /// InfoHash of the source the user picked, when known.
-            /// Travels with <see cref="SourceUrl"/> so when the
-            /// placeholder probe fires we can mark the upstream
-            /// torrent unplayable without re-parsing it out of the
-            /// URL (which only worked for Torrentio-shaped URLs in
-            /// the first place — other addons resolve to debrid
-            /// CDNs that strip the hash from the path).
-            /// </summary>
-            public string InfoHash { get; set; }
         }
 
         /// <summary>
@@ -1036,7 +1018,7 @@ namespace AnimeList.Controllers
         /// the client a CDN URL the Worker can stream from.
         /// </summary>
         [HttpGet("/anime/resolve-stream")]
-        public async Task<IActionResult> ResolveStream(string url, string hash, CancellationToken ct)
+        public async Task<IActionResult> ResolveStream(string url, CancellationToken ct)
         {
             if (string.IsNullOrWhiteSpace(url) ||
                 !Uri.TryCreate(url, UriKind.Absolute, out var u))
@@ -1085,61 +1067,6 @@ namespace AnimeList.Controllers
                 // all redirects when AllowAutoRedirect is true
                 // (default). Falls back to the original on any error.
                 var finalUrl = res.RequestMessage?.RequestUri?.ToString() ?? url;
-
-                // Detect DMCA-removed entries. RD serves these in two
-                // shapes:
-                //   (a) redirect to a non-CDN error page — caught by
-                //       the host-allowlist check below.
-                //   (b) 200 OK from a real *.real-debrid.com host
-                //       with a small placeholder video (~1-5 MB)
-                //       that says "file removed for copyright" —
-                //       caught here by the suspiciously-small total
-                //       size pulled from Content-Range.
-                //
-                // Anything < SUSPICIOUSLY_SMALL is almost certainly
-                // RD's placeholder: real anime episodes are 100 MB+
-                // even at low bitrate. Set generously (50 MB) so we
-                // catch placeholders encoded at higher bitrates than
-                // the typical 1 Mbps — even a 30s clip at 12 Mbps
-                // would only hit 45 MB.
-                const long SuspiciouslySmallBytes = 50 * 1024 * 1024;
-                long? totalSize = null;
-                if (res.Content.Headers.ContentRange?.HasLength == true)
-                {
-                    totalSize = res.Content.Headers.ContentRange.Length;
-                }
-                else if (res.StatusCode == System.Net.HttpStatusCode.OK
-                         && res.Content.Headers.ContentLength.HasValue)
-                {
-                    totalSize = res.Content.Headers.ContentLength.Value;
-                }
-                var looksPlaceholder = totalSize.HasValue && totalSize.Value < SuspiciouslySmallBytes;
-
-                if (Uri.TryCreate(finalUrl, UriKind.Absolute, out var finalUri))
-                {
-                    var finalHost = finalUri.Host.ToLowerInvariant();
-                    var isDebridCdn =
-                        finalHost.EndsWith("real-debrid.com") ||
-                        finalHost.EndsWith("alldebrid.com") ||
-                        finalHost.EndsWith("debrid-link.com") ||
-                        finalHost.EndsWith("premiumize.me") ||
-                        finalHost.EndsWith("torbox.app") ||
-                        finalHost.EndsWith("offcloud.com");
-                    if (!isDebridCdn || looksPlaceholder)
-                    {
-                        if (!string.IsNullOrEmpty(hash))
-                        {
-                            await _badHashCache.MarkAsync(hash);
-                            var reason = looksPlaceholder
-                                ? $"placeholder-sized response ({totalSize}B) from {finalHost}"
-                                : $"resolve landed on non-CDN host {finalHost}";
-                            _logger.LogInformation(
-                                "Marked hash {Hash} as unplayable: {Reason}.",
-                                hash, reason);
-                        }
-                    }
-                }
-
                 return Json(new { resolvedUrl = finalUrl });
             }
             catch (Exception ex)

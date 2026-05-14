@@ -224,11 +224,6 @@ builder.Services.AddScoped<IAnilistFallback, AnilistFallback>();
 // per-addon config lives inside each manifest URL the user pastes on the
 // Configure page.
 builder.Services.AddSingleton<IAddonStreamService, AddonStreamService>();
-// Singleton snapshot over the persisted bad_hashes table — refreshed
-// from SQLite at most once per minute; eager-added to on mark. Shared
-// between AddonStreamService (filtering its fetches) and AnimeController
-// (writing marks on placeholder detection).
-builder.Services.AddSingleton<IBadHashCache, BadHashCache>();
 // Singleton so the (imdb, season, episode) → tracks cache + VTT body
 // cache outlive individual requests — anime episodes are watched
 // repeatedly and the same /watch view re-fetches on every visit.

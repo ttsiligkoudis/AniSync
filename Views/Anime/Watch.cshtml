@@ -307,7 +307,7 @@
             // full page reload (Prev / Next navigation), which is the
             // right boundary — different episode = mark again.
             var episodeMarkedAsWatched = false;
-            function markEpisodeAsWatched(reason, sourceUrl, infoHash) {
+            function markEpisodeAsWatched(reason, sourceUrl) {
                 if (episodeMarkedAsWatched) return;
                 episodeMarkedAsWatched = true;
                 try {
@@ -321,16 +321,13 @@
                             episode: episode,
                             // Optional: when provided, the server
                             // probes the URL with Range 0-0 and
-                            // refuses to mark if it looks like a
-                            // debrid DMCA placeholder. The external-
-                            // launch path passes the stream URL +
-                            // infoHash so a detected placeholder also
-                            // marks the upstream hash unplayable; the
-                            // 70 %-progress path doesn't need this
-                            // because it already does duration ≥ 60s
-                            // client-side.
-                            sourceUrl: sourceUrl || null,
-                            infoHash: infoHash || null
+                            // refuses to mark if the response looks
+                            // like a debrid DMCA placeholder. The
+                            // external-launch path passes the stream
+                            // URL; the 70 %-progress path doesn't
+                            // need this because it already checks
+                            // duration ≥ 60s client-side.
+                            sourceUrl: sourceUrl || null
                         }),
                         // Don't flash the global loader on background
                         // tracking writes.
@@ -786,7 +783,7 @@
             // status pill stays stuck on "Looking…" forever. Caller
             // treats reject as "skip extraction quietly."
             var CDN_HOST_RE = /(?:^|\.)(?:real-debrid\.com|alldebrid\.com|debrid-link\.com|premiumize\.me|torbox\.app|offcloud\.com)$/i;
-            function resolveStreamUrl(originalUrl, signal, infoHash) {
+            function resolveStreamUrl(originalUrl, signal) {
                 return new Promise(function (resolve, reject) {
                     var TIMEOUT_MS = 25000;     // total budget incl. retries
                     var MAX_ATTEMPTS = 5;
@@ -805,9 +802,7 @@
 
                     function tryServerResolve() {
                         attempts++;
-                        var resolveQs = '/anime/resolve-stream?url=' + encodeURIComponent(originalUrl);
-                        if (infoHash) resolveQs += '&hash=' + encodeURIComponent(infoHash);
-                        fetch(resolveQs, {
+                        fetch('/anime/resolve-stream?url=' + encodeURIComponent(originalUrl), {
                             credentials: 'same-origin',
                             headers: { 'Accept': 'application/json' },
                             signal: signal,
@@ -898,7 +893,7 @@
             // as the parser sees the Tracks element so the menu can
             // surface entries before full parse completes — final
             // (onComplete) fires once cue accumulation is done.
-            function extractEmbeddedSubs(url, infoHash, onTracks, onComplete) {
+            function extractEmbeddedSubs(url, onTracks, onComplete) {
                 var abortCtl = new AbortController();
 
                 // Resolve the URL we'll actually fetch from. Three
@@ -933,7 +928,7 @@
                     }
                     setEmbedStatus('Waiting for stream URL…', 'loading');
                     var originalUrl = url;
-                    urlPromise = resolveStreamUrl(originalUrl, abortCtl.signal, infoHash).then(function (resolved) {
+                    urlPromise = resolveStreamUrl(originalUrl, abortCtl.signal).then(function (resolved) {
                         return {
                             direct: resolved,
                             stream: viaCorsProxy(resolved) || viaCorsProxy(originalUrl),
@@ -1366,7 +1361,7 @@
                 var firstLine = (stream.title || stream.name || '').split('\n')[0].trim();
                 var open = el('button', { type: 'button', class: 'btn-ghost btn-ghost-sm' }, 'Open externally');
                 open.addEventListener('click', function () {
-                    openWithExternalPlayer(stream.url, firstLine, stream.infoHash);
+                    openWithExternalPlayer(stream.url, firstLine);
                 });
                 row.appendChild(open);
 
@@ -1770,7 +1765,6 @@
                 // usable.
                 embeddedExtractAbort = extractEmbeddedSubs(
                     stream.url,
-                    stream.infoHash,
                     function (meta) {
                         // Metadata-only step: tracks visible in the
                         // menu but trackData is empty; selecting one
@@ -2006,7 +2000,7 @@
             // player) on desktop / iOS. No interstitial dropdown —
             // both options the menu used to offer fall out of the
             // single launcher path now.
-            function buildExternalAction(url, displayName, infoHash) {
+            function buildExternalAction(url, displayName) {
                 var btn = el('button', {
                     type: 'button',
                     class: 'episode-stream-action episode-stream-action-external',
@@ -2015,7 +2009,7 @@
                 btn.innerHTML = EXTERNAL_ICON_SVG;
                 btn.addEventListener('click', function (e) {
                     e.stopPropagation();
-                    openWithExternalPlayer(url, displayName, infoHash);
+                    openWithExternalPlayer(url, displayName);
                 });
                 return btn;
             }
@@ -2050,7 +2044,7 @@
             //   direct launch (matching Android's feel) without
             //   regressing the zero-config experience for users who
             //   never set anything up.
-            function openWithExternalPlayer(streamUrl, displayName, infoHash) {
+            function openWithExternalPlayer(streamUrl, displayName) {
                 // The user clicked "Open with…" — they're committing
                 // to watch this episode in an external app we can't
                 // observe. Commit the watched mark now rather than
@@ -2071,7 +2065,7 @@
                 var curDuration = curVideo && curVideo.duration;
                 var onPlaceholder = isFinite(curDuration) && curDuration > 0 && curDuration < 60;
                 if (!onPlaceholder) {
-                    markEpisodeAsWatched('external-launch', streamUrl, infoHash);
+                    markEpisodeAsWatched('external-launch', streamUrl);
                 }
 
                 // Decide what to pass as the sidecar subtitle. Three
@@ -2331,7 +2325,7 @@
                         // rather than inside it so the click targets
                         // don't overlap.
                         var actions = el('div', { class: 'episode-stream-actions' });
-                        actions.appendChild(buildExternalAction(s.url, firstLine, s.infoHash));
+                        actions.appendChild(buildExternalAction(s.url, firstLine));
                         li.appendChild(actions);
 
                         list.appendChild(li);
