@@ -1707,12 +1707,22 @@
                 // is more than enough; the markEpisodeAsWatched
                 // helper is idempotent + flag-guarded so multiple
                 // fires inside the threshold cost nothing.
+                //
+                // Skip on suspiciously short durations — Real-Debrid
+                // serves DMCA-removed entries as a 30-second
+                // placeholder video saying "file removed for
+                // copyright". 70 % of 30s = 21s, which the user
+                // would otherwise blow past in seconds and end up
+                // with a falsely-marked episode. Real anime
+                // episodes are 4+ minutes even for shorts; 60s is
+                // a safe floor.
                 art.on('video:timeupdate', function () {
                     if (episodeMarkedAsWatched) return;
                     var v = art && art.video;
                     if (!v) return;
                     var dur = v.duration;
                     if (!isFinite(dur) || dur <= 0) return;
+                    if (dur < 60) return; // RD placeholder, not a real episode
                     if ((v.currentTime || 0) / dur >= 0.7) {
                         markEpisodeAsWatched('70%-progress');
                     }
@@ -2024,7 +2034,19 @@
                 // to watch this episode in an external app we can't
                 // observe. Commit the watched mark now rather than
                 // wait for a 70 %-progress signal we'll never get.
-                markEpisodeAsWatched('external-launch');
+                //
+                // Suppress when the in-app player happens to already
+                // be loaded with the RD DMCA placeholder (30s "file
+                // removed" video). If the user is bailing out of the
+                // dead row into an external player they're trying
+                // another source, not confirming this one. The
+                // 60-second floor matches the 70 %-progress branch.
+                var curVideo = art && art.video;
+                var curDuration = curVideo && curVideo.duration;
+                var onPlaceholder = isFinite(curDuration) && curDuration > 0 && curDuration < 60;
+                if (!onPlaceholder) {
+                    markEpisodeAsWatched('external-launch');
+                }
 
                 // Decide what to pass as the sidecar subtitle. Three
                 // outcomes:
