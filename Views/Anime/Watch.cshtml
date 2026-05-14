@@ -1824,8 +1824,25 @@
 
             function sidecarFromCurrentPick() {
                 if (currentSubKind !== 'vtt' || !currentSubKey) return null;
-                try { return new URL(currentSubKey, window.location.origin).toString(); }
+                try { return toExternalSidecarUrl(currentSubKey); }
                 catch (_) { return null; }
+            }
+
+            // Rebases an in-app subtitle proxy URL ("/anime/subtitle?
+            // url=...") onto our origin AND swaps the path so it ends
+            // in ".vtt". External players (VLC desktop + VLC for
+            // Android in particular) use the URL path's extension as
+            // their primary format hint when fetching slave inputs;
+            // without it they download the bytes but don't always
+            // wire them up as a subtitle track. The server route
+            // /anime/subtitle.vtt aliases /anime/subtitle so both
+            // paths return the same VTT body.
+            function toExternalSidecarUrl(proxyUrl) {
+                var abs = new URL(proxyUrl, window.location.origin);
+                if (abs.pathname === '/anime/subtitle') {
+                    abs.pathname = '/anime/subtitle.vtt';
+                }
+                return abs.toString();
             }
 
             // Hits the existing /anime/episode-subtitles endpoint
@@ -1852,7 +1869,7 @@
                             for (var i = 0; i < subs.length; i++) {
                                 if (/^en/i.test(subs[i].lang || '')) {
                                     try {
-                                        resolve(new URL(subs[i].url, window.location.origin).toString());
+                                        resolve(toExternalSidecarUrl(subs[i].url));
                                     } catch (_) {
                                         resolve(null);
                                     }
@@ -1942,16 +1959,21 @@
                     .replace(/\s+/g, ' ')
                     .trim()
                     .substring(0, 80) || 'stream';
-                // #EXTVLCOPT:input-slave=URI tells VLC to load a
-                // second input alongside the main stream — typically
-                // a subtitle file. Crucially, it accepts URLs,
-                // unlike sub-file=, which VLC resolves as a path
-                // RELATIVE TO THE M3U'S LOCATION (so an HTTP URL
-                // ends up prefixed with file:///C:/.../Downloads/
-                // and fails). Ignored by players that don't speak
-                // EXTVLCOPT (video still plays, just no subs).
+                // VLC sidecar wiring. input-slave= accepts URIs
+                // (unlike sub-file= which is path-resolved relative
+                // to the m3u's location and broke for HTTP URLs);
+                // sub-track-id=0 + sub-autodetect-file=1 nudge VLC
+                // to actually activate the loaded slave as the
+                // current subtitle track instead of just attaching
+                // it silently to the track list. The .vtt path
+                // extension on sidecarSub (rebased server-side via
+                // /anime/subtitle.vtt) gives the demuxer a strong
+                // format hint so the slave is recognised as a
+                // subtitle file in the first place.
                 var subLine = sidecarSub
-                    ? '#EXTVLCOPT:input-slave=' + sidecarSub + '\n'
+                    ? '#EXTVLCOPT:input-slave=' + sidecarSub + '\n' +
+                      '#EXTVLCOPT:sub-autodetect-file=1\n' +
+                      '#EXTVLCOPT:sub-track-id=0\n'
                     : '';
                 var m3u =
                     '#EXTM3U\n' +
