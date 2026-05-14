@@ -558,23 +558,69 @@
                 }
             }
 
-            // Watches the browser's Resource Timing entries for a URL
-            // on a debrid CDN host and resolves to that URL once one
-            // appears. Used when the Stream URL we hold is a
-            // Torrentio resolver (strem.fun) — Torrentio is behind
-            // Cloudflare's WAF which bot-blocks the Worker, but the
-            // post-redirect *.real-debrid.com CDN is fine. <video>
-            // follows the redirect natively when the source starts
-            // loading; we wait for that and use the resolved URL.
+            // Resolves a Torrentio resolver URL (strem.fun/resolve/…)
+            // to the post-redirect debrid CDN URL. Required because
+            // the Cloudflare Worker proxy can't hit Torrentio
+            // directly — its own CF WAF rejects worker traffic with
+            // a bot-challenge page — but the resolved
+            // *.real-debrid.com URL has no CF in front of it, so the
+            // Worker streams from it just fine.
             //
-            // Falls back to the original URL after the timeout so the
-            // pipeline at least tries to run (and fails gracefully)
-            // rather than hanging.
+            // Two paths, raced:
+            //
+            //   1. /anime/resolve-stream — AniSync's server follows
+            //      the 302 from its own (non-Cloudflare) network and
+            //      returns the final URL. Reliable; the only cost is
+            //      one tiny extra HTTP roundtrip per source pick.
+            //
+            //   2. Resource Timing API — watch for an entry on a
+            //      debrid-CDN host. <video> sometimes records the
+            //      post-redirect URL here, depending on browser; on
+            //      Chrome it usually doesn't. Kept as a faster path
+            //      when it does work, plus as a fallback if the
+            //      server endpoint fails.
+            //
+            // Whichever resolves first wins. Falls back to the
+            // original URL after the timeout so the pipeline at
+            // least tries to run (and fails gracefully) rather than
+            // hanging.
             var CDN_HOST_RE = /(?:^|\.)(?:real-debrid\.com|alldebrid\.com|debrid-link\.com|premiumize\.me|torbox\.app|offcloud\.com)$/i;
             function resolveStreamUrl(originalUrl, signal) {
                 return new Promise(function (resolve) {
-                    var TIMEOUT_MS = 8000;
+                    var TIMEOUT_MS = 10000;
+                    var done = false;
+                    var observer = null;
 
+                    function finish(u) {
+                        if (done) return;
+                        done = true;
+                        if (observer) { try { observer.disconnect(); } catch (_) {} }
+                        resolve(u);
+                    }
+
+                    // Server-side resolver — primary path. AniSync's
+                    // origin isn't on Cloudflare's bot blocklist, so
+                    // the 302 follow goes through cleanly.
+                    fetch('/anime/resolve-stream?url=' + encodeURIComponent(originalUrl), {
+                        credentials: 'same-origin',
+                        headers: { 'Accept': 'application/json' },
+                        signal: signal,
+                    })
+                        .then(function (r) { return r.ok ? r.json() : null; })
+                        .then(function (data) {
+                            if (done) return;
+                            var u = data && data.resolvedUrl;
+                            if (!u) return;
+                            try {
+                                if (CDN_HOST_RE.test(new URL(u).hostname)) {
+                                    finish(u);
+                                }
+                            } catch (_) {}
+                        })
+                        .catch(function () { /* swallow — Performance API may still pick it up */ });
+
+                    // Resource Timing fallback (browsers that DO
+                    // record the post-redirect URL via <video>).
                     function findResolved() {
                         try {
                             var entries = performance.getEntriesByType('resource');
@@ -589,16 +635,7 @@
                     }
 
                     var hit = findResolved();
-                    if (hit) { resolve(hit); return; }
-
-                    var done = false;
-                    var observer = null;
-                    function finish(u) {
-                        if (done) return;
-                        done = true;
-                        if (observer) { try { observer.disconnect(); } catch (_) {} }
-                        resolve(u);
-                    }
+                    if (hit) { finish(hit); return; }
 
                     try {
                         observer = new PerformanceObserver(function () {

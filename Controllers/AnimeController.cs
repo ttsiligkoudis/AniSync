@@ -26,6 +26,7 @@ namespace AnimeList.Controllers
         private readonly IAniSkipService _aniSkipService;
         private readonly ISubtitleService _subtitleService;
         private readonly IWyzieSubtitlesService _wyzieSubtitleService;
+        private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<AnimeController> _logger;
 
         public AnimeController(
@@ -42,6 +43,7 @@ namespace AnimeList.Controllers
             IAniSkipService aniSkipService,
             ISubtitleService subtitleService,
             IWyzieSubtitlesService wyzieSubtitleService,
+            IHttpClientFactory httpClientFactory,
             ILogger<AnimeController> logger)
         {
             _tokenService = tokenService;
@@ -57,6 +59,7 @@ namespace AnimeList.Controllers
             _aniSkipService = aniSkipService;
             _subtitleService = subtitleService;
             _wyzieSubtitleService = wyzieSubtitleService;
+            _httpClientFactory = httpClientFactory;
             _logger = logger;
         }
 
@@ -757,6 +760,76 @@ namespace AnimeList.Controllers
             // 1-hour client cache so re-seeks / re-renders don't refetch.
             Response.Headers["Cache-Control"] = "public, max-age=3600";
             return Content(vtt, "text/vtt", System.Text.Encoding.UTF8);
+        }
+
+        /// <summary>
+        /// Resolves a Torrentio resolver URL (<c>strem.fun/resolve/…</c>)
+        /// to the post-redirect debrid CDN URL that Torrentio's 302
+        /// points at. Used by the embedded-subtitle extractor: the
+        /// Cloudflare Worker proxy can't hit Torrentio directly (its
+        /// own CF WAF rejects worker traffic with a bot challenge),
+        /// but the resolved <c>*.real-debrid.com</c> URL has no CF in
+        /// front of it. By doing the redirect-follow here on AniSync's
+        /// own server — which Torrentio doesn't bot-block — we hand
+        /// the client a CDN URL the Worker can stream from.
+        /// </summary>
+        [HttpGet("/anime/resolve-stream")]
+        public async Task<IActionResult> ResolveStream(string url, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(url) ||
+                !Uri.TryCreate(url, UriKind.Absolute, out var u))
+            {
+                return BadRequest(new { error = "invalid url" });
+            }
+            // Lock to known resolver / CDN hosts so this endpoint
+            // isn't a generic redirect-follower someone could point
+            // at internal addresses.
+            var host = u.Host.ToLowerInvariant();
+            var allowed = host.EndsWith("strem.fun")
+                || host.EndsWith("real-debrid.com")
+                || host.EndsWith("alldebrid.com")
+                || host.EndsWith("debrid-link.com")
+                || host.EndsWith("premiumize.me")
+                || host.EndsWith("torbox.app")
+                || host.EndsWith("offcloud.com");
+            if (!allowed)
+            {
+                return Forbid();
+            }
+
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+                var client = _httpClientFactory.CreateClient();
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                // Range to keep the body tiny — we only care about
+                // headers + the post-redirect URI. The CDN will still
+                // return its real Content-Length / Range metadata.
+                req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
+                // Most CF-protected resolvers (Torrentio included)
+                // reject obvious bot UAs. A plausible browser UA
+                // gets us through; we're not impersonating a user,
+                // just doing what their browser would do anyway.
+                req.Headers.UserAgent.ParseAdd(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/120.0 Safari/537.36");
+
+                using var res = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+
+                // RequestMessage.RequestUri reflects the URL of the
+                // *last* request the HttpClient made — i.e. after
+                // all redirects when AllowAutoRedirect is true
+                // (default). Falls back to the original on any error.
+                var finalUrl = res.RequestMessage?.RequestUri?.ToString() ?? url;
+                return Json(new { resolvedUrl = finalUrl });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "ResolveStream failed for {Url}.", url);
+                return Json(new { resolvedUrl = url });
+            }
         }
 
         private async Task<List<Meta>> TryGetRecommendationsAsync(int anilistId, AnimeService translateTo)
