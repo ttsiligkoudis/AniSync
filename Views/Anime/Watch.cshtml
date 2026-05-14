@@ -1816,29 +1816,31 @@
 
             function openExternalMenu(anchorBtn, url, displayName) {
                 if (externalMenu) { closeExternalMenu(); return; }
-                var encoded = encodeURIComponent(url);
-                var encodedTitle = encodeURIComponent(displayName || 'AniSync');
-                var options = [
-                    { label: 'Open in browser tab', href: url, target: '_blank' },
-                    { label: 'Open in VLC',         href: 'vlc://' + url },
-                    { label: 'Open in Infuse',      href: 'infuse://x-callback-url/play?url=' + encoded },
-                    { label: 'Open in Outplayer',   href: 'outplayer://' + url },
-                    { label: 'Open in IINA',        href: 'iina://weblink?url=' + encoded + '&name=' + encodedTitle },
-                ];
                 externalMenu = document.createElement('div');
                 externalMenu.className = 'episode-stream-external-menu';
-                options.forEach(function (opt) {
+
+                // Browser tab — universal fallback. `<a target="_blank">`
+                // lets the browser decide what to do with the URL;
+                // mkv typically downloads, mp4 / direct-stream plays.
+                externalMenu.appendChild(buildMenuItem('Open in browser tab', function () {
                     var a = document.createElement('a');
-                    a.href = opt.href;
-                    a.textContent = opt.label;
-                    if (opt.target) a.target = opt.target;
-                    a.addEventListener('click', function () {
-                        // Defer the close so the navigation actually
-                        // happens before we remove the anchor element.
-                        setTimeout(closeExternalMenu, 0);
-                    });
-                    externalMenu.appendChild(a);
-                });
+                    a.href = url;
+                    a.target = '_blank';
+                    a.rel = 'noopener noreferrer';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                }));
+
+                // VLC — platform-specific launcher. Android uses
+                // intent:// (handled natively by VLC for Android);
+                // desktop/iOS gets a .m3u download that opens VLC
+                // via the OS file association (default on any normal
+                // VLC install — no URL-handler registration needed).
+                externalMenu.appendChild(buildMenuItem('Open in VLC', function () {
+                    openInVlc(url, displayName);
+                }));
+
                 document.body.appendChild(externalMenu);
                 var rect = anchorBtn.getBoundingClientRect();
                 var menuRect = externalMenu.getBoundingClientRect();
@@ -1849,6 +1851,81 @@
                 if (left < 8) left = 8;
                 externalMenu.style.top = top + 'px';
                 externalMenu.style.left = left + 'px';
+            }
+
+            function buildMenuItem(label, onClick) {
+                var a = document.createElement('a');
+                a.href = '#';
+                a.textContent = label;
+                a.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    onClick();
+                    setTimeout(closeExternalMenu, 0);
+                });
+                return a;
+            }
+
+            // Cross-platform "Open in VLC" launcher.
+            //
+            // Android:
+            //   intent:// URL with package=org.videolan.vlc. Handled
+            //   natively by VLC for Android when installed; if not,
+            //   Chrome shows the "VLC isn't installed" prompt. No
+            //   protocol registration needed.
+            //
+            // Everywhere else (Windows / macOS / Linux / iOS):
+            //   Generate a one-line .m3u playlist as a Blob, trigger
+            //   a download via a temporary <a download>. VLC takes
+            //   the .m3u file association on install — opening the
+            //   download launches VLC with the stream. This sidesteps
+            //   the vlc:// URL-handler-not-registered problem on
+            //   Windows where vlc:// links silently fail to dispatch.
+            function openInVlc(streamUrl, displayName) {
+                var ua = navigator.userAgent || '';
+                if (/Android/i.test(ua) && !/Windows Phone/i.test(ua)) {
+                    var u;
+                    try { u = new URL(streamUrl); }
+                    catch (_) { window.open(streamUrl, '_blank'); return; }
+                    var scheme = u.protocol.replace(':', '');
+                    var rest = u.host + u.pathname + u.search + u.hash;
+                    var title = displayName || 'AniSync stream';
+                    var intent = 'intent://' + rest +
+                        '#Intent' +
+                        ';scheme=' + scheme +
+                        ';package=org.videolan.vlc' +
+                        ';type=video/*' +
+                        ';S.title=' + encodeURIComponent(title) +
+                        ';end';
+                    window.location.href = intent;
+                    return;
+                }
+
+                // .m3u download path. Filename uses the display name
+                // (sanitised, capped) so VLC's recent-files list and
+                // the OS's download UI show something readable.
+                var safeName = (displayName || 'stream')
+                    .replace(/[\\/:*?"<>|]/g, '_')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .substring(0, 80) || 'stream';
+                var m3u =
+                    '#EXTM3U\n' +
+                    '#EXTINF:-1,' + safeName + '\n' +
+                    streamUrl + '\n';
+                var blob = new Blob([m3u], { type: 'audio/x-mpegurl' });
+                var blobUrl = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = safeName + '.m3u';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                // Revoke after the click has had a chance to flush —
+                // some browsers cancel the download if the URL is
+                // revoked synchronously.
+                setTimeout(function () {
+                    try { URL.revokeObjectURL(blobUrl); } catch (_) {}
+                }, 5000);
             }
 
 
