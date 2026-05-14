@@ -385,6 +385,7 @@
                 // its DOM — we'd accumulate stale instances per source
                 // pick.
                 if (art) { try { art.destroy(true); } catch (_) {} art = null; }
+                cancelStreamWatchdog();
                 tearDownJassub();
                 // Embedded extraction is source-scoped — cancel the
                 // in-flight stream + parser when we leave this source
@@ -1090,26 +1091,92 @@
                 }
             }
 
-            function showFallback(stream) {
+            function showFallback(stream, reason) {
                 fallbackHost.hidden = false;
                 fallbackHost.innerHTML = '';
-                fallbackHost.appendChild(el('p', { class: 'hint-text', style: 'margin: 0 0 0.75rem;' },
-                    "Your browser couldn't decode this stream. Open it in an external player or copy the URL."));
+                fallbackHost.setAttribute('data-fallback-reason', reason || 'decode');
+
+                // Tailored copy per failure mode so the user gets a
+                // diagnosis, not a generic "broken stream" wall:
+                //   * decode  — browser literally can't play the codec.
+                //     Real fix is an external player or another source.
+                //   * network — fetch never reached the CDN. Most often
+                //     the debrid link expired between resolve and play;
+                //     re-picking the source mints a fresh URL.
+                //   * timeout — initial fetch / metadata never fired.
+                //     Could be slow CDN, geofence, or an actually-bad
+                //     source. Worth waiting + a Retry click before
+                //     giving up.
+                var messages = {
+                    decode: "Your browser can't decode this stream — the codec isn't supported. Open it in an external player, or try a different source below.",
+                    network: "The stream couldn't be reached. The debrid link may have expired — pick the source again, or try a different one.",
+                    timeout: "This source hasn't started playing yet. It might just be slow — wait a bit, retry, or try another source below.",
+                };
+                var message = messages[reason] || "Couldn't play this stream. Try another source below, or open it externally.";
+                fallbackHost.appendChild(el('p', { class: 'hint-text', style: 'margin: 0 0 0.75rem;' }, message));
+
                 var row = el('div', { class: 'watch-fallback-actions' });
+
+                // Retry — re-runs the full pick path for the same
+                // stream. Refreshes the resolve, embedded-sub fetch,
+                // and player init from scratch.
+                var retry = el('button', { type: 'button', class: 'btn-ghost btn-ghost-sm' }, 'Retry');
+                retry.addEventListener('click', function () {
+                    hideFallback();
+                    playStream(stream);
+                });
+                row.appendChild(retry);
+
                 var open = el('a', {
                     class: 'btn-ghost btn-ghost-sm',
                     href: stream.url, target: '_blank', rel: 'noopener noreferrer',
                 }, 'Open externally');
+                row.appendChild(open);
+
                 var copy = el('button', { type: 'button', class: 'btn-ghost btn-ghost-sm' }, 'Copy URL');
                 copy.addEventListener('click', function () {
                     navigator.clipboard.writeText(stream.url).then(function () {
                         copy.textContent = 'Copied';
                         setTimeout(function () { copy.textContent = 'Copy URL'; }, 1200);
-                    });
+                    }).catch(function () { /* swallow — user can pick another action */ });
                 });
-                row.appendChild(open);
                 row.appendChild(copy);
+
                 fallbackHost.appendChild(row);
+            }
+
+            function hideFallback() {
+                fallbackHost.hidden = true;
+                fallbackHost.innerHTML = '';
+                fallbackHost.removeAttribute('data-fallback-reason');
+            }
+
+            // Stream watchdog. Fires when the chosen source hasn't
+            // produced any sign of life (loadedmetadata / playing)
+            // within STREAM_WATCHDOG_MS. 25s is a balance: long
+            // enough to absorb a slow CDN warm-up and the Torrentio
+            // → RD resolve chain, short enough that a user staring
+            // at a hung spinner isn't left guessing whether to
+            // wait or try something else.
+            var STREAM_WATCHDOG_MS = 25000;
+            var streamWatchdog = null;
+            function startStreamWatchdog(stream) {
+                cancelStreamWatchdog();
+                streamWatchdog = setTimeout(function () {
+                    streamWatchdog = null;
+                    if (!art || !art.video) return;
+                    var v = art.video;
+                    // HAVE_CURRENT_DATA (2) or higher means decoding
+                    // started — leave the user alone if so.
+                    if (v.readyState >= 2 || v.currentTime > 0) return;
+                    showFallback(stream, 'timeout');
+                }, STREAM_WATCHDOG_MS);
+            }
+            function cancelStreamWatchdog() {
+                if (streamWatchdog) {
+                    clearTimeout(streamWatchdog);
+                    streamWatchdog = null;
+                }
             }
 
             function playStream(stream) {
@@ -1356,13 +1423,44 @@
 
                 // ArtPlayer normalises the native HTMLVideoElement
                 // through art.video; the "video:error" custom event
-                // fires whenever the inner element errors. code === 4
-                // (MEDIA_ERR_SRC_NOT_SUPPORTED) is the definitive
-                // "browser can't decode" signal we swap for the
-                // external-open fallback.
+                // fires whenever the inner element errors. Map the
+                // HTMLMediaElement error codes:
+                //   1 ABORTED        — user / nav canceled, ignore.
+                //   2 NETWORK        — fetch dropped, debrid URL may
+                //                      have expired between resolve
+                //                      and play. Show "network" copy.
+                //   3 DECODE         — bytes arrived but can't decode.
+                //                      Same UX as 4 effectively.
+                //   4 SRC_NOT_SUPPORTED — browser doesn't speak the
+                //                      codec / container. Show
+                //                      "decode" copy.
                 art.on('video:error', function () {
+                    cancelStreamWatchdog();
                     var v = art.video;
-                    if (v && v.error && v.error.code === 4) showFallback(stream);
+                    var code = v && v.error && v.error.code;
+                    if (code === 1) return; // user aborted, no UI needed
+                    var reason = (code === 2) ? 'network' : 'decode';
+                    showFallback(stream, reason);
+                });
+
+                // Watchdog: if neither loadedmetadata nor playing has
+                // fired within STREAM_WATCHDOG_MS, surface the
+                // "hasn't started yet" fallback so the user has
+                // actionable buttons (Retry / Open externally / Copy
+                // URL) instead of staring at a spinner. The video
+                // element keeps trying behind the scenes — if it
+                // does eventually recover we hide the fallback
+                // automatically via the playing handler below.
+                startStreamWatchdog(stream);
+                art.on('video:loadedmetadata', cancelStreamWatchdog);
+                art.on('video:playing', function () {
+                    cancelStreamWatchdog();
+                    // Auto-dismiss any fallback that's up — if the
+                    // video reached `playing`, whatever error or
+                    // timeout we surfaced earlier resolved itself.
+                    // Keeping the message visible alongside a
+                    // playing video would just be confusing.
+                    hideFallback();
                 });
 
                 // Move the skip-intro overlay button into the player
