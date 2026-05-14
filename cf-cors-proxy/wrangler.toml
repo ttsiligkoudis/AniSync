@@ -1,6 +1,6 @@
 name = "anisync-cors-proxy"
 main = "src/index.js"
-compatibility_date = "2025-01-01"
+compatibility_date = "2025-04-01"
 
 # Optional: gate the proxy behind a shared secret so random scanners
 # finding the worker URL can't use it as an open proxy. Set with:

@@ -1,6 +1,11 @@
 name = "anisync-mkv-extractor"
 main = "src/index.js"
-compatibility_date = "2025-01-01"
+# Bumped to a recent date so we pick up runtime fixes for subrequest
+# connection handling. Specifically rolls in a number of stream/
+# Response stability improvements that landed in workerd through
+# 2025. compatibility_date is a contract about which runtime
+# behaviours we opt into — newer is fine for our pure-JS code.
+compatibility_date = "2025-04-01"
 
 # Optional shared secret — same model as cf-cors-proxy. Set with:
 #   npx wrangler secret put PROXY_SECRET
