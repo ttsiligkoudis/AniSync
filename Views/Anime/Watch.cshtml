@@ -350,7 +350,7 @@
             var _jassubWorkerUrlPromise = null;
             function getJassubWorkerUrl() {
                 if (_jassubWorkerUrlPromise) return _jassubWorkerUrlPromise;
-                _jassubWorkerUrlPromise = fetch(JASSUB_WORKER)
+                _jassubWorkerUrlPromise = fetch(JASSUB_WORKER, { skipLoader: true })
                     .then(function (r) {
                         if (!r.ok) throw new Error('jassub worker fetch HTTP ' + r.status);
                         return r.text();
@@ -416,16 +416,31 @@
             // The two pipelines are mutually exclusive — tearDownJassub
             // + art.subtitle.show=false at the top of every branch
             // ensures only one overlay is live at a time.
+            // State recording which subtitle entry is currently
+            // playing. Updated by every applySubtitle call so
+            // buildSubtitleSelector can mark the right entry as
+            // `default: true` when the menu is rebuilt — necessary
+            // for the auto-promote case (embedded SSA arrives mid-
+            // playback) so the checked option in ArtPlayer's
+            // settings UI tracks reality instead of staying on
+            // whatever was selected at video load.
+            var currentSubKind = 'none';   // 'none' | 'vtt' | 'ass'
+            var currentSubKey  = null;     // url for vtt, label string for ass
+
             function applySubtitle(item) {
                 tearDownJassub();
                 if (!art) return;
                 if (item.kind === 'none') {
                     art.subtitle.show = false;
+                    currentSubKind = 'none';
+                    currentSubKey = null;
                     return;
                 }
                 if (item.kind === 'vtt') {
                     art.subtitle.show = true;
                     art.subtitle.switch(item.url, { name: item.html });
+                    currentSubKind = 'vtt';
+                    currentSubKey = item.url;
                     return;
                 }
                 if (item.kind === 'ass') {
@@ -450,6 +465,8 @@
                     // actually need from an embedded sub when
                     // OpenSubtitles / Wyzie don't have a match.
                     art.subtitle.show = false;
+                    currentSubKind = 'ass';
+                    currentSubKey = item.html || (item.label || 'Embedded') + ' SSA';
                     renderAssAsVtt(item);
                     return;
                 }
@@ -581,6 +598,10 @@
                         credentials: 'same-origin',
                         headers: { 'Accept': 'application/json' },
                         signal: signal,
+                        // The watch page already has visible loading
+                        // chrome for the source pick; the global
+                        // overlay on top would just double up.
+                        skipLoader: true,
                     })
                         .then(function (r) { return r.ok ? r.json() : null; })
                         .then(function (data) {
@@ -791,7 +812,7 @@
                     onComplete([]);
                 });
 
-                fetch(url, { signal: abortCtl.signal })
+                fetch(url, { signal: abortCtl.signal, skipLoader: true })
                     .then(function (response) {
                         if (!response.ok || !response.body) {
                             onComplete([]);
@@ -1084,11 +1105,28 @@
                 // the initial pick in the settings selector + as the
                 // ArtPlayer `subtitle:` config so something shows
                 // immediately on play.
+                // Default to the first English track when present;
+                // otherwise leave at -1 so the "None" entry is selected.
+                // We deliberately don't fall back to the first non-
+                // English track — users with no English coverage from
+                // OpenSubtitles / Wyzie are better served by no subs
+                // than by a surprise Spanish / Russian / etc. overlay
+                // they didn't ask for. They can still pick any track
+                // manually from the selector.
                 var defaultSubIdx = -1;
                 for (var i = 0; i < subtitles.length; i++) {
                     if (/^en/i.test(subtitles[i].lang || '')) { defaultSubIdx = i; break; }
                 }
-                if (defaultSubIdx === -1 && subtitles.length > 0) defaultSubIdx = 0;
+                // Prime the menu-state vars so the initial selector
+                // render matches the subtitle ArtPlayer auto-loads
+                // via its `subtitle:` config below.
+                if (defaultSubIdx >= 0) {
+                    currentSubKind = 'vtt';
+                    currentSubKey = subtitles[defaultSubIdx].url;
+                } else {
+                    currentSubKind = 'none';
+                    currentSubKey = null;
+                }
 
                 // Subtitle picker is ALWAYS rendered with a "None"
                 // option at the top so users can turn captions off
@@ -1097,24 +1135,35 @@
                 // completes); they live alongside the VTT tracks in
                 // the same selector and route through applySubtitle().
                 function buildSubtitleSelector() {
-                    var options = [{ html: 'None', kind: 'none', "default": defaultSubIdx < 0 }];
-                    subtitles.forEach(function (t, i) {
+                    // Default markers are driven by currentSubKind /
+                    // currentSubKey rather than the initial pick so a
+                    // mid-playback auto-promote (e.g. English embedded
+                    // SSA arriving 30s in) shows up as checked in the
+                    // menu instead of staying on whatever was selected
+                    // at video load.
+                    var options = [{
+                        html: 'None',
+                        kind: 'none',
+                        "default": currentSubKind === 'none',
+                    }];
+                    subtitles.forEach(function (t) {
                         options.push({
                             html: t.label || t.lang || 'Subtitles',
                             kind: 'vtt',
                             url: t.url,
-                            "default": i === defaultSubIdx,
+                            "default": currentSubKind === 'vtt' && currentSubKey === t.url,
                         });
                     });
                     embeddedTracks.forEach(function (t) {
                         // Label format intentionally drops the parens —
                         // "English SSA" reads as a track type tag at a
                         // glance, faster than "English (SSA)".
+                        var label = (t.label || 'Embedded') + ' SSA';
                         options.push({
-                            html: (t.label || 'Embedded') + ' SSA',
+                            html: label,
                             kind: 'ass',
                             trackData: t.data,
-                            "default": false,
+                            "default": currentSubKind === 'ass' && currentSubKey === label,
                         });
                     });
                     return options;
@@ -1276,28 +1325,37 @@
                     },
                     function (full) {
                         embeddedTracks = full;
-                        refreshSubtitleSelector(buildSubtitleSelector);
-                        // Auto-promote the SSA track when it lands —
-                        // anime fansubs ship with styled embedded
-                        // subs that almost always beat OpenSubtitles
-                        // for accuracy, so default to that without
-                        // requiring an extra click. Prefer the
-                        // English track when present; fall back to
-                        // the first track.
-                        if (full.length > 0) {
-                            var chosen = null;
-                            for (var i = 0; i < full.length; i++) {
-                                if (/^en/i.test(full[i].language || '')) { chosen = full[i]; break; }
-                            }
-                            chosen = chosen || full[0];
-                            if (chosen && chosen.data) {
-                                applySubtitle({
-                                    kind: 'ass',
-                                    html: (chosen.label || 'Embedded') + ' SSA',
-                                    trackData: chosen.data,
-                                });
+                        // Auto-promote ONLY when an English embedded
+                        // track is available. Anime fansubs are
+                        // overwhelmingly English-default and almost
+                        // always beat OpenSubtitles on timing /
+                        // accuracy, so when it's there we want it
+                        // selected without an extra click. If the
+                        // file has no English embedded track we
+                        // explicitly leave the current selection
+                        // alone — a surprise Spanish / Russian /
+                        // Arabic auto-pick is worse than just
+                        // surfacing the embedded entries in the menu
+                        // for the user to pick from manually.
+                        var englishTrack = null;
+                        for (var i = 0; i < full.length; i++) {
+                            if (/^en/i.test(full[i].language || '')) {
+                                englishTrack = full[i];
+                                break;
                             }
                         }
+                        if (englishTrack && englishTrack.data) {
+                            applySubtitle({
+                                kind: 'ass',
+                                html: (englishTrack.label || 'Embedded') + ' SSA',
+                                trackData: englishTrack.data,
+                            });
+                        }
+                        // Rebuild AFTER applySubtitle so the menu's
+                        // "default" markers reflect the new active
+                        // entry (or stay on the original pick when no
+                        // English embedded track was found).
+                        refreshSubtitleSelector(buildSubtitleSelector);
                     });
             }
 
