@@ -834,12 +834,32 @@ namespace AnimeList.Controllers
                 // (default). Falls back to the original on any error.
                 var finalUrl = res.RequestMessage?.RequestUri?.ToString() ?? url;
 
-                // If the redirect chain didn't land on a debrid CDN,
-                // the file is no longer playable — RD typically
-                // redirects DMCA-removed entries to its error page
-                // host. Mark this hash as bad so the next time the
-                // user reloads the source list it gets pre-filtered
-                // out instead of showing as a dead row.
+                // Detect DMCA-removed entries. RD serves these in two
+                // shapes:
+                //   (a) redirect to a non-CDN error page — caught by
+                //       the host-allowlist check below.
+                //   (b) 200 OK from a real *.real-debrid.com host
+                //       with a small placeholder video (~1-5 MB)
+                //       that says "file removed for copyright" —
+                //       caught here by the suspiciously-small total
+                //       size pulled from Content-Range.
+                //
+                // Anything < SUSPICIOUSLY_SMALL is almost certainly
+                // RD's placeholder: real anime episodes are 100 MB+
+                // even at low bitrate.
+                const long SuspiciouslySmallBytes = 15 * 1024 * 1024;
+                long? totalSize = null;
+                if (res.Content.Headers.ContentRange?.HasLength == true)
+                {
+                    totalSize = res.Content.Headers.ContentRange.Length;
+                }
+                else if (res.StatusCode == System.Net.HttpStatusCode.OK
+                         && res.Content.Headers.ContentLength.HasValue)
+                {
+                    totalSize = res.Content.Headers.ContentLength.Value;
+                }
+                var looksPlaceholder = totalSize.HasValue && totalSize.Value < SuspiciouslySmallBytes;
+
                 if (Uri.TryCreate(finalUrl, UriKind.Absolute, out var finalUri))
                 {
                     var finalHost = finalUri.Host.ToLowerInvariant();
@@ -850,15 +870,18 @@ namespace AnimeList.Controllers
                         finalHost.EndsWith("premiumize.me") ||
                         finalHost.EndsWith("torbox.app") ||
                         finalHost.EndsWith("offcloud.com");
-                    if (!isDebridCdn)
+                    if (!isDebridCdn || looksPlaceholder)
                     {
                         var hash = TorrentioService.ExtractInfoHashFromUrl(url);
                         if (!string.IsNullOrEmpty(hash))
                         {
                             _torrentioService.MarkHashUnplayable(hash);
+                            var reason = looksPlaceholder
+                                ? $"placeholder-sized response ({totalSize}B) from {finalHost}"
+                                : $"resolve landed on non-CDN host {finalHost}";
                             _logger.LogInformation(
-                                "Marked Torrentio hash {Hash} as unplayable (resolve landed on non-CDN host {Host}).",
-                                hash, finalHost);
+                                "Marked Torrentio hash {Hash} as unplayable: {Reason}.",
+                                hash, reason);
                         }
                     }
                 }
