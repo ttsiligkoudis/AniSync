@@ -324,6 +324,39 @@
             var JASSUB_WORKER = 'https://cdn.jsdelivr.net/npm/jassub/dist/jassub-worker.js';
             var JASSUB_WASM   = 'https://cdn.jsdelivr.net/npm/jassub/dist/jassub-worker.wasm';
 
+            // Browsers refuse `new Worker(crossOriginUrl)` even when
+            // the script ships with `Access-Control-Allow-Origin: *`
+            // — the Worker constructor enforces a stricter same-
+            // origin policy than fetch. Workaround: fetch the worker
+            // script as text (CORS-allowed, jsdelivr sends the
+            // header), wrap it in a Blob, and construct the Worker
+            // from the resulting blob: URL (same-origin to the page).
+            // The WASM continues to load directly from the CDN —
+            // that fetch happens INSIDE the worker via a regular
+            // network request, which CORS handles fine.
+            //
+            // Cached per page so repeated SSA picks reuse one blob.
+            var _jassubWorkerUrlPromise = null;
+            function getJassubWorkerUrl() {
+                if (_jassubWorkerUrlPromise) return _jassubWorkerUrlPromise;
+                _jassubWorkerUrlPromise = fetch(JASSUB_WORKER)
+                    .then(function (r) {
+                        if (!r.ok) throw new Error('jassub worker fetch HTTP ' + r.status);
+                        return r.text();
+                    })
+                    .then(function (text) {
+                        var blob = new Blob([text], { type: 'application/javascript' });
+                        return URL.createObjectURL(blob);
+                    })
+                    .catch(function (e) {
+                        // Surface but don't trap — next pick can retry.
+                        console.warn('jassub worker blob prep failed:', e);
+                        _jassubWorkerUrlPromise = null;
+                        throw e;
+                    });
+                return _jassubWorkerUrlPromise;
+            }
+
             function el(tag, attrs, text) {
                 var n = document.createElement(tag);
                 if (attrs) Object.keys(attrs).forEach(function (k) {
@@ -389,20 +422,31 @@
                     // jassub paints over the video.
                     art.subtitle.show = false;
                     if (typeof JASSUB === 'undefined' || !art.video) return;
-                    try {
-                        jassubInstance = new JASSUB({
-                            video: art.video,
-                            subContent: item.trackData,
-                            workerUrl: JASSUB_WORKER,
-                            wasmUrl: JASSUB_WASM,
-                        });
-                    } catch (e) {
-                        // JASSUB init failure (CORS, codec mismatch in
-                        // the codecPrivate header, etc) — leave both
-                        // overlays off, surface a console hint, let
-                        // the user pick a different track.
-                        console.warn('jassub init failed:', e);
-                    }
+                    // workerUrl must resolve to a same-origin blob: URL
+                    // before Worker construction — see getJassubWorkerUrl()
+                    // for the cross-origin workaround. The fetch + Blob
+                    // are cheap after the first call (cached) so the
+                    // async hop is one-shot per page load.
+                    var capturedVideo = art.video;
+                    var capturedItem = item;
+                    getJassubWorkerUrl().then(function (workerUrl) {
+                        // The user may have torn down the player or
+                        // picked a different subtitle in the meantime
+                        // — bail if the world has moved on.
+                        if (!art || art.video !== capturedVideo) return;
+                        try {
+                            jassubInstance = new JASSUB({
+                                video: capturedVideo,
+                                subContent: capturedItem.trackData,
+                                workerUrl: workerUrl,
+                                wasmUrl: JASSUB_WASM,
+                            });
+                        } catch (e) {
+                            console.warn('jassub init failed:', e);
+                        }
+                    }).catch(function (e) {
+                        console.warn('jassub init failed (worker prep):', e);
+                    });
                 }
             }
 
