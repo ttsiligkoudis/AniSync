@@ -229,29 +229,33 @@ namespace AnimeList.Services
                 using var req = new HttpRequestMessage(HttpMethod.Get, streamsUrl);
                 // Tell the addon who the real client is so it can bind
                 // its playback URLs to the user's IP rather than ours.
-                // Sending all three header variants because addons
-                // differ on which they trust — MediaFusion checks
-                // CF-Connecting-IP / Fly-Client-IP first, falling back
-                // to X-Forwarded-For. Without these, the addon's
-                // signed playback URL ends up valid only from
-                // AniSync's backend IP and the user's browser 403s
-                // with "client mismatch".
+                // X-Forwarded-For is the universally-recognised header
+                // — sending the CDN-specific variants alongside it
+                // (CF-Connecting-IP / Fly-Client-IP) tends to trip
+                // anti-spoofing checks on addons that expect those
+                // headers only from their own edge, so we stick to
+                // X-Forwarded-For exclusively.
                 if (!string.IsNullOrEmpty(clientIp))
                 {
                     req.Headers.TryAddWithoutValidation("X-Forwarded-For", clientIp);
-                    req.Headers.TryAddWithoutValidation("CF-Connecting-IP", clientIp);
-                    req.Headers.TryAddWithoutValidation("Fly-Client-IP", clientIp);
                 }
                 var response = await client.SendAsync(req, cts.Token);
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("Addon stream fetch {Status} for {Path} via {Host}.",
-                        (int)response.StatusCode, idPath, addonRoot);
+                    _logger.LogWarning(
+                        "Addon stream fetch {Status} for {Path} via {Host} (clientIp={Ip}).",
+                        (int)response.StatusCode, idPath, addonRoot,
+                        string.IsNullOrEmpty(clientIp) ? "(none)" : clientIp);
                     return [];
                 }
 
                 var content = await response.Content.ReadAsStringAsync(cts.Token);
                 var parsed = ParseStreams(content, addonRoot);
+
+                _logger.LogInformation(
+                    "Addon stream fetch returned {Count} entries for {Path} via {Host} (clientIp={Ip}).",
+                    parsed.Count, idPath, addonRoot,
+                    string.IsNullOrEmpty(clientIp) ? "(none)" : clientIp);
 
                 _cache.Set(cacheKey, parsed, new MemoryCacheEntryOptions
                 {
