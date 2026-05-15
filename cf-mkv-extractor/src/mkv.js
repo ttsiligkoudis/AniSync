@@ -159,9 +159,34 @@ export async function extractSubtitles(reader, options) {
         cuePositions.map(cp => absoluteFromSegment(cp.clusterPosition))
     )).sort((a, b) => a - b);
 
+    // Sharding: when the caller specifies shards>1, slice the offset
+    // list into contiguous ranges and only process this shard's slice.
+    // Each shard runs as its own Worker invocation with its own
+    // 128 MB memory cap + 50-subrequest budget, so 4 shards lets a
+    // big BD remux extract ~480 MB worth of cluster bytes total
+    // instead of the 120 MB ceiling a single invocation has.
+    //
+    // Contiguous slices (not round-robin) so each shard's clusters
+    // are near each other in the file — the batch coalescer below
+    // can then merge them into a few fat Range requests instead of
+    // many small scattered ones, which matters for the 50-subrequest
+    // budget. The browser merges shard responses by track number
+    // and sorts cues by time so any slicing scheme produces the
+    // same final track, but contiguous is by far the cheapest.
+    const shards = Math.max(1, Math.floor(opts.shards || 1));
+    const shardIdx = Math.max(0, Math.min(shards - 1, Math.floor(opts.shard || 0)));
+    let activeOffsets = clusterAbsOffsets;
+    if (shards > 1) {
+        const sliceSize = Math.ceil(clusterAbsOffsets.length / shards);
+        const sliceStart = shardIdx * sliceSize;
+        const sliceEnd = Math.min(sliceStart + sliceSize, clusterAbsOffsets.length);
+        activeOffsets = clusterAbsOffsets.slice(sliceStart, sliceEnd);
+    }
+
     // ── 6. For each Cluster, pull subtitle blocks ─────────────────
     const cuesByTrack = new Map(subtitleTracks.map(t => [t.number, []]));
     let totalFetched = HEAD_BYTES + TRACKS_FETCH + CUES_FETCH;
+    let truncated = false;
 
     // Coalesce nearby cluster offsets into Range batches so a long
     // episode with many cue points doesn't blow Cloudflare Workers'
@@ -177,7 +202,7 @@ export async function extractSubtitles(reader, options) {
     // We then fetch + process + evict each batch sequentially so the
     // resident set stays small even on long extractions.
     const batches = [];
-    for (const off of clusterAbsOffsets) {
+    for (const off of activeOffsets) {
         const cur = batches[batches.length - 1];
         if (cur
             && off - cur.end < CLUSTER_BATCH_GAP
@@ -204,13 +229,20 @@ export async function extractSubtitles(reader, options) {
     // Group cluster offsets by which batch contains them so each
     // batch can be processed in isolation and evicted right after.
     const clustersInBatch = batches.map(b =>
-        clusterAbsOffsets.filter(off => off >= b.start && off + CLUSTER_FETCH <= b.end)
+        activeOffsets.filter(off => off >= b.start && off + CLUSTER_FETCH <= b.end)
     );
 
     for (let bi = 0; bi < batches.length; bi++) {
         const b = batches[bi];
         const len = b.end - b.start;
-        if (totalFetched + len > MAX_TOTAL_FETCH) break;
+        if (totalFetched + len > MAX_TOTAL_FETCH) {
+            // Surfaced to the caller so the client can re-fire with
+            // sharding (or escalate from N=4 to N=8 etc.). Without
+            // this flag the truncation was silent — caller saw a
+            // full-looking response with quietly missing cues.
+            truncated = true;
+            break;
+        }
         try {
             await reader.read(b.start, len);
             totalFetched += len;
@@ -312,6 +344,17 @@ export async function extractSubtitles(reader, options) {
             header: decodeHeader(t.codecPrivate, t.codecID),
             cues: cuesByTrack.get(t.number) || [],
         })),
+        truncated,
+        // Echoed so the caller can confirm which slice this response
+        // covers — useful when debugging a failed merge.
+        shard: shardIdx,
+        shards,
+        // Total cluster offsets in the full file. Lets the client
+        // estimate how many shards are needed when sharding kicks in
+        // (rough rule of thumb: clusters-per-shard × per-cluster-size
+        // should fit under MAX_TOTAL_FETCH).
+        clustersTotal: clusterAbsOffsets.length,
+        clustersInShard: activeOffsets.length,
     };
 }
 

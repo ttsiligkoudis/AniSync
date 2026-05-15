@@ -144,13 +144,33 @@ async function handleFetch(request, env, ctx) {
             //   omitted         — return every subtitle track (legacy
             //                     behaviour).
             const langParam = (url.searchParams.get('lang') || '').toLowerCase();
-            const result = await extractSubtitles(reader, { lang: langParam || null });
+            // Sharding params. shards>1 splits the cluster-offset
+            // list into N contiguous slices; each invocation processes
+            // only its slice. Lets the client fan out big BD remuxes
+            // across multiple Worker invocations to bypass the
+            // single-invocation 128 MB memory cap (MAX_TOTAL_FETCH =
+            // 120 MB inside mkv.js). Defaults to 1 = single-shot
+            // behaviour. The cache key already includes these via
+            // the full request URL, so each (shards, shard) pair
+            // caches independently.
+            const shardsParam = parseInt(url.searchParams.get('shards') || '1', 10) || 1;
+            const shardParam = parseInt(url.searchParams.get('shard') || '0', 10) || 0;
+            const result = await extractSubtitles(reader, {
+                lang: langParam || null,
+                shards: shardsParam,
+                shard: shardParam,
+            });
             // Build with Cache-Control so cache.put accepts it. Two
             // hours covers typical re-watch sessions; after that the
             // RD URL has rotated and any cached entry would be moot.
             const successBody = JSON.stringify({
                 tracks: result.tracks,
                 extracted: true,
+                truncated: !!result.truncated,
+                shard: result.shard,
+                shards: result.shards,
+                clustersTotal: result.clustersTotal,
+                clustersInShard: result.clustersInShard,
                 stats: {
                     fileSize: reader.totalSize,
                     trackCount: result.tracks.length,
@@ -166,8 +186,14 @@ async function handleFetch(request, env, ctx) {
             // ctx.waitUntil lets the cache write happen after we've
             // returned to the client — zero added latency. Use
             // response.clone() because Response bodies are
-            // single-consumer.
-            ctx.waitUntil(cache.put(request, response.clone()));
+            // single-consumer. Truncated responses (single-shot ran
+            // out of MAX_TOTAL_FETCH budget) are NOT cached: the
+            // client uses the truncated flag as the signal to retry
+            // with sharding, and a cached truncated body would
+            // suppress that signal for two hours.
+            if (!result.truncated) {
+                ctx.waitUntil(cache.put(request, response.clone()));
+            }
             return response;
         } catch (e) {
             // Collapse extraction failures (indexless file, mid-stream
