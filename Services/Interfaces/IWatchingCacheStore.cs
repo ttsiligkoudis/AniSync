@@ -33,11 +33,21 @@ namespace AnimeList.Services.Interfaces
         Task<List<WatchingCacheEntry>> GetAllAsync();
 
         Task MarkErrorAsync(string uid, string error);
+
+        /// <summary>
+        /// Writes the precomputed <c>next_airing_at</c> Unix-seconds value
+        /// for each uid (or null to clear). The dispatcher batches every
+        /// known user into a single call after walking the airing schedule
+        /// so the bell can schedule its next refresh to the right minute
+        /// instead of polling.
+        /// </summary>
+        Task SetNextAiringAtBulkAsync(IReadOnlyDictionary<string, long?> nextByUid);
     }
 
     public record WatchingCacheEntry(
         string Uid,
         AnimeService Service,
         HashSet<string> MediaIds,
-        long RefreshedAt);
+        long RefreshedAt,
+        long? NextAiringAt);
 }

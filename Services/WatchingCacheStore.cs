@@ -63,7 +63,7 @@ namespace AnimeList.Services
             await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
-                SELECT uid, service, media_ids_json, refreshed_at
+                SELECT uid, service, media_ids_json, refreshed_at, next_airing_at
                 FROM user_watching_cache
                 WHERE uid = $uid;
                 """;
@@ -108,7 +108,7 @@ namespace AnimeList.Services
             await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
-                SELECT uid, service, media_ids_json, refreshed_at
+                SELECT uid, service, media_ids_json, refreshed_at, next_airing_at
                 FROM user_watching_cache;
                 """;
 
@@ -151,6 +151,7 @@ namespace AnimeList.Services
             var service = (AnimeService)reader.GetInt32(1);
             var rawJson = reader.GetString(2);
             var refreshedAt = reader.GetInt64(3);
+            var nextAiringAt = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4);
             HashSet<string> ids;
             try
             {
@@ -160,7 +161,32 @@ namespace AnimeList.Services
             {
                 ids = [];
             }
-            return new WatchingCacheEntry(uid, service, ids, refreshedAt);
+            return new WatchingCacheEntry(uid, service, ids, refreshedAt, nextAiringAt);
+        }
+
+        public async Task SetNextAiringAtBulkAsync(IReadOnlyDictionary<string, long?> nextByUid)
+        {
+            if (nextByUid == null || nextByUid.Count == 0) return;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            // Single transaction keeps the batch atomic and avoids one fsync
+            // per update — at hundreds of users this is the difference between
+            // sub-millisecond and seconds-per-tick.
+            using var tx = conn.BeginTransaction();
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = "UPDATE user_watching_cache SET next_airing_at = $next WHERE uid = $uid;";
+            var pUid = cmd.Parameters.Add("$uid", Microsoft.Data.Sqlite.SqliteType.Text);
+            var pNext = cmd.Parameters.Add("$next", Microsoft.Data.Sqlite.SqliteType.Integer);
+
+            foreach (var (uid, next) in nextByUid)
+            {
+                pUid.Value = uid;
+                pNext.Value = (object)next ?? DBNull.Value;
+                await cmd.ExecuteNonQueryAsync();
+            }
+            tx.Commit();
         }
     }
 }

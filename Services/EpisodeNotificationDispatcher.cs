@@ -116,10 +116,6 @@ namespace AnimeList.Services
             var startUnix = now.AddHours(-NotifyPastGraceHours).ToUnixTimeSeconds();
             var endUnix = now.AddHours(NotifyWindowHours).ToUnixTimeSeconds();
             var schedule = await _anilistFallback.GetUpcomingEpisodesAsync(startUnix, endUnix);
-            if (schedule.Count == 0)
-            {
-                return new DispatchResult(cachesRefreshed, cachesFailed, 0, 0, 0);
-            }
 
             // Step 3: match airing entries against cached Watching lists.
             var allCaches = await _watchingCache.GetAllAsync();
@@ -127,9 +123,29 @@ namespace AnimeList.Services
             {
                 return new DispatchResult(cachesRefreshed, cachesFailed, schedule.Count, 0, 0);
             }
+            if (schedule.Count == 0)
+            {
+                // Nothing airing in the lookahead window — clear every user's
+                // next_airing_at so the bell falls back to its idle refresh
+                // interval. Without this clear, stale values from earlier
+                // ticks would keep firing late polls forever.
+                var clears = new Dictionary<string, long?>(allCaches.Count);
+                foreach (var c in allCaches) clears[c.Uid] = null;
+                try { await _watchingCache.SetNextAiringAtBulkAsync(clears); }
+                catch (Exception ex) { _logger.LogWarning(ex, "next_airing_at clear failed"); }
+                return new DispatchResult(cachesRefreshed, cachesFailed, 0, 0, 0);
+            }
 
             await _mappingService.EnsureLoadedAsync();
             var createdAt = now.ToUnixTimeSeconds();
+            var nowUnix = createdAt;
+
+            // Pre-seed every known user with a null next-airing so users whose
+            // matching shows have all already aired in this window get their
+            // stale next_airing_at cleared. The match loop below overwrites
+            // these with min(future airingAt) when one is found.
+            var nextAiringByUid = new Dictionary<string, long?>(allCaches.Count);
+            foreach (var c in allCaches) nextAiringByUid[c.Uid] = null;
 
             foreach (var sched in schedule)
             {
@@ -160,6 +176,17 @@ namespace AnimeList.Services
                     }
                     if (!cache.MediaIds.Contains(idInUserSpace)) continue;
 
+                    // Track the min future airingAt across all of this user's
+                    // matching shows. The /count endpoint hands this to the
+                    // browser so the bell can setTimeout to (airingAt + cron
+                    // grace) instead of polling every minute.
+                    if (sched.AiringAt > nowUnix)
+                    {
+                        var existing = nextAiringByUid[cache.Uid];
+                        if (existing == null || sched.AiringAt < existing.Value)
+                            nextAiringByUid[cache.Uid] = sched.AiringAt;
+                    }
+
                     var record = new NotificationRecord
                     {
                         Uid = cache.Uid,
@@ -178,6 +205,12 @@ namespace AnimeList.Services
                     else notificationsSuppressed++;
                 }
             }
+
+            // Persist next-airing for every known user in a single transaction.
+            // Includes nulls so the bell stops scheduling refreshes for users
+            // whose watching list has nothing airing in the lookahead window.
+            try { await _watchingCache.SetNextAiringAtBulkAsync(nextAiringByUid); }
+            catch (Exception ex) { _logger.LogWarning(ex, "next_airing_at bulk update failed"); }
 
             return new DispatchResult(
                 CachesRefreshed: cachesRefreshed,

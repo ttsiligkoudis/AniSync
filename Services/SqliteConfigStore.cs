@@ -127,6 +127,7 @@ namespace AnimeList.Services
                     service         INTEGER NOT NULL,        -- user's primary AnimeService at cache time
                     media_ids_json  TEXT NOT NULL,           -- JSON array of prefixed ids
                     refreshed_at    INTEGER NOT NULL,
+                    next_airing_at  INTEGER,                 -- Unix seconds of the next future airing matching this user's watching set; NULL when nothing's scheduled in the lookahead window
                     last_error      TEXT,
                     last_error_at   INTEGER
                 );
@@ -142,6 +143,12 @@ namespace AnimeList.Services
             // CREATE IF NOT EXISTS doesn't alter existing tables. The
             // try/catch covers the "already exists" race on a fresh DB.
             EnsureColumn(conn, "configs", "stream_addons", "TEXT");
+
+            // next_airing_at was added after user_watching_cache shipped — the
+            // dispatcher writes it so /api/v1/notifications/count can return
+            // the next event time and the browser bell can schedule a single
+            // setTimeout instead of polling every 60s.
+            EnsureColumn(conn, "user_watching_cache", "next_airing_at", "INTEGER");
         }
 
         private static void EnsureColumn(SqliteConnection conn, string table, string column, string typeAndConstraints)
