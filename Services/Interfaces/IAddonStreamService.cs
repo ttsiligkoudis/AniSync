@@ -31,12 +31,22 @@ namespace AnimeList.Services.Interfaces
         /// title/description). Drops entries that aren't directly
         /// playable (no <c>url</c> field — magnets-only addons,
         /// external-only addons). Returns an empty list on any failure.
+        ///
+        /// <paramref name="clientIp"/> is forwarded as the
+        /// <c>X-Forwarded-For</c> / <c>Fly-Client-IP</c> /
+        /// <c>CF-Connecting-IP</c> headers so addons that bind their
+        /// playback tokens to the requesting IP (notably MediaFusion's
+        /// ElfHosted instance) sign URLs to the user's IP rather than
+        /// AniSync's backend IP — without it, the user's browser hits
+        /// the addon's playback URL from a different IP than the one
+        /// the token was issued for and the addon 403s.
         /// </summary>
         Task<IReadOnlyList<AddonStream>> GetStreamsAsync(
             string manifestUrl,
             AnimeSourceLinks links,
             int? season,
             int? episode,
+            string clientIp = null,
             CancellationToken ct = default);
     }
 
