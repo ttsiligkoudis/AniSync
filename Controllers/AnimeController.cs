@@ -461,13 +461,38 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
-        /// Walks the episode list (in (season, episode) order) and finds the
-        /// neighbours of <paramref name="current"/>. Returns (null, null) at
-        /// the ends so the view can hide the prev / next buttons cleanly.
-        /// Ignores future-dated episodes for the "next" lookup so the user
-        /// doesn't land on an unaired episode picker that has nothing to
-        /// show.
+        /// Resolves the user's real client IP for downstream addon
+        /// requests. ASP.NET's ForwardedHeaders middleware
+        /// (Program.cs) normally rewrites <c>RemoteIpAddress</c> to
+        /// the X-Forwarded-For value when AniSync sits behind a
+        /// load balancer / CDN; we also consult the Fly.io- and
+        /// Cloudflare-specific headers explicitly as a belt-and-
+        /// braces fallback for hosts where the middleware's
+        /// known-proxy list doesn't cover the front edge. IPv4-
+        /// mapped IPv6 addresses get unwrapped so MediaFusion-style
+        /// IP-binding comparisons match the form the user's
+        /// browser will reconnect from.
         /// </summary>
+        private static string ResolveClientIp(HttpContext ctx)
+        {
+            string headerIp = null;
+            if (ctx.Request.Headers.TryGetValue("CF-Connecting-IP", out var cf) && cf.Count > 0)
+                headerIp = cf[0]?.Trim();
+            if (string.IsNullOrEmpty(headerIp)
+                && ctx.Request.Headers.TryGetValue("Fly-Client-IP", out var fly) && fly.Count > 0)
+                headerIp = fly[0]?.Trim();
+            if (string.IsNullOrEmpty(headerIp)
+                && ctx.Request.Headers.TryGetValue("X-Forwarded-For", out var xff) && xff.Count > 0)
+                headerIp = xff[0]?.Split(',')[0]?.Trim();
+
+            if (!string.IsNullOrEmpty(headerIp)) return headerIp;
+
+            var addr = ctx.Connection.RemoteIpAddress;
+            if (addr == null) return null;
+            if (addr.IsIPv4MappedToIPv6) addr = addr.MapToIPv4();
+            return addr.ToString();
+        }
+
         /// <summary>
         /// Combines stream lists from every configured addon into one
         /// ranked view. De-dupes by lowercased infoHash, keeping the
@@ -511,6 +536,14 @@ namespace AnimeList.Controllers
             return ranked;
         }
 
+        /// <summary>
+        /// Walks the episode list (in (season, episode) order) and finds the
+        /// neighbours of <paramref name="current"/>. Returns (null, null) at
+        /// the ends so the view can hide the prev / next buttons cleanly.
+        /// Ignores future-dated episodes for the "next" lookup so the user
+        /// doesn't land on an unaired episode picker that has nothing to
+        /// show.
+        /// </summary>
         private static (Video Prev, Video Next) ComputePrevNext(List<Video> videos, Video current)
         {
             var today = DateTime.UtcNow.Date;
@@ -584,11 +617,20 @@ namespace AnimeList.Controllers
             {
                 var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
 
+                // The user's real client IP — forwarded to each addon
+                // so playback URLs that bind to the requesting IP (e.g.
+                // MediaFusion) sign tokens for the user's IP rather
+                // than ours. ForwardedHeaders middleware (Program.cs)
+                // already populates RemoteIpAddress from X-Forwarded-
+                // For when AniSync sits behind a CDN / load balancer.
+                var clientIp = ResolveClientIp(HttpContext);
+
                 // Fan out in parallel — addons are independent
                 // endpoints with no shared rate-limit, so total latency
                 // floors at max(addon latency) rather than summing.
                 var fetchTasks = addons
-                    .Select(a => _addonStreamService.GetStreamsAsync(a.Url, sourceLinks, season, episode))
+                    .Select(a => _addonStreamService.GetStreamsAsync(
+                        a.Url, sourceLinks, season, episode, clientIp))
                     .ToArray();
                 await Task.WhenAll(fetchTasks);
 

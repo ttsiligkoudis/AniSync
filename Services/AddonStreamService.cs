@@ -185,6 +185,7 @@ namespace AnimeList.Services
             AnimeSourceLinks links,
             int? season,
             int? episode,
+            string clientIp = null,
             CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(manifestUrl) || links == null)
@@ -202,9 +203,15 @@ namespace AnimeList.Services
 
             // Fingerprint the manifest URL so addon-specific encrypted
             // config segments don't leak into the in-process cache
-            // namespace (memory dumps stay sanitised).
+            // namespace (memory dumps stay sanitised). Bake the client
+            // IP into the cache key as well: addons like MediaFusion
+            // bind playback tokens to the requesting IP, so two users
+            // on different IPs hitting the same episode genuinely need
+            // different cached responses — sharing would hand user B
+            // a URL token-bound to user A's IP.
             var keyFingerprint = ShortFingerprint(manifestUrl);
-            var cacheKey = $"addon:{keyFingerprint}:{idPath}";
+            var ipKey = string.IsNullOrEmpty(clientIp) ? "anon" : ShortFingerprint(clientIp);
+            var cacheKey = $"addon:{keyFingerprint}:{ipKey}:{idPath}";
 
             if (_cache.TryGetValue<IReadOnlyList<AddonStream>>(cacheKey, out var hit) && hit != null)
             {
@@ -219,7 +226,23 @@ namespace AnimeList.Services
                 cts.CancelAfter(StreamsTimeout);
 
                 var client = _clientFactory.CreateClient();
-                var response = await client.GetAsync(streamsUrl, cts.Token);
+                using var req = new HttpRequestMessage(HttpMethod.Get, streamsUrl);
+                // Tell the addon who the real client is so it can bind
+                // its playback URLs to the user's IP rather than ours.
+                // Sending all three header variants because addons
+                // differ on which they trust — MediaFusion checks
+                // CF-Connecting-IP / Fly-Client-IP first, falling back
+                // to X-Forwarded-For. Without these, the addon's
+                // signed playback URL ends up valid only from
+                // AniSync's backend IP and the user's browser 403s
+                // with "client mismatch".
+                if (!string.IsNullOrEmpty(clientIp))
+                {
+                    req.Headers.TryAddWithoutValidation("X-Forwarded-For", clientIp);
+                    req.Headers.TryAddWithoutValidation("CF-Connecting-IP", clientIp);
+                    req.Headers.TryAddWithoutValidation("Fly-Client-IP", clientIp);
+                }
+                var response = await client.SendAsync(req, cts.Token);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Addon stream fetch {Status} for {Path} via {Host}.",
