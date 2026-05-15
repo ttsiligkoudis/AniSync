@@ -331,16 +331,19 @@ namespace AnimeList.Services
 
             foreach (var s in streams.OfType<JObject>())
             {
-                var url = (string)s["url"];
+                var url = NormalizeAddonStreamUrl((string)s["url"]);
                 if (string.IsNullOrWhiteSpace(url)) continue;
 
                 var name = (string)s["name"] ?? string.Empty;
                 // Different addons populate different descriptive
                 // fields — Torrentio uses `title`, MediaFusion uses
-                // `description`. Combine both to keep the regex
-                // detection robust either way.
-                var description = (string)s["description"] ?? (string)s["title"] ?? string.Empty;
-                var combined = $"{name}\n{description}";
+                // `description` (and may also use `title`). Feed all
+                // three to the detection helpers so the regex hits
+                // size / seeders / language tokens regardless of which
+                // field carries them.
+                var rawDescription = (string)s["description"] ?? string.Empty;
+                var rawTitle = (string)s["title"] ?? string.Empty;
+                var combined = $"{name}\n{rawDescription}\n{rawTitle}";
 
                 var quality = DetectQuality(combined);
                 if (quality == null || Array.IndexOf(AllowedQualities, quality) < 0)
@@ -364,9 +367,19 @@ namespace AnimeList.Services
                     fileIdx = fi;
                 }
 
+                // Pick a single human-readable release-name line for
+                // display. Torrentio puts the filename straight in
+                // `title`; MediaFusion shoves it into a multi-line
+                // `description` after a codec line (and sometimes tags
+                // it with 📁). Walking all three fields with the same
+                // heuristic — explicit 📁 marker first, then the first
+                // line that isn't pure metadata — keeps the source
+                // picker from showing "hevc" / "WEB AAC" as the title.
+                var displayTitle = PickReleaseTitle(rawDescription, rawTitle, name);
+
                 raw.Add(new AddonStream(
                     Name: name,
-                    Title: description,
+                    Title: displayTitle,
                     Url: url,
                     Quality: quality,
                     Size: size,
@@ -495,6 +508,138 @@ namespace AnimeList.Services
             {
                 return true;
             }
+        }
+
+        /// <summary>
+        /// Walks a URL down one URL-decode level at a time, stopping
+        /// at the "single-encoded" canonical form. Workaround for
+        /// MediaFusion configurations that return playback URLs with
+        /// filenames encoded multiple times (e.g. <c>%25255B</c> for
+        /// <c>[</c> and <c>%252520</c> for a space) — the server then
+        /// 403s on its own URL because the signed token in the path
+        /// is computed against the once-encoded form. Guarded against
+        /// over-decoding a legitimate literal <c>%</c> by checking
+        /// that each decoded result still contains another <c>%XX</c>
+        /// percent sequence before accepting it.
+        /// </summary>
+        private static string NormalizeAddonStreamUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return url;
+            var safety = 4;
+            while (safety-- > 0)
+            {
+                if (url.IndexOf("%25", StringComparison.OrdinalIgnoreCase) < 0) break;
+                string decoded;
+                try { decoded = Uri.UnescapeDataString(url); }
+                catch { break; }
+                if (string.Equals(decoded, url, StringComparison.Ordinal)) break;
+                // Stop if the decoded form is no longer URL-encoded —
+                // protects against decoding a single %25 that meant a
+                // literal % in the path. We only accept the decoded
+                // form when it still has at least one %XX pair.
+                if (!Regex.IsMatch(decoded, "%[0-9A-Fa-f]{2}")) break;
+                url = decoded;
+            }
+            return url;
+        }
+
+        /// <summary>
+        /// Pure metadata lines like <c>"🎞️ hevc 🎵 AAC"</c> or
+        /// <c>"📺 WEB 🎞️ av1"</c> consist exclusively of emoji
+        /// indicators and a fixed set of codec / container / quality
+        /// tokens. We skip such lines when looking for the release-
+        /// name line to display.
+        /// </summary>
+        private static readonly Regex MetadataTokenRegex = new(
+            @"^(?:hevc|x265|x264|h\.?26[45]|av1|web(?:-?dl)?|aac|ac3|dts|flac|opus|mp3|mp4|mkv|webm|10[\s-]?bit|hdr|bluray|brrip|webrip|hd|sd|\d{3,4}p|4k|multi|dual|sub(?:bed)?|dub(?:bed)?)$",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        private static readonly Regex TokenSplitterRegex = new(
+            @"[\s|+/,]+",
+            RegexOptions.Compiled);
+
+        /// <summary>
+        /// Strips leading/trailing non-letter/non-digit chars so a
+        /// token like <c>"🎵AAC"</c> reduces to <c>"AAC"</c> for the
+        /// metadata-token check.
+        /// </summary>
+        private static readonly Regex EmojiTrimRegex = new(
+            @"^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$",
+            RegexOptions.Compiled);
+
+        private static bool IsMetadataOnlyLine(string line)
+        {
+            if (string.IsNullOrEmpty(line)) return false;
+            var tokens = TokenSplitterRegex.Split(line);
+            var hasContent = false;
+            foreach (var t in tokens)
+            {
+                var trimmed = t.Trim();
+                if (string.IsNullOrEmpty(trimmed)) continue;
+                var stripped = EmojiTrimRegex.Replace(trimmed, "");
+                if (string.IsNullOrEmpty(stripped)) continue; // emoji-only token
+                hasContent = true;
+                if (!MetadataTokenRegex.IsMatch(stripped)) return false;
+            }
+            return hasContent;
+        }
+
+        // Lines that start with a metadata-tag emoji (size, seeders,
+        // language flags, source-link) carry only that one piece of
+        // info — never the release name itself — so we skip them
+        // outright without doing the token-by-token check.
+        private static readonly Regex MetadataPrefixedLineRegex = new(
+            @"^[\s💾👤🌐🔗⭐]",
+            RegexOptions.Compiled);
+
+        /// <summary>
+        /// Picks a display-friendly release-name line from the
+        /// supplied sources, in order. Walks the lines of each source
+        /// twice: first looking for a 📁-tagged filename line (the
+        /// strongest signal — emitted by MediaFusion and similar
+        /// addons), then for the first line that doesn't look like
+        /// pure codec / size / seeders metadata. Falls back to the
+        /// first non-empty line if no source yields a clean release-
+        /// name. Keeps the source picker from showing
+        /// <c>"hevc"</c> / <c>"WEB AAC"</c> as the title when the
+        /// real filename is one line down.
+        /// </summary>
+        private static string PickReleaseTitle(params string[] sources)
+        {
+            foreach (var src in sources)
+            {
+                if (string.IsNullOrEmpty(src)) continue;
+                // Pass 1: explicit 📁 filename marker.
+                foreach (var raw in src.Split('\n'))
+                {
+                    var line = raw.Trim();
+                    if (line.StartsWith("📁"))
+                    {
+                        var stripped = line["📁".Length..].Trim();
+                        if (!string.IsNullOrEmpty(stripped)) return stripped;
+                    }
+                }
+                // Pass 2: first line that isn't pure metadata.
+                foreach (var raw in src.Split('\n'))
+                {
+                    var line = raw.Trim();
+                    if (string.IsNullOrEmpty(line)) continue;
+                    if (MetadataPrefixedLineRegex.IsMatch(line)) continue;
+                    if (IsMetadataOnlyLine(line)) continue;
+                    return line;
+                }
+            }
+            // Pass 3: first non-empty line from any source.
+            foreach (var src in sources)
+            {
+                if (string.IsNullOrEmpty(src)) continue;
+                foreach (var raw in src.Split('\n'))
+                {
+                    var trimmed = raw.Trim();
+                    if (!string.IsNullOrEmpty(trimmed)) return trimmed;
+                }
+            }
+            return string.Empty;
         }
 
         private static string ShortFingerprint(string s)

@@ -1035,7 +1035,14 @@ namespace AnimeList.Controllers
                 || host.EndsWith("debrid-link.com")
                 || host.EndsWith("premiumize.me")
                 || host.EndsWith("torbox.app")
-                || host.EndsWith("offcloud.com");
+                || host.EndsWith("offcloud.com")
+                // Stremio stream-addon hosts whose /playback URLs
+                // resolve through their own infrastructure (rather
+                // than redirecting to a debrid CDN). MediaFusion's
+                // ElfHosted instance is the most common; the broader
+                // .elfhosted.com cover catches Comet etc. hosted there.
+                || host.EndsWith("mediafusion.elfhosted.com")
+                || host.EndsWith(".elfhosted.com");
             if (!allowed)
             {
                 return Forbid();
