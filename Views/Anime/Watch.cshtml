@@ -1666,7 +1666,22 @@
                     autoOrientation: true,
                     hotkey: true,
                     airplay: true,
-                    moreVideoAttr: { playsInline: true },
+                    moreVideoAttr: {
+                        playsInline: true,
+                        // Browser default for <video> preload is
+                        // 'metadata' — fetches just enough to read
+                        // duration / codec and then waits for play().
+                        // 'auto' tells the browser it's free to keep
+                        // buffering ahead aggressively, which makes
+                        // initial start-up smoother and gives the
+                        // decoder more runway when network jitter
+                        // delays packets mid-stream. The browser
+                        // still decides how far to read ahead, so
+                        // this isn't a free upgrade — but on debrid
+                        // CDN URLs it generally trades a couple of
+                        // MB of speculative fetch for fewer stalls.
+                        preload: 'auto',
+                    },
                     subtitle: defaultSubIdx >= 0 ? {
                         url: subtitles[defaultSubIdx].url,
                         type: 'vtt',
@@ -1733,6 +1748,57 @@
                     var reason = (code === 2) ? 'network' : 'decode';
                     showFallback(stream, reason);
                 });
+
+                // Buffer-underrun watchdog. The browser emits
+                // `waiting` whenever playback pauses because the read
+                // head outran the buffered range, and `stalled` when
+                // the network has been idle while data was still
+                // needed — both signal "the buffer isn't keeping up
+                // with the decoder". A single hiccup is normal noise
+                // (TCP slowstart, debrid CDN regional handoff,
+                // browser tab backgrounded) so we only surface a
+                // hint once underruns cluster: 3 events inside a
+                // 30-second window. The hint uses ArtPlayer's notice
+                // overlay (auto-dismissing, lives over the video so
+                // the user can't miss it without being modal) and
+                // routes the user to the external-player path, which
+                // bypasses every browser-side bottleneck — HEVC
+                // codec support, hardware-decode limits, the
+                // per-tab MediaSource buffer caps — that AniSync
+                // can't fix from JS. Once shown, the hint is
+                // suppressed for the rest of the session so we
+                // don't spam the user; they'll have already seen
+                // the message and either acted on it or chosen not
+                // to. The console.log keeps a per-event trail for
+                // diagnosis if the user reports issues later.
+                var bufferStallTimestamps = [];
+                var bufferHintShown = false;
+                function recordBufferStall(kind) {
+                    var now = Date.now();
+                    bufferStallTimestamps.push(now);
+                    while (bufferStallTimestamps.length &&
+                           now - bufferStallTimestamps[0] > 30000) {
+                        bufferStallTimestamps.shift();
+                    }
+                    try {
+                        var v = art && art.video;
+                        var at = v && typeof v.currentTime === 'number'
+                            ? v.currentTime.toFixed(1) + 's'
+                            : '(unknown)';
+                        console.log(
+                            '[AniSync] buffer ' + kind + ' at',
+                            at,
+                            'recent stalls:', bufferStallTimestamps.length);
+                    } catch (_) {}
+                    if (bufferStallTimestamps.length >= 3 && !bufferHintShown) {
+                        bufferHintShown = true;
+                        try {
+                            art.notice.show = 'Playback laggy? Use the external-player button next to the source for a smoother stream.';
+                        } catch (_) {}
+                    }
+                }
+                art.on('video:waiting', function () { recordBufferStall('waiting'); });
+                art.on('video:stalled', function () { recordBufferStall('stalled'); });
 
                 // Watchdog: if neither loadedmetadata nor playing has
                 // fired within STREAM_WATCHDOG_MS, surface the
