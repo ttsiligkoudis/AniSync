@@ -25,15 +25,18 @@ namespace AnimeList.Controllers
         private readonly INotificationStore _store;
         private readonly ITokenService _tokenService;
         private readonly IConfigStore _configStore;
+        private readonly IWatchingCacheStore _watchingCache;
 
         public NotificationsController(
             INotificationStore store,
             ITokenService tokenService,
-            IConfigStore configStore)
+            IConfigStore configStore,
+            IWatchingCacheStore watchingCache)
         {
             _store = store;
             _tokenService = tokenService;
             _configStore = configStore;
+            _watchingCache = watchingCache;
         }
 
         private async Task<string> ResolveCurrentUidAsync()
@@ -55,17 +58,22 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
-        /// Unread count for the badge. Anonymous callers get <c>{count: 0}</c>
-        /// (not 401) — the bell JS polls this every 60s and a 401 storm in
-        /// logs from logged-out tabs would be noise.
+        /// Unread count for the badge plus the Unix-seconds timestamp of the
+        /// next future episode airing matching the user's Watching list (null
+        /// when nothing is scheduled in the lookahead window). The browser
+        /// uses <c>nextAiringAt</c> to schedule its next refresh — one
+        /// <c>setTimeout</c> per known release rather than blind polling.
+        /// Anonymous callers get a zero count (not 401) so a 401 storm in
+        /// logs from logged-out background tabs doesn't happen.
         /// </summary>
         [HttpGet("count")]
         public async Task<IActionResult> Count()
         {
             var uid = await ResolveCurrentUidAsync();
-            if (uid == null) return new JsonResult(new { count = 0 });
+            if (uid == null) return new JsonResult(new { count = 0, nextAiringAt = (long?)null });
             var count = await _store.GetUnreadCountAsync(uid);
-            return new JsonResult(new { count });
+            var cache = await _watchingCache.GetAsync(uid);
+            return new JsonResult(new { count, nextAiringAt = cache?.NextAiringAt });
         }
 
         [HttpPost("{id:long}/read")]

@@ -1,18 +1,38 @@
 // Bell + dropdown for per-user episode notifications in the site header.
 //
-// Polls /api/v1/notifications/count every 60s while the tab is visible to
-// keep the unread badge fresh; pauses while the document is hidden so
-// background tabs don't burn requests. Click of the bell expands the
-// dropdown, which fetches the most recent 20 notifications and renders
-// each as an <a> linking to the episode's watch page. Clicking a row
-// fires a fire-and-forget POST /{id}/read (with keepalive so the marker
-// survives navigation) and lets the anchor navigate.
+// Refresh strategy: the /count endpoint returns `{count, nextAiringAt}`.
+// nextAiringAt is the Unix-seconds timestamp of the next future episode
+// matching the user's Watching list (precomputed by the dispatcher every
+// 5 min). The bell schedules a single setTimeout to (nextAiringAt + cron
+// grace) instead of polling — a user with one show airing tomorrow makes
+// one count request per day, not 1,440. When nothing's scheduled in the
+// lookahead window we fall back to an hourly tick so the user's library
+// changes (adding new "Watching" anime) eventually surface.
+//
+// Click of the bell expands the dropdown, which fetches the most recent
+// 20 notifications and renders each as an <a> linking to the episode's
+// watch page. Clicking a row fires a fire-and-forget POST /{id}/read
+// (with keepalive so the marker survives navigation).
 (function () {
     'use strict';
 
-    var POLL_MS = 60000;
     var COUNT_URL = '/api/v1/notifications/count';
     var LIST_URL = '/api/v1/notifications';
+    // Wait this long after a known airingAt before refreshing. The cron
+    // tick runs every 5 min server-side, so by airingAt + ~6 min the
+    // notification row should exist in the DB.
+    var POST_AIRING_GRACE_MS = 6 * 60 * 1000;
+    // Lookahead window the dispatcher pulls is 24h; outside that range
+    // nextAiringAt is null and we fall back to this idle interval so a
+    // newly-added watching entry eventually shows up.
+    var IDLE_REFRESH_MS = 60 * 60 * 1000;
+    // After a network error, retry sooner than the idle interval but not
+    // so fast we hammer a failing endpoint.
+    var ERROR_RETRY_MS = 5 * 60 * 1000;
+    // Floor so a "fire immediately" target (airingAt already in the past
+    // when the page loads) still leaves the dispatcher a beat to catch up
+    // and doesn't loop tightly if responses keep coming back stale.
+    var MIN_DELAY_MS = 30 * 1000;
 
     var bell = document.querySelector('[data-notif-bell]');
     if (!bell) return;
@@ -25,6 +45,7 @@
     if (!toggle || !panel || !badge || !list) return;
 
     var listLoaded = false;
+    var pollTimer = null;
 
     function setBadge(count) {
         var n = Number(count) || 0;
@@ -32,14 +53,46 @@
         badge.hidden = n === 0;
     }
 
-    async function pollCount() {
-        if (document.hidden) return;
+    function scheduleNext(delayMs) {
+        if (pollTimer) clearTimeout(pollTimer);
+        // setTimeout caps at ~24.8 days (2^31 ms). Our IDLE_REFRESH_MS and
+        // the 24h lookahead window are both well under that, but clamp
+        // defensively in case the server hands back a far-future value.
+        var capped = Math.min(Math.max(delayMs, MIN_DELAY_MS), 24 * 60 * 60 * 1000);
+        pollTimer = setTimeout(refreshCount, capped);
+    }
+
+    async function refreshCount() {
+        if (document.hidden) {
+            // Defer the work until the tab is visible again; the
+            // visibilitychange handler below restarts the loop.
+            return;
+        }
         try {
             var res = await fetch(COUNT_URL, { credentials: 'same-origin' });
-            if (!res.ok) return;
+            if (!res.ok) {
+                scheduleNext(ERROR_RETRY_MS);
+                return;
+            }
             var data = await res.json();
             setBadge(data && data.count);
-        } catch (_) { /* network blip — try again next tick */ }
+
+            if (data && data.nextAiringAt) {
+                // Schedule one timeout for the precise airing time (+
+                // grace for the cron tick to fire and persist the row).
+                // Re-running refresh after that point will get a fresh
+                // nextAiringAt advanced to the *next* future airing.
+                var targetMs = Number(data.nextAiringAt) * 1000 + POST_AIRING_GRACE_MS;
+                scheduleNext(targetMs - Date.now());
+            } else {
+                // Nothing airing in the 24h lookahead — fall back to a
+                // periodic check so library changes (adding a new watching
+                // entry) eventually surface in the bell.
+                scheduleNext(IDLE_REFRESH_MS);
+            }
+        } catch (_) {
+            scheduleNext(ERROR_RETRY_MS);
+        }
     }
 
     function relativeTime(unix) {
@@ -102,8 +155,8 @@
         toggle.setAttribute('aria-expanded', 'true');
         bell.classList.add('notif-bell-open');
         // Lazy-load on first open; subsequent opens reuse the rendered list
-        // and rely on the 60s poll for new counts. The user can close and
-        // reopen to force a refresh.
+        // and rely on the scheduled refresh for new counts. The user can
+        // close and reopen to force a fresh fetch.
         if (!listLoaded) loadList();
     }
     function closePanel() {
@@ -166,8 +219,11 @@
     });
 
     document.addEventListener('visibilitychange', function () {
-        if (!document.hidden) pollCount();
+        // Coming back to a foregrounded tab: kick off an immediate refresh
+        // so the badge catches up after time-skipped scheduled timers.
+        // (setTimeout is throttled or paused on hidden tabs in many
+        // browsers, so the scheduled wake may have been missed.)
+        if (!document.hidden) refreshCount();
     });
-    setInterval(pollCount, POLL_MS);
-    pollCount();
+    refreshCount();
 })();
