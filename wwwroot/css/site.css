@@ -2100,6 +2100,33 @@ body.modal-open {
     white-space: nowrap;
 }
 
+/* HEVC / 10-bit warning pill. Same chip shape as the provider /
+   language tags so the row stays visually balanced, but coloured
+   amber by default (informational — "this codec is HEVC, here be
+   dragons") and escalated to red when the running browser actually
+   can't decode HEVC. The red variant is the actionable case: the
+   user sees it, hovers for the tooltip, and learns to reach for
+   the external-player button on this row. data-supported is
+   written by Watch.cshtml from the one-time MediaSource probe. */
+.episode-stream-hevc {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.05rem 0.4rem;
+    background: rgba(255, 165, 0, 0.18);
+    border-radius: 0.35rem;
+    color: rgba(255, 190, 120, 0.95);
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+    cursor: help;
+}
+
+.episode-stream-hevc[data-supported="false"] {
+    background: rgba(255, 80, 80, 0.18);
+    color: rgba(255, 150, 150, 1);
+}
+
 /* Language pill — slightly heavier visual weight than the muted size /
    seeders because flag emojis are tiny on their own and benefit from a
    contained background to read as a deliberate tag. */
