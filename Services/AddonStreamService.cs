@@ -84,6 +84,19 @@ namespace AnimeList.Services
             @"\b(?:hevc|x265|h\.?265|av1|mkv|matroska|10[\s-]?bit)\b",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+        // Narrower regex than NonBrowserCodecRegex above: just the
+        // codecs that trigger the HEVC badge on the client (the
+        // Chromium-desktop hardware-decode corruption case). AV1 and
+        // bare "mkv"/"matroska" are intentionally excluded — AV1
+        // plays cleanly in Chrome desktop, and MKV is a container
+        // signal handled by the IsBrowserPlayable check, not a
+        // codec one. Hi10P (10-bit AVC) is grouped with HEVC here
+        // because browser AVC decoders are 8-bit-only — same
+        // user-visible failure mode, same external-player advice.
+        private static readonly Regex HevcOrHi10Regex = new(
+            @"\b(?:hevc|x265|h\.?265|hi10p?|10[\s-]?bit)\b",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
         public AddonStreamService(
             IHttpClientFactory clientFactory,
             IMemoryCache cache,
@@ -380,6 +393,11 @@ namespace AnimeList.Services
                 var seeders = DetectSeeders(combined);
                 var language = DetectLanguage(combined);
                 var playable = IsBrowserPlayable(url, combined);
+                // Detected from the full haystack (name + description
+                // + title) so we catch MediaFusion's codec line which
+                // lives in `description` and gets dropped before the
+                // JSON projection reaches the client.
+                var isHevc = HevcOrHi10Regex.IsMatch(combined);
 
                 string bingeGroup = null;
                 if (s["behaviorHints"] is JObject hints)
@@ -416,7 +434,8 @@ namespace AnimeList.Services
                     Language: language,
                     InfoHash: infoHash,
                     FileIdx: fileIdx,
-                    Provider: providerFallback));
+                    Provider: providerFallback,
+                    IsHevc: isHevc));
             }
 
             return RankAndCap(raw);

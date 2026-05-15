@@ -784,24 +784,13 @@
             // treats reject as "skip extraction quietly."
             var CDN_HOST_RE = /(?:^|\.)(?:real-debrid\.com|alldebrid\.com|debrid-link\.com|premiumize\.me|torbox\.app|offcloud\.com)$/i;
 
-            // HEVC / 10-bit detection from the release filename.
-            // Browsers' AVC decoders are 8-bit-only, so Hi10P / 10-bit
-            // AVC has the same "glitches inline, plays clean in VLC"
-            // failure mode as HEVC — we surface both under the same
-            // badge. The regex deliberately uses word boundaries so
-            // "hxc265" / "h265abc" don't false-match, and the
-            // "h.265" variant covers both dotted and undotted spellings.
-            // We scan name + title concatenated because addons split
-            // their codec info inconsistently: Torrentio puts it in
-            // title alongside the release filename, MediaFusion puts
-            // a short header in name and the codec/HDR/size lines in
-            // title, others (rarely) put a codec hint in name.
-            var HEVC_RE = /\b(hevc|x265|h\.?265|hi10p?|10[\s\-]?bit)\b/i;
-            function streamLooksHEVC(stream) {
-                if (!stream) return false;
-                var haystack = ((stream.name || '') + ' ' + (stream.title || '')) + '';
-                return HEVC_RE.test(haystack);
-            }
+            // HEVC / 10-bit detection runs server-side now —
+            // AddonStreamService scans the full name+description+title
+            // haystack and ships an `isHevc` bool on each stream. The
+            // client-side regex we used to run here couldn't see
+            // MediaFusion's codec line, which lives in `description`
+            // (dropped before the JSON projection picks a release-name
+            // line for `title`). Trust the server flag exclusively.
 
             // Browser HEVC playback reliability heuristic.
             // MediaSource.isTypeSupported lies on Chrome desktop —
@@ -2462,7 +2451,7 @@
                 // that handle HEVC fine (Firefox, Safari, mobile).
                 if (HEVC_RISKY && debrid.length > 1) {
                     debrid = debrid
-                        .map(function (s, i) { return { s: s, i: i, hevc: streamLooksHEVC(s) }; })
+                        .map(function (s, i) { return { s: s, i: i, hevc: !!s.isHevc }; })
                         .sort(function (a, b) {
                             if (a.hevc !== b.hevc) return a.hevc ? 1 : -1;
                             return a.i - b.i;
@@ -2500,7 +2489,7 @@
                         // fallback), amber elsewhere (informational
                         // only — Firefox / Safari / mobile play
                         // these files cleanly).
-                        if (streamLooksHEVC(s)) {
+                        if (s.isHevc) {
                             var hevcBadge = el('span', {
                                 class: 'episode-stream-hevc',
                                 title: HEVC_RISKY

@@ -659,6 +659,7 @@ namespace AnimeList.Controllers
                     seeders = s.Seeders,
                     language = s.Language,
                     provider = s.Provider,
+                    isHevc = s.IsHevc,
                 }).ToList();
             }
 
