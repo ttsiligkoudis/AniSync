@@ -646,32 +646,50 @@
                 return u;
             }
 
-            // Number of shards the escalation flow fans out to when
-            // single-shot extraction returns truncated:true. Each
-            // shard runs as an independent Worker invocation with
-            // its own 128 MB memory cap, so 4 shards ≈ 480 MB of
-            // total cluster-fetch budget vs. 120 MB for a single
-            // invocation. Sufficient for typical BD remuxes up to
-            // ~6-8 GB; very large multi-disc rips would need more.
+            // Two escalation factors, both at 4. They run on
+            // statistically different failure modes:
+            //
+            //   * MKV_EXTRACT_SHARDS — fired when single-shot returned
+            //     truncated:true (the worker hit MAX_TOTAL_FETCH).
+            //     Four shards each fetch a 1/4 contiguous slice of
+            //     the cluster offset list, merge in the browser.
+            //     ALL must succeed; this is "split the work" so any
+            //     single failure means the merge is incomplete.
+            //
+            //   * MKV_EXTRACT_RETRIES — fired when single-shot
+            //     returned a transient failure (reason=network from
+            //     an RD edge drop / worker_error / browser-side
+            //     fetch error). Four IDENTICAL single-shot retries
+            //     race against each other; we take whichever
+            //     succeeds first. RD's drops are per-TCP-connection,
+            //     so even if one attempt dies the others on fresh
+            //     sockets almost always include a survivor. Sharding
+            //     does NOT help this case — every shard still has
+            //     to do its own RD critical reads and would face the
+            //     same drop probability, AND'd across 4 attempts.
             var MKV_EXTRACT_SHARDS = 4;
+            var MKV_EXTRACT_RETRIES = 4;
 
-            // Single Worker invocation. Returns the parsed JSON body
-            // on success or null on structural / network / fall-
-            // through failures (caller falls back to streaming
-            // proxy). Used both for the single-shot first attempt
-            // and as the per-shard call inside the sharded flow.
+            // Single Worker invocation. Returns a rich result shape
+            //   { ok: true,  body: <extract body> }
+            //   { ok: false, transient: bool, reason: string, error?: string, body?: <body if any> }
+            // so the caller can pick between fall-through (permanent
+            // failure → streaming fallback) and parallel retry
+            // (transient failure → re-fire on fresh sockets). Used
+            // both for single-shot first attempts and for per-shard
+            // calls inside the sharded escalation.
             function callMkvExtractor(directUrl, signal, shardOpts) {
                 return new Promise(function (resolve) {
                     var u = viaMkvExtractor(directUrl, shardOpts);
-                    if (!u) { resolve(null); return; }
+                    if (!u) { resolve({ ok: false, transient: false, reason: 'no-worker' }); return; }
                     fetch(u, { signal: signal, skipLoader: true })
                         .then(function (r) {
                             // The Worker returns 200 with
                             // { extracted: false, reason } when the
                             // file is indexless / had a network drop
                             // / a parse error — same downstream
-                            // behaviour as a 5xx, but a 200 keeps the
-                            // Worker out of Cloudflare's
+                            // behaviour as a 5xx, but a 200 keeps
+                            // the Worker out of Cloudflare's
                             // failure-rate guard rail. 4xx still
                             // means a real structural problem.
                             return r.json().then(function (j) {
@@ -683,25 +701,45 @@
                         .then(function (result) {
                             var body = result.body;
                             if (result.status !== 200 || !body) {
-                                console.info(
-                                    '[AniSync] mkv-extractor structural failure (' + result.status + '):',
-                                    (body && body.error) || '(no detail)');
-                                resolve(null);
+                                resolve({
+                                    ok: false,
+                                    transient: false,
+                                    reason: 'http-' + result.status,
+                                });
                                 return;
                             }
                             if (body.extracted === false) {
-                                console.info(
-                                    '[AniSync] mkv-extractor fell through (reason=' + body.reason + '):',
-                                    body.error || '(no detail)');
-                                resolve(null);
+                                var failReason = body.reason || 'fell-through';
+                                // network / worker_error are
+                                // transient and worth re-firing.
+                                // indexless / parse are properties
+                                // of the file itself — retries
+                                // can't help.
+                                var transient =
+                                    failReason === 'network' ||
+                                    failReason === 'worker_error';
+                                resolve({
+                                    ok: false,
+                                    transient: transient,
+                                    reason: failReason,
+                                    error: body.error,
+                                    body: body,
+                                });
                                 return;
                             }
-                            if (!body.tracks) { resolve(null); return; }
-                            resolve(body);
+                            if (!body.tracks) {
+                                resolve({ ok: false, transient: true, reason: 'no-tracks' });
+                                return;
+                            }
+                            resolve({ ok: true, body: body });
                         })
                         .catch(function (e) {
-                            console.info('[AniSync] mkv-extractor network error:', e && e.message);
-                            resolve(null);
+                            resolve({
+                                ok: false,
+                                transient: true,
+                                reason: 'fetch-error',
+                                error: (e && e.message) || String(e),
+                            });
                         });
                 });
             }
@@ -748,86 +786,154 @@
                 return { tracks: merged, extracted: true, truncated: false };
             }
 
-            // Single-shot extract, with sharded re-fire on truncated.
+            // Sharded re-fire — single-shot saw truncated:true so
+            // the file's cluster offset list doesn't fit one
+            // invocation's MAX_TOTAL_FETCH. Each shard fetches its
+            // 1/N slice, all must succeed, browser merges. Fail
+            // loud on ANY shard failure — a silently-incomplete
+            // merged track is worse than no embedded subs.
+            function shardedExtract(directUrl, signal, firstAttempt) {
+                var clustersTotal = firstAttempt.clustersTotal || 0;
+                console.info(
+                    '[AniSync] mkv-extractor truncated single-shot ' +
+                    '(' + (firstAttempt.clustersInShard || 0) + '/' + clustersTotal + ' clusters fit); ' +
+                    'escalating to ' + MKV_EXTRACT_SHARDS + ' shards.');
+                setEmbedStatus(
+                    'Big file — extracting across ' + MKV_EXTRACT_SHARDS + ' workers…',
+                    'loading');
+
+                var promises = [];
+                for (var i = 0; i < MKV_EXTRACT_SHARDS; i++) {
+                    promises.push(callMkvExtractor(directUrl, signal,
+                        { shards: MKV_EXTRACT_SHARDS, shard: i }));
+                }
+                return Promise.all(promises).then(function (results) {
+                    var failures = [];
+                    for (var i = 0; i < results.length; i++) {
+                        var r = results[i];
+                        if (!r.ok) {
+                            failures.push('shard ' + i + ': ' + r.reason +
+                                (r.error ? ' (' + r.error + ')' : ''));
+                        } else if (r.body.truncated) {
+                            failures.push('shard ' + i + ': still truncated at ' +
+                                MKV_EXTRACT_SHARDS + '-way split');
+                        }
+                    }
+                    if (failures.length > 0) {
+                        console.warn('[AniSync] sharded extract failed:', failures);
+                        setEmbedStatus(
+                            'Embedded extraction failed: ' + failures[0],
+                            'error');
+                        return { _giveUp: true };
+                    }
+                    var merged = mergeShardedExtractorResults(
+                        results.map(function (r) { return r.body; }));
+                    try {
+                        console.log(
+                            '[AniSync] mkv-extractor merged from ' + MKV_EXTRACT_SHARDS + ' shards:',
+                            merged.tracks.map(function (t) {
+                                return { num: t.number, lang: t.language, cues: t.cues.length };
+                            })
+                        );
+                    } catch (_) {}
+                    return merged;
+                });
+            }
+
+            // Parallel-retry re-fire — single-shot hit a transient
+            // failure (RD edge drop on critical reads, browser-side
+            // fetch error, worker-internal error). Fire N identical
+            // single-shot calls in parallel; each one opens a fresh
+            // worker invocation against a fresh socket to RD. We
+            // only need ONE to succeed because each retry attempts
+            // the full job, so this is the right tool for per-
+            // connection flakiness (vs. sharding which AND's failure
+            // probabilities). Cache key is identical across retries
+            // so the second successful one's cache write loses the
+            // race harmlessly.
+            function parallelRetryExtract(directUrl, signal, firstAttempt) {
+                console.info(
+                    '[AniSync] mkv-extractor transient failure ' +
+                    '(' + firstAttempt.reason + (firstAttempt.error ? ': ' + firstAttempt.error : '') + '); ' +
+                    'firing ' + MKV_EXTRACT_RETRIES + ' parallel retries.');
+                setEmbedStatus(
+                    'Retrying extraction across ' + MKV_EXTRACT_RETRIES + ' workers…',
+                    'loading');
+
+                var promises = [];
+                for (var i = 0; i < MKV_EXTRACT_RETRIES; i++) {
+                    promises.push(callMkvExtractor(directUrl, signal, null));
+                }
+                return Promise.all(promises).then(function (results) {
+                    // First clean success wins.
+                    for (var i = 0; i < results.length; i++) {
+                        if (results[i].ok && !results[i].body.truncated) {
+                            console.log('[AniSync] parallel retry: worker ' + i + ' succeeded.');
+                            return results[i].body;
+                        }
+                    }
+                    // No clean success — if any retry came back
+                    // truncated, escalate that into the sharded
+                    // path. The transient failure recovered but
+                    // the file is also memory-bound.
+                    for (var j = 0; j < results.length; j++) {
+                        if (results[j].ok && results[j].body.truncated) {
+                            console.info('[AniSync] parallel retry got truncated success, escalating to shards.');
+                            return shardedExtract(directUrl, signal, results[j].body);
+                        }
+                    }
+                    // All retries failed too. Let the caller fall
+                    // through to the streaming proxy as a last
+                    // resort — at this point the worker path is
+                    // definitively unreliable for this file.
+                    console.warn(
+                        '[AniSync] all ' + MKV_EXTRACT_RETRIES + ' parallel retries failed; ' +
+                        'reasons:',
+                        results.map(function (r) { return r.reason; }));
+                    return null;
+                });
+            }
+
+            // Single-shot extract with two distinct escalation paths
+            // depending on the failure shape:
+            //   * truncated → split-the-work sharded re-fire
+            //   * transient network/worker error → race-the-same-work
+            //                                      parallel retries
+            //   * permanent error (indexless / parse / 4xx) → null,
+            //                                                 streaming fallback
             // Return contract:
-            //   * Full extractor body  — handed to deliverExtractorResult.
-            //   * null                  — structural / network failure;
-            //                             caller falls back to streaming.
+            //   * full extractor body  — handed to deliverExtractorResult
+            //   * null                  — fall through to streaming
             //   * { _giveUp: true }     — sharded extract failed
             //                             definitively; caller skips
-            //                             streaming (it would hit the
-            //                             same memory pressure on the
-            //                             browser side) and goes
-            //                             straight to OpenSubtitles.
+            //                             streaming and goes straight
+            //                             to OpenSubtitles.
             function tryMkvExtractor(directUrl, signal) {
-                return callMkvExtractor(directUrl, signal, null).then(function (body) {
-                    if (!body) return null;
-                    if (!body.truncated) {
+                return callMkvExtractor(directUrl, signal, null).then(function (r) {
+                    if (r.ok && !r.body.truncated) {
                         try {
                             console.log(
                                 '[AniSync] mkv-extractor:',
-                                body.tracks.length, 'tracks',
-                                '(file=' + (body.stats && body.stats.fileSize) + 'B)',
-                                body.tracks.map(function (t) {
+                                r.body.tracks.length, 'tracks',
+                                '(file=' + (r.body.stats && r.body.stats.fileSize) + 'B)',
+                                r.body.tracks.map(function (t) {
                                     return { num: t.number, lang: t.language, name: t.name, cues: (t.cues || []).length };
                                 })
                             );
                         } catch (_) {}
-                        return body;
+                        return r.body;
                     }
-
-                    // Single-shot hit MAX_TOTAL_FETCH. Fan out across
-                    // MKV_EXTRACT_SHARDS independent Worker invocations
-                    // in parallel; each gets its own memory + subrequest
-                    // budget. Merge their per-track cue arrays and
-                    // serve as if it were a single response.
-                    var clustersTotal = body.clustersTotal || 0;
+                    if (r.ok && r.body.truncated) {
+                        return shardedExtract(directUrl, signal, r.body);
+                    }
+                    if (r.transient) {
+                        return parallelRetryExtract(directUrl, signal, r);
+                    }
                     console.info(
-                        '[AniSync] mkv-extractor truncated single-shot ' +
-                        '(' + (body.clustersInShard || 0) + '/' + clustersTotal + ' clusters fit); ' +
-                        'escalating to ' + MKV_EXTRACT_SHARDS + ' shards.');
-                    setEmbedStatus(
-                        'Big file — extracting across ' + MKV_EXTRACT_SHARDS + ' workers…',
-                        'loading');
-
-                    var promises = [];
-                    for (var i = 0; i < MKV_EXTRACT_SHARDS; i++) {
-                        promises.push(callMkvExtractor(directUrl, signal,
-                            { shards: MKV_EXTRACT_SHARDS, shard: i }));
-                    }
-                    return Promise.all(promises).then(function (results) {
-                        // Fail loud: any shard that nulled out (structural /
-                        // network) OR is still truncated (file too large
-                        // even sliced N ways) takes the whole extract
-                        // down. The user gets OpenSubtitles instead;
-                        // they don't get a quietly-incomplete track.
-                        var failures = [];
-                        for (var i = 0; i < results.length; i++) {
-                            if (!results[i]) {
-                                failures.push('shard ' + i + ': network / structural failure');
-                            } else if (results[i].truncated) {
-                                failures.push('shard ' + i + ': still truncated at ' +
-                                    MKV_EXTRACT_SHARDS + '-way split');
-                            }
-                        }
-                        if (failures.length > 0) {
-                            console.warn('[AniSync] sharded extract failed:', failures);
-                            setEmbedStatus(
-                                'Embedded extraction failed: ' + failures[0],
-                                'error');
-                            return { _giveUp: true };
-                        }
-                        var merged = mergeShardedExtractorResults(results);
-                        try {
-                            console.log(
-                                '[AniSync] mkv-extractor merged from ' + MKV_EXTRACT_SHARDS + ' shards:',
-                                merged.tracks.map(function (t) {
-                                    return { num: t.number, lang: t.language, cues: t.cues.length };
-                                })
-                            );
-                        } catch (_) {}
-                        return merged;
-                    });
+                        '[AniSync] mkv-extractor permanent failure (' + r.reason + ')' +
+                        (r.error ? ': ' + r.error : '') +
+                        '; falling back to streaming.');
+                    return null;
                 });
             }
 
