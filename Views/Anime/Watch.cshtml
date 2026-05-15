@@ -1053,6 +1053,43 @@
                 var trackMeta = [];   // [{ number, language, codecID, header }]
                 var trackCues = {};   // number → array of { time, duration, text }
 
+                // lang=auto behaviour: mirror the cf-mkv-extractor
+                // Worker — collect cues only from the first English-
+                // tagged track. Anything else falls through to the
+                // OpenSubtitles / Wyzie path the same way an
+                // English-less Worker response does. -1 means "we
+                // haven't decided yet", > 0 is a real EBML track
+                // number, 0 means "no English track found, drop
+                // everything." Decided in the 'tracks' handler.
+                var targetTrackNumber = -1;
+
+                // Early-exit heuristic — bail once we've gone too
+                // long without seeing ANY subtitle event. MKV
+                // Clusters are roughly time-ordered, so a long run
+                // of cluster bytes with no Block emitting a sub
+                // means we're past the dialogue region (credits /
+                // outro / preview). We track ANY track's cues (not
+                // just the English one) so a release with parallel
+                // language tracks doesn't trip the heuristic during
+                // a silent stretch in the chosen track. Threshold
+                // is set at ~95 seconds of typical 1080p MKV bytes
+                // (≈63 MB/min), which lands inside the credits for
+                // most anime episodes. We acknowledge this drops
+                // post-credit stinger subs — acceptable trade for
+                // not pulling another 200-500 MB through the
+                // browser per pick.
+                var EARLY_EXIT_GAP_BYTES = 100 * 1024 * 1024;
+                var totalBytesRead = 0;
+                var lastCueByteOffset = 0;
+                var seenAnyCue = false;
+                var earlyExited = false;
+
+                function isEnglishTrack(t) {
+                    var l = (t.language || '').toLowerCase();
+                    var n = (t.name || '').toLowerCase();
+                    return l.indexOf('en') === 0 || /\benglish\b/.test(n) || /\beng\b/.test(n);
+                }
+
                 parser.once('tracks', function (tracks) {
                     trackMeta = tracks.map(function (t) {
                         // Track names are the most reliable English-
@@ -1092,20 +1129,61 @@
                             };
                         }));
                     } catch (_) {}
+
+                    // Pick the first English-tagged track. Mirrors
+                    // the cf-mkv-extractor Worker so the streaming
+                    // fallback doesn't blow up to 700 MB of MKV
+                    // pulled through the browser just to discard
+                    // non-English tracks on the way out — the
+                    // auto-promote rule downstream would drop them
+                    // anyway. 0 means "no English here"; in that
+                    // case we abort the extract entirely and let
+                    // OpenSubtitles / Wyzie carry the UX, matching
+                    // what the Worker does when its lang=auto
+                    // filter returns empty.
+                    var english = null;
+                    for (var i = 0; i < trackMeta.length; i++) {
+                        if (isEnglishTrack(trackMeta[i])) { english = trackMeta[i]; break; }
+                    }
+                    if (english) {
+                        targetTrackNumber = english.number;
+                        trackMeta = [english];
+                    } else {
+                        targetTrackNumber = 0;
+                        trackMeta = [];
+                    }
+
                     if (trackMeta.length > 0) {
                         setEmbedStatus(
-                            'Found ' + trackMeta.length + ' embedded track' + (trackMeta.length === 1 ? '' : 's') + ' — parsing cues…',
+                            'Found embedded ' + (english.label || 'English') + ' track — parsing cues…',
                             'loading');
                     } else {
-                        setEmbedStatus('No embedded subtitles in this file', 'none');
+                        setEmbedStatus('No English embedded subtitle in this file', 'none');
                     }
                     // Notify caller that track metadata is available;
                     // the cues themselves still need time to stream
                     // in, but the menu can update with the language
                     // list immediately.
                     onTracks(trackMeta);
+
+                    // No English track — there's nothing for the
+                    // streaming pipeline to produce. Bail out now
+                    // instead of streaming the whole MKV just to
+                    // throw every cue away in the subtitle handler.
+                    if (targetTrackNumber === 0) {
+                        earlyExited = true;
+                        try { parser.end(); } catch (_) {}
+                    }
                 });
                 parser.on('subtitle', function (sub, trackNumber) {
+                    // Update the early-exit timer on ANY cue so a
+                    // legitimately quiet stretch in the English
+                    // track (e.g., action scene with only Japanese
+                    // signs / songs on a sibling track) doesn't
+                    // false-trigger the bail-out.
+                    seenAnyCue = true;
+                    lastCueByteOffset = totalBytesRead;
+                    if (targetTrackNumber > 0 && trackNumber !== targetTrackNumber) return;
                     (trackCues[trackNumber] = trackCues[trackNumber] || []).push(sub);
                 });
                 parser.on('finish', function () {
@@ -1148,9 +1226,41 @@
                         }
                         var reader = response.body.getReader();
                         function pump() {
+                            // Cooperative bail-out: the 'tracks'
+                            // handler can decide there's no English
+                            // track and flip earlyExited, and the
+                            // gap check below can do the same when
+                            // we drift past the dialogue region.
+                            // Both paths want the network closed
+                            // promptly so the browser doesn't keep
+                            // pulling MKV bytes we'll never look at.
+                            if (earlyExited) {
+                                try { reader.cancel(); } catch (_) {}
+                                return;
+                            }
                             return reader.read().then(function (result) {
                                 if (result.done) { try { parser.end(); } catch (_) {} return; }
+                                totalBytesRead += result.value.byteLength;
                                 try { parser.write(result.value); } catch (e) { /* parser may abort early when EOS reached */ }
+
+                                // Early-exit guard. Skipped until
+                                // at least one subtitle event has
+                                // been seen, otherwise a file with
+                                // a long pre-dialogue lead-in (cold
+                                // open + intro) would trip the
+                                // threshold before any cue arrived.
+                                if (seenAnyCue && (totalBytesRead - lastCueByteOffset) > EARLY_EXIT_GAP_BYTES) {
+                                    try {
+                                        console.log('[AniSync] embedded sub early-exit: ' +
+                                            Math.round(totalBytesRead / (1024 * 1024)) + ' MB read, ' +
+                                            Math.round((totalBytesRead - lastCueByteOffset) / (1024 * 1024)) +
+                                            ' MB since last cue; flushing parser.');
+                                    } catch (_) {}
+                                    earlyExited = true;
+                                    try { reader.cancel(); } catch (_) {}
+                                    try { parser.end(); } catch (_) {}
+                                    return;
+                                }
                                 return pump();
                             });
                         }
