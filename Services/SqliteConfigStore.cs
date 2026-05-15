@@ -87,6 +87,51 @@ namespace AnimeList.Services
                     ON configs(mal_user_key)     WHERE mal_user_key     IS NOT NULL;
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_configs_scrobble_token
                     ON configs(scrobble_token)   WHERE scrobble_token   IS NOT NULL;
+
+                -- Per-user episode notifications. Rendered in the site-header bell
+                -- with an unread badge; click of a row deep-links into the watch
+                -- page. Idempotency on (uid, anime_id, season, episode_number)
+                -- means the every-5-min cron is safe to re-run on the same window
+                -- without producing duplicates — INSERT OR IGNORE in CreateAsync.
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    uid             TEXT NOT NULL,
+                    service         INTEGER NOT NULL,        -- AnimeService enum int, pinned at create-time
+                    anime_id        TEXT NOT NULL,           -- prefixed id, e.g. anilist:123
+                    anime_title     TEXT NOT NULL,
+                    episode_number  INTEGER NOT NULL,
+                    season          INTEGER,                 -- nullable; routes collapse null → season 1
+                    thumbnail_url   TEXT,
+                    link_path       TEXT NOT NULL,           -- pre-baked /anime/{id}/watch/{ep} deep link
+                    created_at      INTEGER NOT NULL,
+                    read_at         INTEGER                  -- NULL = unread
+                );
+                CREATE INDEX IF NOT EXISTS idx_notifications_uid_created
+                    ON notifications(uid, created_at DESC);
+                -- COALESCE so a NULL season is a single value rather than "every row distinct"
+                -- (SQLite's default), which would break the dedup.
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_unique
+                    ON notifications(uid, anime_id, COALESCE(season, 0), episode_number);
+                -- Partial index keeps the unread-count query tiny — the bell polls this
+                -- once a minute per logged-in tab so the read path matters.
+                CREATE INDEX IF NOT EXISTS idx_notifications_unread
+                    ON notifications(uid) WHERE read_at IS NULL;
+
+                -- Per-user snapshot of "Watching"-status anime ids. The episode
+                -- notification dispatcher reads this to decide which airing
+                -- episodes match which users without hammering AniList/MAL/Kitsu
+                -- every 5 minutes. Refreshed lazily (6h staleness gate) when the
+                -- cron tick runs.
+                CREATE TABLE IF NOT EXISTS user_watching_cache (
+                    uid             TEXT PRIMARY KEY,
+                    service         INTEGER NOT NULL,        -- user's primary AnimeService at cache time
+                    media_ids_json  TEXT NOT NULL,           -- JSON array of prefixed ids
+                    refreshed_at    INTEGER NOT NULL,
+                    last_error      TEXT,
+                    last_error_at   INTEGER
+                );
+                CREATE INDEX IF NOT EXISTS idx_user_watching_cache_stale
+                    ON user_watching_cache(refreshed_at);
                 """;
             create.ExecuteNonQuery();
 

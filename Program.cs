@@ -252,6 +252,15 @@ builder.Services.AddSingleton<IFillerListService, FillerListService>();
 // website, etc.).
 builder.Services.AddSingleton<IUserListCache, UserListCache>();
 
+// Episode-release notification stack. The two stores are singleton (raw
+// SQLite, same lifetime as IConfigStore which owns the schema). The
+// dispatcher is scoped because it depends on scoped per-service clients
+// (IAnilistService / IMalService / IKitsuService / ITokenService); the
+// cron endpoint creates a fresh request scope so this is correct.
+builder.Services.AddSingleton<INotificationStore, NotificationStore>();
+builder.Services.AddSingleton<IWatchingCacheStore, WatchingCacheStore>();
+builder.Services.AddScoped<IEpisodeNotificationDispatcher, EpisodeNotificationDispatcher>();
+
 var app = builder.Build();
 
 // Must run before any middleware that reads Request.Scheme / Request.IsHttps (HSTS,
