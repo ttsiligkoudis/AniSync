@@ -83,11 +83,22 @@
         <ul id="streamAddonList" class="stream-addon-list">
             @foreach (var addon in Model.StreamAddons)
             {
+                // Standard Stremio convention is /manifest.json for the
+                // addon descriptor and /configure for the HTML config
+                // page that regenerates a new manifest URL. Swap the
+                // suffix to give the user a one-click way back to the
+                // addon's settings (Real-Debrid key rotation, indexer
+                // toggles, language filters) without re-pasting the
+                // URL by hand. Anything that doesn't end in
+                // /manifest.json is left alone — link still works as a
+                // fallback.
+                var configureUrl = addon.Url?.Replace("/manifest.json", "/configure") ?? addon.Url;
                 <li class="stream-addon-row" data-url="@addon.Url">
                     <div class="stream-addon-meta">
                         <span class="stream-addon-name">@addon.Name</span>
                         <span class="stream-addon-url">@addon.Url</span>
                     </div>
+                    <a class="btn-ghost btn-ghost-sm" href="@configureUrl" target="_blank" rel="noopener" style="white-space: nowrap;">Configure</a>
                     <button class="btn-ghost btn-ghost-sm stream-addon-remove" type="button" style="white-space: nowrap;">Remove</button>
                 </li>
             }

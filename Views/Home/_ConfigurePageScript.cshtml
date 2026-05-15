@@ -635,11 +635,21 @@
     // Remove deletes the entry. The original rows are server-rendered on
     // first load; this JS only handles mutations.
     function buildAddonRow(addon) {
-        var $li = $('<li class="stream-addon-row"></li>').attr('data-url', addon.url || addon.Url);
+        var url = addon.url || addon.Url || '';
+        var $li = $('<li class="stream-addon-row"></li>').attr('data-url', url);
         var $meta = $('<div class="stream-addon-meta"></div>');
         $meta.append($('<span class="stream-addon-name"></span>').text(addon.name || addon.Name || '(addon)'));
-        $meta.append($('<span class="stream-addon-url"></span>').text(addon.url || addon.Url || ''));
+        $meta.append($('<span class="stream-addon-url"></span>').text(url));
         $li.append($meta);
+        // Mirror the server-rendered Configure link from
+        // _StreamsSection.cshtml: swap /manifest.json for /configure
+        // to land on the addon's HTML configurator. href is set via
+        // .attr() so jQuery escapes the user-pasted URL rather than
+        // interpolating it into an HTML string.
+        var configureUrl = url.replace(/\/manifest\.json(\?[^#]*)?$/, '/configure$1');
+        var $configBtn = $('<a class="btn-ghost btn-ghost-sm" target="_blank" rel="noopener" style="white-space: nowrap;">Configure</a>')
+            .attr('href', configureUrl);
+        $li.append($configBtn);
         $li.append('<button class="btn-ghost btn-ghost-sm stream-addon-remove" type="button" style="white-space: nowrap;">Remove</button>');
         return $li;
     }
