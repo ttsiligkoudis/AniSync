@@ -1063,23 +1063,34 @@
                 // everything." Decided in the 'tracks' handler.
                 var targetTrackNumber = -1;
 
-                // Early-exit heuristic — bail once we've gone too
-                // long without seeing ANY subtitle event. MKV
-                // Clusters are roughly time-ordered, so a long run
-                // of cluster bytes with no Block emitting a sub
-                // means we're past the dialogue region (credits /
-                // outro / preview). We track ANY track's cues (not
-                // just the English one) so a release with parallel
-                // language tracks doesn't trip the heuristic during
-                // a silent stretch in the chosen track. Threshold
-                // is set at ~95 seconds of typical 1080p MKV bytes
-                // (≈63 MB/min), which lands inside the credits for
-                // most anime episodes. We acknowledge this drops
-                // post-credit stinger subs — acceptable trade for
-                // not pulling another 200-500 MB through the
-                // browser per pick.
-                var EARLY_EXIT_GAP_BYTES = 100 * 1024 * 1024;
+                // Early-exit heuristic — bail once we're plausibly
+                // past the dialogue region. Two-stage gate so we
+                // don't false-trigger during the OP. Anime opening
+                // credits run ~90 seconds with zero subtitle events
+                // (no track has lyrics during the OP for most
+                // releases), which at typical 1080p MKV bitrate is
+                // ~85-130 MB of file bytes — almost identical to a
+                // post-credits silent tail. We can't tell them
+                // apart from cue-gap alone, so we use file position
+                // as the discriminator:
+                //
+                //   * Mid-file gap (< 85% of Content-Length): keep
+                //     reading. The OP lives here and it WILL go
+                //     quiet for a minute or two.
+                //   * Tail-of-file gap (>= 85%): bail after a small
+                //     30 MB cue-less stretch. By this point dialogue
+                //     is over and what remains is credits + preview.
+                //
+                // When Content-Length is missing (some CDNs use
+                // chunked transfer) we fall back to a very loose
+                // pure-gap threshold that won't trip on a typical
+                // OP. In that branch we lose the byte savings but
+                // keep correctness.
+                var EARLY_EXIT_TAIL_FRACTION = 0.85;
+                var EARLY_EXIT_GAP_IN_TAIL = 30 * 1024 * 1024;
+                var EARLY_EXIT_GAP_NO_LENGTH = 400 * 1024 * 1024;
                 var totalBytesRead = 0;
+                var contentLength = 0;
                 var lastCueByteOffset = 0;
                 var seenAnyCue = false;
                 var earlyExited = false;
@@ -1224,6 +1235,19 @@
                             onComplete([]);
                             return;
                         }
+                        // Content-Length is the discriminator between
+                        // "mid-file gap" and "tail gap". May be absent
+                        // when the response is chunked or when an
+                        // upstream proxy stripped it — in that case
+                        // EARLY_EXIT_GAP_NO_LENGTH kicks in below.
+                        try {
+                            var lenHeader = response.headers.get('content-length');
+                            if (lenHeader) contentLength = parseInt(lenHeader, 10) || 0;
+                        } catch (_) {}
+                        try {
+                            console.log('[AniSync] embedded sub stream start: content-length=' +
+                                (contentLength ? Math.round(contentLength / (1024 * 1024)) + ' MB' : 'unknown'));
+                        } catch (_) {}
                         var reader = response.body.getReader();
                         function pump() {
                             // Cooperative bail-out: the 'tracks'
@@ -1243,17 +1267,27 @@
                                 totalBytesRead += result.value.byteLength;
                                 try { parser.write(result.value); } catch (e) { /* parser may abort early when EOS reached */ }
 
-                                // Early-exit guard. Skipped until
-                                // at least one subtitle event has
-                                // been seen, otherwise a file with
-                                // a long pre-dialogue lead-in (cold
-                                // open + intro) would trip the
-                                // threshold before any cue arrived.
-                                if (seenAnyCue && (totalBytesRead - lastCueByteOffset) > EARLY_EXIT_GAP_BYTES) {
+                                // Early-exit guard. Two-stage gate
+                                // — see EARLY_EXIT_* declarations
+                                // above for the rationale. Skipped
+                                // until at least one cue has been
+                                // seen so a cold-open + OP without
+                                // dialogue can't trip the threshold
+                                // before any sub arrives.
+                                var gap = totalBytesRead - lastCueByteOffset;
+                                var canBail;
+                                if (contentLength > 0) {
+                                    var inTail = totalBytesRead > contentLength * EARLY_EXIT_TAIL_FRACTION;
+                                    canBail = inTail && gap > EARLY_EXIT_GAP_IN_TAIL;
+                                } else {
+                                    canBail = gap > EARLY_EXIT_GAP_NO_LENGTH;
+                                }
+                                if (seenAnyCue && canBail) {
                                     try {
                                         console.log('[AniSync] embedded sub early-exit: ' +
-                                            Math.round(totalBytesRead / (1024 * 1024)) + ' MB read, ' +
-                                            Math.round((totalBytesRead - lastCueByteOffset) / (1024 * 1024)) +
+                                            Math.round(totalBytesRead / (1024 * 1024)) + ' MB read' +
+                                            (contentLength ? ' / ' + Math.round(contentLength / (1024 * 1024)) + ' MB' : '') +
+                                            ', ' + Math.round(gap / (1024 * 1024)) +
                                             ' MB since last cue; flushing parser.');
                                     } catch (_) {}
                                     earlyExited = true;
