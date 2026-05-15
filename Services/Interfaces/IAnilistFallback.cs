@@ -78,6 +78,18 @@ namespace AnimeList.Services.Interfaces
         Task<List<Meta>> GetNewEpisodesTodayAsync(AnimeService translateTo = AnimeService.Anilist);
 
         /// <summary>
+        /// Episodes airing within an arbitrary [startUnix, endUnix] window
+        /// (Unix seconds, UTC). Used by the per-user notification dispatcher,
+        /// which runs every 5 minutes and needs a sliding "now-1h to now+24h"
+        /// window rather than the calendar-day shape
+        /// <see cref="GetNewEpisodesTodayAsync"/> returns. Not cached — the
+        /// caller's cron is the cadence. Stays in the anilist-prefixed id
+        /// space; translation to MAL/Kitsu happens downstream via the mapping
+        /// service.
+        /// </summary>
+        Task<List<UpcomingEpisode>> GetUpcomingEpisodesAsync(long startUnix, long endUnix);
+
+        /// <summary>
         /// Prequels and sequels for an AniList anime id, sorted by air year
         /// ascending so the carousel reads chronologically (story-order
         /// approximation — for the rare case where a prequel airs after its

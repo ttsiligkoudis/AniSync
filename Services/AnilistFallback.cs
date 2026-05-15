@@ -821,6 +821,70 @@ namespace AnimeList.Services
             }
         }
 
+        public async Task<List<UpcomingEpisode>> GetUpcomingEpisodesAsync(long startUnix, long endUnix)
+        {
+            // Same airingSchedules shape as GetNewEpisodesTodayAsync above, but
+            // parameterised on an arbitrary window with no caching — the caller's
+            // cron tick is the cadence (every 5 min). Pulls up to 100 entries per
+            // window which comfortably covers a 24h horizon (~50-80 airings/day
+            // peak Saturday); if the window grows we'd need to paginate.
+            try
+            {
+                var requestBody = SerializeObject(new
+                {
+                    query = @"
+                        query ($startUnix: Int, $endUnix: Int, $page: Int) {
+                            Page(page: $page, perPage: 100) {
+                                airingSchedules(airingAt_greater: $startUnix, airingAt_lesser: $endUnix, sort: TIME) {
+                                    airingAt
+                                    episode
+                                    media {
+                                        id
+                                        title { english romaji }
+                                        coverImage { large }
+                                    }
+                                }
+                            }
+                        }",
+                    variables = new { startUnix, endUnix, page = 1 }
+                });
+
+                var data = await PostJsonAsync(requestBody);
+                var schedules = data?.Page?.airingSchedules;
+                if (schedules == null) return [];
+
+                var result = new List<UpcomingEpisode>();
+                foreach (var sched in schedules)
+                {
+                    var media = sched.media;
+                    if (media == null) continue;
+
+                    var anilistId = (int?)media.id;
+                    var episode = (int?)sched.episode;
+                    var airingAt = (long?)sched.airingAt;
+                    if (!anilistId.HasValue || !episode.HasValue || !airingAt.HasValue) continue;
+
+                    var name = string.IsNullOrEmpty((string)media.title?.english)
+                        ? (string)media.title?.romaji
+                        : (string)media.title?.english;
+                    if (string.IsNullOrEmpty(name)) continue;
+
+                    result.Add(new UpcomingEpisode(
+                        AnilistId: anilistId.Value,
+                        Title: name,
+                        Episode: episode.Value,
+                        AiringAt: airingAt.Value,
+                        CoverImage: (string)media.coverImage?.large));
+                }
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[AnilistFallback] GetUpcomingEpisodesAsync failed: {ex.Message}");
+                return [];
+            }
+        }
+
         public async Task<List<Meta>> GetRelatedAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist)
             => await TranslateMetaIdsAsync(
                 CloneMetas((await FetchSidedataAsync(anilistId)).Related),
