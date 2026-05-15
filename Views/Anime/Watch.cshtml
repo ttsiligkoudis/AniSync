@@ -1361,7 +1361,9 @@
                 var firstLine = (stream.title || stream.name || '').split('\n')[0].trim();
                 var open = el('button', { type: 'button', class: 'btn-ghost btn-ghost-sm' }, 'Open externally');
                 open.addEventListener('click', function () {
-                    openWithExternalPlayer(stream.url, firstLine);
+                    resolvePlaybackUrl(stream.url).then(function (resolvedUrl) {
+                        openWithExternalPlayer(resolvedUrl, firstLine);
+                    });
                 });
                 row.appendChild(open);
 
@@ -1450,33 +1452,69 @@
                     + (hasSeasons ? '&season=' + encodeURIComponent(season) : '')
                     + (firstLine ? '&filename=' + encodeURIComponent(firstLine) : '');
 
-                fetch('/anime/episode-subtitles?' + subQs, {
+                // Resolve the stream URL through our server-side
+                // redirect-follow first. For MediaFusion-style addons
+                // that bind playback tokens to the IP that requested
+                // /stream/ (which is AniSync's backend IP, not the
+                // browser's), this trades the IP-bound /playback/ URL
+                // for the post-redirect debrid CDN URL — token-
+                // authenticated in the URL itself, no IP-binding, so
+                // the browser can load it direct. For Torrentio
+                // sources that already point at an RD CDN URL the
+                // resolve is effectively a no-op. Runs in parallel
+                // with the subtitle fetch so we don't add a serial
+                // round-trip on the click → play path.
+                var resolvePromise = resolvePlaybackUrl(stream.url);
+                var subsPromise = fetch('/anime/episode-subtitles?' + subQs, {
                     credentials: 'same-origin',
                     headers: { 'Accept': 'application/json' },
                     skipLoader: true,
                 })
                     .then(function (r) { return r.ok ? r.json() : { subtitles: [] }; })
-                    .catch(function () { return { subtitles: [] }; })
-                    .then(function (data) {
-                        var subs = (data && data.subtitles) || [];
-                        // Visibility into per-provider contribution.
-                        // Logged to console (devtools-only, no UI cost
-                        // for normal users) and rendered as a chip in
-                        // the toolbar (visible to everyone) so the
-                        // user can confirm at a glance whether each
-                        // provider returned anything.
-                        var pc = (data && data.providerCounts) || {};
-                        try {
-                            console.log(
-                                '[AniSync] subtitles loaded:',
-                                subs.length, 'tracks',
-                                'opensubtitles=' + (pc.opensubtitles || 0),
-                                'wyzie=' + (pc.wyzie || 0),
-                                subs);
-                        } catch (_) {}
-                        renderSubsProviderChip(pc);
-                        initPlayer(stream, subs);
-                    });
+                    .catch(function () { return { subtitles: [] }; });
+
+                Promise.all([resolvePromise, subsPromise]).then(function (results) {
+                    var resolvedUrl = results[0];
+                    var data = results[1];
+                    var subs = (data && data.subtitles) || [];
+                    // Visibility into per-provider contribution.
+                    // Logged to console (devtools-only, no UI cost
+                    // for normal users) and rendered as a chip in
+                    // the toolbar (visible to everyone) so the
+                    // user can confirm at a glance whether each
+                    // provider returned anything.
+                    var pc = (data && data.providerCounts) || {};
+                    try {
+                        console.log(
+                            '[AniSync] subtitles loaded:',
+                            subs.length, 'tracks',
+                            'opensubtitles=' + (pc.opensubtitles || 0),
+                            'wyzie=' + (pc.wyzie || 0),
+                            subs);
+                    } catch (_) {}
+                    renderSubsProviderChip(pc);
+                    var resolvedStream = Object.assign({}, stream, { url: resolvedUrl });
+                    initPlayer(resolvedStream, subs);
+                });
+            }
+
+            // Hands a stream URL to /anime/resolve-stream and returns
+            // the post-redirect URL the server saw — usually a debrid
+            // CDN URL (real-debrid.com / alldebrid.com / …) that's
+            // not IP-bound and can be loaded from any client. Falls
+            // back to the original URL on any failure so a misbehaving
+            // resolver doesn't block playback entirely. Used by both
+            // the inline player and the external-launcher paths.
+            function resolvePlaybackUrl(originalUrl) {
+                if (!originalUrl) return Promise.resolve(originalUrl);
+                return fetch('/anime/resolve-stream?url=' + encodeURIComponent(originalUrl), {
+                    credentials: 'same-origin',
+                    headers: { 'Accept': 'application/json' },
+                    skipLoader: true,
+                })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (data) { return (data && data.resolvedUrl) || originalUrl; })
+                    .catch(function () { return originalUrl; });
             }
 
             function initPlayer(stream, subtitles) {
@@ -2009,7 +2047,16 @@
                 btn.innerHTML = EXTERNAL_ICON_SVG;
                 btn.addEventListener('click', function (e) {
                     e.stopPropagation();
-                    openWithExternalPlayer(url, displayName);
+                    // Resolve through the same server-side redirect-
+                    // follower the inline player uses. MediaFusion-
+                    // bound /playback/ URLs would 403 from VLC / Infuse
+                    // too (the external player's IP doesn't match the
+                    // Fly.io IP the token was signed against), so we
+                    // hand the external app the post-redirect debrid
+                    // CDN URL instead.
+                    resolvePlaybackUrl(url).then(function (resolvedUrl) {
+                        openWithExternalPlayer(resolvedUrl, displayName);
+                    });
                 });
                 return btn;
             }
