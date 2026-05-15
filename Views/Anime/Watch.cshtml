@@ -1416,23 +1416,6 @@
             function playStream(stream) {
                 destroyPlayer();
 
-                // Server-side pre-flight: AddonStreamService already
-                // flagged this stream as not browser-playable (HEVC /
-                // AV1 / MKV / 10-bit tokens in the addon's name or
-                // description, or a non-mp4/webm extension on a URL
-                // that exposed one). Skip ArtPlayer's reconnect loop
-                // and surface the codec-fallback UI immediately —
-                // saves 5 guaranteed-to-fail loads before the user
-                // sees the "Open externally" affordance.
-                if (stream && stream.playable === false) {
-                    if (playerHost && playerHost.scrollIntoView) {
-                        try { playerHost.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-                        catch (_) { playerHost.scrollIntoView(true); }
-                    }
-                    showFallback(stream, 'decode');
-                    return;
-                }
-
                 // Scroll the player into view so the user gets a
                 // visible signal that "click → play" happened, even
                 // when their click landed below the fold (long
