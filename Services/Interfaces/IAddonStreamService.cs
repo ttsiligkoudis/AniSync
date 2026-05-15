@@ -64,6 +64,12 @@ namespace AnimeList.Services.Interfaces
     /// MULTi / DUAL token; null when nothing recognisable was emitted.
     /// <see cref="Provider"/> is the addon's display name, used as a
     /// source badge in the UI and as a discriminator in the merge step.
+    /// <see cref="IsHevc"/> flags HEVC / x265 / H.265 / Hi10P / 10-bit
+    /// releases so the UI can warn on Chromium-desktop browsers where
+    /// the hardware HEVC path produces visual corruption — detected
+    /// from the addon's full name+description+title haystack because
+    /// addons like MediaFusion put the codec line in <c>description</c>
+    /// (which never makes the trip to the client otherwise).
     /// </summary>
     public record AddonStream(
         string Name,
@@ -77,5 +83,6 @@ namespace AnimeList.Services.Interfaces
         string Language,
         string InfoHash,
         int? FileIdx,
-        string Provider);
+        string Provider,
+        bool IsHevc);
 }
