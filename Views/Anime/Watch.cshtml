@@ -791,36 +791,50 @@
             // badge. The regex deliberately uses word boundaries so
             // "hxc265" / "h265abc" don't false-match, and the
             // "h.265" variant covers both dotted and undotted spellings.
+            // We scan name + title concatenated because addons split
+            // their codec info inconsistently: Torrentio puts it in
+            // title alongside the release filename, MediaFusion puts
+            // a short header in name and the codec/HDR/size lines in
+            // title, others (rarely) put a codec hint in name.
             var HEVC_RE = /\b(hevc|x265|h\.?265|hi10p?|10[\s\-]?bit)\b/i;
             function streamLooksHEVC(stream) {
                 if (!stream) return false;
-                var s = (stream.title || stream.name || '') + '';
-                return HEVC_RE.test(s);
+                var haystack = ((stream.name || '') + ' ' + (stream.title || '')) + '';
+                return HEVC_RE.test(haystack);
             }
 
-            // One-shot probe of the browser's HEVC decoder. Chrome /
-            // Edge on Windows only return true when the Microsoft
-            // HEVC Video Extension is installed AND the GPU has
-            // hardware decode; Firefox returns false almost
-            // everywhere; Safari / Chrome-on-macOS return true.
-            // We test both modern codec strings — hev1 is "raw"
-            // HEVC, hvc1 is HEVC with parameter sets in the sample
-            // entry; some browsers only accept one or the other.
-            // MediaSource.isTypeSupported is for MSE, but it's a
-            // reliable proxy for whether the underlying decoder
-            // exists at all and is what existing libraries
-            // (hls.js etc.) use for the same check.
-            var HEVC_SUPPORTED = (function () {
+            // Browser HEVC playback reliability heuristic.
+            // MediaSource.isTypeSupported lies on Chrome desktop —
+            // it returns true (HEVC Video Extension installed) but
+            // the GPU decoder corrupts many real-world HEVC files
+            // (Main10, anime reference-frame patterns) into
+            // macroblock soup. Chrome ships no software HEVC
+            // fallback, so toggling hardware acceleration makes it
+            // strictly worse (black screen + audio). The actually
+            // reliable signal is "Chromium-based browser running on
+            // a desktop OS" — empirically that's the set that
+            // produces corrupted output. Firefox uses its own FFmpeg
+            // path, Safari uses VideoToolbox, and mobile Chrome
+            // routes through the OS decoder differently — all three
+            // handle HEVC cleanly in our testing.
+            var HEVC_RISKY = (function () {
                 try {
-                    if (typeof MediaSource === 'undefined') return false;
-                    return MediaSource.isTypeSupported('video/mp4; codecs="hev1.1.6.L93.B0"') ||
-                           MediaSource.isTypeSupported('video/mp4; codecs="hvc1.1.6.L93.B0"');
+                    var ua = navigator.userAgent || '';
+                    if (/Mobi|Mobile|Android|iPhone|iPad|iPod/i.test(ua)) return false;
+                    // Chrome / Edge / Opera / Brave / Vivaldi all
+                    // ship the "Chrome" UA token; Edg / OPR are
+                    // additional brand tokens we don't need to
+                    // match on separately because the Chrome token
+                    // covers them. Exclude Firefox defensively in
+                    // case future Firefox builds adopt a Chrome
+                    // brand token for compat.
+                    return /Chrome|Chromium/.test(ua) && !/Firefox/.test(ua);
                 } catch (_) {
                     return false;
                 }
             })();
             try {
-                console.log('[AniSync] browser HEVC decode support:', HEVC_SUPPORTED);
+                console.log('[AniSync] HEVC marked risky for this browser:', HEVC_RISKY);
             } catch (_) {}
 
             function resolveStreamUrl(originalUrl, signal) {
@@ -2439,15 +2453,14 @@
                 var debrid = (data && data.debridStreams) || [];
                 var external = (data && data.externalLinks) || [];
 
-                // When the browser can't decode HEVC, push HEVC /
-                // 10-bit sources to the bottom so the default-picks
-                // (top of the list) are ones that'll actually play
-                // inline. Stable-sort: among same-codec sources the
-                // upstream order from the server is preserved, so
-                // quality ranking / dedupe logic isn't disturbed.
-                // No-op when the browser supports HEVC — we trust
-                // the server's ranking in that case.
-                if (!HEVC_SUPPORTED && debrid.length > 1) {
+                // When HEVC is risky on this browser, push HEVC /
+                // 10-bit sources to the bottom so the default picks
+                // at the top of the list are ones that'll play
+                // cleanly inline. Stable-sort: among same-codec
+                // sources the server's upstream ranking (quality /
+                // seeders / etc.) is preserved. No-op on browsers
+                // that handle HEVC fine (Firefox, Safari, mobile).
+                if (HEVC_RISKY && debrid.length > 1) {
                     debrid = debrid
                         .map(function (s, i) { return { s: s, i: i, hevc: streamLooksHEVC(s) }; })
                         .sort(function (a, b) {
@@ -2478,21 +2491,22 @@
                             sub.appendChild(el('span', { class: 'episode-stream-provider' }, s.provider));
                         }
                         // HEVC / 10-bit warning badge. Surfaced
-                        // regardless of browser support so the user
-                        // knows the codec at a glance, but coloured
-                        // differently when the browser can't decode
-                        // it: amber = "should play but may struggle
-                        // on slower CPUs", red = "browser can't
-                        // decode, use the external-player button".
-                        // The tooltip carries the explanation so
-                        // we don't bloat the badge text.
+                        // regardless of browser so the user knows
+                        // the codec at a glance, but coloured
+                        // differently when this browser is known
+                        // to mishandle HEVC: red on Chromium
+                        // desktop (the hardware decoder produces
+                        // visual corruption with no software
+                        // fallback), amber elsewhere (informational
+                        // only — Firefox / Safari / mobile play
+                        // these files cleanly).
                         if (streamLooksHEVC(s)) {
                             var hevcBadge = el('span', {
                                 class: 'episode-stream-hevc',
-                                title: HEVC_SUPPORTED
-                                    ? 'HEVC / 10-bit — should play inline but may glitch on slower CPUs. Use the external-player button if you see artifacts.'
-                                    : 'HEVC / 10-bit — your browser can’t decode this smoothly. Use the external-player button (VLC / Infuse) for clean playback.',
-                                'data-supported': HEVC_SUPPORTED ? 'true' : 'false',
+                                title: HEVC_RISKY
+                                    ? 'HEVC / 10-bit — Chrome/Edge on desktop frequently corrupts these files into visual artifacts and there’s no software fallback. Open it in an external player (VLC / Infuse), or try Firefox.'
+                                    : 'HEVC / 10-bit — your browser should decode this fine. Use the external-player button if you see artifacts anyway.',
+                                'data-supported': HEVC_RISKY ? 'false' : 'true',
                             }, 'HEVC');
                             sub.appendChild(hevcBadge);
                         }
