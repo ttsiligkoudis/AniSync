@@ -79,7 +79,25 @@
                 return;
             }
             var data = await res.json();
-            setBadge(data && data.count);
+            var newCount = Number(data && data.count) || 0;
+            // Read the previous count BEFORE updating the badge so we can
+            // detect new arrivals — "99+" parses as 99 which is good
+            // enough for the > comparison (the rare case of 99→100 still
+            // shows as "99+" and the user wouldn't notice a stale list
+            // beyond that count anyway).
+            var prevCount = Number((badge.textContent || '').replace('+', '')) || 0;
+            setBadge(newCount);
+
+            if (newCount > prevCount) {
+                // A new notification was inserted server-side since the last
+                // refresh. The dropdown's cached list (loaded lazily on the
+                // first bell click) is now stale — invalidate it so the next
+                // panel open refetches. If the panel is already open right
+                // now, refetch immediately so the new row appears without
+                // waiting for the user to close + reopen.
+                listLoaded = false;
+                if (!panel.hidden) loadList();
+            }
 
             if (data && data.nextAiringAt) {
                 // Schedule one timeout for the precise airing time (+
