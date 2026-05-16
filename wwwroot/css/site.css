@@ -4538,6 +4538,35 @@ button.anime-detail-user-state:hover {
     color: #93c5fd;
 }
 
+/* "Continue · Ep N" / "Watch Ep N" jump-to-next-unseen pill. Lives in
+   .anime-detail-badges next to the user-state pill. Solid cobalt to
+   read as the page's primary action (the user-state pill next to it
+   is cobalt-tinted but read-only-ish; this one fires the navigation).
+   Play-triangle icon makes the intent obvious without label parsing. */
+.anime-detail-watch-next,
+.anime-detail-watch-next:link,
+.anime-detail-watch-next:visited {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.85rem;
+    background: #3B82F6;
+    color: #fff;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    line-height: 1.2;
+    text-decoration: none;
+    transition: background 0.15s;
+}
+
+.anime-detail-watch-next:hover,
+.anime-detail-watch-next:focus {
+    background: #2563eb;
+    color: #fff;
+    text-decoration: none;
+}
+
 .anime-detail-section {
     width: 100%;
     margin-top: 0.5rem;

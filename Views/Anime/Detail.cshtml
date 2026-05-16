@@ -188,6 +188,34 @@
                         </svg>
                     </button>
                 }
+
+                @* Continue-watching CTA. Jumps straight to (progress + 1)
+                   when the user has progress on this anime, or to ep 1
+                   otherwise. Hidden when there's no place to play yet
+                   (no stream sources configured, no videos in the list,
+                   or progress is already past the last video), and for
+                   movies — those get their own .anime-detail-movie-cta
+                   below the description. *@
+                @{
+                    var watchProgress = Model.Entry?.Progress ?? 0;
+                    var totalEps = a.videos?.Count ?? 0;
+                    var nextEp = watchProgress + 1;
+                    var showWatchCta = a.type != MetaType.movie.ToString()
+                        && Model.HasStreamSources
+                        && totalEps > 0
+                        && nextEp <= totalEps;
+                }
+                @if (showWatchCta)
+                {
+                    var watchLabel = watchProgress > 0 ? $"Continue · Ep {nextEp}" : $"Watch Ep {nextEp}";
+                    <a class="anime-detail-watch-next" href="@($"/anime/{a.id}/watch/{nextEp}")"
+                       aria-label="@watchLabel">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+                            <polygon points="6 4 20 12 6 20 6 4"></polygon>
+                        </svg>
+                        <span>@watchLabel</span>
+                    </a>
+                }
             </div>
             @* Studios are rendered as their own section in the bottom
                linksByCategory loop now — same chip style as Tag / Staff
