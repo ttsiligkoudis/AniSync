@@ -529,6 +529,23 @@
         </div>
     </section>
 }
+else if (a.type == MetaType.movie.ToString())
+{
+    @* Movie meta has no per-episode list (the underlying service collapses
+       the whole feature into one streamable unit), so the user has no
+       click target to reach the watch page. Surface a single CTA pointed
+       at /anime/{id}/watch/1 — the watch route treats episode=1 as the
+       movie body for movie-typed entries. *@
+    <section class="anime-detail-section anime-detail-movie-cta-wrap">
+        <a class="anime-detail-movie-cta" href="@($"/anime/{a.id}/watch/1")">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polygon points="6 4 20 12 6 20 6 4"></polygon>
+            </svg>
+            <span>Watch movie</span>
+        </a>
+    </section>
+}
 
 @* Related (prequel/sequel) + Recommended carousels are populated client-side
    after page load via /anime/{id}/extras so the hero + episodes render off
