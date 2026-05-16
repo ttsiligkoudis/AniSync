@@ -533,8 +533,8 @@ namespace AnimeList.Controllers
                 else if (id.StartsWith(anilistPrefix))  meta = await _anilistService.GetAnimeByIdAsync(id, null);
                 else if (id.StartsWith(tmdbPrefix))     meta = await _tmdbService.GetAnimeByIdAsync(id, null);
 
-                if (meta?.Video == null) return NotFound(new ApiError("not found"));
-                var rows = meta.Video.Select(v => new EpisodeInfo(
+                if (meta?.videos == null) return NotFound(new ApiError("not found"));
+                var rows = meta.videos.Select(v => new EpisodeInfo(
                     Season: v.season,
                     Episode: v.episode,
                     Title: v.title ?? v.name,
