@@ -529,13 +529,16 @@
         </div>
     </section>
 }
-else if (a.type == MetaType.movie.ToString())
+else if (a.type == MetaType.movie.ToString() && Model.HasStreamSources)
 {
     @* Movie meta has no per-episode list (the underlying service collapses
        the whole feature into one streamable unit), so the user has no
        click target to reach the watch page. Surface a single CTA pointed
        at /anime/{id}/watch/1 — the watch route treats episode=1 as the
-       movie body for movie-typed entries. *@
+       movie body for movie-typed entries. Gated on HasStreamSources for
+       the same reason episode rows are inert when neither stream addons
+       nor External services are wired up — without a source there'd be
+       nothing to play on the other side of the click. *@
     <section class="anime-detail-section anime-detail-movie-cta-wrap">
         <a class="anime-detail-movie-cta" href="@($"/anime/{a.id}/watch/1")">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
