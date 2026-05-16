@@ -4890,6 +4890,228 @@ button.anime-detail-user-state:hover {
     -webkit-appearance: none;
 }
 
+/* ── /notifications page ─────────────────────────────────────────── */
+/* Mirrors the bell-dropdown row chrome (notif-thumb, notif-title,
+   notif-meta) but lives at page scale with checkboxes + per-row
+   delete + a sticky-feeling header that swaps between default and
+   "N selected" modes. */
+
+/* Two-column header — left-aligned titles, toolbar on the right.
+   Wraps to two rows on narrow viewports so the toolbar drops below
+   the title block cleanly. */
+.notif-page-list ~ .page-header,
+.page-header-row {
+    /* Selector before "," is harmless on this controller's view —
+       included only so this block doesn't get accidentally pruned by
+       a future global .page-header refactor. */
+    display: block;
+}
+
+.page-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+
+.page-header-titles {
+    text-align: left;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.page-header-titles .page-title,
+.page-header-titles .page-subtitle {
+    text-align: left;
+}
+
+.notif-page-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.notif-page-action {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #cfcfcf;
+    padding: 0.4rem 0.85rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.notif-page-action:hover:not(:disabled),
+.notif-page-action:focus:not(:disabled) {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.22);
+    color: #fff;
+    outline: none;
+}
+
+.notif-page-action:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.notif-page-action-danger,
+.notif-page-action-danger:link,
+.notif-page-action-danger:visited {
+    background: rgba(239, 68, 68, 0.10);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+}
+
+.notif-page-action-danger:hover:not(:disabled),
+.notif-page-action-danger:focus:not(:disabled) {
+    background: rgba(239, 68, 68, 0.18);
+    border-color: rgba(239, 68, 68, 0.55);
+    color: #fecaca;
+}
+
+.notif-page-list {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.65rem;
+    overflow: hidden;
+    background: #141414;
+}
+
+.notif-page-item,
+.notif-page-item:link,
+.notif-page-item:visited {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.65rem 0.9rem;
+    color: #e0e0e0;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.notif-page-item:last-child {
+    border-bottom: 0;
+}
+
+.notif-page-item:hover,
+.notif-page-item:focus {
+    background: rgba(255, 255, 255, 0.04);
+    color: #fff;
+    text-decoration: none;
+}
+
+.notif-page-item-unread {
+    background: rgba(59, 130, 246, 0.06);
+}
+
+.notif-page-item-unread .notif-page-title {
+    color: #fff;
+}
+
+.notif-page-item-selected {
+    background: rgba(59, 130, 246, 0.14);
+}
+
+.notif-page-item-selected.notif-page-item-unread {
+    background: rgba(59, 130, 246, 0.20);
+}
+
+.notif-page-checkbox {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+}
+
+.notif-page-checkbox-input {
+    width: 16px;
+    height: 16px;
+    accent-color: #3B82F6;
+    cursor: pointer;
+    margin: 0;
+}
+
+.notif-page-thumb {
+    width: 48px;
+    height: 68px;
+    flex-shrink: 0;
+    object-fit: cover;
+    border-radius: 0.3rem;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.notif-page-thumb-placeholder {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.notif-page-body {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.notif-page-title {
+    font-size: 0.95rem;
+    font-weight: 500;
+    line-height: 1.3;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.notif-page-meta {
+    margin-top: 0.2rem;
+    font-size: 0.82rem;
+    color: #8a8a8a;
+}
+
+.notif-page-delete {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0.4rem;
+    color: #888;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.notif-page-delete:hover:not(:disabled),
+.notif-page-delete:focus:not(:disabled) {
+    background: rgba(239, 68, 68, 0.12);
+    color: #fca5a5;
+    outline: none;
+}
+
+.notif-page-delete:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.notif-page-sentinel {
+    height: 1px;
+}
+
+.notif-page-loader {
+    padding: 0.75rem 0.9rem;
+    color: #888;
+    font-size: 0.82rem;
+    text-align: center;
+}
+
 /* Thumbnail wrapper — the play-diamond and watched-eye glyphs absolute-
    position inside it. */
 .anime-detail-episode-thumb-wrap {
@@ -5409,4 +5631,30 @@ ol.anime-detail-episodes-busy {
     margin-top: 0.2rem;
     font-size: 0.78rem;
     color: #8a8a8a;
+}
+
+/* "View all" link at the bottom of the bell dropdown. Goes to the
+   /notifications page where the user can scroll the full history and
+   multi-select / bulk-act. Sticky-style separator at the top so it
+   reads as a footer rather than a list row. */
+.notif-panel-footer,
+.notif-panel-footer:link,
+.notif-panel-footer:visited {
+    display: block;
+    padding: 0.6rem 0.9rem;
+    text-align: center;
+    text-decoration: none;
+    color: #93c5fd;
+    font-size: 0.84rem;
+    font-weight: 600;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.02);
+    transition: background 0.15s, color 0.15s;
+}
+
+.notif-panel-footer:hover,
+.notif-panel-footer:focus {
+    background: rgba(255, 255, 255, 0.04);
+    color: #bfdbfe;
+    text-decoration: none;
 }

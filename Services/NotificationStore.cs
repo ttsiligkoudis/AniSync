@@ -51,9 +51,10 @@ namespace AnimeList.Services
             return true;
         }
 
-        public async Task<List<NotificationRecord>> ListForUserAsync(string uid, int limit = 20)
+        public async Task<List<NotificationRecord>> ListForUserAsync(string uid, int limit = 20, int skip = 0)
         {
             if (string.IsNullOrEmpty(uid)) return [];
+            if (skip < 0) skip = 0;
             using var conn = new SqliteConnection(_connectionString);
             await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
@@ -63,10 +64,11 @@ namespace AnimeList.Services
                 FROM notifications
                 WHERE uid = $uid
                 ORDER BY created_at DESC, id DESC
-                LIMIT $limit;
+                LIMIT $limit OFFSET $skip;
                 """;
             cmd.Parameters.AddWithValue("$uid", uid);
             cmd.Parameters.AddWithValue("$limit", limit);
+            cmd.Parameters.AddWithValue("$skip", skip);
 
             var result = new List<NotificationRecord>();
             using var reader = await cmd.ExecuteReaderAsync();
@@ -137,6 +139,67 @@ namespace AnimeList.Services
             cmd.Parameters.AddWithValue("$uid", uid);
             cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             return await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<int> MarkManyReadAsync(string uid, IReadOnlyCollection<long> ids)
+        {
+            if (string.IsNullOrEmpty(uid) || ids == null || ids.Count == 0) return 0;
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var tx = conn.BeginTransaction();
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                UPDATE notifications SET read_at = $now
+                WHERE id = $id AND uid = $uid AND read_at IS NULL;
+                """;
+            var pId = cmd.Parameters.Add("$id", Microsoft.Data.Sqlite.SqliteType.Integer);
+            cmd.Parameters.AddWithValue("$uid", uid);
+            cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+
+            var total = 0;
+            foreach (var id in ids)
+            {
+                pId.Value = id;
+                total += await cmd.ExecuteNonQueryAsync();
+            }
+            tx.Commit();
+            return total;
+        }
+
+        public async Task<bool> DeleteAsync(string uid, long id)
+        {
+            if (string.IsNullOrEmpty(uid)) return false;
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            // UID gate so user A can't delete user B's rows.
+            cmd.CommandText = "DELETE FROM notifications WHERE id = $id AND uid = $uid;";
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.Parameters.AddWithValue("$uid", uid);
+            return await cmd.ExecuteNonQueryAsync() > 0;
+        }
+
+        public async Task<int> DeleteManyAsync(string uid, IReadOnlyCollection<long> ids)
+        {
+            if (string.IsNullOrEmpty(uid) || ids == null || ids.Count == 0) return 0;
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var tx = conn.BeginTransaction();
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = "DELETE FROM notifications WHERE id = $id AND uid = $uid;";
+            var pId = cmd.Parameters.Add("$id", Microsoft.Data.Sqlite.SqliteType.Integer);
+            cmd.Parameters.AddWithValue("$uid", uid);
+
+            var total = 0;
+            foreach (var id in ids)
+            {
+                pId.Value = id;
+                total += await cmd.ExecuteNonQueryAsync();
+            }
+            tx.Commit();
+            return total;
         }
     }
 }
