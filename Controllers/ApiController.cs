@@ -461,23 +461,29 @@ namespace AnimeList.Controllers
         // ── Airing schedule ─────────────────────────────────────────────────────
 
         /// <summary>
-        /// Anime with an episode airing during the current UTC day. One row per anime
-        /// (cours overlapping in the same day collapse to a single entry). Same data
-        /// the dashboard's "New Episodes Today" shelf renders — cached server-side
-        /// until the next UTC midnight.
+        /// Anime with an episode airing during the calendar day in the
+        /// caller's timezone. One row per anime (cours overlapping in
+        /// the same day collapse to a single entry). Same data the
+        /// dashboard's "New Episodes Today" shelf renders.
         /// </summary>
+        /// <param name="tz">Caller's UTC offset in minutes, JS
+        /// <c>Date.getTimezoneOffset()</c> convention — positive = west
+        /// of UTC. Defaults to 0 (UTC day) when omitted.</param>
         [HttpGet("airing/today")]
         [ProducesResponseType(typeof(AiringTodayResponse), StatusCodes.Status200OK)]
-        public async Task<IActionResult> AiringToday(AnimeService service = AnimeService.Anilist)
+        public async Task<IActionResult> AiringToday(AnimeService service = AnimeService.Anilist, int tz = 0)
         {
             try
             {
-                var items = await _anilistFallback.GetNewEpisodesTodayAsync(service);
+                // Clamp the same range JS getTimezoneOffset emits so a
+                // malformed query string can't make the cache key absurd.
+                var offset = Math.Clamp(tz, -840, 720);
+                var items = await _anilistFallback.GetNewEpisodesTodayAsync(service, offset);
                 return new JsonResult(new AiringTodayResponse(items ?? []));
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "API AiringToday failed (service={Service}).", service);
+                _logger.LogError(ex, "API AiringToday failed (service={Service}, tz={Tz}).", service, tz);
                 return StatusCode(500, new ApiError("lookup failed"));
             }
         }
