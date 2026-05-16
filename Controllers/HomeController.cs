@@ -97,6 +97,10 @@ public class HomeController : Controller
         int totalHoursWatched = 0;
         double? meanScore = null;
         List<string> contributingNames = [];
+        // Lifted to outer scope so the view-model construction below can
+        // surface the currently-working linked services alongside the
+        // primary in the dashboard hero badge.
+        List<LinkedToken> linkedTokens = [];
 
         // Continue-watching + stats surfaces only fire for non-anonymous logged-in
         // users. Anonymous and not-logged-in visitors get the plain three-tile
@@ -126,13 +130,16 @@ public class HomeController : Controller
             // stats panel hidden (HasStats = false); they can link AniList
             // from /configure to unlock it.
             TokenData anilistTokenForStats = null;
+            if (!string.IsNullOrEmpty(uid))
+            {
+                linkedTokens = await _configStore.GetLinkedTokensAsync(uid);
+            }
             if (tokenData.anime_service == AnimeService.Anilist)
             {
                 anilistTokenForStats = tokenData;
             }
-            else if (!string.IsNullOrEmpty(uid))
+            else
             {
-                var linkedTokens = await _configStore.GetLinkedTokensAsync(uid);
                 foreach (var lt in linkedTokens)
                 {
                     if (lt.NeedsReauth || lt.TokenData == null || lt.TokenData.anonymousUser) continue;
@@ -194,11 +201,24 @@ public class HomeController : Controller
 
         var (seasonAiring, seasonNew, seasonTotal) = await seasonStatsTask;
 
+        // Surface the linked-secondary service names alongside the primary
+        // so the dashboard hero pill can read "✓ Synced with AniList · MAL"
+        // rather than just the primary. Quietly drops links flagged
+        // NeedsReauth / anonymous / null-token so the badge only counts
+        // currently-working connections.
+        var linkedServiceNames = (tokenData != null && !tokenData.anonymousUser)
+            ? linkedTokens
+                .Where(lt => !lt.NeedsReauth && lt.TokenData != null && !lt.TokenData.anonymousUser)
+                .Select(lt => lt.Service.ToString())
+                .ToList()
+            : [];
+
         return View(new DashboardViewModel
         {
             TokenData = tokenData,
             ConfigUid = uid,
             ContinueWatching = continueWatching,
+            LinkedServices = linkedServiceNames,
             HasStats = hasStats,
             WatchingTotal = watchingTotal,
             CompletedTotal = completedTotal,

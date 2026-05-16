@@ -6,6 +6,13 @@
     var isLoggedIn = tokenData != null;
     var anonymousUser = tokenData?.anonymousUser ?? false;
     var serviceLabel = tokenData?.anime_service.ToString();
+    // Primary + every currently-working linked secondary, dot-separated,
+    // so the hero badge reads "✓ Synced with AniList · MAL · Kitsu"
+    // when the user has linked all three rather than hiding the fact
+    // that saves fan out to more than one tracker.
+    var allConnectedLabel = isLoggedIn && !anonymousUser
+        ? string.Join(" · ", new[] { serviceLabel }.Concat(Model.LinkedServices ?? []))
+        : serviceLabel;
     var hasContinueWatching = Model.ContinueWatching?.Count > 0;
 }
 
@@ -17,7 +24,7 @@
 <section class="hero-card">
     @if (isLoggedIn && !anonymousUser)
     {
-        <span class="hero-badge">✓ Synced with @serviceLabel</span>
+        <span class="hero-badge">✓ Synced with @allConnectedLabel</span>
         <h2 class="hero-title">
             Continue your <span class="hero-title-accent">anime journey</span>
         </h2>

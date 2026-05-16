@@ -13,6 +13,13 @@ namespace AnimeList.Models
         public string ConfigUid { get; set; }
         public List<Meta> ContinueWatching { get; set; } = [];
 
+        // Linked secondary providers attached to this config (e.g. AniList
+        // primary + MAL + Kitsu linked). Names only — the dashboard's hero
+        // "✓ Synced with X" badge renders them alongside the primary
+        // service so the user sees every tracker their saves fan out to,
+        // not just their primary. Empty when no secondaries are linked.
+        public List<string> LinkedServices { get; set; } = [];
+
         // Stats panel — populated only when the viewer has an AniList token
         // (primary or linked), since the dashboard now reads stats from
         // AniList's User.statistics GraphQL rather than computing them

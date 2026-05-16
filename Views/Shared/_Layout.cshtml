@@ -1,3 +1,4 @@
+@inject AnimeList.Services.Interfaces.IConfigStore _layoutConfigStore
 @{
     // Session-derived identity used by the site-header pill + the drawer's
     // sign-in / disconnect CTA. Reading directly here keeps every page's
@@ -20,6 +21,34 @@
        their session. *@
     var layoutHasSession = layoutToken != null;
     var activeNav = ViewData["ActiveNav"]?.ToString();
+
+    // Resolve linked-secondary services so the drawer footer can read
+    // "✓ Connected to AniList · MAL · Kitsu" rather than just the
+    // primary. Two indexed SQLite calls per request — sub-millisecond,
+    // and the drawer is rendered on every page so it's not worth
+    // plumbing through every controller. try/catch swallows any
+    // store/connection failure into "primary only" so a transient
+    // SQLite error doesn't 500 the entire layout.
+    var layoutConnectedServices = new List<string>();
+    if (layoutLoggedIn)
+    {
+        layoutConnectedServices.Add(layoutToken.anime_service.ToString());
+        try
+        {
+            var (layoutUid, _) = await _layoutConfigStore.FindUidByIdentityAsync(layoutToken);
+            if (!string.IsNullOrEmpty(layoutUid))
+            {
+                var layoutLinked = await _layoutConfigStore.GetLinkedTokensAsync(layoutUid);
+                foreach (var lt in layoutLinked)
+                {
+                    if (lt.NeedsReauth || lt.TokenData == null || lt.TokenData.anonymousUser) continue;
+                    layoutConnectedServices.Add(lt.Service.ToString());
+                }
+            }
+        }
+        catch { /* fall back to primary-only label */ }
+    }
+    var layoutConnectedLabel = string.Join(" · ", layoutConnectedServices);
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -124,7 +153,7 @@
             @if (layoutHasSession)
             {
                 <span class="nav-drawer-status">
-                    @(layoutLoggedIn ? $"✓ Connected to {layoutToken.anime_service}" : "✓ Connected without account")
+                    @(layoutLoggedIn ? $"✓ Connected to {layoutConnectedLabel}" : "✓ Connected without account")
                 </span>
                 <a class="nav-drawer-cta nav-drawer-cta-secondary" href="@Url.Action("Logout", "Auth")">Disconnect</a>
             }
