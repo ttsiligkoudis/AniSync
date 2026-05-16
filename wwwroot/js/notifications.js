@@ -69,7 +69,11 @@
             return;
         }
         try {
-            var res = await fetch(COUNT_URL, { credentials: 'same-origin' });
+            // skipLoader: bell refresh is a background poll that fires on a
+            // schedule the user didn't initiate — flashing the global
+            // spinner for it every wake would be noisy. Same opt-out the
+            // typeahead search uses (see loader.js).
+            var res = await fetch(COUNT_URL, { credentials: 'same-origin', skipLoader: true });
             if (!res.ok) {
                 scheduleNext(ERROR_RETRY_MS);
                 return;
@@ -142,7 +146,7 @@
 
     async function loadList() {
         try {
-            var res = await fetch(LIST_URL, { credentials: 'same-origin' });
+            var res = await fetch(LIST_URL, { credentials: 'same-origin', skipLoader: true });
             if (!res.ok) return;
             var data = await res.json();
             renderItems(data && data.items);
@@ -183,6 +187,7 @@
                 method: 'POST',
                 credentials: 'same-origin',
                 keepalive: true,
+                skipLoader: true,
             });
         } catch (_) { /* ignore — server-side dedup means a missed mark is harmless */ }
         // Optimistically zero-out the unread state in the badge so the
@@ -197,6 +202,7 @@
                 var res = await fetch('/api/v1/notifications/read-all', {
                     method: 'POST',
                     credentials: 'same-origin',
+                    skipLoader: true,
                 });
                 if (!res.ok) return;
             } catch (_) { return; }
