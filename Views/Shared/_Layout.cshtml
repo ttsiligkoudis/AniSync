@@ -137,12 +137,14 @@
     <div class="drawer-backdrop"
          onclick="document.body.classList.remove('drawer-open')"></div>
 
-    <div class="container">
-        <main role="main" style="min-height: 100vh;">
-            <header class="site-header">
-                <a class="site-logo" href="/" aria-label="AniSync home">
-                    <img src="/logo.png" alt="AniSync" />
-                </a>
+    @* Site header is intentionally OUTSIDE the page container so the
+       sticky bar can paint edge-to-edge on desktop while its inner
+       content stays aligned with the page via the inner .container. *@
+    <header class="site-header">
+        <div class="container site-header-inner">
+            <a class="site-logo" href="/" aria-label="AniSync home">
+                <img src="/logo.png" alt="AniSync" />
+            </a>
                 @* Inline desktop nav — mirrors the slide-in drawer's links.
                    Hidden under 992px (lg) where the hamburger takes over.
                    Same href + active-class logic as the drawer so adding a
@@ -272,11 +274,15 @@
                 {
                     <a class="site-header-cta site-header-cta-primary" href="@Url.Action("Configure", "Home")">Sign in</a>
                 }
-                <button class="hamburger-btn" aria-label="Open menu"
-                        onclick="document.body.classList.toggle('drawer-open')">
-                    <span></span><span></span><span></span>
-                </button>
-            </header>
+            <button class="hamburger-btn" aria-label="Open menu"
+                    onclick="document.body.classList.toggle('drawer-open')">
+                <span></span><span></span><span></span>
+            </button>
+        </div>
+    </header>
+
+    <div class="container">
+        <main role="main" style="min-height: 100vh;">
             @RenderBody()
         </main>
     </div>
