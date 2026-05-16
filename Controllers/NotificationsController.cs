@@ -44,13 +44,23 @@ namespace AnimeList.Controllers
             return uid;
         }
 
-        /// <summary>List the most recent notifications for the signed-in user.</summary>
+        /// <summary>
+        /// Most-recent-first list of the signed-in user's notifications.
+        /// Paginated via <paramref name="skip"/> / <paramref name="limit"/>;
+        /// the /notifications page's infinite-scroll JS fetches successive
+        /// chunks by incrementing skip by the chunk size.
+        /// </summary>
+        /// <param name="limit">Page size. 1–50. Defaults to 20.</param>
+        /// <param name="skip">Offset into the most-recent-first ordering. Defaults to 0 (newest).</param>
         [HttpGet]
-        public async Task<IActionResult> List()
+        public async Task<IActionResult> List(int limit = 20, int skip = 0)
         {
             var uid = await ResolveCurrentUidAsync();
             if (uid == null) return Unauthorized(new ApiError("not signed in"));
-            var items = await _store.ListForUserAsync(uid, 20);
+            if (limit < 1) limit = 1;
+            if (limit > 50) limit = 50;
+            if (skip < 0) skip = 0;
+            var items = await _store.ListForUserAsync(uid, limit, skip);
             return new JsonResult(new { items });
         }
 
@@ -90,5 +100,48 @@ namespace AnimeList.Controllers
             var marked = await _store.MarkAllReadAsync(uid);
             return new JsonResult(new { marked });
         }
+
+        /// <summary>
+        /// Bulk-mark a list of notification ids as read. UID-gated server-side;
+        /// ids belonging to another user are silently dropped. Body: <c>{ids: [1,2,3]}</c>.
+        /// </summary>
+        [HttpPost("bulk-read")]
+        public async Task<IActionResult> BulkRead([FromBody] NotificationIdsRequest body)
+        {
+            var uid = await ResolveCurrentUidAsync();
+            if (uid == null) return Unauthorized(new ApiError("not signed in"));
+            if (body?.Ids == null || body.Ids.Count == 0)
+                return new JsonResult(new { marked = 0 });
+            var marked = await _store.MarkManyReadAsync(uid, body.Ids);
+            return new JsonResult(new { marked });
+        }
+
+        /// <summary>Removes one notification. UID-gated; 404 when the id doesn't belong to the caller.</summary>
+        [HttpDelete("{id:long}")]
+        public async Task<IActionResult> Delete(long id)
+        {
+            var uid = await ResolveCurrentUidAsync();
+            if (uid == null) return Unauthorized(new ApiError("not signed in"));
+            var ok = await _store.DeleteAsync(uid, id);
+            return ok ? Ok() : NotFound();
+        }
+
+        /// <summary>
+        /// Bulk-delete. UID-gated server-side; ids belonging to another user
+        /// are silently dropped. Body: <c>{ids: [1,2,3]}</c>.
+        /// </summary>
+        [HttpPost("bulk-delete")]
+        public async Task<IActionResult> BulkDelete([FromBody] NotificationIdsRequest body)
+        {
+            var uid = await ResolveCurrentUidAsync();
+            if (uid == null) return Unauthorized(new ApiError("not signed in"));
+            if (body?.Ids == null || body.Ids.Count == 0)
+                return new JsonResult(new { deleted = 0 });
+            var deleted = await _store.DeleteManyAsync(uid, body.Ids);
+            return new JsonResult(new { deleted });
+        }
     }
+
+    /// <summary>Body shape for the /bulk-read and /bulk-delete endpoints.</summary>
+    public record NotificationIdsRequest(List<long> Ids);
 }

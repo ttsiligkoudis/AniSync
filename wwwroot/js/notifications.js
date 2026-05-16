@@ -17,7 +17,7 @@
     'use strict';
 
     var COUNT_URL = '/api/v1/notifications/count';
-    var LIST_URL = '/api/v1/notifications';
+    var LIST_URL = '/api/v1/notifications?limit=10';
     // Wait this long after a known airingAt before refreshing. The cron
     // tick runs every 5 min server-side, so by airingAt + ~6 min the
     // notification row should exist in the DB.
