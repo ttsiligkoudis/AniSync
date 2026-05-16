@@ -550,6 +550,90 @@ namespace AnimeList.Services
             return string.IsNullOrEmpty(raw) ? null : $"{GetServicePrefix(service)}{raw}";
         }
 
+        public async Task<(int Season, int Episode)?> ResolveImdbStreamCoordinatesAsync(
+            string animeId,
+            int withinCourEpisode,
+            AnimeService service,
+            Func<string, Task<(string? Name, int? EpisodeCount)>> getSummary)
+        {
+            if (string.IsNullOrEmpty(animeId)) return null;
+
+            AnimeIdMapping current;
+            if (animeId.StartsWith(anilistPrefix))      current = await GetAnilistMapping(animeId);
+            else if (animeId.StartsWith(malPrefix))     current = await GetMalMapping(animeId);
+            else if (animeId.StartsWith(kitsuPrefix))   current = await GetKitsuMapping(animeId);
+            else return null;
+
+            if (current?.ImdbId == null) return null;
+            var courSeason = current.Season ?? 1;
+
+            // Single-cour franchise: per-cour episode IS the IMDb episode.
+            var siblings = await GetImdbMapping(current.ImdbId);
+            if (siblings == null || siblings.Count <= 1)
+                return (courSeason, withinCourEpisode);
+
+            // Flat-IMDb detection: more than one cour points at the same
+            // IMDb season number means the IMDb listing collapses cours
+            // (so the cour's within-season episode collides with siblings
+            // from other cours). When the season is unique among siblings
+            // the per-cour numbering passes through unchanged — that's
+            // the Re:Zero S2 / Demon Slayer Mugen Train pattern.
+            var sharesSeason = siblings.Count(s => s.Season == current.Season) > 1;
+            if (!sharesSeason)
+                return (courSeason, withinCourEpisode);
+
+            // Sort cours the same way CinemetaService.GetCourEpisodesAsync
+            // does so the cumulative offset matches what's actually queued
+            // up in the videos array — Season ASC, then service id ASC.
+            int? IdFor(AnimeIdMapping m) => service switch
+            {
+                AnimeService.Anilist => m.AnilistId,
+                AnimeService.Kitsu => m.KitsuId,
+                AnimeService.MyAnimeList => m.MalId,
+                _ => null,
+            };
+            var prefix = GetServicePrefix(service);
+            var ordered = siblings
+                .OrderBy(m => m.Season ?? int.MaxValue)
+                .ThenBy(IdFor)
+                .ToList();
+
+            var currentId = IdFor(current);
+            var index = ordered.FindIndex(m => IdFor(m) == currentId);
+            if (index <= 0) return (courSeason, withinCourEpisode);
+
+            // Sum episode counts of earlier cours. Enrich on the fly via
+            // the service summary callback when Episodes isn't cached yet,
+            // then persist back so the next call doesn't re-fetch.
+            var cumulative = 0;
+            var enriched = false;
+            for (var i = 0; i < index; i++)
+            {
+                var idHere = IdFor(ordered[i]);
+                if (!ordered[i].Episodes.HasValue && idHere.HasValue)
+                {
+                    try
+                    {
+                        var (name, eps) = await getSummary($"{prefix}{idHere}");
+                        ordered[i].Name ??= name;
+                        ordered[i].Episodes = eps;
+                        enriched = true;
+                    }
+                    catch
+                    {
+                        // Best-effort: a single failed summary lookup leaves
+                        // the cumulative undercounted for that one cour. The
+                        // user will see streams from the wrong episode then,
+                        // but the alternative (refuse to compute) is worse.
+                    }
+                }
+                cumulative += ordered[i].Episodes ?? 0;
+            }
+            if (enriched) await EnrichImdbMappings(ordered);
+
+            return (courSeason, cumulative + withinCourEpisode);
+        }
+
         /// <summary>
         /// Walks a list of external IDs (e.g. from a Plex/Jellyfin webhook payload) in priority
         /// order and returns the first one that resolves to <paramref name="service"/>'s id.

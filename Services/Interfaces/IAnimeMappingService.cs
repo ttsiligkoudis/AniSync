@@ -25,6 +25,33 @@ namespace AnimeList.Services.Interfaces
         Task<string> GetIdWithPrefixAsync(string animeId, AnimeService service, int? season = null);
 
         /// <summary>
+        /// Translates a within-cour episode number into the (season, episode)
+        /// coordinates that IMDb-keyed Stremio addons (Torrentio, MediaFusion,
+        /// Comet, AIOStreams, …) expect. For most franchises every cour gets
+        /// its own IMDb season and the input passes through unchanged; for
+        /// franchises whose IMDb listing collapses every cour into one
+        /// continuous season (e.g. an anime with "S4 E6" airing as IMDb
+        /// "S1 E42"), the helper detects the collapse — multiple cours
+        /// share the same <see cref="AnimeIdMapping.Season"/> value — sorts
+        /// the cours by service id, computes the cumulative episode offset
+        /// from earlier cours via their <see cref="AnimeIdMapping.Episodes"/>
+        /// field (enriched on-demand via <paramref name="getSummary"/>),
+        /// and returns the absolute coordinates. Mirrors the same cumulative
+        /// math <c>CinemetaService.GetCourEpisodesAsync</c> already uses
+        /// for slicing per-cour video lists.
+        /// </summary>
+        /// <param name="animeId">Service-prefixed id of the current cour.</param>
+        /// <param name="withinCourEpisode">Episode number inside the cour (1..N).</param>
+        /// <param name="service">User's primary tracker — selects which per-cour id field to sort by.</param>
+        /// <param name="getSummary">Callback that fetches (title, episode count) for a service-prefixed id. Used to enrich cours whose <c>Episodes</c> field is missing so the cumulative is accurate.</param>
+        /// <returns>Translated <c>(Season, Episode)</c>, or null when no IMDb mapping exists for <paramref name="animeId"/>.</returns>
+        Task<(int Season, int Episode)?> ResolveImdbStreamCoordinatesAsync(
+            string animeId,
+            int withinCourEpisode,
+            AnimeService service,
+            Func<string, Task<(string? Name, int? EpisodeCount)>> getSummary);
+
+        /// <summary>
         /// Walks a list of external IDs (from a webhook payload) in priority order and returns
         /// the first one that resolves to a tracker id for <paramref name="service"/>. Tuples are
         /// <c>(prefix, raw id)</c> where <c>prefix</c> is one of <c>anidbPrefix</c>,
