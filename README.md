@@ -2,16 +2,17 @@
 
 # AniSync
 
-### The only Stremio addon that syncs anime across **AniList**, **Kitsu** & **MyAnimeList** — simultaneously.
+### Your anime list, synced everywhere — **AniList**, **Kitsu** & **MyAnimeList**, in lockstep.
 
-Browse your lists as native Stremio catalogs. Edit entries without leaving the app. Watch an episode and your progress writes back to every linked tracker, automatically.
+A self-hostable **web app**, a **Stremio addon**, and a **browser extension** — all talking to one tracker stack so wherever you watch, your list stays right.
 
 [![Install on Stremio](https://img.shields.io/badge/Install-Stremio-7B5BF5?style=for-the-badge&logo=stremio&logoColor=white)](https://anisync.fly.dev)
-[![Install on Stremio Web](https://img.shields.io/badge/Install-Stremio%20Web-5A4FD8?style=for-the-badge)](https://anisync.fly.dev)
+[![Open the web app](https://img.shields.io/badge/Open-Web%20App-3B82F6?style=for-the-badge)](https://anisync.fly.dev)
+[![Browser extension](https://img.shields.io/badge/Get-Browser%20Extension-FF7139?style=for-the-badge&logo=firefox&logoColor=white)](examples/browser-extension)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?style=for-the-badge&logo=.net&logoColor=white)](https://dotnet.microsoft.com)
 [![License](https://img.shields.io/github/license/ttsiligkoudis/AniSync?style=for-the-badge)](LICENSE)
 
-[**Install**](#install-in-30-seconds) · [**Why AniSync**](#why-anisync) · [**vs. other addons**](#how-anisync-compares) · [**Features**](#features) · [**FAQ**](#faq)
+[**Three surfaces**](#three-surfaces-one-source-of-truth) · [**Why AniSync**](#why-anisync) · [**vs. other addons**](#how-anisync-compares) · [**Public API**](#public-api) · [**Self-host**](#self-hosting) · [**FAQ**](#faq)
 
 </div>
 
@@ -19,54 +20,98 @@ Browse your lists as native Stremio catalogs. Edit entries without leaving the a
 
 ## Why AniSync
 
-If you watch anime on Stremio, you've lived this:
+If you watch anime online, you've lived this:
 
 > Episode ends. Open a browser tab. Find AniList. Update progress. Realise you also wanted it on MAL because your friends are there. Open another tab. Re-do it. Three episodes later you give up and your list rots for six months.
 
-**AniSync fixes that, for all three trackers at the same time.**
+**AniSync fixes that — for all three trackers at the same time, on every surface you watch from.**
 
-It's the only Stremio addon — out of every anime tracker we could find — that:
+It's the only stack — out of every anime tracker we could find — that:
 
 - Syncs **AniList, Kitsu *and* MyAnimeList** in one install (others pick one).
 - **Fans out writes to every linked account** so your lists never drift.
-- Lets you **edit entries inside Stremio** via a per-episode stream (no addon-SDK hacks, no alt-tabbing).
-- Ships **AniSkip auto-skip**, **canon/filler tags**, and **correct cour slicing** for split-season franchises out of the box.
-
-It's a tracker layer for your existing Stremio setup — not a scraper, not a streaming source, not a replacement for Torrentio. It just makes sure your anime list reflects what you actually watched.
+- Lives **in Stremio** *and* **on the web** *and* **in your browser** — same tracker state, three ways to interact with it.
+- Ships **AniSkip auto-skip**, **canon/filler tags**, **per-user episode notifications** and **correct cour slicing** out of the box.
 
 ---
 
-## Install in 30 seconds
+## Three surfaces, one source of truth
 
-1. Open **[anisync.fly.dev](https://anisync.fly.dev)**.
-2. Pick **AniList**, **Kitsu** or **MyAnimeList** and sign in. *(Or skip auth and use the public catalogs.)*
-3. Toggle the catalogs and streams you want.
-4. Click **Install to Stremio** — done.
+```
+┌────────────────────────────────────────────────────────────────────┐
+│  🌐 Web App         🎬 Stremio Addon       🧩 Browser Extension     │
+│  full client        catalogs + streams    auto-track on any site   │
+└──────────────────────────────┬─────────────────────────────────────┘
+                               ▼
+                  ┌──────────────────────────┐
+                  │   AniSync core service   │
+                  │  • Multi-provider sync   │
+                  │  • Public REST API       │
+                  │  • Episode notifications │
+                  │  • Plex/Jellyfin webhook │
+                  └──────────────────────────┘
+                               │
+                               ▼
+              AniList   •   Kitsu   •   MyAnimeList
+```
 
-A revision counter is appended to the install URL on every save, so Stremio's manifest cache invalidates automatically. No reinstall dance when you change settings.
-
----
-
-## How AniSync compares
-
-The Stremio anime-tracker space is small. Here's how AniSync stacks up against every other tracker addon we could find:
-
-| | **AniSync** | Anime&nbsp;Kitsu | animeo | mal-stremio-addon | AnilistStream |
-|---|:---:|:---:|:---:|:---:|:---:|
-| **AniList sync** | ✅ | — | ✅ | — | ✅ |
-| **Kitsu sync** | ✅ | catalog only | — | — | — |
-| **MAL sync** | ✅ | — | — | ✅ | — |
-| **Multi-provider sync** | ✅ | — | — | — | — |
-| **Edit entries inside Stremio** | ✅ | — | — | — | — |
-| **AniSkip auto-skip** | ✅ | — | — | — | — |
-| **Canon/filler tags** | ✅ | — | — | — | — |
-| **Cour slicing for split seasons** | ✅ | — | — | — | — |
-
-> AniSync is **the tracker layer**, not a streaming source. Most users pair it with a scraper addon like Torrentio or Comet for actual playback — see [the recommended stack](#the-anisync-stack) below.
+Sign in once on [anisync.fly.dev](https://anisync.fly.dev). The web app, the Stremio addon and the browser extension all read and write through the same account — your progress on Crunchyroll, on a Stremio stream, on the AniSync watch page, *anywhere* — lands on every tracker you've linked.
 
 ---
 
-## Features
+## 🌐 The Web App
+
+A complete client at [**anisync.fly.dev**](https://anisync.fly.dev) — browse, watch, track, all without leaving the tab. Installable as a PWA on mobile.
+
+### Dashboard
+- **Continue watching** shelf pulled live from your primary tracker.
+- **Your stats** — counts, mean score, total hours watched, from AniList's `User.statistics`.
+- **This Season** — currently airing / new / total counts at a glance.
+- **Popular this season / Most anticipated next season / New episodes today** carousels.
+- Connected-services pill on every page header — see at a glance which trackers your saves fan out to.
+
+### Library
+- Filter your list by status, search by title, narrow by genre.
+- Infinite-scroll grid with Continue Watching / Completed / Planning / Paused / Dropped / Rewatching tabs.
+- Per-card **Manage Entry** quick-edit modal — same as the Stremio integration, on the web.
+
+### Discover
+- Trending Now, Seasonal, Currently Airing.
+- Browse by **tag**, **studio**, **staff** — every catalog AniList exposes, in one UI.
+- Infinite-scroll pagination throughout.
+
+### Anime detail page (`/anime/{id}`)
+- **Hero**: poster, year, score, status badge, your-progress chip, **Continue · Ep N** primary CTA.
+- **Episodes** list with thumbnails, air dates, canon/filler tags, future-episode badges.
+- **Live filter** — type a number or title fragment, list narrows in place. No network round-trip.
+- **Watch movie / Watch first episode** affordances for entries that haven't been started.
+- **Recommendations**, **Related (prequels/sequels)**, **Supplementary chips** (staff, studios, tags).
+- **Source links** to the same anime on AniList / Kitsu / MAL / IMDb / TMDb / TVDB.
+- **Cour-aware episode numbering** — flat-IMDb franchises (Naruto-style) and split-cour franchises both render with sane 1..N within-cour numbering, with the underlying IMDb coordinates preserved for stream lookups.
+
+### Watch page (`/anime/{id}/watch/{ep}`)
+- Embedded player with prev/next episode navigation.
+- **Stream picker** — debrid sources from your configured addons (Torrentio / MediaFusion / Comet / AIOStreams) + External services (Crunchyroll, Netflix, HiDive).
+- **Subtitles** from OpenSubtitles + Wyzie, merged + dedup'd.
+- **AniSkip markers** for OP / ED / recap auto-skip.
+- **Auto-track** writes progress at 70%, fanned out to every linked provider.
+
+### 🔔 Episode-release notifications
+- Bell in the site header with an unread counter.
+- **Scheduled** server-side — when an episode you're Watching airs, a notification is created at the airing moment. The bell badge refreshes itself at the right time (no constant polling).
+- Click a notification → straight to the watch page for that episode.
+- **Dedicated `/notifications` page** with infinite scroll, **multi-select**, **bulk mark-read / delete**, per-row trash.
+- Driven by an in-process `BackgroundService` that pulls the AniList airing schedule daily and arms one `Task.Delay` per episode — fires to the second, no external cron.
+
+### Sticky chrome
+- Full-bleed sticky header — bell, search and nav stay reachable while you scroll.
+- Bottom-nav on mobile (Home / Library / Discover / Settings).
+
+---
+
+## 🎬 The Stremio Addon
+
+Same install URL as the web app — [anisync.fly.dev](https://anisync.fly.dev) — toggle catalogs, click **Install to Stremio**, done. A revision counter on the install URL invalidates Stremio's manifest cache on every save, so no reinstall dance when you change settings.
 
 ### 📚 Catalogs
 
@@ -87,7 +132,7 @@ Every catalog can be toggled independently and set to **Discover Only** to keep 
 
 Per-episode streams that AniSync attaches to anime in Stremio:
 
-- **Manage Entry** — quick-edit progress, score, notes, rewatch count, start/finish dates without leaving Stremio. Multi-cour franchises get a **Season** dropdown so the change targets the right cour, auto-selected from the URL.
+- **Manage Entry** — quick-edit progress, score, notes, rewatch count, start/finish dates without leaving Stremio. Multi-cour franchises get a **Season** dropdown so the change targets the right cour.
 - **Auto-track progress** — start an episode and your list updates automatically, fanned out to every linked provider.
 - **External services** — direct links to Crunchyroll, Netflix, HiDive and others. MAL doesn't expose these, so AniSync transparently falls back to AniList through the cross-service mapping for MAL users.
 - **AniSkip integration** — `skipIntro` / `skipOutro` / `skipRecap` hints from [AniSkip's](https://aniskip.com) community markers. Compatible clients (notably **Stremio Enhanced**) auto-skip OPs, EDs and recaps.
@@ -101,27 +146,85 @@ Even with ungrouped seasons, every episode card carries:
 - `hasScheduledVideos` hint so future episodes get the **Upcoming** badge.
 - **Correct cour slicing.** IMDb often flat-numbers a multi-cour franchise as one season — AniSync slices it back into the right cour using preceding cours' episode counts. Opening cour 2 shows that cour's 12 episodes, not all 40.
 
+---
+
+## 🧩 The Browser Extension
+
+A cross-browser MV3 extension ([Chrome / Edge / Firefox / Brave](examples/browser-extension)) that watches anime episodes on **any** streaming site and auto-updates your AniSync list as you watch. Works as a bridge from sites Stremio doesn't cover (Crunchyroll, HiAnime, Aniwave, HiDive, …) to your tracker accounts.
+
+### Built-in adapters
+
+| Site | Behavior |
+| --- | --- |
+| **Crunchyroll** | Auto-tracks across SPA episode navigation, JSON-LD + URL fallback. |
+| **HiAnime / Zoro / aniwatch** *(8 hostnames)* | Sidebar-DOM extraction (URL has no episode number). |
+| **Aniwave** *(5 hostnames)* | Same shape — sidebar `.active` marker. |
+| **HiDive** | Universal heuristic chain (OG meta + title). |
+| **Other sites** | Floating **Track** button always available — confirm + save. |
+
+### How it works
+
+1. Content script detects the show + episode via per-site adapter or universal heuristic chain (JSON-LD, URL slug, OG meta, page title, DOM h1).
+2. A small **Track** button appears bottom-right whenever the page looks like an episode page.
+3. Save auto-fires once playback crosses **80%** (matches Anilist's typical "watched" threshold).
+4. Hits AniSync's `GET /api/v1/match` to resolve the title, then `POST /api/v1/me/entries/{id}` to write progress.
+5. AniSync's existing fan-out mirrors that write to every linked secondary tracker.
+
+### Permission model
+
+- Curated install-time host allowlist (Crunchyroll, HiAnime, Aniwave, AniSync API).
+- **Opt-in flow** for new sites: click the toolbar icon → **Always allow on this site** → browser's native permission dialog → persistent dynamic content-script registration.
+- Designed to clear both Chrome Web Store and Mozilla Add-ons review without broad permissions by default.
+
+See [`examples/browser-extension/README.md`](examples/browser-extension/README.md) for the full design, build steps, and how to add a site adapter (~20 lines).
+
+---
+
+## How AniSync compares
+
+The Stremio anime-tracker space is small. Here's how AniSync stacks up against every other tracker addon we could find:
+
+| | **AniSync** | Anime&nbsp;Kitsu | animeo | mal-stremio-addon | AnilistStream |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **AniList sync** | ✅ | — | ✅ | — | ✅ |
+| **Kitsu sync** | ✅ | catalog only | — | — | — |
+| **MAL sync** | ✅ | — | — | ✅ | — |
+| **Multi-provider sync** | ✅ | — | — | — | — |
+| **Edit entries inside Stremio** | ✅ | — | — | — | — |
+| **AniSkip auto-skip** | ✅ | — | — | — | — |
+| **Canon/filler tags** | ✅ | — | — | — | — |
+| **Cour slicing for split seasons** | ✅ | — | — | — | — |
+| **Standalone web app** | ✅ | — | — | — | — |
+| **Browser extension** | ✅ | — | — | — | — |
+| **Episode-release notifications** | ✅ | — | — | — | — |
+| **Plex / Jellyfin / Emby webhook** | ✅ | — | — | — | — |
+| **Public REST API** | ✅ | — | — | — | — |
+
+> AniSync is **the tracker layer**, not a streaming source. Most users pair it with a scraper addon like Torrentio or Comet for actual playback — see [the recommended stack](#the-anisync-stack) below.
+
+---
+
+## What ties them together
+
 ### 🔁 Multi-provider sync
 
 The headline feature. Link more than one tracker and AniSync keeps them aligned.
 
 - **Linked accounts.** Sign in with extra providers from the configure page. One is the **primary** (the catalog source), the rest are secondary write targets.
 - **Promote any linked account to primary** with one click. Force-promote handles collisions when the new primary already has different data.
-- **Save fan-out.** Manage Entry edits and auto-track writes hit the primary, then concurrently mirror to every linked secondary with status and score normalised across providers.
+- **Save fan-out.** Manage Entry edits, auto-track writes, browser-extension saves, Plex webhooks — all hit the primary first, then concurrently mirror to every linked secondary with status and score normalised across providers.
 - **One-click full sync.** Backfill your entire library from primary into every linked secondary, with a progress modal, real cancel, and a worker pool that respects each provider's rate limit.
 - **Lazy re-auth.** When a refresh token fails, that provider's pill shows a **Needs reauth** badge so you can fix it without losing the rest of your config.
 
-### 🏠 Home Server Sync (Plex / Jellyfin / Emby)
+### 🏠 Home server sync (Plex / Jellyfin / Emby)
 
-Multi-provider fan-out, but for files you watch outside Stremio. Paste one webhook URL into your Plex / Jellyfin / Emby server and every finished episode scrobbles onto AniList, Kitsu, *and* MyAnimeList simultaneously.
+Multi-provider fan-out, but for files you watch outside Stremio and the browser. Paste one webhook URL into your media server and every finished episode scrobbles onto AniList, Kitsu, *and* MyAnimeList simultaneously.
 
-- **One URL, all three servers.** The endpoint content-type-sniffs the payload — Plex sends multipart, Jellyfin and Emby send JSON. Same URL works for whichever you run.
-- **External-id resolution.** Plex's default agent emits TVDB IDs, HAMA emits AniDB, Jellyfin's Skyhook plugin emits AniDB, and most setups have IMDB or TMDB on top — AniSync resolves any of them to your tracker primary id via the bundled cross-mapping data.
-- **Plex Home filtering.** Optional username field — events from other Plex Home users are dropped so your roommate's playback doesn't scrobble onto your account.
+- **One URL, all three servers.** Content-type-sniffs the payload — Plex sends multipart, Jellyfin and Emby send JSON. Same URL works for whichever you run.
+- **External-id resolution.** Plex's default agent emits TVDB IDs, HAMA emits AniDB, Jellyfin's Skyhook plugin emits AniDB, IMDB and TMDB on top — AniSync resolves any of them to your tracker primary via the bundled cross-mapping data.
+- **Plex Home filtering.** Optional username field — events from other Plex Home users are dropped.
 - **Idempotent.** A 60-second dedup window per (anime, season, episode) shrugs off retries and resumed-session re-deliveries.
 - **Token-revocable.** A "Rotate token" button on the configure page invalidates the old URL instantly without touching your tracker auth.
-
-Setup: open the configure page → **Home Server Sync** → copy the URL → paste it into your media server's webhook settings. See [`Tests/fixtures/scrobble/README.md`](Tests/fixtures/scrobble/README.md) for curl-based smoke tests.
 
 ### 🔐 Accounts
 
@@ -143,19 +246,43 @@ Or skip auth entirely and use public catalogs only.
 
 ---
 
-## Screenshots
+## Public API
 
-> _Drop captures into `docs/screenshots/` and uncomment the block below._
+Every feature the site uses ships behind a Swagger-documented JSON API at `/api/v1/*`. The browser extension is built entirely on it — your custom dashboard or scrobble script can be too.
 
-<!--
-<div align="center">
+**Explore the interactive docs at [`/api/docs`](https://anisync.fly.dev/api/docs).**
 
-| Configure page | Manage Entry stream | Catalog in Stremio |
-| :---: | :---: | :---: |
-| ![Configure](docs/screenshots/configure.png) | ![Manage Entry](docs/screenshots/manage-entry.png) | ![Catalog](docs/screenshots/catalog.png) |
+| Surface | Endpoints |
+| --- | --- |
+| **Anonymous read** | `/anime/{id}`, `/anime/{id}/episodes`, `/anime/{id}/streams`, `/anime/{id}/trailer`, `/anime/{id}/related`, `/anime/{id}/recommendations`, `/anime/{id}/supplementary`, `/anime/{id}/links`, `/anime/{id}/episodes/{ep}/subtitles`, `/search`, `/match`, `/discover/{kind}`, `/discover/by-tag/{tag}`, `/tags`, `/studios`, `/studios/{id}/anime`, `/staff/{id}/anime`, `/airing/today`, `/airing/upcoming`, `/stats/season`, `/skip/{id}/{ep}`, `/filler/{id-or-title}`, `/mappings/{id}` |
+| **User-scoped** *(via `X-AniSync-Config` header)* | `/me/library`, `/me/entries/{id}`, `/me/entries` *(bulk)*, `/me/sync/diff`, `/me/sync`, `/me/primary/{service}`, `/me/linked`, `/me/stats`, `/me/continue-watching`, `/me/upcoming` |
+| **Notifications** *(session-based)* | `/notifications`, `/notifications/count`, `/notifications/{id}/read`, `/notifications/read-all`, `/notifications/bulk-read`, `/notifications/bulk-delete`, `/notifications/{id}` *(DELETE)* |
 
-</div>
--->
+UID is passed via the `X-AniSync-Config` header — never in the URL — so it can't leak through Referer, reverse-proxy logs, browser history, or shared screenshots.
+
+---
+
+## Install in 30 seconds
+
+### As a Stremio addon
+1. Open **[anisync.fly.dev](https://anisync.fly.dev)**.
+2. Pick **AniList**, **Kitsu** or **MyAnimeList** and sign in. *(Or skip auth and use the public catalogs.)*
+3. Toggle the catalogs and streams you want.
+4. Click **Install to Stremio** — done.
+
+### As a web app
+Open **[anisync.fly.dev](https://anisync.fly.dev)** in your browser. Sign in. That's it. On mobile, tap the install icon in the address bar to add it as a PWA.
+
+### As a browser extension
+```bash
+# Chrome / Edge / Brave
+chrome://extensions → enable Developer mode → Load unpacked → select examples/browser-extension/
+
+# Firefox
+about:debugging#/runtime/this-firefox → Load Temporary Add-on → pick manifest.json
+```
+
+Then open the extension Options page and paste your Config UID (the long segment in your install URL between the slashes). Full setup in [the extension README](examples/browser-extension/README.md).
 
 ---
 
@@ -204,19 +331,25 @@ MAL doesn't expose streaming-provider links on its API. To avoid leaving MAL use
 <details>
 <summary><strong>AniSkip auto-skip isn't working.</strong></summary>
 
-Stock Stremio doesn't honour `skipIntro` / `skipOutro` / `skipRecap` hints — you need a client that does. **Stremio Enhanced** is the easiest option. The hints are still embedded for any other client that adds support later.
+Stock Stremio doesn't honour `skipIntro` / `skipOutro` / `skipRecap` hints — you need a client that does. **Stremio Enhanced** is the easiest option. The hints are still embedded for any other client that adds support later. The AniSync web-app watch page honours them natively.
 </details>
 
 <details>
 <summary><strong>Will AniSync write to my list when I scrub forward, or only when I genuinely watch?</strong></summary>
 
-Auto-track fires on Stremio's play event for a new episode — scrubbing within an episode doesn't trigger writes. If you want fully manual control, disable Auto-track and use Manage Entry instead.
+Auto-track fires on Stremio's play event for a new episode (or, in the browser extension, at 80% playback) — scrubbing within an episode doesn't trigger writes. If you want fully manual control, disable Auto-track and use Manage Entry instead.
 </details>
 
 <details>
 <summary><strong>Is multi-provider sync bidirectional?</strong></summary>
 
 No. There's a single **primary** provider that is the source of truth; secondaries receive writes but their changes don't flow back. Promote a different account to primary if you want to flip the direction. The full-sync button does a one-shot backfill from primary to all secondaries.
+</details>
+
+<details>
+<summary><strong>How do episode-release notifications work?</strong></summary>
+
+The web app pulls the AniList airing schedule daily and arms one in-process `Task.Delay` per future episode. When the timer fires, the dispatcher walks your Watching list and inserts a notification row if the episode matches anything you're tracking. The bell badge refreshes itself precisely at the next known airing time — no constant polling. New notifications are visible the moment you next interact with the page.
 </details>
 
 <details>
@@ -267,17 +400,30 @@ MAL requires the deployment to register an API client. Set these in `appsettings
 
 The `RedirectUri` must match the URL registered on the MAL developer dashboard exactly. AniList credentials are baked into the build for the canonical deployment; Kitsu doesn't need any.
 
+### Storage
+
+A single SQLite file at `$ANISYNC_DATA_DIR/anisync.db` holds every config: token data, linked secondaries, addon URLs, notifications, watching cache. Mount it to a persistent volume on your host. Fly.io's mount in `fly.toml` already does this.
+
+### Optional Cloudflare Workers
+
+Two small Workers ship alongside the app — both optional, both free to run:
+
+- [`cf-cors-proxy/`](cf-cors-proxy) — adds CORS headers to debrid CDN responses so the watch page's matroska-subtitles extractor can stream MKV bytes from the browser.
+- [`cf-mkv-extractor/`](cf-mkv-extractor) — fetches MKV files via Range requests, parses the EBML index, returns SSA/ASS/SRT subtitle tracks as JSON (saves ~700 MB vs. full-file proxy).
+
 ---
 
 ## Tech stack
 
-- **ASP.NET Core (.NET 8)** MVC web app
-- **SQLite**-backed configuration store
-- Anime ID mapping via [Fribb anime-lists](https://github.com/Fribb/anime-lists), enriched at runtime with [manami-project anime-offline-database](https://github.com/manami-project/anime-offline-database)
-- Episode metadata from Stremio's [Cinemeta](https://github.com/Stremio/stremio-addon-cinemeta) (TMDb)
-- Filler/canon tags scraped from [AnimeFillerList](https://www.animefillerlist.com), negative-cached so unknown shows don't pound their server
-- Intro/outro markers from [AniSkip](https://aniskip.com)
-- Deployed on [Fly.io](https://fly.io)
+- **ASP.NET Core (.NET 8)** MVC web app — site, addon, API, and notification scheduler all in one process.
+- **SQLite**-backed configuration store + notification queue.
+- Anime ID mapping via [Fribb anime-lists](https://github.com/Fribb/anime-lists), enriched at runtime with [manami-project anime-offline-database](https://github.com/manami-project/anime-offline-database).
+- Episode metadata from Stremio's [Cinemeta](https://github.com/Stremio/stremio-addon-cinemeta) (TMDb).
+- Filler/canon tags scraped from [AnimeFillerList](https://www.animefillerlist.com), negative-cached so unknown shows don't pound their server.
+- Intro/outro markers from [AniSkip](https://aniskip.com).
+- Subtitles from [OpenSubtitles](https://opensubtitles.com) + [Wyzie](https://sub.wyzie.ru) (Subdl / Addic7ed federated).
+- Stream addons via the Stremio addon protocol — Torrentio, MediaFusion, Comet, Jackettio, AIOStreams all work.
+- Deployed on [Fly.io](https://fly.io).
 
 ## Acknowledgements
 
