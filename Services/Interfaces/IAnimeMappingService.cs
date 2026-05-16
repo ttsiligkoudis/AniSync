@@ -16,6 +16,15 @@ namespace AnimeList.Services.Interfaces
         Task<string> GetIdByService(string animeId, AnimeService service, int? season = null);
 
         /// <summary>
+        /// Convenience over <see cref="GetIdByService"/> that returns the
+        /// id with its service prefix already stamped on (e.g.
+        /// <c>"anilist:12345"</c>) — saves callers the
+        /// service-switch-+-string-interpolation dance they otherwise
+        /// repeat at every call site. Returns null when no mapping exists.
+        /// </summary>
+        Task<string> GetIdWithPrefixAsync(string animeId, AnimeService service, int? season = null);
+
+        /// <summary>
         /// Walks a list of external IDs (from a webhook payload) in priority order and returns
         /// the first one that resolves to a tracker id for <paramref name="service"/>. Tuples are
         /// <c>(prefix, raw id)</c> where <c>prefix</c> is one of <c>anidbPrefix</c>,

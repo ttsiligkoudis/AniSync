@@ -544,6 +544,12 @@ namespace AnimeList.Services
             return animeId;
         }
 
+        public async Task<string> GetIdWithPrefixAsync(string animeId, AnimeService service, int? season = null)
+        {
+            var raw = await GetIdByService(animeId, service, season);
+            return string.IsNullOrEmpty(raw) ? null : $"{GetServicePrefix(service)}{raw}";
+        }
+
         /// <summary>
         /// Walks a list of external IDs (e.g. from a Plex/Jellyfin webhook payload) in priority
         /// order and returns the first one that resolves to <paramref name="service"/>'s id.

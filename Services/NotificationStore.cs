@@ -16,20 +16,7 @@ namespace AnimeList.Services
 
         public NotificationStore(IConfiguration configuration)
         {
-            // Mirror SqliteConfigStore's connection-string assembly verbatim
-            // so both stores land on the same file and the same pooled
-            // connection space. Cheap to duplicate; keeps the two stores
-            // independent.
-            var dataDir = configuration["ANISYNC_DATA_DIR"]
-                ?? Environment.GetEnvironmentVariable("ANISYNC_DATA_DIR")
-                ?? ".";
-            _connectionString = new SqliteConnectionStringBuilder
-            {
-                DataSource = Path.Combine(dataDir, "anisync.db"),
-                Mode = SqliteOpenMode.ReadWriteCreate,
-                Pooling = true,
-                Cache = SqliteCacheMode.Shared,
-            }.ToString();
+            _connectionString = SqliteConnectionFactory.BuildConnectionString(configuration);
         }
 
         public async Task<bool> CreateAsync(NotificationRecord record)

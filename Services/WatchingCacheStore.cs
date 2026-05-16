@@ -16,16 +16,7 @@ namespace AnimeList.Services
 
         public WatchingCacheStore(IConfiguration configuration)
         {
-            var dataDir = configuration["ANISYNC_DATA_DIR"]
-                ?? Environment.GetEnvironmentVariable("ANISYNC_DATA_DIR")
-                ?? ".";
-            _connectionString = new SqliteConnectionStringBuilder
-            {
-                DataSource = Path.Combine(dataDir, "anisync.db"),
-                Mode = SqliteOpenMode.ReadWriteCreate,
-                Pooling = true,
-                Cache = SqliteCacheMode.Shared,
-            }.ToString();
+            _connectionString = SqliteConnectionFactory.BuildConnectionString(configuration);
         }
 
         public async Task UpsertAsync(string uid, IReadOnlyCollection<string> mediaIds, AnimeService service)

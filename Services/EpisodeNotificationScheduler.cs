@@ -149,44 +149,13 @@ namespace AnimeList.Services
             {
                 using var scope = _services.CreateScope();
                 var watchingCache = scope.ServiceProvider.GetRequiredService<IWatchingCacheStore>();
-                var configStore = scope.ServiceProvider.GetRequiredService<IConfigStore>();
-                var anilist = scope.ServiceProvider.GetRequiredService<IAnilistService>();
-                var mal = scope.ServiceProvider.GetRequiredService<IMalService>();
-                var kitsu = scope.ServiceProvider.GetRequiredService<IKitsuService>();
+                var refresher = scope.ServiceProvider.GetRequiredService<IWatchingCacheRefreshService>();
 
                 var stale = await watchingCache.GetStaleUidsAsync(TimeSpan.FromHours(24), StartupRefreshBatch);
                 foreach (var uid in stale)
                 {
                     if (stoppingToken.IsCancellationRequested) break;
-                    try
-                    {
-                        var token = await configStore.GetAsync(uid);
-                        if (token == null || token.anonymousUser)
-                        {
-                            await watchingCache.UpsertAsync(uid, [], token?.anime_service ?? AnimeService.Anilist);
-                            continue;
-                        }
-
-                        var entries = token.anime_service switch
-                        {
-                            AnimeService.Anilist => await anilist.GetUserListEntriesAsync(token),
-                            AnimeService.MyAnimeList => await mal.GetUserListEntriesAsync(token),
-                            _ => await kitsu.GetUserListEntriesAsync(token),
-                        };
-
-                        var watchingIds = (entries ?? [])
-                            .Where(e => NormalizeListStatus(e.Status) == "watching")
-                            .Select(e => e.MediaId)
-                            .Where(id => !string.IsNullOrEmpty(id))
-                            .ToHashSet();
-
-                        await watchingCache.UpsertAsync(uid, watchingIds, token.anime_service);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "backstop watching-cache refresh failed for {Uid}", uid);
-                        try { await watchingCache.MarkErrorAsync(uid, ex.Message); } catch { /* best-effort */ }
-                    }
+                    await refresher.RefreshAsync(uid, stoppingToken);
                 }
             }
             catch (Exception ex)

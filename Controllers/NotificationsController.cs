@@ -1,4 +1,5 @@
 using AnimeList.Models.Api;
+using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -39,9 +40,7 @@ namespace AnimeList.Controllers
 
         private async Task<string> ResolveCurrentUidAsync()
         {
-            var token = await _tokenService.GetAccessTokenAsync();
-            if (token == null || token.anonymousUser) return null;
-            var (uid, _) = await _configStore.FindUidByIdentityAsync(token);
+            var (_, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             return uid;
         }
 

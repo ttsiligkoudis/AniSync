@@ -1,5 +1,6 @@
 using AnimeList.Models;
 using AnimeList.Services;
+using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -80,21 +81,12 @@ namespace AnimeList.Controllers
             // anonymous fresh-visitors get a Kitsu-default synthetic token like
             // /discover does so the per-service dispatch below has a service
             // to switch on. The detail data itself is public — no auth required
-            // to render the page.
-            var tokenData = await _tokenService.GetAccessTokenAsync()
-                ?? new TokenData { anime_service = AnimeService.Kitsu };
+            // to render the page. ResolveCurrentAsync returns null uid for
+            // anonymous / unauthenticated, so that double-purpose handles the
+            // existing "anonymousUser → no uid" branching for us.
+            var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+            tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
             var animeService = tokenData.anime_service;
-
-            // Resolve the row's UID for logged-in users so the entry-fetch
-            // path below can hit the user's tracker with the right identity.
-            // Anonymous viewers get null, which is fine — the entry block is
-            // gated on !anonymousUser anyway.
-            string uid = null;
-            if (!tokenData.anonymousUser)
-            {
-                var (resolvedUid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
-                uid = resolvedUid;
-            }
             // /anime/{id} is always ungrouped — the enableSeasonGrouping pref
             // now only governs Stremio's catalog / meta endpoints. The detail
             // page is the destination for a single-cour card, so resolving the
@@ -181,13 +173,7 @@ namespace AnimeList.Controllers
                 // and the page renders without the user-state panel.
                 try
                 {
-                    var resolvedEntryId = await _mappingService.GetIdByService(anime.id, animeService);
-                    var entryId = string.IsNullOrEmpty(resolvedEntryId) ? anime.id : (animeService switch
-                    {
-                        AnimeService.Anilist     => $"{anilistPrefix}{resolvedEntryId}",
-                        AnimeService.MyAnimeList => $"{malPrefix}{resolvedEntryId}",
-                        _                        => $"{kitsuPrefix}{resolvedEntryId}",
-                    });
+                    var entryId = await _mappingService.GetIdWithPrefixAsync(anime.id, animeService) ?? anime.id;
 
                     var raw = animeService switch
                     {
@@ -346,16 +332,9 @@ namespace AnimeList.Controllers
                 return View("NotFound");
             }
 
-            var tokenData = await _tokenService.GetAccessTokenAsync()
-                ?? new TokenData { anime_service = AnimeService.Kitsu };
+            var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+            tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
             var animeService = tokenData.anime_service;
-
-            string uid = null;
-            if (!tokenData.anonymousUser)
-            {
-                var (resolvedUid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
-                uid = resolvedUid;
-            }
 
             id = await ResolveToServiceIdAsync(id, animeService) ?? id;
 
@@ -594,15 +573,8 @@ namespace AnimeList.Controllers
                 return BadRequest(new { error = "id required" });
             }
 
-            var tokenData = await _tokenService.GetAccessTokenAsync()
-                ?? new TokenData { anime_service = AnimeService.Kitsu };
-
-            string uid = null;
-            if (!tokenData.anonymousUser)
-            {
-                var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
-                uid = resolved;
-            }
+            var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+            tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
 
             // Stream addons — one fan-out per configured manifest URL.
             // Anonymous installs and users with no addons see no debrid
@@ -1164,14 +1136,7 @@ namespace AnimeList.Controllers
             }
             if (id.StartsWith(malPrefix) && service != AnimeService.MyAnimeList)
             {
-                var resolved = await _mappingService.GetIdByService(id, service);
-                if (string.IsNullOrEmpty(resolved)) return null;
-                return service switch
-                {
-                    AnimeService.Anilist => $"{anilistPrefix}{resolved}",
-                    AnimeService.Kitsu   => $"{kitsuPrefix}{resolved}",
-                    _                    => id,
-                };
+                return await _mappingService.GetIdWithPrefixAsync(id, service);
             }
             return id;
         }

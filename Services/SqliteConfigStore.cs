@@ -15,21 +15,7 @@ namespace AnimeList.Services
 
         public SqliteConfigStore(IConfiguration configuration)
         {
-            // Honour ANISYNC_DATA_DIR (Fly.io sets it to /data) and fall back to the working
-            // directory, which is enough for local dev. Make sure the directory exists so the
-            // SQLite open call doesn't fail with "unable to open database file".
-            var dataDir = configuration["ANISYNC_DATA_DIR"]
-                ?? Environment.GetEnvironmentVariable("ANISYNC_DATA_DIR")
-                ?? ".";
-            Directory.CreateDirectory(dataDir);
-
-            _connectionString = new SqliteConnectionStringBuilder
-            {
-                DataSource = Path.Combine(dataDir, "anisync.db"),
-                Mode = SqliteOpenMode.ReadWriteCreate,
-                Pooling = true,
-                Cache = SqliteCacheMode.Shared,
-            }.ToString();
+            _connectionString = SqliteConnectionFactory.BuildConnectionString(configuration);
 
             EnsureSchema();
         }

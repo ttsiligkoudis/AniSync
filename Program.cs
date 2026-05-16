@@ -266,6 +266,7 @@ builder.Services.AddSingleton<IUserListCache, UserListCache>();
 builder.Services.AddSingleton<INotificationStore, NotificationStore>();
 builder.Services.AddSingleton<IWatchingCacheStore, WatchingCacheStore>();
 builder.Services.AddSingleton<IAnimeScheduleService, AnimeScheduleService>();
+builder.Services.AddScoped<IWatchingCacheRefreshService, WatchingCacheRefreshService>();
 builder.Services.AddScoped<IEpisodeNotificationDispatcher, EpisodeNotificationDispatcher>();
 builder.Services.AddHostedService<EpisodeNotificationScheduler>();
 
