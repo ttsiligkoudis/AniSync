@@ -4810,6 +4810,50 @@ button.anime-detail-user-state:hover {
     display: none;
 }
 
+/* Filter-input-driven hide. Kept separate from -hidden so the season
+   tabs and the filter input can coexist on franchises that have both
+   (the union of both classes hides the row; clearing either alone
+   doesn't re-show a row the other is still excluding). */
+.anime-detail-episode-filtered {
+    display: none;
+}
+
+/* Live filter input in the episodes header. Sits between the section
+   title and the collapse toggle; flexes to fill the available space
+   on desktop and shrinks gracefully on mobile via min-width: 0. */
+.anime-detail-episodes-filter {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 280px;
+    padding: 0.4rem 0.75rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 0.5rem;
+    color: #e0e0e0;
+    font-size: 0.85rem;
+    font-family: inherit;
+    transition: border-color 0.15s, background 0.15s;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.anime-detail-episodes-filter::placeholder {
+    color: #777;
+}
+
+.anime-detail-episodes-filter:focus {
+    outline: none;
+    border-color: rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+/* Strip the browser's default search-input "x" decoration. The Escape
+   keydown handler covers the clear interaction without browser chrome
+   that varies per platform. */
+.anime-detail-episodes-filter::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+}
+
 /* Thumbnail wrapper — the play-diamond and watched-eye glyphs absolute-
    position inside it. */
 .anime-detail-episode-thumb-wrap {
