@@ -546,19 +546,33 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
-        /// Renumbers <see cref="Meta.videos"/> to within-cour 1..N. The
-        /// per-service GetAnimeByIdAsync's Cinemeta path returns videos with
-        /// their IMDb-absolute episode numbers (e.g. a S4 cour ships as
-        /// videos[0..5].episode = 37..42 for a flat-IMDb franchise like
-        /// the user's anilist:171110), while the streamingEpisodes fallback
-        /// already renumbers to 1..N. Both paths reach the Detail and Watch
-        /// controllers — without normalising, the route /watch/{episode}
-        /// would 404 against a Cinemeta-numbered cour for every within-cour
-        /// episode, and a Detail-page click of "Ep 37" would land on a
-        /// route the Watch action can't resolve back. Stream-lookup
-        /// translation back to IMDb-absolute happens in EpisodeStreams via
-        /// <see cref="IAnimeMappingService.ResolveImdbStreamCoordinatesAsync"/>.
-        /// No-op when videos is empty (movie path) or already 1..N.
+        /// Renumbers <see cref="Meta.videos"/> to within-cour 1..N collapsed
+        /// into a single virtual season, preserving the original IMDb
+        /// coordinates on each <see cref="Video.imdbSeason"/> /
+        /// <see cref="Video.imdbEpisode"/> so the stream lookup can still
+        /// hit the right episode of the right IMDb season.
+        /// <para>
+        /// Why: the per-service GetAnimeByIdAsync's Cinemeta path returns
+        /// videos with their IMDb-absolute coordinates — for a flat-IMDb
+        /// franchise like anilist:171110's cour 4 that's
+        /// <c>videos[0..5].episode = 37..42, season = 1</c>; for a long-
+        /// running show like Naruto (anilist:20) that's 220 videos
+        /// split across IMDb seasons 1..5. Both shapes broke the site's
+        /// UX: the route <c>/watch/{episode}</c> 404'd for every
+        /// within-cour episode on flat-IMDb anime, and the Detail page
+        /// rendered "Season 1, 2, 3, 4, 5" tabs for shows whose AniList
+        /// entry is a single contiguous run.
+        /// </para>
+        /// <para>
+        /// After this call, all videos share <c>season = 1</c> and have
+        /// <c>episode = 1..N</c>, so the Detail page renders as one
+        /// season with continuous numbering and <c>/watch/{N}</c> means
+        /// "the Nth episode of this AniList entry" regardless of how
+        /// IMDb chose to slice the show. The Watch view's stream-fetch
+        /// JS reads the preserved <c>imdbSeason</c> / <c>imdbEpisode</c>
+        /// values when present so the addon query still goes to the
+        /// right IMDb coordinates.
+        /// </para>
         /// </summary>
         private static void NormaliseCourEpisodeNumbering(Meta anime)
         {
@@ -569,26 +583,23 @@ namespace AnimeList.Controllers
                 .ToList();
             for (var i = 0; i < ordered.Count; i++)
             {
-                ordered[i].episode = i + 1;
+                var v = ordered[i];
+                // Preserve only when the source numbering looks like it
+                // came from Cinemeta — i.e. the video already had a
+                // non-zero episode. The streamingEpisodes fallback path
+                // in the per-service implementations renumbers to 1..N
+                // before reaching us, so its season/episode are AniList-
+                // cour values, not IMDb — preserving them would mislead
+                // the addon query downstream.
+                if (v.episode > 0 && v.imdbEpisode == null)
+                {
+                    v.imdbSeason = v.season > 0 ? v.season : 1;
+                    v.imdbEpisode = v.episode;
+                }
+                v.season = 1;
+                v.episode = i + 1;
             }
             anime.videos = ordered;
-        }
-
-        /// <summary>
-        /// Builds the summary-fetch callback IAnimeMappingService.ResolveImdbStreamCoordinatesAsync
-        /// needs to enrich sibling cours whose <c>Episodes</c> field isn't cached
-        /// yet. Dispatches on the current token's primary service so the count
-        /// matches whatever provider the user's id space lives in. Anonymous
-        /// users fall through to Kitsu's anonymous GetAnimeSummaryAsync.
-        /// </summary>
-        private Func<string, Task<(string? Name, int? EpisodeCount)>> BuildSummaryFetcher(TokenData tokenData)
-        {
-            return tokenData?.anime_service switch
-            {
-                AnimeService.Anilist => _anilistService.GetAnimeSummaryAsync,
-                AnimeService.MyAnimeList => _malService.GetAnimeSummaryAsync,
-                _ => _kitsuService.GetAnimeSummaryAsync,
-            };
         }
 
         /// <summary>
@@ -674,28 +685,18 @@ namespace AnimeList.Controllers
             {
                 var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
 
-                // Translate the within-cour episode number to the (season,
-                // episode) IMDb-keyed addons expect. For franchises with
-                // per-cour IMDb seasons this is a no-op; for franchises
-                // whose IMDb listing collapses every cour into one
-                // continuous season (e.g. "S4 E6" airing as IMDb "S1 E42")
-                // it sums the cumulative episodes of earlier cours and
-                // returns the absolute coordinates. Same cumulative math
-                // CinemetaService.GetCourEpisodesAsync already uses. Skip
-                // for movies — they go through the no-episode branch.
-                if (!isMovie && lookupEpisode.HasValue)
+                // Override sourceLinks.ImdbSeason with the per-call value
+                // when the JS supplied one explicitly (Watch.cshtml passes
+                // the imdbSeason field NormaliseCourEpisodeNumbering
+                // preserved on each Video). BuildStremioId prefers
+                // links.ImdbSeason over the passed-in season, so without
+                // this override a long show like Naruto would request
+                // tt0409591:1:100 for /watch/100 (sourceLinks.ImdbSeason
+                // is 1 from the Fribb mapping) instead of the right
+                // tt0409591:3:28 the JS asked for via lookupSeason.
+                if (!isMovie && lookupSeason.HasValue)
                 {
-                    var translated = await _mappingService.ResolveImdbStreamCoordinatesAsync(
-                        id, lookupEpisode.Value, tokenData.anime_service, BuildSummaryFetcher(tokenData));
-                    if (translated.HasValue)
-                    {
-                        lookupSeason = translated.Value.Season;
-                        lookupEpisode = translated.Value.Episode;
-                        // BuildStremioId prefers links.ImdbSeason over the
-                        // passed-in season, so override it with the
-                        // translated value to keep the two in sync.
-                        sourceLinks.ImdbSeason = translated.Value.Season;
-                    }
+                    sourceLinks.ImdbSeason = lookupSeason.Value;
                 }
 
                 // The user's real client IP — forwarded to each addon

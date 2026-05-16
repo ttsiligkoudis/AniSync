@@ -305,6 +305,19 @@
             // of the series shape (imdb:S:E) — series-shape lookups return
             // zero results from addons for a feature film.
             var isMovie = @(a.type == MetaType.movie.ToString() ? "true" : "false");
+            // IMDb-absolute coordinates preserved by AnimeController's
+            // NormaliseCourEpisodeNumbering when the videos came from
+            // Cinemeta. The Watch URL + display use within-cour 1..N
+            // (so /watch/100 means "100th episode of this AniList entry"
+            // regardless of how IMDb sliced it), but the addon stream
+            // query has to use the IMDb coordinates Cinemeta returned —
+            // otherwise a long show like Naruto would ask Torrentio for
+            // tt0409591:1:100 (S1 only has ~40 eps) when the right query
+            // is tt0409591:3:28. null when no Cinemeta data was available
+            // (anime with no IMDb mapping) — the addon falls through to
+            // its kitsu:N path which ignores season anyway.
+            var streamSeason  = @(Model.Current.imdbSeason ?? (Model.Current.season > 0 ? Model.Current.season : 1));
+            var streamEpisode = @(Model.Current.imdbEpisode ?? Model.Current.episode);
 
             // One-shot guard so the 70 %-progress check, the external
             // launcher, and any future trigger don't double-fire the
@@ -2951,8 +2964,8 @@
             }
 
             var qs = 'id=' + encodeURIComponent(animeId)
-                + '&episode=' + encodeURIComponent(episode)
-                + (hasSeasons ? '&season=' + encodeURIComponent(season) : '')
+                + '&episode=' + encodeURIComponent(streamEpisode)
+                + '&season=' + encodeURIComponent(streamSeason)
                 + (isMovie ? '&type=movie' : '');
             fetch('/anime/episode-streams?' + qs, {
                 credentials: 'same-origin',
