@@ -390,6 +390,19 @@
     <section class="anime-detail-section anime-detail-episodes-wrap">
         <div class="anime-detail-episodes-header">
             <h2 class="anime-detail-section-title">Episodes <span class="anime-detail-section-count">(@a.videos.Count)</span></h2>
+            @if (a.videos.Count > 1)
+            {
+                @* Client-side filter — matches against the row's
+                   data-episode-num and the rendered title text. No
+                   extra network call; the rows are already in the DOM. *@
+                <input type="search"
+                       class="anime-detail-episodes-filter"
+                       placeholder="Filter episodes…"
+                       aria-label="Filter episodes by number or title"
+                       data-episodes-filter
+                       autocomplete="off"
+                       spellcheck="false" />
+            }
             <button type="button" class="anime-detail-episodes-toggle"
                     aria-expanded="true"
                     aria-controls="anime-detail-episodes-body">
@@ -983,6 +996,42 @@ else
    the URL only when the show actually has more than one cour so
    single-season URLs stay clean. *@
 <script>
+    @* Episode filter — runs independent of the stream-source gate below
+       since the filter is useful even when the user has no addons wired
+       up (they can still browse + read titles). Pure DOM filter, no
+       network. *@
+    (function () {
+        var filter = document.querySelector('[data-episodes-filter]');
+        var list = document.querySelector('.anime-detail-episodes');
+        if (!filter || !list) return;
+        var rows = list.querySelectorAll('li.anime-detail-episode');
+        if (rows.length === 0) return;
+
+        function apply() {
+            var q = filter.value.trim().toLowerCase();
+            for (var i = 0; i < rows.length; i++) {
+                var li = rows[i];
+                if (!q) {
+                    li.classList.remove('anime-detail-episode-filtered');
+                    continue;
+                }
+                var num = (li.getAttribute('data-episode-num') || '').toLowerCase();
+                var titleEl = li.querySelector('.anime-detail-episode-title');
+                var title = (titleEl && titleEl.textContent ? titleEl.textContent : '').toLowerCase();
+                var match = num === q || num.indexOf(q) !== -1 || title.indexOf(q) !== -1;
+                li.classList.toggle('anime-detail-episode-filtered', !match);
+            }
+        }
+
+        filter.addEventListener('input', apply);
+        filter.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && filter.value !== '') {
+                filter.value = '';
+                apply();
+            }
+        });
+    })();
+
     (function () {
         var animeId = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.Anime?.id));
         if (!animeId) return;
