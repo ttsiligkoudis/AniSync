@@ -4,33 +4,32 @@ using AnimeList.Services.Interfaces;
 namespace AnimeList.Services
 {
     /// <summary>
-    /// One tick of "find newly-aired episodes and create per-user
-    /// notifications for users tracking them". Driven by the
-    /// <c>cf-episode-notifier</c> Cloudflare Worker every 5 minutes.
+    /// Per-episode dispatch: given an airing entry that just fired, find
+    /// every cached user watching that anime and insert a notification.
+    /// Stale watching caches (explicitly invalidated via UI edit hooks or
+    /// older than the staleness backstop) get refreshed first so a user
+    /// who added the show today doesn't miss tonight's episode.
     ///
-    /// Pipeline:
-    ///   1. Refresh stale <see cref="IWatchingCacheStore"/> snapshots — at most
-    ///      <see cref="RefreshBatchLimit"/> users per tick so we don't hammer
-    ///      AniList/MAL/Kitsu list APIs.
-    ///   2. Pull the AniList airing schedule for the [now-1h, now+24h] window.
-    ///   3. For every airing entry, translate the AniList id into each user's
-    ///      primary-service id (via the existing <see cref="IAnimeMappingService"/>),
-    ///      then walk every cached user and create a notification when their
-    ///      Watching set contains the show. <see cref="INotificationStore.CreateAsync"/>
-    ///      is idempotent on (uid, anime_id, season, episode_number) so the
-    ///      sliding window naturally dedupes across overlapping ticks.
-    ///
-    /// All upstream calls (`airingAt` from AniList, the per-user list fetches)
-    /// operate in Unix UTC, so timezones / DST are a non-issue throughout.
+    /// Idempotency: <see cref="INotificationStore.CreateAsync"/> uses
+    /// <c>INSERT OR IGNORE</c> on the (uid, anime_id, season, episode_number)
+    /// unique index, so a re-fired timer (after a crash + restart, or a
+    /// double-scheduled episode) produces no duplicates.
     /// </summary>
     public class EpisodeNotificationDispatcher : IEpisodeNotificationDispatcher
     {
-        private static readonly TimeSpan RefreshLookback = TimeSpan.FromHours(6);
-        private const int RefreshBatchLimit = 50;
-        private const int NotifyWindowHours = 24;
-        private const int NotifyPastGraceHours = 1;
+        // Backstop staleness: caches older than this get refreshed when an
+        // episode airs for one of the user's matching shows. UI edits already
+        // mark stale immediately (via UserListCache.Invalidate), so this
+        // only catches external edits made through AniList/MAL/Kitsu's own
+        // websites and inactive sessions.
+        private static readonly TimeSpan StaleBackstop = TimeSpan.FromHours(24);
 
-        private readonly IAnilistFallback _anilistFallback;
+        // Per-episode safety cap on inline refreshes. Keeps a Saturday-evening
+        // burst from fan-out-fetching every user's list against AniList in
+        // the same second. Users beyond this cap are skipped on this episode
+        // but picked up by the scheduler's daily backstop refresh.
+        private const int MaxInlineRefreshes = 25;
+
         private readonly IConfigStore _configStore;
         private readonly IAnimeMappingService _mappingService;
         private readonly IAnilistService _anilistService;
@@ -41,7 +40,6 @@ namespace AnimeList.Services
         private readonly ILogger<EpisodeNotificationDispatcher> _logger;
 
         public EpisodeNotificationDispatcher(
-            IAnilistFallback anilistFallback,
             IConfigStore configStore,
             IAnimeMappingService mappingService,
             IAnilistService anilistService,
@@ -51,7 +49,6 @@ namespace AnimeList.Services
             INotificationStore notifications,
             ILogger<EpisodeNotificationDispatcher> logger)
         {
-            _anilistFallback = anilistFallback;
             _configStore = configStore;
             _mappingService = mappingService;
             _anilistService = anilistService;
@@ -62,28 +59,50 @@ namespace AnimeList.Services
             _logger = logger;
         }
 
-        public async Task<DispatchResult> RunAsync(CancellationToken ct = default)
+        public async Task<DispatchResult> DispatchEpisodeAsync(UpcomingEpisode episode, CancellationToken ct = default)
         {
-            var cachesRefreshed = 0;
-            var cachesFailed = 0;
-            var notificationsCreated = 0;
-            var notificationsSuppressed = 0;
+            // Resolve the AniList id into each per-service id ONCE up front.
+            // Mapping miss → MAL/Kitsu users for this show are silently
+            // skipped (same shape as AnilistFallback.ResolveExternalIdAsync).
+            await _mappingService.EnsureLoadedAsync();
+            var anilistPrefixed = $"{anilistPrefix}{episode.AnilistId}";
+            AnimeIdMapping mapping = null;
+            try { mapping = await _mappingService.GetAnilistMapping(anilistPrefixed); }
+            catch (Exception ex) { _logger.LogDebug(ex, "GetAnilistMapping failed for {Id}", anilistPrefixed); }
 
-            // Step 1: refresh stale Watching caches.
-            var staleUids = await _watchingCache.GetStaleUidsAsync(RefreshLookback, RefreshBatchLimit);
-            foreach (var uid in staleUids)
+            var idsByService = new Dictionary<AnimeService, string>
+            {
+                [AnimeService.Anilist] = anilistPrefixed,
+                [AnimeService.MyAnimeList] = mapping?.MalId != null ? $"{malPrefix}{mapping.MalId}" : null,
+                [AnimeService.Kitsu] = mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" : null,
+            };
+
+            var caches = await _watchingCache.GetAllAsync();
+            if (caches.Count == 0)
+            {
+                return new DispatchResult(0, 0, 0, 0, 0);
+            }
+
+            // Refresh stale caches inline so users who edited today don't miss
+            // tonight's notifications. Bounded to MaxInlineRefreshes so a
+            // simultaneous-airing burst doesn't melt the upstream APIs.
+            var refreshed = 0;
+            var refreshFailed = 0;
+            var staleCutoff = DateTimeOffset.UtcNow.Subtract(StaleBackstop).ToUnixTimeSeconds();
+            for (var i = 0; i < caches.Count && refreshed + refreshFailed < MaxInlineRefreshes; i++)
             {
                 if (ct.IsCancellationRequested) break;
+                var c = caches[i];
+                if (c.RefreshedAt >= staleCutoff && c.RefreshedAt > 0) continue;
+
                 try
                 {
-                    var token = await _configStore.GetAsync(uid);
+                    var token = await _configStore.GetAsync(c.Uid);
                     if (token == null || token.anonymousUser)
                     {
-                        // Anonymous / detached row — record success against
-                        // an empty set so the staleness gate doesn't keep
-                        // returning it every tick.
-                        await _watchingCache.UpsertAsync(uid, [], token?.anime_service ?? AnimeService.Anilist);
-                        cachesRefreshed++;
+                        await _watchingCache.UpsertAsync(c.Uid, [], token?.anime_service ?? c.Service);
+                        refreshed++;
+                        caches[i] = new WatchingCacheEntry(c.Uid, c.Service, [], DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                         continue;
                     }
 
@@ -100,124 +119,56 @@ namespace AnimeList.Services
                         .Where(id => !string.IsNullOrEmpty(id))
                         .ToHashSet();
 
-                    await _watchingCache.UpsertAsync(uid, watchingIds, token.anime_service);
-                    cachesRefreshed++;
+                    await _watchingCache.UpsertAsync(c.Uid, watchingIds, token.anime_service);
+                    refreshed++;
+                    caches[i] = new WatchingCacheEntry(c.Uid, token.anime_service, watchingIds, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "watching-cache refresh failed for {Uid}", uid);
-                    try { await _watchingCache.MarkErrorAsync(uid, ex.Message); } catch { /* best-effort */ }
-                    cachesFailed++;
+                    _logger.LogWarning(ex, "inline watching-cache refresh failed for {Uid}", c.Uid);
+                    try { await _watchingCache.MarkErrorAsync(c.Uid, ex.Message); } catch { /* best-effort */ }
+                    refreshFailed++;
                 }
             }
 
-            // Step 2: pull the airing schedule for the notification window.
-            var now = DateTimeOffset.UtcNow;
-            var startUnix = now.AddHours(-NotifyPastGraceHours).ToUnixTimeSeconds();
-            var endUnix = now.AddHours(NotifyWindowHours).ToUnixTimeSeconds();
-            var schedule = await _anilistFallback.GetUpcomingEpisodesAsync(startUnix, endUnix);
-
-            // Step 3: match airing entries against cached Watching lists.
-            var allCaches = await _watchingCache.GetAllAsync();
-            if (allCaches.Count == 0)
-            {
-                return new DispatchResult(cachesRefreshed, cachesFailed, schedule.Count, 0, 0);
-            }
-            if (schedule.Count == 0)
-            {
-                // Nothing airing in the lookahead window — clear every user's
-                // next_airing_at so the bell falls back to its idle refresh
-                // interval. Without this clear, stale values from earlier
-                // ticks would keep firing late polls forever.
-                var clears = new Dictionary<string, long?>(allCaches.Count);
-                foreach (var c in allCaches) clears[c.Uid] = null;
-                try { await _watchingCache.SetNextAiringAtBulkAsync(clears); }
-                catch (Exception ex) { _logger.LogWarning(ex, "next_airing_at clear failed"); }
-                return new DispatchResult(cachesRefreshed, cachesFailed, 0, 0, 0);
-            }
-
-            await _mappingService.EnsureLoadedAsync();
-            var createdAt = now.ToUnixTimeSeconds();
-            var nowUnix = createdAt;
-
-            // Pre-seed every known user with a null next-airing so users whose
-            // matching shows have all already aired in this window get their
-            // stale next_airing_at cleared. The match loop below overwrites
-            // these with min(future airingAt) when one is found.
-            var nextAiringByUid = new Dictionary<string, long?>(allCaches.Count);
-            foreach (var c in allCaches) nextAiringByUid[c.Uid] = null;
-
-            foreach (var sched in schedule)
+            // Match + insert.
+            var created = 0;
+            var suppressed = 0;
+            var createdAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            foreach (var cache in caches)
             {
                 if (ct.IsCancellationRequested) break;
-
-                // Resolve the AniList id into each per-service id ONCE per
-                // airing entry instead of per user — typically 200-300 cached
-                // users vs. ~50 airing entries makes this the right axis to
-                // amortise on.
-                var anilistPrefixed = $"{anilistPrefix}{sched.AnilistId}";
-                AnimeIdMapping mapping = null;
-                try { mapping = await _mappingService.GetAnilistMapping(anilistPrefixed); }
-                catch { /* mapping miss → MAL/Kitsu users for this show are skipped, same shape as ResolveExternalIdAsync */ }
-
-                var idsByService = new Dictionary<AnimeService, string>
+                if (!idsByService.TryGetValue(cache.Service, out var idInUserSpace)
+                    || string.IsNullOrEmpty(idInUserSpace))
                 {
-                    [AnimeService.Anilist] = anilistPrefixed,
-                    [AnimeService.MyAnimeList] = mapping?.MalId != null ? $"{malPrefix}{mapping.MalId}" : null,
-                    [AnimeService.Kitsu] = mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" : null,
+                    continue;
+                }
+                if (!cache.MediaIds.Contains(idInUserSpace)) continue;
+
+                var record = new NotificationRecord
+                {
+                    Uid = cache.Uid,
+                    Service = cache.Service,
+                    AnimeId = idInUserSpace,
+                    AnimeTitle = episode.Title,
+                    EpisodeNumber = episode.Episode,
+                    Season = null,
+                    ThumbnailUrl = episode.CoverImage,
+                    LinkPath = $"/anime/{idInUserSpace}/watch/{episode.Episode}",
+                    CreatedAt = createdAt,
                 };
 
-                foreach (var cache in allCaches)
-                {
-                    if (!idsByService.TryGetValue(cache.Service, out var idInUserSpace)
-                        || string.IsNullOrEmpty(idInUserSpace))
-                    {
-                        continue;
-                    }
-                    if (!cache.MediaIds.Contains(idInUserSpace)) continue;
-
-                    // Track the min future airingAt across all of this user's
-                    // matching shows. The /count endpoint hands this to the
-                    // browser so the bell can setTimeout to (airingAt + cron
-                    // grace) instead of polling every minute.
-                    if (sched.AiringAt > nowUnix)
-                    {
-                        var existing = nextAiringByUid[cache.Uid];
-                        if (existing == null || sched.AiringAt < existing.Value)
-                            nextAiringByUid[cache.Uid] = sched.AiringAt;
-                    }
-
-                    var record = new NotificationRecord
-                    {
-                        Uid = cache.Uid,
-                        Service = cache.Service,
-                        AnimeId = idInUserSpace,
-                        AnimeTitle = sched.Title,
-                        EpisodeNumber = sched.Episode,
-                        Season = null,
-                        ThumbnailUrl = sched.CoverImage,
-                        LinkPath = $"/anime/{idInUserSpace}/watch/{sched.Episode}",
-                        CreatedAt = createdAt,
-                    };
-
-                    var inserted = await _notifications.CreateAsync(record);
-                    if (inserted) notificationsCreated++;
-                    else notificationsSuppressed++;
-                }
+                var inserted = await _notifications.CreateAsync(record);
+                if (inserted) created++;
+                else suppressed++;
             }
 
-            // Persist next-airing for every known user in a single transaction.
-            // Includes nulls so the bell stops scheduling refreshes for users
-            // whose watching list has nothing airing in the lookahead window.
-            try { await _watchingCache.SetNextAiringAtBulkAsync(nextAiringByUid); }
-            catch (Exception ex) { _logger.LogWarning(ex, "next_airing_at bulk update failed"); }
-
             return new DispatchResult(
-                CachesRefreshed: cachesRefreshed,
-                CachesFailed: cachesFailed,
-                AiringChecked: schedule.Count,
-                NotificationsCreated: notificationsCreated,
-                NotificationsSuppressed: notificationsSuppressed);
+                UsersChecked: caches.Count,
+                CachesRefreshed: refreshed,
+                CachesFailed: refreshFailed,
+                NotificationsCreated: created,
+                NotificationsSuppressed: suppressed);
         }
     }
 }

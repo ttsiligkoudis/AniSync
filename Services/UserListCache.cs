@@ -7,6 +7,8 @@ namespace AnimeList.Services
     public class UserListCache : IUserListCache
     {
         private readonly IMemoryCache _cache;
+        private readonly IWatchingCacheStore _watchingCache;
+        private readonly IConfigStore _configStore;
         private readonly ILogger<UserListCache> _logger;
 
         // 10 minutes — long enough that a Home → Library → Home navigation cycle
@@ -31,9 +33,15 @@ namespace AnimeList.Services
             ListType.Repeating,
         ];
 
-        public UserListCache(IMemoryCache cache, ILogger<UserListCache> logger)
+        public UserListCache(
+            IMemoryCache cache,
+            IWatchingCacheStore watchingCache,
+            IConfigStore configStore,
+            ILogger<UserListCache> logger)
         {
             _cache = cache;
+            _watchingCache = watchingCache;
+            _configStore = configStore;
             _logger = logger;
         }
 
@@ -77,8 +85,31 @@ namespace AnimeList.Services
                 _cache.Remove(BuildKey(token.anime_service, userKey, lt, false));
             }
 
+            // Fire-and-forget the persistent watching-cache invalidation so the
+            // next episode dispatcher pass re-fetches this user's list instead
+            // of using the snapshot from before this edit. Best-effort: a missed
+            // mark is self-correcting (the daily backstop refresh catches up).
+            _ = MarkWatchingStaleAsync(token);
+
             _logger.LogDebug("UserListCache invalidated for {Service}:{UserKey}.",
                 token.anime_service, userKey);
+        }
+
+        private async Task MarkWatchingStaleAsync(TokenData token)
+        {
+            try
+            {
+                if (token == null || token.anonymousUser) return;
+                var (uid, _) = await _configStore.FindUidByIdentityAsync(token);
+                if (!string.IsNullOrEmpty(uid))
+                {
+                    await _watchingCache.MarkStaleAsync(uid);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "WatchingCacheStore.MarkStaleAsync failed (best-effort)");
+            }
         }
 
         // Identity preference order matches what each service exposes after auth:

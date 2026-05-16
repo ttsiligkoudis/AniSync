@@ -63,7 +63,7 @@ namespace AnimeList.Services
             await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
-                SELECT uid, service, media_ids_json, refreshed_at, next_airing_at
+                SELECT uid, service, media_ids_json, refreshed_at
                 FROM user_watching_cache
                 WHERE uid = $uid;
                 """;
@@ -81,10 +81,8 @@ namespace AnimeList.Services
             await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
             // LEFT JOIN configs so users with no cache row yet (first-run case)
-            // are returned and prioritised (refreshed_at IS NULL sorts first via
-            // COALESCE(_, 0)). The LIMIT acts as the rate-limit governor — at
-            // 12 ticks/h × N users this caps the request rate against the
-            // external list APIs.
+            // are returned and prioritised — and so explicitly-invalidated rows
+            // (refreshed_at = 0) sort to the front via COALESCE.
             cmd.CommandText = """
                 SELECT c.uid
                 FROM configs c
@@ -108,7 +106,7 @@ namespace AnimeList.Services
             await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
-                SELECT uid, service, media_ids_json, refreshed_at, next_airing_at
+                SELECT uid, service, media_ids_json, refreshed_at
                 FROM user_watching_cache;
                 """;
 
@@ -145,13 +143,27 @@ namespace AnimeList.Services
             await cmd.ExecuteNonQueryAsync();
         }
 
+        public async Task MarkStaleAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return;
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            // Zero out refreshed_at so GetStaleUidsAsync surfaces this row
+            // immediately on the next refresh pass. No-op if the row doesn't
+            // exist yet — the user has never had a cache populated, and the
+            // LEFT JOIN in GetStaleUidsAsync handles that case anyway.
+            cmd.CommandText = "UPDATE user_watching_cache SET refreshed_at = 0 WHERE uid = $uid;";
+            cmd.Parameters.AddWithValue("$uid", uid);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
         private static WatchingCacheEntry BuildEntry(SqliteDataReader reader)
         {
             var uid = reader.GetString(0);
             var service = (AnimeService)reader.GetInt32(1);
             var rawJson = reader.GetString(2);
             var refreshedAt = reader.GetInt64(3);
-            var nextAiringAt = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4);
             HashSet<string> ids;
             try
             {
@@ -161,32 +173,7 @@ namespace AnimeList.Services
             {
                 ids = [];
             }
-            return new WatchingCacheEntry(uid, service, ids, refreshedAt, nextAiringAt);
-        }
-
-        public async Task SetNextAiringAtBulkAsync(IReadOnlyDictionary<string, long?> nextByUid)
-        {
-            if (nextByUid == null || nextByUid.Count == 0) return;
-
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
-            // Single transaction keeps the batch atomic and avoids one fsync
-            // per update — at hundreds of users this is the difference between
-            // sub-millisecond and seconds-per-tick.
-            using var tx = conn.BeginTransaction();
-            using var cmd = conn.CreateCommand();
-            cmd.Transaction = tx;
-            cmd.CommandText = "UPDATE user_watching_cache SET next_airing_at = $next WHERE uid = $uid;";
-            var pUid = cmd.Parameters.Add("$uid", Microsoft.Data.Sqlite.SqliteType.Text);
-            var pNext = cmd.Parameters.Add("$next", Microsoft.Data.Sqlite.SqliteType.Integer);
-
-            foreach (var (uid, next) in nextByUid)
-            {
-                pUid.Value = uid;
-                pNext.Value = (object)next ?? DBNull.Value;
-                await cmd.ExecuteNonQueryAsync();
-            }
-            tx.Commit();
+            return new WatchingCacheEntry(uid, service, ids, refreshedAt);
         }
     }
 }
