@@ -35,6 +35,8 @@ namespace AnimeList.Controllers
         private readonly IAnilistFallback _anilistFallback;
         private readonly IAniSkipService _aniSkipService;
         private readonly IFillerListService _fillerListService;
+        private readonly ISubtitleService _subtitleService;
+        private readonly IWyzieSubtitlesService _wyzieSubtitleService;
         private readonly ILogger<ApiController> _logger;
 
         public ApiController(
@@ -47,6 +49,8 @@ namespace AnimeList.Controllers
             IAnilistFallback anilistFallback,
             IAniSkipService aniSkipService,
             IFillerListService fillerListService,
+            ISubtitleService subtitleService,
+            IWyzieSubtitlesService wyzieSubtitleService,
             ILogger<ApiController> logger)
         {
             _anilistService = anilistService;
@@ -58,6 +62,8 @@ namespace AnimeList.Controllers
             _anilistFallback = anilistFallback;
             _aniSkipService = aniSkipService;
             _fillerListService = fillerListService;
+            _subtitleService = subtitleService;
+            _wyzieSubtitleService = wyzieSubtitleService;
             _logger = logger;
         }
 
@@ -450,6 +456,405 @@ namespace AnimeList.Controllers
                 if (!string.IsNullOrEmpty(name)) return name;
             }
             return null;
+        }
+
+        // ── Airing schedule ─────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Anime with an episode airing during the current UTC day. One row per anime
+        /// (cours overlapping in the same day collapse to a single entry). Same data
+        /// the dashboard's "New Episodes Today" shelf renders — cached server-side
+        /// until the next UTC midnight.
+        /// </summary>
+        [HttpGet("airing/today")]
+        [ProducesResponseType(typeof(AiringTodayResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> AiringToday(AnimeService service = AnimeService.Anilist)
+        {
+            try
+            {
+                var items = await _anilistFallback.GetNewEpisodesTodayAsync(service);
+                return new JsonResult(new AiringTodayResponse(items ?? []));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API AiringToday failed (service={Service}).", service);
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// Episodes airing in an arbitrary window (<paramref name="hours"/> from now,
+        /// up to 168 / one week). Same source the episode-notification scheduler
+        /// uses to arm its per-episode timers. Not cached — caller's cadence is the
+        /// source of throttling.
+        /// </summary>
+        /// <param name="hours">Lookahead window in hours. 1–168 (one week). Defaults to 24.</param>
+        [HttpGet("airing/upcoming")]
+        [ProducesResponseType(typeof(AiringUpcomingResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> AiringUpcoming(int hours = 24)
+        {
+            if (hours < 1 || hours > 168)
+                return BadRequest(new ApiError("hours must be between 1 and 168"));
+            try
+            {
+                var now = DateTimeOffset.UtcNow;
+                var start = now.AddHours(-1).ToUnixTimeSeconds();
+                var end = now.AddHours(hours).ToUnixTimeSeconds();
+                var items = await _anilistFallback.GetUpcomingEpisodesAsync(start, end);
+                return new JsonResult(new AiringUpcomingResponse(start, end, items ?? []));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API AiringUpcoming failed (hours={Hours}).", hours);
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
+
+        // ── Per-anime supplementary data ────────────────────────────────────────
+
+        /// <summary>
+        /// Episode list extracted from the anime's full meta. Same data
+        /// <c>/api/v1/anime/{id}</c> embeds inside the videos array, surfaced as a
+        /// dedicated sub-resource so a client can refresh per-episode metadata
+        /// (filler markers, thumbnails, air dates) without re-fetching the show
+        /// envelope.
+        /// </summary>
+        [HttpGet("anime/{id}/episodes")]
+        [ProducesResponseType(typeof(EpisodesResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> Episodes(string id)
+        {
+            try
+            {
+                Meta meta = null;
+                if (id.StartsWith(malPrefix))           meta = await _malService.GetAnimeByIdAsync(id, null);
+                else if (id.StartsWith(kitsuPrefix))    meta = await _kitsuService.GetAnimeByIdAsync(id, null);
+                else if (id.StartsWith(anilistPrefix))  meta = await _anilistService.GetAnimeByIdAsync(id, null);
+                else if (id.StartsWith(tmdbPrefix))     meta = await _tmdbService.GetAnimeByIdAsync(id, null);
+
+                if (meta?.Video == null) return NotFound(new ApiError("not found"));
+                var rows = meta.Video.Select(v => new EpisodeInfo(
+                    Season: v.season,
+                    Episode: v.episode,
+                    Title: v.title ?? v.name,
+                    Thumbnail: v.thumbnail,
+                    Released: v.released ?? v.firstAired,
+                    Overview: v.overview ?? v.description)).ToList();
+                return new JsonResult(new EpisodesResponse(meta.id ?? id, rows));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Episodes failed (id={Id}).", id);
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// YouTube trailer id for an anime, or null when no trailer is published or
+        /// it's hosted on a non-YouTube platform. Translates the id to AniList via
+        /// the mapping service so the call works for mal: / kitsu: / imdb: / tmdb:
+        /// ids too.
+        /// </summary>
+        [HttpGet("anime/{id}/trailer")]
+        [ProducesResponseType(typeof(TrailerResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> Trailer(string id)
+        {
+            try
+            {
+                var anilistRaw = await _mappingService.GetIdByService(id, AnimeService.Anilist);
+                if (!int.TryParse(anilistRaw, out var anilistId))
+                    return NotFound(new ApiError("no anilist mapping for id"));
+                var youtubeId = await _anilistFallback.GetYoutubeTrailerIdAsync(anilistId);
+                return new JsonResult(new TrailerResponse(youtubeId));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Trailer failed (id={Id}).", id);
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// Prequels and sequels for an anime, sorted chronologically (story-order
+        /// approximation). Returns slim Meta entries; ids translated to
+        /// <paramref name="service"/>'s native space when a mapping exists.
+        /// </summary>
+        [HttpGet("anime/{id}/related")]
+        [ProducesResponseType(typeof(MetaListResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> Related(string id, AnimeService service = AnimeService.Anilist)
+        {
+            try
+            {
+                var anilistRaw = await _mappingService.GetIdByService(id, AnimeService.Anilist);
+                if (!int.TryParse(anilistRaw, out var anilistId))
+                    return NotFound(new ApiError("no anilist mapping for id"));
+                var items = await _anilistFallback.GetRelatedAsync(anilistId, service);
+                return new JsonResult(new MetaListResponse(items ?? []));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Related failed (id={Id}, service={Service}).", id, service);
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// Recommendation carousel — same data the detail page's "You might also like"
+        /// shelf renders. Richer than <c>/anime/{id}/similar</c> (which returns
+        /// minimal Link entries): includes posters, scores, episode counts, format.
+        /// </summary>
+        [HttpGet("anime/{id}/recommendations")]
+        [ProducesResponseType(typeof(MetaListResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> Recommendations(string id, AnimeService service = AnimeService.Anilist)
+        {
+            try
+            {
+                var anilistRaw = await _mappingService.GetIdByService(id, AnimeService.Anilist);
+                if (!int.TryParse(anilistRaw, out var anilistId))
+                    return NotFound(new ApiError("no anilist mapping for id"));
+                var items = await _anilistFallback.GetRecommendationMetasAsync(anilistId, service);
+                return new JsonResult(new MetaListResponse(items ?? []));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Recommendations failed (id={Id}, service={Service}).", id, service);
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// AniList-sourced supplementary chips — staff, studios, tags, composer,
+        /// producer credits. Used by the detail page to render the metadata sidebar
+        /// for anime whose primary tracker (MAL / Kitsu) doesn't surface this depth.
+        /// </summary>
+        [HttpGet("anime/{id}/supplementary")]
+        [ProducesResponseType(typeof(SupplementaryResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> Supplementary(string id)
+        {
+            try
+            {
+                var anilistRaw = await _mappingService.GetIdByService(id, AnimeService.Anilist);
+                if (!int.TryParse(anilistRaw, out var anilistId))
+                    return NotFound(new ApiError("no anilist mapping for id"));
+                var links = await _anilistFallback.GetSupplementaryLinksAsync(anilistId);
+                return new JsonResult(new SupplementaryResponse(links ?? []));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Supplementary failed (id={Id}).", id);
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// Cross-service id bundle for an anime — every AniList / MAL / Kitsu /
+        /// IMDb / TMDB / TVDB / AniDB id we know about. Used by the detail page's
+        /// "open on X" buttons.
+        /// </summary>
+        [HttpGet("anime/{id}/links")]
+        [ProducesResponseType(typeof(SourceLinksResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> Links(string id)
+        {
+            try
+            {
+                var links = await _mappingService.BuildSourceLinksAsync(id);
+                if (links == null) return NotFound(new ApiError("no source links for id"));
+                return new JsonResult(new SourceLinksResponse(links));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Links failed (id={Id}).", id);
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// Aggregated subtitle tracks for one episode (OpenSubtitles + Wyzie
+        /// merged, dedup'd by URL). Anime without an IMDb mapping return an
+        /// empty list. Same source the watch page and the Stremio
+        /// SubtitlesController draw from.
+        /// </summary>
+        /// <param name="id">Service-prefixed anime id.</param>
+        /// <param name="episode">Episode number (within the chosen season).</param>
+        /// <param name="season">Optional season number for multi-cour franchises. Defaults to 1.</param>
+        [HttpGet("anime/{id}/episodes/{episode:int}/subtitles")]
+        [ProducesResponseType(typeof(SubtitlesResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> Subtitles(string id, int episode, int? season = null)
+        {
+            try
+            {
+                var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
+                var imdbId = sourceLinks?.ImdbId;
+                if (string.IsNullOrEmpty(imdbId))
+                    return new JsonResult(new SubtitlesResponse([], new SubtitleProviderCounts(0, 0)));
+
+                var osTask = SafeOpenSubtitlesSearch(imdbId, season, episode);
+                var wyzieTask = SafeWyzieSearch(imdbId, season, episode);
+                await Task.WhenAll(osTask, wyzieTask);
+
+                var merged = new List<SubtitleTrack>(osTask.Result.Count + wyzieTask.Result.Count);
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var t in osTask.Result) { if (seen.Add(t.Url)) merged.Add(t); }
+                foreach (var t in wyzieTask.Result) { if (seen.Add(t.Url)) merged.Add(t); }
+
+                return new JsonResult(new SubtitlesResponse(
+                    merged,
+                    new SubtitleProviderCounts(osTask.Result.Count, wyzieTask.Result.Count)));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Subtitles failed (id={Id}, ep={Ep}).", id, episode);
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
+
+        private async Task<IReadOnlyList<SubtitleTrack>> SafeOpenSubtitlesSearch(string imdbId, int? season, int episode)
+        {
+            try { return await _subtitleService.SearchAsync(imdbId, season, episode); }
+            catch (Exception ex) { _logger.LogWarning(ex, "OpenSubtitles search failed (imdb={Imdb}, ep={Ep})", imdbId, episode); return []; }
+        }
+
+        private async Task<IReadOnlyList<SubtitleTrack>> SafeWyzieSearch(string imdbId, int? season, int episode)
+        {
+            try { return await _wyzieSubtitleService.SearchAsync(imdbId, season, episode); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Wyzie search failed (imdb={Imdb}, ep={Ep})", imdbId, episode); return []; }
+        }
+
+        // ── Season / catalog metadata ───────────────────────────────────────────
+
+        /// <summary>
+        /// Current-season aggregate counts — currently airing, new this season,
+        /// total this season. Same numbers the dashboard's "This Season" strip
+        /// renders; 24h-cached upstream so calling this on a hot loop is fine.
+        /// </summary>
+        [HttpGet("stats/season")]
+        [ProducesResponseType(typeof(SeasonStatsResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> SeasonStats()
+        {
+            try
+            {
+                var (airing, newThis, total) = await _anilistFallback.GetSeasonStatsAsync();
+                return new JsonResult(new SeasonStatsResponse(airing, newThis, total));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API SeasonStats failed.");
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// Full AniList tag catalog (non-adult, grouped by category). Used by the
+        /// <c>/discover/tag</c> listing page. 24h-cached upstream.
+        /// </summary>
+        [HttpGet("tags")]
+        [ProducesResponseType(typeof(TagsListResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> Tags()
+        {
+            try
+            {
+                var tags = await _anilistFallback.GetTagsListAsync();
+                return new JsonResult(new TagsListResponse(tags ?? []));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Tags failed.");
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// One page of animation studios sorted by popularity. Each entry
+        /// carries its anime count so a UI can render "Studio · N anime" tiles
+        /// without a per-studio follow-up. 1-indexed pagination.
+        /// </summary>
+        [HttpGet("studios")]
+        [ProducesResponseType(typeof(StudiosListResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> Studios(int page = 1)
+        {
+            if (page < 1) page = 1;
+            try
+            {
+                var (studios, hasNext) = await _anilistFallback.GetStudiosListAsync(page);
+                return new JsonResult(new StudiosListResponse(studios ?? [], hasNext));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Studios failed (page={Page}).", page);
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// One page of a studio's catalog (every anime they produced), sorted
+        /// alphabetically. 1-indexed pagination. <c>HasNextPage</c> is the
+        /// authoritative stop signal — empty pages can precede more pages
+        /// because the underlying media list is filtered server-side.
+        /// </summary>
+        [HttpGet("studios/{studioId:int}/anime")]
+        [ProducesResponseType(typeof(StudioMediaResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> StudioMedia(int studioId, AnimeService service = AnimeService.Anilist, int page = 1)
+        {
+            if (page < 1) page = 1;
+            try
+            {
+                var (name, items, hasNext) = await _anilistFallback.GetStudioMediaAsync(studioId, service, page);
+                return new JsonResult(new StudioMediaResponse(name, items ?? [], hasNext));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API StudioMedia failed (studio={Id}, page={Page}).", studioId, page);
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// A staff member's filmography sorted by popularity. <paramref name="skip"/>
+        /// is the opaque pagination cursor (number of cards already returned).
+        /// </summary>
+        [HttpGet("staff/{staffId:int}/anime")]
+        [ProducesResponseType(typeof(StaffMediaResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> StaffMedia(int staffId, AnimeService service = AnimeService.Anilist, string skip = null)
+        {
+            try
+            {
+                var (name, items) = await _anilistFallback.GetStaffMediaAsync(staffId, service, skip);
+                return new JsonResult(new StaffMediaResponse(name, items ?? []));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API StaffMedia failed (staff={Id}, skip={Skip}).", staffId, skip);
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// Browse every anime tagged with <paramref name="tag"/>, sorted by
+        /// popularity. 1-indexed pagination; <c>HasNextPage</c> is the stop
+        /// signal.
+        /// </summary>
+        [HttpGet("discover/by-tag/{tag}")]
+        [ProducesResponseType(typeof(TagMediaResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> DiscoverByTag(string tag, AnimeService service = AnimeService.Anilist, int page = 1)
+        {
+            if (page < 1) page = 1;
+            try
+            {
+                var (items, hasNext) = await _anilistFallback.GetByTagPageAsync(tag, service, page);
+                return new JsonResult(new TagMediaResponse(tag, items ?? [], hasNext));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API DiscoverByTag failed (tag={Tag}, page={Page}).", tag, page);
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
         }
 
         private static bool LooksLikeId(string s)

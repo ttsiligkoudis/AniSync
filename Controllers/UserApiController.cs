@@ -41,6 +41,8 @@ namespace AnimeList.Controllers
         private readonly ISyncService _syncService;
         private readonly IAnimeMappingService _mappingService;
         private readonly IUserListCache _listCache;
+        private readonly IAnimeScheduleService _scheduleService;
+        private readonly IWatchingCacheStore _watchingCache;
         private readonly ILogger<UserApiController> _logger;
 
         public UserApiController(
@@ -52,6 +54,8 @@ namespace AnimeList.Controllers
             ISyncService syncService,
             IAnimeMappingService mappingService,
             IUserListCache listCache,
+            IAnimeScheduleService scheduleService,
+            IWatchingCacheStore watchingCache,
             ILogger<UserApiController> logger)
         {
             _tokenService = tokenService;
@@ -62,6 +66,8 @@ namespace AnimeList.Controllers
             _syncService = syncService;
             _mappingService = mappingService;
             _listCache = listCache;
+            _scheduleService = scheduleService;
+            _watchingCache = watchingCache;
             _logger = logger;
         }
 
@@ -712,6 +718,171 @@ namespace AnimeList.Controllers
         // body inspects the raw header itself.
         private string ResolvedConfig =>
             (string)HttpContext.Items[RequireConfigAttribute.ItemKey]!;
+
+        // ── Insight endpoints (user-scoped, read-only) ──────────────────────────
+
+        /// <summary>
+        /// User's AniList statistics — counts per status, mean score, total
+        /// hours watched. Sourced from AniList's <c>User.statistics</c> GraphQL
+        /// (one query, vastly cheaper than walking the Watching + Completed
+        /// lists locally). Returns 404 when the user has neither an AniList
+        /// primary nor a linked AniList account.
+        /// </summary>
+        [HttpGet("stats")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(UserStatsResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> Stats()
+        {
+            try
+            {
+                var resolvedConfig = ResolvedConfig;
+                var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
+                if (string.IsNullOrEmpty(tokenData?.access_token))
+                    return Unauthorized(new ApiError("config has no primary token"));
+
+                // Primary is AniList: use it directly. Otherwise look for an
+                // AniList token in the linked-secondaries list — same fallback
+                // the dashboard uses (HomeController.cs:127-143).
+                TokenData anilistToken = null;
+                if (tokenData.anime_service == AnimeService.Anilist && !tokenData.anonymousUser)
+                {
+                    anilistToken = tokenData;
+                }
+                else
+                {
+                    var cfg = await ResolveConfigAsync(resolvedConfig, _configStore);
+                    if (!string.IsNullOrEmpty(cfg?.tokenUid))
+                    {
+                        var linked = await _configStore.GetLinkedTokensAsync(cfg.tokenUid);
+                        anilistToken = linked
+                            .FirstOrDefault(l => !l.NeedsReauth
+                                && l.TokenData != null
+                                && !l.TokenData.anonymousUser
+                                && l.Service == AnimeService.Anilist)?.TokenData;
+                    }
+                }
+
+                if (anilistToken == null)
+                    return NotFound(new ApiError("no AniList token (primary or linked) available"));
+
+                var stats = await _anilistService.GetUserStatsAsync(anilistToken);
+                if (stats == null) return NotFound(new ApiError("AniList returned no stats"));
+                return new JsonResult(new UserStatsResponse(stats));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Stats failed.");
+                return StatusCode(500, new ApiError("stats lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// Continue-watching shelf — the user's <c>Current</c>/Watching list
+        /// from their primary tracker, capped at <paramref name="limit"/>
+        /// items. Same data the dashboard's "Continue your anime journey"
+        /// shelf renders, in the standard <c>Meta</c> shape (poster +
+        /// per-episode progress + airingAt for the next-episode pill).
+        /// </summary>
+        /// <param name="limit">Max items to return. 1–50. Defaults to 15.</param>
+        [HttpGet("continue-watching")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(ContinueWatchingResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> ContinueWatching(int limit = 15)
+        {
+            if (limit < 1) limit = 1;
+            if (limit > 50) limit = 50;
+            try
+            {
+                var resolvedConfig = ResolvedConfig;
+                var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
+                if (string.IsNullOrEmpty(tokenData?.access_token))
+                    return Unauthorized(new ApiError("config has no primary token"));
+
+                var metas = tokenData.anime_service switch
+                {
+                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, ListType.Current),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Current),
+                    _ => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Current),
+                };
+
+                return new JsonResult(new ContinueWatchingResponse(
+                    Primary: tokenData.anime_service.ToString(),
+                    Items: (metas ?? []).Take(limit).ToList()));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API ContinueWatching failed.");
+                return StatusCode(500, new ApiError("continue-watching lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// Episodes airing in the next 24h that match this user's "Watching"
+        /// list — same source the bell uses to fire notifications. Reads from
+        /// the in-memory <see cref="IAnimeScheduleService"/> snapshot
+        /// (refreshed daily at UTC midnight) cross-referenced against the
+        /// persistent <c>user_watching_cache</c>. The user's Watching cache
+        /// must have been populated at least once (happens at login or via
+        /// the daily backstop refresh); empty list otherwise.
+        /// </summary>
+        [HttpGet("upcoming")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(UserUpcomingResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> Upcoming()
+        {
+            try
+            {
+                var resolvedConfig = ResolvedConfig;
+                var cfg = await ResolveConfigAsync(resolvedConfig, _configStore);
+                if (string.IsNullOrEmpty(cfg?.tokenUid))
+                    return new JsonResult(new UserUpcomingResponse([]));
+
+                var cache = await _watchingCache.GetAsync(cfg.tokenUid);
+                if (cache == null || cache.MediaIds.Count == 0)
+                    return new JsonResult(new UserUpcomingResponse([]));
+
+                var schedule = _scheduleService.GetSchedule();
+                if (schedule.Count == 0)
+                    return new JsonResult(new UserUpcomingResponse([]));
+
+                var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                var matches = new List<UserUpcomingEpisode>();
+                foreach (var sched in schedule)
+                {
+                    if (sched.AiringAt <= nowUnix) continue;
+
+                    // Resolve the AniList id into this user's primary service
+                    // (so the response matches what their list contains). Mapping
+                    // miss → MAL/Kitsu users for this show silently skip, same
+                    // pattern as the episode-notification dispatcher.
+                    var idInUserSpace = cache.Service switch
+                    {
+                        AnimeService.Anilist => $"{anilistPrefix}{sched.AnilistId}",
+                        _ => await _mappingService.GetIdWithPrefixAsync(
+                                $"{anilistPrefix}{sched.AnilistId}", cache.Service),
+                    };
+                    if (string.IsNullOrEmpty(idInUserSpace)) continue;
+                    if (!cache.MediaIds.Contains(idInUserSpace)) continue;
+
+                    matches.Add(new UserUpcomingEpisode(
+                        AnimeId: idInUserSpace,
+                        Title: sched.Title,
+                        Episode: sched.Episode,
+                        AiringAt: sched.AiringAt,
+                        CoverImage: sched.CoverImage));
+                }
+
+                // Same chronological order the dispatcher would fire in.
+                matches.Sort((a, b) => a.AiringAt.CompareTo(b.AiringAt));
+                return new JsonResult(new UserUpcomingResponse(matches));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Upcoming failed.");
+                return StatusCode(500, new ApiError("upcoming lookup failed"));
+            }
+        }
 
         /// <summary>
         /// Lists every linked secondary provider for this config plus the
