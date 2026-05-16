@@ -92,6 +92,23 @@
        jQuery ajax hooks are in place before any other script can fire
        an HTTP request. *@
     <script src="~/js/loader.js" asp-append-version="true"></script>
+    @* Stamp the viewer's UTC offset (in minutes, JS getTimezoneOffset
+       convention — positive = west of UTC) into a cookie so server-
+       rendered "today" shelves (the dashboard's New Episodes Today, in
+       particular) can bucket against the viewer's local calendar day
+       rather than UTC. The cookie is set as early as possible so the
+       NEXT navigation already has the right offset; first-time visitors
+       see UTC-bucketed "today" on their initial render. *@
+    <script>
+        (function () {
+            try {
+                var offset = new Date().getTimezoneOffset();
+                var existing = document.cookie.split('; ').find(function (c) { return c.indexOf('anisync_tz=') === 0; });
+                if (existing === 'anisync_tz=' + offset) return;
+                document.cookie = 'anisync_tz=' + offset + '; path=/; max-age=31536000; SameSite=Lax';
+            } catch (_) { /* cookies disabled — server falls back to UTC */ }
+        })();
+    </script>
 </head>
 <body class="@ViewData["BodyClass"]">
     @* Persistent site chrome: slide-in drawer + mobile bottom-nav are lifted

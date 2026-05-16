@@ -196,7 +196,20 @@ public class HomeController : Controller
         var primaryService = tokenData?.anime_service ?? AnimeService.Anilist;
         var popularThisSeasonTask = GetPopularBySeasonAsync(SeasonCurrent, primaryService);
         var mostAnticipatedTask = GetPopularBySeasonAsync(SeasonNext, primaryService);
-        var newEpisodesTodayTask = _anilistFallback.GetNewEpisodesTodayAsync(primaryService);
+        // Read the timezone-offset cookie stamped by the layout's inline
+        // script. Defaults to 0 (UTC) when the cookie isn't present yet
+        // (brand-new visitor's first request — the cookie is set during
+        // that render, so the next navigation picks up the right value).
+        var tzOffsetMinutes = 0;
+        var tzCookie = Request.Cookies["anisync_tz"];
+        if (!string.IsNullOrEmpty(tzCookie) && int.TryParse(tzCookie, out var parsed))
+        {
+            // JS getTimezoneOffset ranges from -840 (UTC+14) to +720
+            // (UTC-12). Clamp defensively so a malformed cookie can't
+            // make the cache key absurd.
+            tzOffsetMinutes = Math.Clamp(parsed, -840, 720);
+        }
+        var newEpisodesTodayTask = _anilistFallback.GetNewEpisodesTodayAsync(primaryService, tzOffsetMinutes);
         await Task.WhenAll(seasonStatsTask, popularThisSeasonTask, mostAnticipatedTask, newEpisodesTodayTask);
 
         var (seasonAiring, seasonNew, seasonTotal) = await seasonStatsTask;

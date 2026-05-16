@@ -21,15 +21,6 @@ namespace AnimeList.Services
         // season's entry just expires unread.
         private static readonly TimeSpan SeasonStatsCacheDuration = TimeSpan.FromHours(24);
 
-        // Rolling-window sizes for "New episodes today" — see
-        // GetNewEpisodesTodayAsync's comment for the why. The shelf
-        // surfaces episodes airing within [now - LookbackHours, now +
-        // LookaheadHours]. Lookback at 18h covers an "I missed last
-        // night's drop" case for most timezones; lookahead at 18h
-        // pulls in early-morning airings for asia-time shows. Total
-        // window: ~36 hours, capped at AniList's 50-entry page size.
-        private const int LookbackHours = 18;
-        private const int LookaheadHours = 18;
 
         public AnilistFallback(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IMemoryCache cache)
         {
@@ -701,23 +692,32 @@ namespace AnimeList.Services
             return (airing, newThis, total);
         }
 
-        public async Task<List<Meta>> GetNewEpisodesTodayAsync(AnimeService translateTo = AnimeService.Anilist)
+        public async Task<List<Meta>> GetNewEpisodesTodayAsync(
+            AnimeService translateTo = AnimeService.Anilist,
+            int tzOffsetMinutes = 0)
         {
-            // Rolling window centred on "now" rather than a UTC calendar day.
-            // The previous UTC-day approach left viewers in positive-UTC
-            // timezones staring at yesterday's airings for hours after their
-            // local midnight (a UTC+3 viewer at 02:08 saw the previous day's
-            // shelf until 03:00, when UTC midnight finally rotated it). The
-            // sliding window is timezone-agnostic — it always shows what's
-            // recently aired plus what's airing within the next day, so
-            // "today" reads correctly no matter where the viewer connects
-            // from. Cache key bucketed to the hour so the shelf rotates at
-            // most once per hour without re-hitting AniList on every render.
-            var now = DateTimeOffset.UtcNow;
-            var startUnix = now.AddHours(-LookbackHours).ToUnixTimeSeconds();
-            var endUnix = now.AddHours(LookaheadHours).ToUnixTimeSeconds();
+            // Bucket "today" against the viewer's local calendar day rather
+            // than UTC. tzOffsetMinutes follows JS Date.getTimezoneOffset()
+            // convention: minutes WEST of UTC (UTC+3 = -180, UTC-5 = +300).
+            // Negate it to get the TimeSpan offset DateTimeOffset wants.
+            // A UTC+3 viewer at local 02:16 (their day 16) sees the window
+            // [16 00:00 local, 17 00:00 local) which translates to UTC
+            // [15 21:00, 16 21:00) — yesterday-UTC's late evening through
+            // today-UTC's afternoon. Without this, a rolling-now-±18h
+            // window over-included yesterday's afternoon airings (still
+            // within ±18h of UTC-midnight) and tomorrow's morning airings.
+            var tz = TimeSpan.FromMinutes(-tzOffsetMinutes);
+            var localNow = DateTimeOffset.UtcNow.ToOffset(tz);
+            var localToday = new DateTimeOffset(localNow.Date, tz);
+            var startUnix = localToday.ToUnixTimeSeconds();
+            var endUnix = localToday.AddDays(1).ToUnixTimeSeconds();
 
-            var cacheKey = $"anilist:new-episodes-today:{now:yyyyMMddHH}";
+            // Cache key includes the local-day + timezone offset so
+            // viewers in different timezones get their own cached
+            // bucket and each rotates at its own midnight. The hour
+            // suffix limits per-tz cache lifetime to roughly an hour
+            // so an airing-schedule shift propagates quickly.
+            var cacheKey = $"anilist:new-episodes-today:{localToday:yyyyMMdd}:tz{tzOffsetMinutes}:{localNow:HH}";
 
             if (_cache.TryGetValue<List<Meta>>(cacheKey, out var cached) && cached != null)
             {

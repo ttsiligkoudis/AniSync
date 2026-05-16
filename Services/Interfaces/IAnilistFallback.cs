@@ -75,7 +75,23 @@ namespace AnimeList.Services.Interfaces
         /// shelf rotates cleanly when the calendar day changes (rather than
         /// after a fixed 24-hour window from first fetch).
         /// </summary>
-        Task<List<Meta>> GetNewEpisodesTodayAsync(AnimeService translateTo = AnimeService.Anilist);
+        /// <summary>
+        /// Anime with at least one episode airing today, where "today" is
+        /// the calendar day in the viewer's timezone. <paramref name="tzOffsetMinutes"/>
+        /// follows the JS <c>Date.getTimezoneOffset()</c> convention —
+        /// minutes west of UTC, so UTC+3 sends -180 and UTC-5 sends 300.
+        /// Defaults to 0 (UTC) when the cookie that sources the offset
+        /// hasn't been set yet (e.g. a brand-new visitor's first request);
+        /// the layout's inline script seeds it for every subsequent
+        /// render. One row per anime (multi-cour drops collapse into a
+        /// single card). Slim <see cref="Meta"/> shape compatible with the
+        /// dashboard's scroll-row _PosterGrid. Cached for an hour per
+        /// (date, tz) bucket so the shelf rotates predictably without
+        /// per-render upstream calls.
+        /// </summary>
+        Task<List<Meta>> GetNewEpisodesTodayAsync(
+            AnimeService translateTo = AnimeService.Anilist,
+            int tzOffsetMinutes = 0);
 
         /// <summary>
         /// Episodes airing within an arbitrary [startUnix, endUnix] window
