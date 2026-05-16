@@ -30,31 +30,22 @@ namespace AnimeList.Services
         // but picked up by the scheduler's daily backstop refresh.
         private const int MaxInlineRefreshes = 25;
 
-        private readonly IConfigStore _configStore;
         private readonly IAnimeMappingService _mappingService;
-        private readonly IAnilistService _anilistService;
-        private readonly IMalService _malService;
-        private readonly IKitsuService _kitsuService;
         private readonly IWatchingCacheStore _watchingCache;
+        private readonly IWatchingCacheRefreshService _watchingRefresh;
         private readonly INotificationStore _notifications;
         private readonly ILogger<EpisodeNotificationDispatcher> _logger;
 
         public EpisodeNotificationDispatcher(
-            IConfigStore configStore,
             IAnimeMappingService mappingService,
-            IAnilistService anilistService,
-            IMalService malService,
-            IKitsuService kitsuService,
             IWatchingCacheStore watchingCache,
+            IWatchingCacheRefreshService watchingRefresh,
             INotificationStore notifications,
             ILogger<EpisodeNotificationDispatcher> logger)
         {
-            _configStore = configStore;
             _mappingService = mappingService;
-            _anilistService = anilistService;
-            _malService = malService;
-            _kitsuService = kitsuService;
             _watchingCache = watchingCache;
+            _watchingRefresh = watchingRefresh;
             _notifications = notifications;
             _logger = logger;
         }
@@ -95,38 +86,14 @@ namespace AnimeList.Services
                 var c = caches[i];
                 if (c.RefreshedAt >= staleCutoff && c.RefreshedAt > 0) continue;
 
-                try
+                var fresh = await _watchingRefresh.RefreshAsync(c.Uid, ct);
+                if (fresh != null)
                 {
-                    var token = await _configStore.GetAsync(c.Uid);
-                    if (token == null || token.anonymousUser)
-                    {
-                        await _watchingCache.UpsertAsync(c.Uid, [], token?.anime_service ?? c.Service);
-                        refreshed++;
-                        caches[i] = new WatchingCacheEntry(c.Uid, c.Service, [], DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-                        continue;
-                    }
-
-                    var entries = token.anime_service switch
-                    {
-                        AnimeService.Anilist => await _anilistService.GetUserListEntriesAsync(token),
-                        AnimeService.MyAnimeList => await _malService.GetUserListEntriesAsync(token),
-                        _ => await _kitsuService.GetUserListEntriesAsync(token),
-                    };
-
-                    var watchingIds = (entries ?? [])
-                        .Where(e => NormalizeListStatus(e.Status) == "watching")
-                        .Select(e => e.MediaId)
-                        .Where(id => !string.IsNullOrEmpty(id))
-                        .ToHashSet();
-
-                    await _watchingCache.UpsertAsync(c.Uid, watchingIds, token.anime_service);
+                    caches[i] = fresh;
                     refreshed++;
-                    caches[i] = new WatchingCacheEntry(c.Uid, token.anime_service, watchingIds, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                 }
-                catch (Exception ex)
+                else
                 {
-                    _logger.LogWarning(ex, "inline watching-cache refresh failed for {Uid}", c.Uid);
-                    try { await _watchingCache.MarkErrorAsync(c.Uid, ex.Message); } catch { /* best-effort */ }
                     refreshFailed++;
                 }
             }

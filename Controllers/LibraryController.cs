@@ -1,4 +1,5 @@
 using AnimeList.Models;
+using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -70,9 +71,10 @@ namespace AnimeList.Controllers
             // Anonymous visitors and not-logged-in sessions get bounced to the dashboard
             // because user lists require a real list account; the dashboard already
             // explains that and offers a Configure-page CTA where they can log in.
-            var tokenData = await _tokenService.GetAccessTokenAsync();
-            if (tokenData == null || tokenData.anonymousUser)
-                return RedirectToAction("Index", "Home");
+            // ResolveCurrentAsync returns uid == null for both unauthenticated and
+            // anonymous sessions, so a single null check covers both cases.
+            var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+            if (uid == null) return RedirectToAction("Index", "Home");
 
             var hasSearch = !string.IsNullOrWhiteSpace(search);
             var hasGenre = !string.IsNullOrWhiteSpace(genre);
@@ -81,12 +83,6 @@ namespace AnimeList.Controllers
             // unknown / non-user-list values rather than 400'ing — keeps shareable URLs
             // tolerant of typos and old links.
             var activeList = ParseListType(list);
-
-            // Resolve the row's UID so the Manage Entry links on each card can use the
-            // existing config-scoped /{config}/Meta/ManageEntry/{id} flow without us
-            // having to surface the UID in the visible URL — it stays an implementation
-            // detail of the link href.
-            var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
 
             // Honor the "Hide unaired from Watching" site preference — only affects
             // ListType.Current, every other tab passes the flag through harmlessly.
@@ -181,9 +177,8 @@ namespace AnimeList.Controllers
         [Route("/library/page")]
         public async Task<IActionResult> Page(string list = null, string search = null, string genre = null, int skip = 0, bool fullPane = false)
         {
-            var tokenData = await _tokenService.GetAccessTokenAsync();
-            if (tokenData == null || tokenData.anonymousUser)
-                return Unauthorized();
+            var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+            if (uid == null) return Unauthorized();
 
             var hasSearch = !string.IsNullOrWhiteSpace(search);
             var hasGenre = !string.IsNullOrWhiteSpace(genre);
@@ -197,8 +192,6 @@ namespace AnimeList.Controllers
                 [ListType.Dropped]   = "Dropped",
                 [ListType.Repeating] = "Rewatching",
             };
-
-            var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
 
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
