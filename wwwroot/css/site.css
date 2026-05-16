@@ -790,29 +790,34 @@ body.modal-open {
 }
 
 /* ── Site header (used on the dashboard above the hero) ── */
-/* Compact wordmark + login state, replacing the centred big-logo block.
-   Phase 4 of the StreamD refactor adds a hamburger drawer trigger here. */
+/* Sticky site header — sits outside the page .container in _Layout.cshtml
+   so its dark background paints edge-to-edge on wide viewports while the
+   inner .site-header-inner re-applies the container's max-width to keep
+   the logo / nav / bell aligned with the rest of the page content.
+   z-index sits at the bottom-nav tier (50) — below the slide-in drawer
+   (100), notif panel (1050), and any modals; above ordinary page content. */
 .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    width: 100%;
+    background: #0A0A0A;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Flex row that holds the logo, nav, search, bell, install + auth CTA,
+   and the hamburger. Lives inside .site-header. .container also applied
+   in the markup so this row inherits the page's max-width + horizontal
+   padding at each breakpoint, keeping the bar's content aligned with
+   the rest of the page even though the bar itself is full-bleed. */
+.site-header-inner {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
     width: 100%;
-    margin-bottom: 0.5rem;
-
-    /* Sticky so the bell + nav stay reachable while the user scrolls
-       (otherwise the notif panel — which anchors to the bell — floats
-       disconnected once the header scrolls off, see screenshot from the
-       issue that prompted this). Background matches the body so content
-       passes cleanly underneath. z-index sits at the bottom-nav tier
-       (50) — below the slide-in drawer (100), notif panel (1050), and
-       any modals; above ordinary page content. */
-    position: sticky;
-    top: 0;
-    z-index: 50;
-    background: #0A0A0A;
-    padding-top: 0.5rem;
-    padding-bottom: 0.5rem;
 }
 
 /* Site brand mark — wraps an <img> of /logo.png. Bootstrap 5's
