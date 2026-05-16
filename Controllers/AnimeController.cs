@@ -353,8 +353,28 @@ namespace AnimeList.Controllers
 
             if (anime?.videos == null || anime.videos.Count == 0)
             {
-                Response.StatusCode = 404;
-                return View("NotFound");
+                // Movie meta path: services collapse the entire feature into a
+                // single streamable unit and leave videos empty. Synthesize a
+                // single Video for episode 1 so the existing per-episode
+                // rendering below works unchanged. Anything other than
+                // /watch/1 on a movie 404s — there's no "ep 2 of a movie".
+                if (anime != null
+                    && episode == 1
+                    && anime.type == MetaType.movie.ToString())
+                {
+                    anime.videos = [new Video
+                    {
+                        episode = 1,
+                        season = 1,
+                        title = anime.name,
+                        thumbnail = anime.poster ?? anime.background,
+                    }];
+                }
+                else
+                {
+                    Response.StatusCode = 404;
+                    return View("NotFound");
+                }
             }
 
             // Match on episode + season — season null means "any cour", which
