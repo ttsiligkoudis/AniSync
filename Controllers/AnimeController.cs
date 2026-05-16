@@ -586,12 +586,21 @@ namespace AnimeList.Controllers
         /// /anime/{*id} which would otherwise swallow any literal sub-path.
         /// </summary>
         [HttpGet("/anime/episode-streams")]
-        public async Task<IActionResult> EpisodeStreams(string id, int? season, int episode)
+        public async Task<IActionResult> EpisodeStreams(string id, int? season, int episode, string type = null)
         {
             if (string.IsNullOrWhiteSpace(id))
             {
                 return BadRequest(new { error = "id required" });
             }
+
+            // For movie-typed entries we pass null episode + null season to
+            // the stream-addon fan-out so BuildStremioId emits the "movie"
+            // path shape (imdb / kitsu:N alone) instead of the "series"
+            // shape (imdb:S:E) — the latter doesn't match anything on the
+            // addon side for a feature film.
+            var isMovie = string.Equals(type, "movie", StringComparison.OrdinalIgnoreCase);
+            int? lookupEpisode = isMovie ? null : episode;
+            int? lookupSeason = isMovie ? null : season;
 
             var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
@@ -622,7 +631,7 @@ namespace AnimeList.Controllers
                 // floors at max(addon latency) rather than summing.
                 var fetchTasks = addons
                     .Select(a => _addonStreamService.GetStreamsAsync(
-                        a.Url, sourceLinks, season, episode, clientIp))
+                        a.Url, sourceLinks, lookupSeason, lookupEpisode, clientIp))
                     .ToArray();
                 await Task.WhenAll(fetchTasks);
 
