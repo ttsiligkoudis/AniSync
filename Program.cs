@@ -252,14 +252,22 @@ builder.Services.AddSingleton<IFillerListService, FillerListService>();
 // website, etc.).
 builder.Services.AddSingleton<IUserListCache, UserListCache>();
 
-// Episode-release notification stack. The two stores are singleton (raw
-// SQLite, same lifetime as IConfigStore which owns the schema). The
-// dispatcher is scoped because it depends on scoped per-service clients
-// (IAnilistService / IMalService / IKitsuService / ITokenService); the
-// cron endpoint creates a fresh request scope so this is correct.
+// Episode-release notification stack.
+//   - Stores are singleton (raw SQLite, same lifetime as IConfigStore which
+//     owns the schema).
+//   - AnimeScheduleService holds today's airing snapshot in memory and is
+//     the source of truth for the bell's "nextAiringAt" — singleton so the
+//     snapshot is shared.
+//   - The dispatcher is scoped (depends on the per-service IAnilistService
+//     / IMalService / IKitsuService); EpisodeNotificationScheduler creates
+//     fresh scopes per timer fire.
+//   - EpisodeNotificationScheduler is the hosted service that owns the
+//     daily refresh + per-episode Task.Delay timers.
 builder.Services.AddSingleton<INotificationStore, NotificationStore>();
 builder.Services.AddSingleton<IWatchingCacheStore, WatchingCacheStore>();
+builder.Services.AddSingleton<IAnimeScheduleService, AnimeScheduleService>();
 builder.Services.AddScoped<IEpisodeNotificationDispatcher, EpisodeNotificationDispatcher>();
+builder.Services.AddHostedService<EpisodeNotificationScheduler>();
 
 var app = builder.Build();
 

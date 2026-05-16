@@ -2,9 +2,9 @@ namespace AnimeList.Services.Interfaces
 {
     /// <summary>
     /// Per-user snapshot of the prefixed media ids the user has flagged as
-    /// "Watching" on their primary tracker. The episode-notification
-    /// dispatcher reads this so the every-5-min cron tick doesn't hit
-    /// AniList/MAL/Kitsu list APIs for every user every time.
+    /// "Watching" on their primary tracker. Read by the per-episode
+    /// notification scheduler to decide which users to notify when an
+    /// episode airs; written by login/startup/scheduler refresh paths.
     /// </summary>
     public interface IWatchingCacheStore
     {
@@ -20,14 +20,15 @@ namespace AnimeList.Services.Interfaces
         /// <summary>
         /// Returns uids whose cache is older than <paramref name="maxAge"/>
         /// OR who have no cache row yet (LEFT JOIN against configs).
-        /// <paramref name="limit"/> is the per-tick rate-limit governor
-        /// against the external list APIs.
+        /// <paramref name="limit"/> caps the per-call refresh batch so a
+        /// startup or daily refresh doesn't fan out into hundreds of
+        /// upstream calls at once.
         /// </summary>
         Task<List<string>> GetStaleUidsAsync(TimeSpan maxAge, int limit);
 
         /// <summary>
-        /// Every cached row. Used by the dispatcher's matching pass —
-        /// walks each airing episode and checks every cached user's
+        /// Every cached row. Used by the per-episode dispatcher's match
+        /// pass — walks each airing episode and checks every user's
         /// HashSet for the resolved per-service id.
         /// </summary>
         Task<List<WatchingCacheEntry>> GetAllAsync();
@@ -35,19 +36,18 @@ namespace AnimeList.Services.Interfaces
         Task MarkErrorAsync(string uid, string error);
 
         /// <summary>
-        /// Writes the precomputed <c>next_airing_at</c> Unix-seconds value
-        /// for each uid (or null to clear). The dispatcher batches every
-        /// known user into a single call after walking the airing schedule
-        /// so the bell can schedule its next refresh to the right minute
-        /// instead of polling.
+        /// Forces the next read to treat this row as stale by zeroing its
+        /// <c>refreshed_at</c>. Called from the UI-edit / scrobble paths
+        /// alongside the existing <see cref="IUserListCache.Invalidate"/>
+        /// hook so a save the user just made shows up on the next episode
+        /// dispatch instead of waiting for the daily backstop.
         /// </summary>
-        Task SetNextAiringAtBulkAsync(IReadOnlyDictionary<string, long?> nextByUid);
+        Task MarkStaleAsync(string uid);
     }
 
     public record WatchingCacheEntry(
         string Uid,
         AnimeService Service,
         HashSet<string> MediaIds,
-        long RefreshedAt,
-        long? NextAiringAt);
+        long RefreshedAt);
 }
