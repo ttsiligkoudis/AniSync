@@ -799,6 +799,20 @@ body.modal-open {
     gap: 1rem;
     width: 100%;
     margin-bottom: 0.5rem;
+
+    /* Sticky so the bell + nav stay reachable while the user scrolls
+       (otherwise the notif panel — which anchors to the bell — floats
+       disconnected once the header scrolls off, see screenshot from the
+       issue that prompted this). Background matches the body so content
+       passes cleanly underneath. z-index sits at the bottom-nav tier
+       (50) — below the slide-in drawer (100), notif panel (1050), and
+       any modals; above ordinary page content. */
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: #0A0A0A;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
 }
 
 /* Site brand mark — wraps an <img> of /logo.png. Bootstrap 5's
