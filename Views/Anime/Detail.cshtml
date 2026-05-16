@@ -196,8 +196,11 @@
                Hidden when there's nothing playable (no addons / no External
                services), the anime is a movie (those have their own
                .anime-detail-movie-cta below the description), the user has
-               completed the show, or progress is already past the last
-               loaded video. *@
+               completed the show, progress is already past the last loaded
+               video, OR the next unseen episode hasn't aired yet — same
+               condition that makes the corresponding episode row inert in
+               the list below, so the CTA disappears in lockstep with its
+               click target. *@
             @{
                 var watchProgress = Model.Entry?.Progress ?? 0;
                 var totalEps = a.videos?.Count ?? 0;
@@ -206,11 +209,30 @@
                 var isCompleted = statusNorm == "completed"
                     || (entryTotal is int et && et > 0 && watchProgress >= et);
                 var nextEp = watchProgress + 1;
+
+                // Look up the target video (NormaliseCourEpisodeNumbering
+                // has already sorted + renumbered so episode == ordinal,
+                // matching the URL semantics) and consult its release
+                // date — if it's a future-aired episode, the click target
+                // is inert and the CTA shouldn't promise something we
+                // can't actually play.
+                var todayHero = DateTime.UtcNow.Date;
+                var targetVideo = a.videos?.FirstOrDefault(v => v.episode == nextEp);
+                var targetIsFuture = false;
+                if (targetVideo != null
+                    && !string.IsNullOrEmpty(targetVideo.released)
+                    && targetVideo.released.Length >= 10
+                    && DateTime.TryParse(targetVideo.released[..10], out var nextReleaseDate))
+                {
+                    targetIsFuture = nextReleaseDate.Date > todayHero;
+                }
+
                 var showWatchCta = a.type != MetaType.movie.ToString()
                     && Model.HasStreamSources
                     && totalEps > 0
                     && nextEp <= totalEps
-                    && !isCompleted;
+                    && !isCompleted
+                    && !targetIsFuture;
             }
             @if (showWatchCta)
             {
