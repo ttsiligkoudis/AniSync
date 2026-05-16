@@ -584,6 +584,7 @@ namespace AnimeList.Controllers
             for (var i = 0; i < ordered.Count; i++)
             {
                 var v = ordered[i];
+                var originalEpisode = v.episode;
                 // Preserve only when the source numbering looks like it
                 // came from Cinemeta — i.e. the video already had a
                 // non-zero episode. The streamingEpisodes fallback path
@@ -598,6 +599,23 @@ namespace AnimeList.Controllers
                 }
                 v.season = 1;
                 v.episode = i + 1;
+
+                // Cinemeta emits placeholder names like "Episode 43" for
+                // not-yet-aired rows that don't have a real title yet.
+                // After we renumber, the row reads "7. Episode 43" which
+                // is off-by-one and confusing. Rewrite the placeholder
+                // to track the new ordinal — only when the existing
+                // name/title is literally "Episode <originalNumber>", so
+                // real titles like "Harspiel Concert" stay untouched.
+                if (originalEpisode > 0 && originalEpisode != v.episode)
+                {
+                    var placeholder = $"Episode {originalEpisode}";
+                    var rebuilt = $"Episode {v.episode}";
+                    if (string.Equals(v.name?.Trim(), placeholder, StringComparison.OrdinalIgnoreCase))
+                        v.name = rebuilt;
+                    if (string.Equals(v.title?.Trim(), placeholder, StringComparison.OrdinalIgnoreCase))
+                        v.title = rebuilt;
+                }
             }
             anime.videos = ordered;
         }
