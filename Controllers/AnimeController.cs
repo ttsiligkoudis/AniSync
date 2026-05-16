@@ -153,6 +153,12 @@ namespace AnimeList.Controllers
                 return View("NotFound");
             }
 
+            // Normalise the videos array to within-cour 1..N — see Watch
+            // action's matching block for the full rationale. Both pages
+            // need to stay in sync so a Detail-page click of "Ep 6" maps
+            // to /watch/6 and the Watch lookup actually finds the row.
+            NormaliseCourEpisodeNumbering(anime);
+
             // Filler / canon enrichment — same pattern as MetaController's
             // EnrichMetaWithFillerAsync used by the Stremio addon path.
             // Episodes get a coloured emoji prefix (🟦 canon, 🟨 filler,
@@ -376,6 +382,10 @@ namespace AnimeList.Controllers
                     return View("NotFound");
                 }
             }
+            else
+            {
+                NormaliseCourEpisodeNumbering(anime);
+            }
 
             // Match on episode + season — season null means "any cour", which
             // covers the common single-cour case where the videos all carry
@@ -533,6 +543,35 @@ namespace AnimeList.Controllers
                 }
             }
             return ranked;
+        }
+
+        /// <summary>
+        /// Renumbers <see cref="Meta.videos"/> to within-cour 1..N. The
+        /// per-service GetAnimeByIdAsync's Cinemeta path returns videos with
+        /// their IMDb-absolute episode numbers (e.g. a S4 cour ships as
+        /// videos[0..5].episode = 37..42 for a flat-IMDb franchise like
+        /// the user's anilist:171110), while the streamingEpisodes fallback
+        /// already renumbers to 1..N. Both paths reach the Detail and Watch
+        /// controllers — without normalising, the route /watch/{episode}
+        /// would 404 against a Cinemeta-numbered cour for every within-cour
+        /// episode, and a Detail-page click of "Ep 37" would land on a
+        /// route the Watch action can't resolve back. Stream-lookup
+        /// translation back to IMDb-absolute happens in EpisodeStreams via
+        /// <see cref="IAnimeMappingService.ResolveImdbStreamCoordinatesAsync"/>.
+        /// No-op when videos is empty (movie path) or already 1..N.
+        /// </summary>
+        private static void NormaliseCourEpisodeNumbering(Meta anime)
+        {
+            if (anime?.videos == null || anime.videos.Count == 0) return;
+            var ordered = anime.videos
+                .OrderBy(v => v.season > 0 ? v.season : 1)
+                .ThenBy(v => v.episode)
+                .ToList();
+            for (var i = 0; i < ordered.Count; i++)
+            {
+                ordered[i].episode = i + 1;
+            }
+            anime.videos = ordered;
         }
 
         /// <summary>
