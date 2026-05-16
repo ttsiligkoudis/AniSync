@@ -536,6 +536,23 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
+        /// Builds the summary-fetch callback IAnimeMappingService.ResolveImdbStreamCoordinatesAsync
+        /// needs to enrich sibling cours whose <c>Episodes</c> field isn't cached
+        /// yet. Dispatches on the current token's primary service so the count
+        /// matches whatever provider the user's id space lives in. Anonymous
+        /// users fall through to Kitsu's anonymous GetAnimeSummaryAsync.
+        /// </summary>
+        private Func<string, Task<(string? Name, int? EpisodeCount)>> BuildSummaryFetcher(TokenData tokenData)
+        {
+            return tokenData?.anime_service switch
+            {
+                AnimeService.Anilist => _anilistService.GetAnimeSummaryAsync,
+                AnimeService.MyAnimeList => _malService.GetAnimeSummaryAsync,
+                _ => _kitsuService.GetAnimeSummaryAsync,
+            };
+        }
+
+        /// <summary>
         /// Walks the episode list (in (season, episode) order) and finds the
         /// neighbours of <paramref name="current"/>. Returns (null, null) at
         /// the ends so the view can hide the prev / next buttons cleanly.
@@ -617,6 +634,30 @@ namespace AnimeList.Controllers
             if (addons.Count > 0)
             {
                 var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
+
+                // Translate the within-cour episode number to the (season,
+                // episode) IMDb-keyed addons expect. For franchises with
+                // per-cour IMDb seasons this is a no-op; for franchises
+                // whose IMDb listing collapses every cour into one
+                // continuous season (e.g. "S4 E6" airing as IMDb "S1 E42")
+                // it sums the cumulative episodes of earlier cours and
+                // returns the absolute coordinates. Same cumulative math
+                // CinemetaService.GetCourEpisodesAsync already uses. Skip
+                // for movies — they go through the no-episode branch.
+                if (!isMovie && lookupEpisode.HasValue)
+                {
+                    var translated = await _mappingService.ResolveImdbStreamCoordinatesAsync(
+                        id, lookupEpisode.Value, tokenData.anime_service, BuildSummaryFetcher(tokenData));
+                    if (translated.HasValue)
+                    {
+                        lookupSeason = translated.Value.Season;
+                        lookupEpisode = translated.Value.Episode;
+                        // BuildStremioId prefers links.ImdbSeason over the
+                        // passed-in season, so override it with the
+                        // translated value to keep the two in sync.
+                        sourceLinks.ImdbSeason = translated.Value.Season;
+                    }
+                }
 
                 // The user's real client IP — forwarded to each addon
                 // so playback URLs that bind to the requesting IP (e.g.
