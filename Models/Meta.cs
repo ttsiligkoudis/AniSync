@@ -184,6 +184,18 @@ namespace AnimeList.Models
         public string description { get; set; }
         public string name { get; set; }
         public string firstAired{ get; set; }
+
+        // Original IMDb (Cinemeta) coordinates, preserved when the
+        // AnimeController-side NormaliseCourEpisodeNumbering collapses
+        // the cour to within-cour 1..N for display + routing. The stream
+        // lookup needs the IMDb-absolute values to query addons against
+        // the right episode of the right IMDb season (e.g. a Naruto-style
+        // 220-episode show split across 5 IMDb seasons would otherwise
+        // collapse to "S1 E100" which addons can't resolve). Null when
+        // the video didn't come from Cinemeta — falls back to using
+        // <see cref="season"/> / <see cref="episode"/> at the call site.
+        public int? imdbSeason { get; set; }
+        public int? imdbEpisode { get; set; }
     }
 
     public class Edge
