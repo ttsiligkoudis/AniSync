@@ -4543,6 +4543,38 @@ button.anime-detail-user-state:hover {
     margin-top: 0.5rem;
 }
 
+/* Movie-only CTA. Replaces the episodes list for movie-typed entries
+   (which have no per-episode list) — a single big button that takes the
+   user to /anime/{id}/watch/1. Solid cobalt to read as a primary action,
+   sized to match the other section headers' rhythm. */
+.anime-detail-movie-cta-wrap {
+    display: flex;
+    justify-content: flex-start;
+}
+
+.anime-detail-movie-cta,
+.anime-detail-movie-cta:link,
+.anime-detail-movie-cta:visited {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.7rem 1.2rem;
+    border-radius: 0.6rem;
+    background: #3B82F6;
+    color: #fff;
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 0.15s;
+}
+
+.anime-detail-movie-cta:hover,
+.anime-detail-movie-cta:focus {
+    background: #2563eb;
+    color: #fff;
+    text-decoration: none;
+}
+
 .anime-detail-section-title {
     font-size: 1.05rem;
     font-weight: 600;
