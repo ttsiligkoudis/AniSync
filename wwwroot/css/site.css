@@ -5115,12 +5115,18 @@ ol.anime-detail-episodes-busy {
 }
 
 .notif-bell-badge {
+    /* Anchored to the bell button's top-right corner with a small outward
+       offset so it visually overlaps onto the header chrome. The element is
+       a perfect circle for one or two digit counts (min-width and height
+       are equal; border-box keeps padding/border from inflating the outer
+       size). 3-char "99+" stretches to a pill — border-radius:999px keeps
+       the ends rounded in that case. */
     position: absolute;
-    top: -4px;
-    right: -4px;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 5px;
+    top: -6px;
+    right: -6px;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 2px;
     background: #ef4444;
     color: #fff;
     font-size: 0.68rem;
@@ -5129,7 +5135,8 @@ ol.anime-detail-episodes-busy {
     text-align: center;
     border-radius: 999px;
     border: 2px solid #0A0A0A;
-    box-sizing: content-box;
+    box-sizing: border-box;
+    pointer-events: none;
 }
 
 .notif-panel {
