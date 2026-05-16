@@ -21,6 +21,16 @@ namespace AnimeList.Services
         // season's entry just expires unread.
         private static readonly TimeSpan SeasonStatsCacheDuration = TimeSpan.FromHours(24);
 
+        // Rolling-window sizes for "New episodes today" — see
+        // GetNewEpisodesTodayAsync's comment for the why. The shelf
+        // surfaces episodes airing within [now - LookbackHours, now +
+        // LookaheadHours]. Lookback at 18h covers an "I missed last
+        // night's drop" case for most timezones; lookahead at 18h
+        // pulls in early-morning airings for asia-time shows. Total
+        // window: ~36 hours, capped at AniList's 50-entry page size.
+        private const int LookbackHours = 18;
+        private const int LookaheadHours = 18;
+
         public AnilistFallback(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IMemoryCache cache)
         {
             _clientFactory = clientFactory;
@@ -693,26 +703,25 @@ namespace AnimeList.Services
 
         public async Task<List<Meta>> GetNewEpisodesTodayAsync(AnimeService translateTo = AnimeService.Anilist)
         {
-            // Bound the query to [today 00:00 UTC, tomorrow 00:00 UTC) using
-            // AniList's airingAt_greater / airingAt_lesser unix-timestamp
-            // filters. Yes UTC fuzzes the edges for viewers far from GMT —
-            // a JST user just past midnight UTC sees a fresh "today" already
-            // populated with their early-morning JST airings — but it keeps
-            // the server-side cache key unambiguous and the boundary
-            // consistent for every visitor regardless of where they connect
-            // from.
-            var todayUtc = DateTime.UtcNow.Date;
-            var startUnix = new DateTimeOffset(todayUtc, TimeSpan.Zero).ToUnixTimeSeconds();
-            var endUnix = new DateTimeOffset(todayUtc.AddDays(1), TimeSpan.Zero).ToUnixTimeSeconds();
+            // Rolling window centred on "now" rather than a UTC calendar day.
+            // The previous UTC-day approach left viewers in positive-UTC
+            // timezones staring at yesterday's airings for hours after their
+            // local midnight (a UTC+3 viewer at 02:08 saw the previous day's
+            // shelf until 03:00, when UTC midnight finally rotated it). The
+            // sliding window is timezone-agnostic — it always shows what's
+            // recently aired plus what's airing within the next day, so
+            // "today" reads correctly no matter where the viewer connects
+            // from. Cache key bucketed to the hour so the shelf rotates at
+            // most once per hour without re-hitting AniList on every render.
+            var now = DateTimeOffset.UtcNow;
+            var startUnix = now.AddHours(-LookbackHours).ToUnixTimeSeconds();
+            var endUnix = now.AddHours(LookaheadHours).ToUnixTimeSeconds();
 
-            // Key on the UTC date so the entry auto-rotates at midnight; old
-            // day's entry just sits dead until eviction. The 'until end of
-            // day' expiration below means at most one upstream call per day.
-            var cacheKey = $"anilist:new-episodes-today:{todayUtc:yyyy-MM-dd}";
+            var cacheKey = $"anilist:new-episodes-today:{now:yyyyMMddHH}";
 
             if (_cache.TryGetValue<List<Meta>>(cacheKey, out var cached) && cached != null)
             {
-                // Cache stores anilist:N ids (one entry per day, shared
+                // Cache stores anilist:N ids (one entry per hour, shared
                 // across every viewer). Translate per-call into the
                 // requesting service's native id space so a MAL/Kitsu
                 // primary's clicks resolve directly. CloneMetas first so
@@ -798,15 +807,14 @@ namespace AnimeList.Services
                     // reorder the dashboard shelf.
                     result = result.OrderBy(m => m.airingAt ?? long.MaxValue).ToList();
 
-                    // Pin expiration to the next UTC midnight so the cache
-                    // holds for exactly today rather than a rolling 24h
-                    // window. A fetch at 23:00 UTC caches for 1h; a fetch
-                    // at 01:00 UTC caches for ~23h. Either way, the next
-                    // midnight wipes it and a fresh fetch builds tomorrow's
-                    // shelf.
+                    // Hold the snapshot for one hour. With the rolling
+                    // window the dashboard never shows episodes more than
+                    // LookbackHours old — caching longer would let the
+                    // user-facing "today" drift past that threshold
+                    // before the next refresh.
                     _cache.Set(cacheKey, result, new MemoryCacheEntryOptions
                     {
-                        AbsoluteExpiration = new DateTimeOffset(todayUtc.AddDays(1), TimeSpan.Zero),
+                        AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1),
                     });
                 }
                 // Same translate-on-return contract as the cache-hit path so
