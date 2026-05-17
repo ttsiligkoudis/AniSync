@@ -11,31 +11,15 @@ namespace AnimeList.Controllers
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
         private readonly IConfigStore _configStore;
-        private readonly IUserListCache _listCache;
         private readonly ILogger<CatalogController> _logger;
 
-        // Stremio re-requests the same catalog often (every Home / Discover open,
-        // every paginated scroll) — the six user-list types defined here mirror
-        // UserListCache.CachedListTypes so the read path through the cache stays
-        // consistent with what gets invalidated on writes.
-        private static readonly HashSet<ListType> UserListTypes =
-        [
-            ListType.Current,
-            ListType.Completed,
-            ListType.Planning,
-            ListType.Paused,
-            ListType.Dropped,
-            ListType.Repeating,
-        ];
-
-        public CatalogController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, IConfigStore configStore, IUserListCache listCache, ILogger<CatalogController> logger)
+        public CatalogController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, IConfigStore configStore, ILogger<CatalogController> logger)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
             _configStore = configStore;
-            _listCache = listCache;
             _logger = logger;
         }
 
@@ -80,21 +64,12 @@ namespace AnimeList.Controllers
                 // Seasonal / Airing).
                 var groupSeasonsForCall = listType == ListType.Search ? false : groupSeasons;
 
-                // Route the six user-list types through UserListCache so a grouping-enabled
-                // user only hits AniList/MAL/Kitsu once per 10 minutes regardless of how
-                // often Stremio re-asks for the same catalog. The cache decides internally
-                // whether the call actually short-circuits (only for groupSeasons=true on
-                // an authenticated user) — every other branch falls through to the fetcher.
-                Task<List<Meta>> Fetch() => animeService switch
+                var metas = animeService switch
                 {
-                    AnimeService.Anilist => _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased),
-                    AnimeService.MyAnimeList => _malService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased),
-                    _ => _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                    _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased),
                 };
-
-                var metas = UserListTypes.Contains(listType)
-                    ? await _listCache.GetOrFetchAsync(tokenData, listType, groupSeasonsForCall, Fetch)
-                    : await Fetch();
 
                 // Search splits into separate series + movie catalogs in the manifest
                 // so Stremio renders two result rows. The upstream search hit returns
