@@ -209,19 +209,23 @@
             <h2 class="dashboard-section-title">Your stats</h2>
             <span class="dashboard-section-actions">
                 <span class="dashboard-section-link-muted">@statsAttribution</span>
-                @* Force-refresh button: re-renders the dashboard with ?nocache=1
-                   which tells the controller to bypass the 10-minute per-user
-                   list cache and refetch directly from upstream. Use sparingly —
-                   most edits invalidate the cache automatically; this exists for
-                   when an out-of-band write (scrobble, edit on the provider's
-                   own website) made the stats look wrong. *@
-                <a class="dashboard-refresh-btn"
-                   href="@Url.Action("Index", "Home", new { nocache = true })"
-                   title="Refresh stats — bypass the 10 min cache"
-                   aria-label="Refresh stats">
+                @* Info indicator instead of a refresh button: AniList re-aggregates
+                   User.statistics at most once per 48 h and exposes no public
+                   mutation to force a recompute, so a refresh affordance on our
+                   side would do nothing — the GraphQL would just return the same
+                   stale payload AniList has cached. The link points at the
+                   "Update Stats" control on anilist.co/settings/lists, which IS
+                   the only thing that can force an immediate refresh. *@
+                <a class="dashboard-stats-info-btn"
+                   href="https://anilist.co/settings/lists"
+                   target="_blank"
+                   rel="noopener noreferrer"
+                   title="AniList caches your stats for up to 48 hours and only refreshes them on its own schedule. To force an immediate refresh, click 'Update Stats' on anilist.co/settings/lists."
+                   aria-label="Stats info — opens AniList list settings where you can force a stats refresh">
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <polyline points="23 4 23 10 17 10"></polyline>
-                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
                     </svg>
                 </a>
             </span>

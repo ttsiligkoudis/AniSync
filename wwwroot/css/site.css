@@ -3444,13 +3444,16 @@ body.modal-open {
     gap: 0.55rem;
 }
 
-/* Force-refresh icon button — surfaces the ?nocache=1 escape hatch for users
-   whose stats look wrong after an out-of-band write. Kept small and muted
-   so it doesn't distract from the stats themselves; only the hover state
-   highlights it. */
-.dashboard-refresh-btn,
-.dashboard-refresh-btn:link,
-.dashboard-refresh-btn:visited {
+/* Stats-info icon button — small circular indicator next to the "via AniList"
+   attribution that links to anilist.co/settings/lists. AniList caches user
+   stats for up to 48 h on its end and exposes no public mutation to force
+   a recompute, so a same-shape "refresh" affordance on our side would do
+   nothing; the icon's tooltip points users at the only place that CAN force
+   the refresh. Kept small and muted so it doesn't distract from the stats
+   themselves; only the hover state highlights it. */
+.dashboard-stats-info-btn,
+.dashboard-stats-info-btn:link,
+.dashboard-stats-info-btn:visited {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -3464,8 +3467,8 @@ body.modal-open {
     transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 
-.dashboard-refresh-btn:hover,
-.dashboard-refresh-btn:focus {
+.dashboard-stats-info-btn:hover,
+.dashboard-stats-info-btn:focus {
     color: #fff;
     border-color: rgba(59, 130, 246, 0.4);
     background: rgba(59, 130, 246, 0.12);
