@@ -78,12 +78,18 @@ namespace AnimeList.Services
             if (isUserList && !string.IsNullOrEmpty(resolvedAnimeId))
                 return await GetSingleUserListEntryAsync(resolvedAnimeId, tokenData, groupSeasons);
 
-            // For "browse my list" with grouping on we walk every page server-side and dedup
-            // across all of them, then UserListCache caches the deduped result so each
-            // Stremio re-render is free. With grouping off the manifest declares the `skip`
-            // extra so Stremio paginates — one upstream page per request, no global dedup
-            // pass needed (every entry already has a unique native id when grouping is off).
-            var fetchAll = isUserList && groupSeasons;
+            // "Browse my list" has two read shapes:
+            //   - whole-library (no skip): LibraryController and the cached Stremio
+            //     catalog flow with grouping on both rely on the service returning
+            //     every entry in one shot so the caller can slice / cache it.
+            //   - single page (skip non-null): the Stremio catalog flow with grouping
+            //     off declares the `skip` extra, and Stremio always sends an explicit
+            //     skip (even "0" for the first page) — that signals one upstream page
+            //     per request.
+            // Dedup across pages still runs in the whole-library path; with single-
+            // page mode every entry has a unique native id so per-page dedup is a
+            // no-op, no global pass needed.
+            var fetchAll = isUserList && string.IsNullOrEmpty(skip);
             // MAL caps animelist at 1000/page, so a single round-trip covers most users; the
             // ranking/seasonal/search endpoints stay at CatalogPageSize.
             var pageSize = fetchAll ? FullFetchPageSize : CatalogPageSize;
@@ -181,10 +187,10 @@ namespace AnimeList.Services
 
             // Sort user libraries alphabetically by name so franchise cours sit next to each
             // other ("Show", "Show Part 2", "Show Season 2", …) — only meaningful when we
-            // have the whole library in memory (grouping on). With grouping off we return
-            // a single upstream page so the sort would only reorder within that window and
-            // make the global order jagged across pages; keep MAL's own list_updated_at
-            // ordering instead. Discovery catalogs always keep their API ranking.
+            // have the whole library in memory (no skip). With per-page reads the sort
+            // would only reorder within one page and make the global order jagged across
+            // page boundaries; keep MAL's own list_updated_at ordering instead. Discovery
+            // catalogs always keep their API ranking.
             if (isUserList && fetchAll)
                 return seenIds.Values
                     .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
