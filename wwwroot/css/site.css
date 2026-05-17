@@ -3444,30 +3444,105 @@ body.modal-open {
     gap: 0.55rem;
 }
 
-/* Inline note under the stats section header that explains AniList's 48h
-   recompute cadence and links to the only place a user can force a refresh
-   (anilist.co/settings/lists). Replaces an earlier hover-only info icon —
-   touch devices never render title-attr tooltips, so the explanation was
-   invisible on mobile. Inline keeps it discoverable everywhere at the cost
-   of one muted line of vertical space on desktop. */
-.stats-section-note {
-    margin: 0.35rem 0 0.65rem 0;
-    font-size: 0.8rem;
-    color: #999;
-    line-height: 1.4;
+/* Stats-info icon + click/hover popover. The icon is a 26px circle next to
+   the "via AniList" attribution; the popover explains the 48h AniList
+   recompute cadence (and links to the only place a user can force a
+   refresh) since we can't trigger it via the public API ourselves. Desktop
+   shows the popover on :hover/:focus-within; touch shows it via a JS
+   .is-open class toggled by the click handler in Index.cshtml. Both paths
+   end up styled identically below. */
+.dashboard-stats-info {
+    position: relative;
+    display: inline-flex;
 }
 
-.stats-section-note a,
-.stats-section-note a:link,
-.stats-section-note a:visited {
-    color: inherit;
+.dashboard-stats-info-btn,
+.dashboard-stats-info-btn:link,
+.dashboard-stats-info-btn:visited {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    color: #777;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    padding: 0;
+    text-decoration: none;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.dashboard-stats-info-btn:hover,
+.dashboard-stats-info-btn:focus {
+    color: #fff;
+    border-color: rgba(59, 130, 246, 0.4);
+    background: rgba(59, 130, 246, 0.12);
+    outline: none;
+    text-decoration: none;
+}
+
+.dashboard-stats-info-tooltip {
+    /* Hidden by default; shown via the :hover / :focus-within / .is-open
+       selectors below. visibility (not display) so the open transition can
+       interpolate opacity / transform. */
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 260px;
+    max-width: calc(100vw - 2rem);
+    padding: 0.65rem 0.75rem;
+    background: #181818;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    color: #ccc;
+    font-size: 0.78rem;
+    font-weight: 400;
+    line-height: 1.45;
+    text-align: left;
+    white-space: normal;
+    visibility: hidden;
+    opacity: 0;
+    transform: translateY(-4px);
+    pointer-events: none;
+    transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
+    z-index: 100;
+}
+
+/* @media (hover: hover) keeps touch devices from triggering :hover on tap —
+   on iOS Safari especially, the first tap fires :hover and a synthetic
+   click, which would race the JS toggle and leave the popover stuck open. */
+@media (hover: hover) {
+    .dashboard-stats-info:hover .dashboard-stats-info-tooltip,
+    .dashboard-stats-info:focus-within .dashboard-stats-info-tooltip {
+        visibility: visible;
+        opacity: 1;
+        transform: translateY(0);
+        pointer-events: auto;
+    }
+}
+
+.dashboard-stats-info.is-open .dashboard-stats-info-tooltip {
+    visibility: visible;
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.dashboard-stats-info-tooltip a,
+.dashboard-stats-info-tooltip a:link,
+.dashboard-stats-info-tooltip a:visited {
+    display: inline-block;
+    margin-top: 0.35rem;
+    color: #6ea8fe;
     text-decoration: underline;
     text-underline-offset: 2px;
-    transition: color 0.15s;
 }
 
-.stats-section-note a:hover,
-.stats-section-note a:focus {
+.dashboard-stats-info-tooltip a:hover,
+.dashboard-stats-info-tooltip a:focus {
     color: #fff;
 }
 
