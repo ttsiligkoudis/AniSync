@@ -4,11 +4,15 @@
 // list / genre / season).
 //
 // Each scroll-trigger fetches /library/page?list=...&skip=N from the
-// server. /library/page refetches the full list from the upstream
-// service every time (we dropped the user-list cache by design — every
-// load reflects live state) and slices the requested window. The cards
-// returned are appended to the existing .library-grid; the running
-// skip counter is incremented by however many cards actually landed.
+// server. /library/page forwards skip to MAL/Kitsu so each scroll request
+// maps to one upstream page (50 entries on MAL, 20 on Kitsu) — no full-
+// list refetch on scroll. The script only runs for MAL/Kitsu without a
+// filter applied; AniList returns the whole library in one shot
+// (MediaListCollection has no nested pagination) and filter modes render
+// every match server-side, so the server doesn't emit a paginator wrapper
+// for those and we no-op here. The cards returned are appended to the
+// existing .library-grid; the running skip counter is incremented by
+// however many cards actually landed.
 (function () {
     'use strict';
 
