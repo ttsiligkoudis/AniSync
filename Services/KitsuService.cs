@@ -47,17 +47,13 @@ namespace AnimeList.Services
             if (isUserList && string.IsNullOrEmpty(tokenData?.user_id))
                 return [];
 
-            // "Browse my list" has two read shapes:
-            //   - whole-library (no skip): LibraryController and the cached Stremio
-            //     catalog flow with grouping on both rely on the service returning
-            //     every entry in one shot so the caller can slice / cache it.
-            //   - single page (skip non-null): the Stremio catalog flow with grouping
-            //     off declares the `skip` extra, and Stremio always sends an explicit
-            //     skip (even "0" for the first page) — that signals one upstream page
-            //     per request. Every entry has a unique native id in this mode so
-            //     per-page dedup doesn't shrink the response and the "short page = no
-            //     more" Stremio heuristic doesn't bite.
-            var fetchAll = isUserList && string.IsNullOrEmpty(skip) && string.IsNullOrEmpty(resolvedAnimeId);
+            // For "browse my list" with grouping on we walk every page server-side, dedup
+            // across all of them, and UserListCache caches the deduped result. With grouping
+            // off the manifest declares the `skip` extra so Stremio paginates one Kitsu page
+            // at a time — every entry already has a unique native id, so per-page dedup
+            // doesn't shrink the response and the "short page = no more" Stremio heuristic
+            // that bites the dedup path doesn't apply.
+            var fetchAll = isUserList && groupSeasons && string.IsNullOrEmpty(resolvedAnimeId);
 
             await _mappingService.EnsureLoadedAsync();
             var seenIds = new Dictionary<string, Meta>();
@@ -121,9 +117,10 @@ namespace AnimeList.Services
 
             // Sort user libraries alphabetically by name so franchise cours sit next to each
             // other ("Show", "Show Part 2", "Show Season 2", …) — only meaningful when we
-            // have the whole library in memory (no skip). With per-page reads the sort
-            // would only reorder within one page; keep Kitsu's own progressed_at ordering
-            // instead. Discovery catalogs always keep their API ranking.
+            // have the whole library in memory (grouping on). With grouping off we return
+            // a single upstream page so the sort would only reorder within that window;
+            // keep Kitsu's own progressed_at ordering instead. Discovery catalogs always
+            // keep their API ranking.
             if (isUserList && fetchAll)
                 return seenIds.Values
                     .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
