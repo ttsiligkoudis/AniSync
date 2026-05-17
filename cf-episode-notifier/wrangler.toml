@@ -22,7 +22,7 @@ crons = ["0 1 * * *", "* * * * *"]
 # Then replace the placeholder id below with the one wrangler prints.
 [[kv_namespaces]]
 binding = "SCHEDULE"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "2faf21dc127541fc8ced9304224f9729"
 
 # Secrets — set with:
 #   npx wrangler secret put ANISYNC_URL    # e.g. https://anisync.fly.dev
