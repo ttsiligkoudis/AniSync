@@ -19,10 +19,10 @@ namespace AnimeList.Services
         // bounds cross-channel staleness.
         private static readonly TimeSpan Ttl = TimeSpan.FromMinutes(10);
 
-        // The six per-user list types the dashboard + library pages read.
-        // Trending/Seasonal/Airing/Search are deliberately excluded — Trending
-        // and friends aren't user-scoped (they belong in a different cache if
-        // we ever add one), Search is query-shaped and unbounded.
+        // The six per-user list types the Stremio catalog endpoint reads when
+        // group-anime-seasons is enabled. Trending / Seasonal / Airing / Search
+        // are deliberately excluded — Trending and friends aren't user-scoped,
+        // Search is query-shaped and unbounded.
         private static readonly ListType[] CachedListTypes =
         [
             ListType.Current,
@@ -49,13 +49,19 @@ namespace AnimeList.Services
             bool groupSeasons, Func<Task<List<Meta>>> fetcher, bool bypassCache = false)
         {
             var userKey = GetUserKey(token);
-            // Skip the cache for anonymous users (no stable id) and for list types
-            // outside the cached set (search results, public catalogs). The caller
-            // gets the unwrapped fetcher result, so callers don't have to branch.
-            if (userKey == null || Array.IndexOf(CachedListTypes, listType) < 0)
+            // Cache only applies in the Stremio catalog flow with grouping enabled —
+            // that's the mode where one upstream round-trip returns the entire
+            // deduped library and a hot cache amortises it across paginated UI
+            // renders. With grouping off, Stremio pages user-list catalogs via the
+            // `skip` extra (one upstream page per request), so a per-page cache
+            // wouldn't earn its memory. Anonymous users and non-user list types
+            // (search, trending, …) also skip the cache.
+            if (userKey == null
+                || !groupSeasons
+                || Array.IndexOf(CachedListTypes, listType) < 0)
                 return await fetcher() ?? [];
 
-            var key = BuildKey(token.anime_service, userKey, listType, groupSeasons);
+            var key = BuildKey(token.anime_service, userKey, listType);
 
             if (bypassCache)
             {
@@ -76,13 +82,11 @@ namespace AnimeList.Services
             var userKey = GetUserKey(token);
             if (userKey == null) return;
 
-            // 12 removes per user (6 list types × 2 group-seasons states). Cheaper
-            // than tracking per-user key sets and avoids any threading subtleties
-            // around invalidation racing the next read.
+            // 6 removes per user — one entry per cached list type. groupSeasons=false
+            // never lands in the cache so there's nothing to clear for that state.
             foreach (var lt in CachedListTypes)
             {
-                _cache.Remove(BuildKey(token.anime_service, userKey, lt, true));
-                _cache.Remove(BuildKey(token.anime_service, userKey, lt, false));
+                _cache.Remove(BuildKey(token.anime_service, userKey, lt));
             }
 
             // Fire-and-forget the persistent watching-cache invalidation so the
@@ -125,7 +129,7 @@ namespace AnimeList.Services
             return null;
         }
 
-        private static string BuildKey(AnimeService svc, string userKey, ListType lt, bool groupSeasons) =>
-            $"userlist:{(int)svc}:{userKey}:{(int)lt}:{(groupSeasons ? 1 : 0)}";
+        private static string BuildKey(AnimeService svc, string userKey, ListType lt) =>
+            $"userlist:{(int)svc}:{userKey}:{(int)lt}";
     }
 }
