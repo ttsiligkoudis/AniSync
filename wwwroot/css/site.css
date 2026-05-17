@@ -5112,6 +5112,84 @@ button.anime-detail-user-state:hover {
     text-align: center;
 }
 
+/* Push-notification subscribe toggle on the notifications page.
+   Hidden by default — JS reveals it once it confirms browser support
+   + server VAPID config. When enabled the row picks up the cobalt-
+   tinted "active" pill, mirroring the user-state badge on the anime
+   detail page. */
+.notif-push-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin: 0.4rem 0 0.6rem;
+    padding: 0.55rem 0.85rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.55rem;
+    background: rgba(255, 255, 255, 0.02);
+    color: #cfcfcf;
+    font-size: 0.85rem;
+}
+
+.notif-push-toggle-disable {
+    border-color: rgba(59, 130, 246, 0.32);
+    background: rgba(59, 130, 246, 0.08);
+}
+
+.notif-push-toggle-disable .notif-push-toggle-label {
+    color: #93c5fd;
+    font-weight: 600;
+}
+
+.notif-push-toggle-denied {
+    border-color: rgba(239, 68, 68, 0.28);
+    background: rgba(239, 68, 68, 0.06);
+    color: #fca5a5;
+}
+
+.notif-push-toggle-label {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.notif-push-toggle-btn {
+    flex-shrink: 0;
+    background: #3B82F6;
+    color: #fff;
+    border: 0;
+    padding: 0.4rem 0.95rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.notif-push-toggle-btn:hover:not(:disabled),
+.notif-push-toggle-btn:focus:not(:disabled) {
+    background: #2563eb;
+    outline: none;
+}
+
+.notif-push-toggle-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.notif-push-toggle-disable .notif-push-toggle-btn {
+    background: transparent;
+    color: #cfcfcf;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.notif-push-toggle-disable .notif-push-toggle-btn:hover:not(:disabled),
+.notif-push-toggle-disable .notif-push-toggle-btn:focus:not(:disabled) {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
 /* Thumbnail wrapper — the play-diamond and watched-eye glyphs absolute-
    position inside it. */
 .anime-detail-episode-thumb-wrap {

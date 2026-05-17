@@ -29,6 +29,16 @@
                     data-notif-bulk-cancel hidden>Cancel</button>
         </div>
     </div>
+    @* Web Push toggle — hidden by default; push-subscribe.js reveals
+       it once it confirms (a) the browser supports PushManager, (b)
+       the deployment has VAPID keys configured, and (c) discovers the
+       current subscription state. When unsupported / unconfigured the
+       row stays hidden entirely so users on Safari < 16.4 or on
+       self-hosted instances without push don't see a dead toggle. *@
+    <div class="notif-push-toggle" data-push-toggle hidden>
+        <span class="notif-push-toggle-label" data-push-toggle-label>Get notified when episodes drop</span>
+        <button type="button" class="notif-push-toggle-btn" data-push-toggle-btn hidden>Enable browser notifications</button>
+    </div>
 </section>
 
 @if (Model.Items.Count == 0)
@@ -53,4 +63,5 @@ else
 
 @section Scripts {
     <script src="~/js/notifications-page.js" asp-append-version="true" defer></script>
+    <script src="~/js/push-subscribe.js" asp-append-version="true" defer></script>
 }

@@ -265,6 +265,8 @@ builder.Services.AddSingleton<IUserListCache, UserListCache>();
 //     daily refresh + per-episode Task.Delay timers.
 builder.Services.AddSingleton<INotificationStore, NotificationStore>();
 builder.Services.AddSingleton<IWatchingCacheStore, WatchingCacheStore>();
+builder.Services.AddSingleton<IPushSubscriptionStore, PushSubscriptionStore>();
+builder.Services.AddSingleton<IPushNotificationService, PushNotificationService>();
 builder.Services.AddSingleton<IAnimeScheduleService, AnimeScheduleService>();
 builder.Services.AddScoped<IWatchingCacheRefreshService, WatchingCacheRefreshService>();
 builder.Services.AddScoped<IEpisodeNotificationDispatcher, EpisodeNotificationDispatcher>();
