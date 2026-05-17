@@ -3444,35 +3444,31 @@ body.modal-open {
     gap: 0.55rem;
 }
 
-/* Stats-info icon button — small circular indicator next to the "via AniList"
-   attribution that links to anilist.co/settings/lists. AniList caches user
-   stats for up to 48 h on its end and exposes no public mutation to force
-   a recompute, so a same-shape "refresh" affordance on our side would do
-   nothing; the icon's tooltip points users at the only place that CAN force
-   the refresh. Kept small and muted so it doesn't distract from the stats
-   themselves; only the hover state highlights it. */
-.dashboard-stats-info-btn,
-.dashboard-stats-info-btn:link,
-.dashboard-stats-info-btn:visited {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    border-radius: 999px;
-    color: #777;
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    text-decoration: none;
-    transition: color 0.15s, border-color 0.15s, background 0.15s;
+/* Inline note under the stats section header that explains AniList's 48h
+   recompute cadence and links to the only place a user can force a refresh
+   (anilist.co/settings/lists). Replaces an earlier hover-only info icon —
+   touch devices never render title-attr tooltips, so the explanation was
+   invisible on mobile. Inline keeps it discoverable everywhere at the cost
+   of one muted line of vertical space on desktop. */
+.stats-section-note {
+    margin: 0.35rem 0 0.65rem 0;
+    font-size: 0.8rem;
+    color: #999;
+    line-height: 1.4;
 }
 
-.dashboard-stats-info-btn:hover,
-.dashboard-stats-info-btn:focus {
+.stats-section-note a,
+.stats-section-note a:link,
+.stats-section-note a:visited {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    transition: color 0.15s;
+}
+
+.stats-section-note a:hover,
+.stats-section-note a:focus {
     color: #fff;
-    border-color: rgba(59, 130, 246, 0.4);
-    background: rgba(59, 130, 246, 0.12);
-    text-decoration: none;
 }
 
 /* Library variant sits inline inside the page-subtitle line; nudge it up a

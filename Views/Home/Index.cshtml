@@ -209,27 +209,20 @@
             <h2 class="dashboard-section-title">Your stats</h2>
             <span class="dashboard-section-actions">
                 <span class="dashboard-section-link-muted">@statsAttribution</span>
-                @* Info indicator instead of a refresh button: AniList re-aggregates
-                   User.statistics at most once per 48 h and exposes no public
-                   mutation to force a recompute, so a refresh affordance on our
-                   side would do nothing — the GraphQL would just return the same
-                   stale payload AniList has cached. The link points at the
-                   "Update Stats" control on anilist.co/settings/lists, which IS
-                   the only thing that can force an immediate refresh. *@
-                <a class="dashboard-stats-info-btn"
-                   href="https://anilist.co/settings/lists"
-                   target="_blank"
-                   rel="noopener noreferrer"
-                   title="AniList caches your stats for up to 48 hours and only refreshes them on its own schedule. To force an immediate refresh, click 'Update Stats' on anilist.co/settings/lists."
-                   aria-label="Stats info — opens AniList list settings where you can force a stats refresh">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <line x1="12" y1="16" x2="12" y2="12"></line>
-                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                    </svg>
-                </a>
             </span>
         </div>
+        @* Inline caption instead of a hover-only info icon: AniList re-aggregates
+           User.statistics at most once per 48 h and exposes no public mutation
+           to force a recompute, so a refresh affordance on our side would do
+           nothing. The link points at the "Update Stats" control on
+           anilist.co/settings/lists, which IS the only thing that can force an
+           immediate refresh. Kept inline (not behind a tooltip / title attr)
+           so mobile users see it too — touch devices never render hover
+           tooltips. *@
+        <p class="stats-section-note">
+            AniList recomputes these up to every 48 hours.
+            <a href="https://anilist.co/settings/lists" target="_blank" rel="noopener noreferrer">Update on AniList&nbsp;→</a>
+        </p>
         @* 4-cell stats strip: Watching · Completed · Hours · Mean Score. Wraps
            to 2x2 on narrow viewports via flex-wrap. Per-cell soft-coloured icon
            tiles match the StreamD reference's Currently Airing / This Season /
