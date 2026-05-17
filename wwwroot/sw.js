@@ -17,7 +17,7 @@
 //     because /css/site.css?v=abc never matched the cached
 //     /css/site.css entry.
 //     POSTs / API calls / cross-origin requests pass through verbatim.
-const CACHE_VERSION = 'anisync-shell-v2';
+const CACHE_VERSION = 'anisync-shell-v3';
 const SHELL_ASSETS = [
     '/',
     '/css/site.css',
@@ -73,6 +73,50 @@ self.addEventListener('fetch', function (event) {
             return caches.match(req, { ignoreSearch: true }).then(function (cached) {
                 return cached || caches.match('/', { ignoreSearch: true });
             });
+        })
+    );
+});
+
+// Web Push handler — fires when the upstream push provider (FCM /
+// Mozilla autopush / etc.) delivers a payload from AniSync's
+// PushNotificationService. Payload shape matches what the .NET side
+// serialises in PushNotificationService.SendAsync.
+self.addEventListener('push', function (event) {
+    var data = {};
+    try { data = event.data ? event.data.json() : {}; }
+    catch (_) { /* keep default {} */ }
+
+    var title = data.title || 'AniSync';
+    var options = {
+        body: data.body || '',
+        icon: data.icon || '/icons/icon-192.png',
+        badge: '/icons/icon-192.png',
+        // `tag` collapses repeated pushes for the same airing into a
+        // single OS notification (Chrome stacks otherwise) — the server
+        // emits "anisync:<animeId>:<episode>" so a re-push from the
+        // dispatcher doesn't double up.
+        tag: data.tag || undefined,
+        data: { url: data.url || '/notifications' },
+    };
+    event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Notification click: focus an existing tab on the deep-link URL if
+// one's open, otherwise pop a new window. Matches the bell-dropdown's
+// behaviour for in-page clicks (go straight to the watch page).
+self.addEventListener('notificationclick', function (event) {
+    event.notification.close();
+    var url = (event.notification.data && event.notification.data.url) || '/notifications';
+    event.waitUntil(
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (matched) {
+            for (var i = 0; i < matched.length; i++) {
+                var c = matched[i];
+                try {
+                    var path = new URL(c.url).pathname;
+                    if (path === url && 'focus' in c) return c.focus();
+                } catch (_) { /* ignore malformed URLs */ }
+            }
+            if (self.clients.openWindow) return self.clients.openWindow(url);
         })
     );
 });

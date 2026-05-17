@@ -118,6 +118,25 @@ namespace AnimeList.Services
                 );
                 CREATE INDEX IF NOT EXISTS idx_user_watching_cache_stale
                     ON user_watching_cache(refreshed_at);
+
+                -- Per-browser Web Push subscriptions. One row per (uid,
+                -- endpoint) pair — a user with multiple devices /
+                -- browsers gets multiple rows, all of them notified
+                -- on dispatch. UNIQUE (uid, endpoint) so a repeated
+                -- subscribe from the same browser updates the existing
+                -- row instead of stacking duplicates.
+                CREATE TABLE IF NOT EXISTS push_subscriptions (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    uid         TEXT NOT NULL,
+                    endpoint    TEXT NOT NULL,
+                    p256dh      TEXT NOT NULL,
+                    auth        TEXT NOT NULL,
+                    user_agent  TEXT,
+                    created_at  INTEGER NOT NULL,
+                    UNIQUE (uid, endpoint)
+                );
+                CREATE INDEX IF NOT EXISTS idx_push_subscriptions_uid
+                    ON push_subscriptions(uid);
                 """;
             create.ExecuteNonQuery();
 

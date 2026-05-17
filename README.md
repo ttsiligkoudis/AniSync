@@ -404,6 +404,28 @@ The `RedirectUri` must match the URL registered on the MAL developer dashboard e
 
 A single SQLite file at `$ANISYNC_DATA_DIR/anisync.db` holds every config: token data, linked secondaries, addon URLs, notifications, watching cache. Mount it to a persistent volume on your host. Fly.io's mount in `fly.toml` already does this.
 
+### Web Push (browser notifications)
+
+To enable system-level browser notifications (the bell on the page still works without this, but Web Push lets users get a notification on their phone / desktop even when the tab is closed), generate a VAPID key pair and set three env vars:
+
+```bash
+# Generate a VAPID key pair
+npx web-push generate-vapid-keys
+```
+
+Set on the AniSync host:
+
+```bash
+fly secrets set \
+  Push__VapidPublicKey="<the printed Public Key>" \
+  Push__VapidPrivateKey="<the printed Private Key>" \
+  Push__VapidSubject="mailto:you@example.com"
+```
+
+Restart AniSync. Users will see an "Enable browser notifications" toggle on the `/notifications` page; clicking it walks through the browser permission prompt and registers a push subscription. The dispatcher then fans Web Push payloads to every subscribed browser when it creates a notification — works even when the AniSync tab is closed, even on a phone home screen if installed as a PWA.
+
+Without these env vars set, the toggle stays hidden and AniSync operates as before (bell-only updates while the page is open).
+
 ### Optional Cloudflare Workers
 
 Two small Workers ship alongside the app — both optional, both free to run:

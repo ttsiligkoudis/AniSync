@@ -34,6 +34,7 @@ namespace AnimeList.Services
         private readonly IWatchingCacheStore _watchingCache;
         private readonly IWatchingCacheRefreshService _watchingRefresh;
         private readonly INotificationStore _notifications;
+        private readonly IPushNotificationService _push;
         private readonly ILogger<EpisodeNotificationDispatcher> _logger;
 
         public EpisodeNotificationDispatcher(
@@ -41,12 +42,14 @@ namespace AnimeList.Services
             IWatchingCacheStore watchingCache,
             IWatchingCacheRefreshService watchingRefresh,
             INotificationStore notifications,
+            IPushNotificationService push,
             ILogger<EpisodeNotificationDispatcher> logger)
         {
             _mappingService = mappingService;
             _watchingCache = watchingCache;
             _watchingRefresh = watchingRefresh;
             _notifications = notifications;
+            _push = push;
             _logger = logger;
         }
 
@@ -126,8 +129,24 @@ namespace AnimeList.Services
                 };
 
                 var inserted = await _notifications.CreateAsync(record);
-                if (inserted) created++;
-                else suppressed++;
+                if (inserted)
+                {
+                    created++;
+                    // Fire-and-forget Web Push to every browser the
+                    // user has subscribed. Awaited so any exception
+                    // still surfaces via the per-call log, but the
+                    // push service swallows transient failures
+                    // internally — a dead push provider can't break
+                    // notification creation (the row's already in the
+                    // DB; the bell still updates on next page render).
+                    // No-op when VAPID keys aren't configured.
+                    try { await _push.SendAsync(cache.Uid, record); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Web Push send failed for {Uid}", cache.Uid); }
+                }
+                else
+                {
+                    suppressed++;
+                }
             }
 
             return new DispatchResult(
