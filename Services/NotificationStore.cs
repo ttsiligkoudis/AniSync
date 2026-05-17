@@ -19,18 +19,57 @@ namespace AnimeList.Services
             _connectionString = SqliteConnectionFactory.BuildConnectionString(configuration);
         }
 
-        public async Task<bool> CreateAsync(NotificationRecord record)
+        public async Task<bool> CreateAsync(NotificationRecord record, IReadOnlyCollection<string> equivalentAnimeIds = null)
         {
+            // Build the set of anime ids treated as the same physical anime
+            // for dedup. Always includes record.AnimeId; the dispatcher adds
+            // every mapped service prefix (anilist:21 / mal:21 / kitsu:11061)
+            // so we don't insert a second row when a user flips primary
+            // service between two cron pings inside the dispatch lookback.
+            var dedupIds = new HashSet<string>(StringComparer.Ordinal) { record.AnimeId };
+            if (equivalentAnimeIds != null)
+            {
+                foreach (var id in equivalentAnimeIds)
+                {
+                    if (!string.IsNullOrEmpty(id)) dedupIds.Add(id);
+                }
+            }
+
             using var conn = new SqliteConnection(_connectionString);
             await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
+
+            // Dynamic IN-list of equivalent ids. Param count is bounded by
+            // AnimeService enum size (3 today), so no risk of hitting
+            // SQLite's variable-count cap.
+            var inParamNames = new List<string>(dedupIds.Count);
+            var idx = 0;
+            foreach (var id in dedupIds)
+            {
+                var name = $"$eqid{idx++}";
+                inParamNames.Add(name);
+                cmd.Parameters.AddWithValue(name, id);
+            }
+            var inClause = string.Join(", ", inParamNames);
+
+            // INSERT … SELECT … WHERE NOT EXISTS handles the cross-service
+            // duplicate (different anime_id strings for the same physical
+            // anime) that the unique index can't catch. OR IGNORE on top
+            // catches the exact-match race where two concurrent inserts
+            // both pass WHERE NOT EXISTS before either commits.
+            cmd.CommandText = $$"""
                 INSERT OR IGNORE INTO notifications
                     (uid, service, anime_id, anime_title, episode_number, season,
                      thumbnail_url, link_path, created_at, read_at)
-                VALUES
-                    ($uid, $service, $animeId, $title, $episode, $season,
-                     $thumb, $link, $created, NULL)
+                SELECT $uid, $service, $animeId, $title, $episode, $season,
+                       $thumb, $link, $created, NULL
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM notifications
+                    WHERE uid = $uid
+                      AND episode_number = $episode
+                      AND COALESCE(season, 0) = COALESCE($season, 0)
+                      AND anime_id IN ({{inClause}})
+                )
                 RETURNING id;
                 """;
             cmd.Parameters.AddWithValue("$uid", record.Uid);
@@ -43,8 +82,9 @@ namespace AnimeList.Services
             cmd.Parameters.AddWithValue("$link", record.LinkPath);
             cmd.Parameters.AddWithValue("$created", record.CreatedAt);
 
-            // RETURNING returns the inserted row's id on success and zero rows
-            // on conflict (because OR IGNORE swallowed the insert).
+            // RETURNING yields the inserted id on success and no rows when
+            // WHERE NOT EXISTS suppressed the insert (or OR IGNORE caught
+            // the unique-index race).
             var insertedId = await cmd.ExecuteScalarAsync();
             if (insertedId == null || insertedId == DBNull.Value) return false;
             record.Id = Convert.ToInt64(insertedId);
