@@ -118,36 +118,6 @@ namespace AnimeList.Services
                 );
                 CREATE INDEX IF NOT EXISTS idx_user_watching_cache_stale
                     ON user_watching_cache(refreshed_at);
-
-                -- Per-airing dispatch state. Tracks which AniList airings
-                -- the scheduler has already run the dispatch loop for, so
-                -- repeated cron pings (the Cloudflare Worker fires once
-                -- per minute, plus the worker's 90s window can double-
-                -- catch boundary events) collapse to no-ops cheaply
-                -- without re-running the full per-user fan-out. The
-                -- per-user uniqueness constraint on `notifications` still
-                -- guards individual notification inserts; this table is
-                -- the per-airing guard one level above.
-                --
-                -- notified_at = NULL  →  dispatch hasn't run yet (or
-                --                        failed and should be retried)
-                -- notified_at = unix  →  dispatch completed successfully
-                CREATE TABLE IF NOT EXISTS schedule_entries (
-                    anilist_id     INTEGER NOT NULL,
-                    episode        INTEGER NOT NULL,
-                    airing_at      INTEGER NOT NULL,
-                    title          TEXT NOT NULL,
-                    cover_image    TEXT,
-                    notified_at    INTEGER,
-                    refreshed_at   INTEGER NOT NULL,
-                    PRIMARY KEY (anilist_id, episode)
-                );
-                -- Partial index over the only column the scheduler queries
-                -- when looking for "what still needs dispatching", so the
-                -- common-case lookup is an O(log n) probe over a tiny set.
-                CREATE INDEX IF NOT EXISTS idx_schedule_entries_pending
-                    ON schedule_entries(airing_at)
-                    WHERE notified_at IS NULL;
                 """;
             create.ExecuteNonQuery();
 
