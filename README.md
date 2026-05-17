@@ -410,6 +410,7 @@ Two small Workers ship alongside the app — both optional, both free to run:
 
 - [`cf-cors-proxy/`](cf-cors-proxy) — adds CORS headers to debrid CDN responses so the watch page's matroska-subtitles extractor can stream MKV bytes from the browser.
 - [`cf-mkv-extractor/`](cf-mkv-extractor) — fetches MKV files via Range requests, parses the EBML index, returns SSA/ASS/SRT subtitle tracks as JSON (saves ~700 MB vs. full-file proxy).
+- [`cf-episode-notifier/`](cf-episode-notifier) — pings AniSync the moment a watched-list episode airs so notifications fire in real time even when Fly.io's auto-stop has spun the machine down. Free-plan compatible (cron triggers + KV, no Durable Objects). Without it the in-process scheduler still works, but missed-during-sleep notifications only land when a user-triggered request next wakes the machine (within the 24h recovery window).
 
 ---
 

@@ -1,0 +1,29 @@
+name = "anisync-episode-notifier"
+main = "src/index.js"
+compatibility_date = "2025-04-01"
+
+# Two cron triggers:
+#   - 0 1 * * *  →  daily 01:00 UTC, fetches the airing schedule and
+#                   caches it to KV.
+#   - * * * * *  →  every minute, reads the cached schedule and pings
+#                   AniSync if anything's due to air in the last ~90s.
+#
+# Per-minute granularity is the lowest CF Workers cron supports; the
+# Worker stays on the free plan (the daily ~1,440 cron ticks + ~30
+# KV writes + ~20 wake pings to AniSync sit well under every free-
+# tier limit). AniSync only wakes when an episode is actually due,
+# not on every Worker tick.
+[triggers]
+crons = ["0 1 * * *", "* * * * *"]
+
+# KV namespace that holds the cached airing-schedule array between
+# ticks. Create with:
+#   npx wrangler kv:namespace create SCHEDULE
+# Then replace the placeholder id below with the one wrangler prints.
+[[kv_namespaces]]
+binding = "SCHEDULE"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Secrets — set with:
+#   npx wrangler secret put ANISYNC_URL    # e.g. https://anisync.fly.dev
+#   npx wrangler secret put CRON_SECRET    # must match ANISYNC_CRON_SECRET on the .NET side

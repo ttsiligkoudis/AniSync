@@ -5476,23 +5476,24 @@ ol.anime-detail-episodes-busy {
 }
 
 .notif-bell-badge {
-    /* Anchored to the bell button's top-right corner with a small outward
-       offset so it visually overlaps onto the header chrome. The element is
-       a perfect circle for one or two digit counts (min-width and height
-       are equal; border-box keeps padding/border from inflating the outer
-       size). 3-char "99+" stretches to a pill — border-radius:999px keeps
-       the ends rounded in that case. */
+    /* Anchored to the bell button's top-right corner with a tight inset
+       so the badge sits over the bell rather than spilling onto the
+       neighbouring header chrome (the Install pill / hamburger). The
+       element is a perfect circle for one or two digit counts
+       (min-width and height are equal; border-box keeps padding/border
+       from inflating the outer size). 3-char "99+" stretches to a pill
+       — border-radius:999px keeps the ends rounded in that case. */
     position: absolute;
-    top: -6px;
-    right: -6px;
-    min-width: 22px;
-    height: 22px;
+    top: -2px;
+    right: -2px;
+    min-width: 18px;
+    height: 18px;
     padding: 0 2px;
     background: #ef4444;
     color: #fff;
-    font-size: 0.68rem;
+    font-size: 0.62rem;
     font-weight: 700;
-    line-height: 18px;
+    line-height: 14px;
     text-align: center;
     border-radius: 999px;
     border: 2px solid #0A0A0A;

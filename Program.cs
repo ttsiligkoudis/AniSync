@@ -268,7 +268,16 @@ builder.Services.AddSingleton<IWatchingCacheStore, WatchingCacheStore>();
 builder.Services.AddSingleton<IAnimeScheduleService, AnimeScheduleService>();
 builder.Services.AddScoped<IWatchingCacheRefreshService, WatchingCacheRefreshService>();
 builder.Services.AddScoped<IEpisodeNotificationDispatcher, EpisodeNotificationDispatcher>();
-builder.Services.AddHostedService<EpisodeNotificationScheduler>();
+// Register the scheduler under all three of its identities so the
+// hosting infrastructure runs it as a BackgroundService AND
+// controllers can inject IEpisodeNotificationScheduler to trigger
+// refreshes on demand (used by CronController for the Cloudflare
+// Worker's per-minute wake pings).
+builder.Services.AddSingleton<EpisodeNotificationScheduler>();
+builder.Services.AddSingleton<IEpisodeNotificationScheduler>(sp =>
+    sp.GetRequiredService<EpisodeNotificationScheduler>());
+builder.Services.AddHostedService(sp =>
+    sp.GetRequiredService<EpisodeNotificationScheduler>());
 
 var app = builder.Build();
 
