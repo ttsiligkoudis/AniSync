@@ -1,4 +1,5 @@
 using AnimeList.Services.Interfaces;
+using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json.Linq;
 
 namespace AnimeList.Services
@@ -17,6 +18,8 @@ namespace AnimeList.Services
     public class WyzieSubtitlesService : IWyzieSubtitlesService
     {
         private const string ApiBase = "https://sub.wyzie.ru";
+        private static readonly TimeSpan ListCacheTtl = TimeSpan.FromHours(2);
+        private static readonly TimeSpan NegativeCacheTtl = TimeSpan.FromMinutes(30);
 
         // Cap menu length on shows where Wyzie returns a long tail
         // of mostly-identical English variants from different release
@@ -69,13 +72,16 @@ namespace AnimeList.Services
             ["eng", "spa", "por", "fre", "ger", "ita", "jpn", "chi", "kor"];
 
         private readonly IHttpClientFactory _clientFactory;
+        private readonly IMemoryCache _cache;
         private readonly ILogger<WyzieSubtitlesService> _logger;
 
         public WyzieSubtitlesService(
             IHttpClientFactory clientFactory,
+            IMemoryCache cache,
             ILogger<WyzieSubtitlesService> logger)
         {
             _clientFactory = clientFactory;
+            _cache = cache;
             _logger = logger;
         }
 
@@ -88,6 +94,11 @@ namespace AnimeList.Services
             }
 
             var s = season ?? 1;
+            var cacheKey = $"wyzie:list:{imdbId}:{s}:{episode}";
+            if (_cache.TryGetValue<IReadOnlyList<SubtitleTrack>>(cacheKey, out var hit) && hit != null)
+            {
+                return hit;
+            }
 
             // No language filter — Wyzie's language= parameter
             // accepts ISO codes inconsistently (some upstreams want
@@ -106,6 +117,13 @@ namespace AnimeList.Services
                 var client = _clientFactory.CreateClient();
                 var body = await client.GetStringAsync(url, cts.Token);
                 var tracks = ParseList(body);
+
+                _cache.Set(cacheKey, tracks, new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = tracks.Count == 0
+                        ? NegativeCacheTtl
+                        : ListCacheTtl,
+                });
 
                 // One info line per query so the operator can see the
                 // language breakdown — including the empty case, so

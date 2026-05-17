@@ -1,4 +1,5 @@
 using AnimeList.Services.Interfaces;
+using Microsoft.Extensions.Caching.Memory;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -18,9 +19,12 @@ namespace AnimeList.Services
     public class OpenSubtitlesService : ISubtitleService
     {
         private readonly IHttpClientFactory _clientFactory;
+        private readonly IMemoryCache _cache;
         private readonly ILogger<OpenSubtitlesService> _logger;
 
         private const string AddonBase = "https://opensubtitles-v3.strem.io";
+        private static readonly TimeSpan ListCacheTtl = TimeSpan.FromHours(2);
+        private static readonly TimeSpan VttCacheTtl  = TimeSpan.FromHours(6);
 
         // Common language pool surfaced first in the player's captions
         // menu. The addon returns ISO-639-2/B codes (eng, spa, fre …);
@@ -78,9 +82,11 @@ namespace AnimeList.Services
 
         public OpenSubtitlesService(
             IHttpClientFactory clientFactory,
+            IMemoryCache cache,
             ILogger<OpenSubtitlesService> logger)
         {
             _clientFactory = clientFactory;
+            _cache = cache;
             _logger = logger;
         }
 
@@ -93,10 +99,19 @@ namespace AnimeList.Services
             }
 
             // Filename narrows results to release-matched subs — same
-            // signal Stremio's web player passes.
+            // signal Stremio's web player passes. Normalise to a
+            // short, stable cache fingerprint so e.g. two slightly-
+            // different display titles of the same file don't churn
+            // cache entries (we lowercase and strip the extension).
             var normalisedFilename = !string.IsNullOrWhiteSpace(filename)
                 ? filename.Trim().ToLowerInvariant()
                 : null;
+            var filenameKey = string.IsNullOrEmpty(normalisedFilename) ? "_" : normalisedFilename;
+            var cacheKey = $"opensubs:list:{imdbId}:{season ?? 0}:{episode ?? 0}:{filenameKey}";
+            if (_cache.TryGetValue<IReadOnlyList<SubtitleTrack>>(cacheKey, out var hit) && hit != null)
+            {
+                return hit;
+            }
 
             // Stremio addon URL shape: /subtitles/{type}/{stremioId}.json
             // - series → tt{imdb}:{s}:{e}
@@ -128,7 +143,9 @@ namespace AnimeList.Services
                 cts.CancelAfter(TimeSpan.FromSeconds(6));
                 var client = _clientFactory.CreateClient();
                 var raw = await client.GetStringAsync(url, cts.Token);
-                return ParseList(raw);
+                var parsed = ParseList(raw);
+                _cache.Set(cacheKey, parsed, new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = ListCacheTtl });
+                return parsed;
             }
             catch (Exception ex)
             {
@@ -151,7 +168,14 @@ namespace AnimeList.Services
             }
 
             // Force the subs5.strem.io UTF-8 transform when applicable
-            // (no-op for other hosts).
+            // (no-op for other hosts). Cache key still keys on the
+            // pre-transform URL so re-requests with the same upstream
+            // URL hit cache regardless of transform application.
+            var cacheKey = $"opensubs:vtt:{url}";
+            if (_cache.TryGetValue<string>(cacheKey, out var hit) && hit != null)
+            {
+                return hit;
+            }
             var fetchUrl = EnsureUtf8Transform(url);
 
             try
@@ -161,9 +185,11 @@ namespace AnimeList.Services
                 var client = _clientFactory.CreateClient();
                 var bytes = await client.GetByteArrayAsync(fetchUrl, cts.Token);
                 var text = DecodeText(bytes);
-                return text.TrimStart().StartsWith("WEBVTT", StringComparison.OrdinalIgnoreCase)
+                var vtt = text.TrimStart().StartsWith("WEBVTT", StringComparison.OrdinalIgnoreCase)
                     ? text
                     : SrtToVtt(text);
+                _cache.Set(cacheKey, vtt, new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = VttCacheTtl });
+                return vtt;
             }
             catch (Exception ex)
             {

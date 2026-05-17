@@ -207,13 +207,6 @@ builder.Services.AddRateLimiter(options =>
 // (uid, anime, season, episode) currently being scrobbled.
 builder.Services.AddMemoryCache();
 
-// Liveness probe at /health. Fly's HTTP check pings this every 30s to decide
-// whether to keep a suspended machine, recycle a wedged one, or fail a deploy
-// before flipping traffic. The default ASP.NET response is a 200 "Healthy"
-// with no DB or upstream hops, so the check stays cheap even when the app is
-// otherwise idle.
-builder.Services.AddHealthChecks();
-
 builder.Services.AddSingleton<IAnimeMappingService, AnimeMappingService>();
 builder.Services.AddSingleton<IConfigStore, SqliteConfigStore>();
 builder.Services.AddScoped<ITokenService, TokenService>();
@@ -231,15 +224,16 @@ builder.Services.AddScoped<IAnilistFallback, AnilistFallback>();
 // per-addon config lives inside each manifest URL the user pastes on the
 // Configure page.
 builder.Services.AddSingleton<IAddonStreamService, AddonStreamService>();
-// Stateless — every SearchAsync / FetchAsVttAsync call hits the upstream
-// addon. Subtitle lists are small and the addon is fast, so the in-process
-// cache that used to sit here wasn't worth the memory headroom on a 1 GB box.
+// Singleton so the (imdb, season, episode) → tracks cache + VTT body
+// cache outlive individual requests — anime episodes are watched
+// repeatedly and the same /watch view re-fetches on every visit.
 builder.Services.AddSingleton<ISubtitleService, OpenSubtitlesService>();
 // Second subtitle provider — Wyzie federates Subdl / Addic7ed /
 // others behind a single IMDb-keyed endpoint. No API key, results
 // from "OpenSubtitles" upstream are filtered out at the service
 // boundary so this is purely complementary to the dedicated
-// OpenSubtitles addon path above. Stateless, same reasoning as above.
+// OpenSubtitles addon path above. Singleton so the
+// (imdb, season, episode) → tracks cache outlives requests.
 builder.Services.AddSingleton<IWyzieSubtitlesService, WyzieSubtitlesService>();
 builder.Services.AddScoped<ISyncService, SyncService>();
 // Singleton — its (malId, episode) → markers cache is the whole point. Per-request
@@ -355,8 +349,6 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = "api/docs";
     c.HeadContent = "<meta name=\"referrer\" content=\"no-referrer\">";
 });
-
-app.MapHealthChecks("/health");
 
 app.MapControllerRoute(
     name: "default",

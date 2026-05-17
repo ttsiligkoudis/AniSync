@@ -19,17 +19,6 @@ primary_region = 'ams'
   min_machines_running = 0
   processes = ['app']
 
-  # GET /health is the ASP.NET Core liveness endpoint registered in Program.cs.
-  # Fly recycles the machine if checks fail past the grace period — catches a
-  # wedged process (deadlock, GC death spiral) that's still listening on the
-  # socket. grace_period covers the cold-boot / wake-from-suspend window.
-  [[http_service.checks]]
-    grace_period = "10s"
-    interval = "30s"
-    method = "GET"
-    timeout = "5s"
-    path = "/health"
-
 [env]
   ANISYNC_DATA_DIR = '/data'
 
