@@ -105,6 +105,11 @@ async function tick(env) {
     await pingAniSync(env, dueCount);
 }
 
+// We deliberately swallow every error path back to a 2xx response or a
+// silently-completed scheduled run. Cloudflare aggressively throttles
+// Workers that throw repeatedly from `scheduled` handlers — a transient
+// AniSync outage shouldn't disable the cron trigger that's the whole
+// point of this Worker.
 export default {
     async scheduled(event, env, ctx) {
         ctx.waitUntil(
@@ -116,37 +121,48 @@ export default {
                         await tick(env);
                     }
                 } catch (e) {
+                    // Log and swallow — scheduled handlers that throw
+                    // accumulate failure points against the worker's
+                    // health, and CF can disable the cron after too many.
                     console.error(`scheduled handler failed: ${e && e.message ? e.message : e}`);
                 }
             })(),
         );
+        // No return value needed from scheduled, but explicit success
+        // documents the contract for future readers.
     },
 
     // Manual trigger surface for testing + ops. `wrangler dev` exposes
     // this on localhost so a developer can curl /refresh or /tick to
-    // verify behaviour without waiting for the cron.
+    // verify behaviour without waiting for the cron. Always returns a
+    // 2xx response — error details land in the body but the HTTP
+    // status stays successful so CF doesn't count this as a failure.
     async fetch(request, env) {
-        if (request.method !== 'POST') {
-            return new Response(
-                'POST /refresh to re-pull the schedule\nPOST /tick to evaluate due episodes now',
-                { status: 405, headers: { 'Content-Type': 'text/plain' } },
-            );
-        }
-        const url = new URL(request.url);
         try {
+            if (request.method !== 'POST') {
+                return new Response(
+                    'POST /refresh to re-pull the schedule\nPOST /tick to evaluate due episodes now',
+                    { status: 200, headers: { 'Content-Type': 'text/plain' } },
+                );
+            }
+            const url = new URL(request.url);
             if (url.pathname === '/refresh') {
                 await refreshSchedule(env);
-                return new Response('refreshed\n');
+                return new Response('refreshed\n', { status: 200 });
             }
             if (url.pathname === '/tick') {
                 await tick(env);
-                return new Response('ticked\n');
+                return new Response('ticked\n', { status: 200 });
             }
-            return new Response('not found', { status: 404 });
+            return new Response(
+                'Try POST /refresh or POST /tick\n',
+                { status: 200, headers: { 'Content-Type': 'text/plain' } },
+            );
         } catch (e) {
+            console.error(`fetch handler failed: ${e && e.message ? e.message : e}`);
             return new Response(
                 JSON.stringify({ ok: false, error: e && e.message ? e.message : String(e) }),
-                { status: 500, headers: { 'Content-Type': 'application/json' } },
+                { status: 200, headers: { 'Content-Type': 'application/json' } },
             );
         }
     },

@@ -83,37 +83,45 @@ namespace AnimeList.Services
             {
                 using var scope = _services.CreateScope();
                 var schedule = scope.ServiceProvider.GetRequiredService<IAnimeScheduleService>();
+                var scheduleStore = scope.ServiceProvider.GetRequiredService<IScheduleStore>();
                 await schedule.RefreshAsync(stoppingToken);
 
-                var entries = schedule.GetSchedule();
+                // Pull "things still needing dispatch" from the persistent
+                // store instead of the in-memory snapshot. The store
+                // preserves notified_at across refreshes, so an entry the
+                // scheduler already dispatched in a previous pass is
+                // filtered out here without having to consult the in-
+                // memory _armed set. Covers the wake-from-sleep recovery
+                // case (Fly.io auto-stop killed the Task.Delay) and
+                // collapses redundant Cloudflare Worker pings to cheap
+                // no-ops (the per-airing partial index keeps the lookup
+                // O(log n) regardless of how many historical entries
+                // accumulate before the daily prune runs).
+                var pending = await scheduleStore.GetPendingAsync();
                 var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 var armedThisPass = 0;
                 var recoveredThisPass = 0;
-                foreach (var ep in entries)
+                foreach (var ep in pending)
                 {
                     if (stoppingToken.IsCancellationRequested) break;
 
                     var key = $"{ep.AnilistId}:{ep.Episode}";
                     lock (_armedLock)
                     {
+                        // In-memory dedup for the brief window between
+                        // "this RefreshAndArmAsync saw the row pending"
+                        // and "DispatchImmediate / ArmTimer has marked it
+                        // notified." Without this, two concurrent
+                        // RefreshAndArmAsync calls (e.g. the BG service's
+                        // midnight tick overlapping with a Worker-driven
+                        // trigger) could both see the same pending row
+                        // and double-dispatch before either's MarkNotified
+                        // ran.
                         if (!_armed.Add(key)) continue;
                     }
 
                     if (ep.AiringAt <= nowUnix)
                     {
-                        // Past episode — dispatch immediately rather than
-                        // arm-and-fire-later. Covers the Fly.io auto-stop
-                        // sleep-recovery case: when the machine was asleep
-                        // at the original airing moment, the Task.Delay
-                        // timer died with the process and the user never
-                        // got a notification. On wake the schedule fetch
-                        // (24h lookback) surfaces those past episodes and
-                        // we dispatch them here. NotificationStore's UNIQUE
-                        // INDEX (uid, anime_id, season, episode) makes the
-                        // dispatch idempotent — episodes that DID fire
-                        // before the sleep (or already fired in a prior
-                        // RefreshAndArmAsync pass) collide and become
-                        // no-ops via INSERT OR IGNORE.
                         recoveredThisPass++;
                         _ = DispatchImmediateAsync(ep, key, stoppingToken);
                     }
@@ -125,8 +133,8 @@ namespace AnimeList.Services
                 }
 
                 _logger.LogInformation(
-                    "EpisodeNotificationScheduler armed {Armed} future timers, recovered {Recovered} past episodes (snapshot has {Total} entries)",
-                    armedThisPass, recoveredThisPass, entries.Count);
+                    "EpisodeNotificationScheduler: {Pending} pending → {Armed} future timers + {Recovered} immediate dispatches",
+                    pending.Count, armedThisPass, recoveredThisPass);
             }
             catch (Exception ex)
             {
@@ -143,6 +151,7 @@ namespace AnimeList.Services
         /// </summary>
         private async Task DispatchImmediateAsync(UpcomingEpisode ep, string key, CancellationToken stoppingToken)
         {
+            var success = false;
             try
             {
                 using var scope = _services.CreateScope();
@@ -154,6 +163,14 @@ namespace AnimeList.Services
                     DateTimeOffset.UtcNow.ToUnixTimeSeconds() - ep.AiringAt,
                     result.UsersChecked, result.CachesRefreshed,
                     result.CachesFailed, result.NotificationsCreated, result.NotificationsSuppressed);
+
+                // Mark the schedule entry notified so subsequent
+                // RefreshAndArmAsync passes don't re-dispatch (the per-
+                // user UNIQUE INDEX would still no-op duplicates, but
+                // skipping the work entirely is cheaper).
+                var scheduleStore = scope.ServiceProvider.GetRequiredService<IScheduleStore>();
+                await scheduleStore.MarkNotifiedAsync(ep.AnilistId, ep.Episode);
+                success = true;
             }
             catch (OperationCanceledException)
             {
@@ -165,11 +182,14 @@ namespace AnimeList.Services
             }
             finally
             {
-                // Same dedup-slot cleanup as ArmTimerAsync — clear the
-                // key so a later refresh that still has this episode
-                // in its window can re-attempt (no-ops via INSERT OR
-                // IGNORE on the second pass).
+                // Clear the in-memory dedup slot. On failure the entry
+                // stays pending in the store (notified_at NULL) so a
+                // future RefreshAndArmAsync retries it.
                 lock (_armedLock) { _armed.Remove(key); }
+                if (!success)
+                {
+                    _logger.LogDebug("DispatchImmediateAsync: entry {Key} left pending for next refresh", key);
+                }
             }
         }
 
@@ -191,10 +211,18 @@ namespace AnimeList.Services
                     "episode dispatch {Anime} ep{Ep}: users={Users} refreshed={Refreshed} failed={Failed} created={Created} suppressed={Suppressed}",
                     ep.Title, ep.Episode, result.UsersChecked, result.CachesRefreshed,
                     result.CachesFailed, result.NotificationsCreated, result.NotificationsSuppressed);
+
+                // Mark notified in the schedule store so the next
+                // RefreshAndArmAsync skips this entry. On failure the
+                // entry stays pending and gets retried via the recovery
+                // path on the next wake / schedule pass.
+                var scheduleStore = scope.ServiceProvider.GetRequiredService<IScheduleStore>();
+                await scheduleStore.MarkNotifiedAsync(ep.AnilistId, ep.Episode);
             }
             catch (OperationCanceledException)
             {
-                // App shutting down — drop the timer silently.
+                // App shutting down — drop the timer silently. Entry stays
+                // pending in the store so the next process picks it up.
             }
             catch (Exception ex)
             {
@@ -202,9 +230,9 @@ namespace AnimeList.Services
             }
             finally
             {
-                // Free the dedup slot so a midnight re-arm of the same key
-                // (rare — would mean a schedule that didn't shift) re-fires.
-                // In practice each (anilistId, episode) only airs once.
+                // Free the in-memory dedup slot. The persistent
+                // notified_at flag is the durable record; this is just
+                // for inter-task coordination within a single process.
                 lock (_armedLock) { _armed.Remove(key); }
             }
         }

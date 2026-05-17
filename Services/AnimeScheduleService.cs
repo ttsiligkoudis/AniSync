@@ -26,6 +26,7 @@ namespace AnimeList.Services
         // create a per-call scope — the fallback is registered scoped and
         // shouldn't be captured by this singleton.
         private readonly IServiceProvider _services;
+        private readonly IScheduleStore _scheduleStore;
         private readonly ILogger<AnimeScheduleService> _logger;
 
         // Volatile-replaced reference; reads always see either the old or
@@ -34,9 +35,13 @@ namespace AnimeList.Services
         private IReadOnlyList<UpcomingEpisode> _schedule = [];
         private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
-        public AnimeScheduleService(IServiceProvider services, ILogger<AnimeScheduleService> logger)
+        public AnimeScheduleService(
+            IServiceProvider services,
+            IScheduleStore scheduleStore,
+            ILogger<AnimeScheduleService> logger)
         {
             _services = services;
+            _scheduleStore = scheduleStore;
             _logger = logger;
         }
 
@@ -55,6 +60,23 @@ namespace AnimeList.Services
                 var anilist = scope.ServiceProvider.GetRequiredService<IAnilistFallback>();
                 var fresh = await anilist.GetUpcomingEpisodesAsync(start, end);
                 _schedule = fresh ?? [];
+
+                // Persist the snapshot so the scheduler can recover
+                // dispatch state across process restarts and the per-
+                // airing notified_at flag survives wake/sleep cycles.
+                // Upsert preserves notified_at on existing rows so
+                // a refresh doesn't re-arm an already-dispatched
+                // entry. Best-effort: a DB blip here doesn't block
+                // the in-memory cache from updating.
+                try { await _scheduleStore.UpsertManyAsync(_schedule); }
+                catch (Exception ex) { _logger.LogWarning(ex, "ScheduleStore.UpsertManyAsync failed"); }
+
+                // Drop rows older than 7 days — the scheduler doesn't
+                // care about ancient airings and the table would
+                // otherwise grow unbounded.
+                try { await _scheduleStore.PruneOlderThanAsync(now.AddDays(-7).ToUnixTimeSeconds()); }
+                catch (Exception ex) { _logger.LogDebug(ex, "ScheduleStore.PruneOlderThanAsync failed"); }
+
                 _logger.LogInformation(
                     "AnimeScheduleService refreshed: {Count} airings in [{Start}, {End}]",
                     _schedule.Count, start, end);
