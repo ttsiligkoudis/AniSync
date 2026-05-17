@@ -10,12 +10,19 @@ namespace AnimeList.Services.Interfaces
     public interface INotificationStore
     {
         /// <summary>
-        /// Inserts a notification, no-op on (uid, anime_id, season, episode_number)
-        /// duplicate. Returns true when a new row was inserted, false when the
-        /// unique index suppressed it. The dispatcher relies on this idempotency
-        /// — every 5-min cron tick is safe to re-run on overlapping windows.
+        /// Inserts a notification, no-op when a row already exists for the same
+        /// (uid, season, episode_number) under any of the supplied equivalent
+        /// anime ids. <paramref name="equivalentAnimeIds"/> carries the same
+        /// physical anime under every service prefix the mapping resolves
+        /// (anilist:21 / mal:21 / kitsu:11061 / …) so a user who flipped their
+        /// primary provider between two cron runs doesn't get the same episode
+        /// twice under two different id-spaces — the bell would otherwise show
+        /// two rows because the unique index keys on the literal anime_id
+        /// string. Pass null/empty to fall back to the literal anime_id check
+        /// (callers outside the dispatcher don't need cross-service dedup).
+        /// Returns true when a new row was inserted, false when suppressed.
         /// </summary>
-        Task<bool> CreateAsync(NotificationRecord record);
+        Task<bool> CreateAsync(NotificationRecord record, IReadOnlyCollection<string> equivalentAnimeIds = null);
 
         /// <summary>Most-recent-first, paginated.</summary>
         Task<List<NotificationRecord>> ListForUserAsync(string uid, int limit = 20, int skip = 0);

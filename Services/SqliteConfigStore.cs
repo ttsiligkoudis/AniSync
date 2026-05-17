@@ -76,9 +76,12 @@ namespace AnimeList.Services
 
                 -- Per-user episode notifications. Rendered in the site-header bell
                 -- with an unread badge; click of a row deep-links into the watch
-                -- page. Idempotency on (uid, anime_id, season, episode_number)
-                -- means the every-5-min cron is safe to re-run on the same window
-                -- without producing duplicates — INSERT OR IGNORE in CreateAsync.
+                -- page. The unique index on (uid, anime_id, season, episode_number)
+                -- below is the backstop dedup; primary dedup lives in
+                -- NotificationStore.CreateAsync, which also collapses cross-
+                -- service-prefix duplicates (anilist:21 / mal:21 / kitsu:11061
+                -- = same physical anime) so a primary-provider flip mid-cron-
+                -- window doesn't produce two bell rows for the same episode.
                 CREATE TABLE IF NOT EXISTS notifications (
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
                     uid             TEXT NOT NULL,

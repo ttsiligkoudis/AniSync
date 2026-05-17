@@ -10,10 +10,14 @@ namespace AnimeList.Services
     /// older than the staleness backstop) get refreshed first so a user
     /// who added the show today doesn't miss tonight's episode.
     ///
-    /// Idempotency: <see cref="INotificationStore.CreateAsync"/> uses
-    /// <c>INSERT OR IGNORE</c> on the (uid, anime_id, season, episode_number)
-    /// unique index, so a re-fired timer (after a crash + restart, or a
-    /// double-scheduled episode) produces no duplicates.
+    /// Idempotency: <see cref="INotificationStore.CreateAsync"/> dedups on
+    /// (uid, season, episode_number) AND any of the per-service prefixed
+    /// ids for the same physical anime (anilist:21 / mal:21 / kitsu:11061),
+    /// passed via the equivalentAnimeIds argument below. A user who flips
+    /// primary provider between two cron runs in the dispatch lookback
+    /// window therefore doesn't get the same episode twice under two
+    /// different id-spaces — the bare unique index on (uid, anime_id, …)
+    /// keys on the literal id string and wouldn't catch that.
     /// </summary>
     public class EpisodeNotificationDispatcher : IEpisodeNotificationDispatcher
     {
@@ -70,6 +74,13 @@ namespace AnimeList.Services
                 [AnimeService.MyAnimeList] = mapping?.MalId != null ? $"{malPrefix}{mapping.MalId}" : null,
                 [AnimeService.Kitsu] = mapping?.KitsuId != null ? $"{kitsuPrefix}{mapping.KitsuId}" : null,
             };
+
+            // Treated as the same anime by the dedup check inside
+            // CreateAsync so a primary-service flip mid-window doesn't
+            // produce two bell rows for the same episode.
+            var equivalentIds = idsByService.Values
+                .Where(v => !string.IsNullOrEmpty(v))
+                .ToList();
 
             var caches = await _watchingCache.GetAllAsync();
             if (caches.Count == 0)
@@ -128,7 +139,7 @@ namespace AnimeList.Services
                     CreatedAt = createdAt,
                 };
 
-                var inserted = await _notifications.CreateAsync(record);
+                var inserted = await _notifications.CreateAsync(record, equivalentIds);
                 if (inserted)
                 {
                     created++;
