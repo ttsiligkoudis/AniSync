@@ -47,12 +47,13 @@ namespace AnimeList.Services
             if (isUserList && string.IsNullOrEmpty(tokenData?.user_id))
                 return [];
 
-            // For "browse my list" requests we walk every page server-side, dedup across all
-            // of them, and apply the user's `skip` after dedup. Server-side pagination + per-
-            // page dedup returns short pages that confuse Stremio's "fetch until empty" loop —
-            // some catalog views can end up paging in circles or refetching the same skip
-            // indefinitely. Mirrors AnilistService's MediaListCollection approach.
-            var fetchAll = isUserList && string.IsNullOrEmpty(resolvedAnimeId);
+            // For "browse my list" with grouping on we walk every page server-side, dedup
+            // across all of them, and UserListCache caches the deduped result. With grouping
+            // off the manifest declares the `skip` extra so Stremio paginates one Kitsu page
+            // at a time — every entry already has a unique native id, so per-page dedup
+            // doesn't shrink the response and the "short page = no more" Stremio heuristic
+            // that bites the dedup path doesn't apply.
+            var fetchAll = isUserList && groupSeasons && string.IsNullOrEmpty(resolvedAnimeId);
 
             await _mappingService.EnsureLoadedAsync();
             var seenIds = new Dictionary<string, Meta>();
@@ -115,9 +116,12 @@ namespace AnimeList.Services
             }
 
             // Sort user libraries alphabetically by name so franchise cours sit next to each
-            // other ("Show", "Show Part 2", "Show Season 2", …). Discovery catalogs keep
-            // their API ranking.
-            if (isUserList)
+            // other ("Show", "Show Part 2", "Show Season 2", …) — only meaningful when we
+            // have the whole library in memory (grouping on). With grouping off we return
+            // a single upstream page so the sort would only reorder within that window;
+            // keep Kitsu's own progressed_at ordering instead. Discovery catalogs always
+            // keep their API ranking.
+            if (isUserList && fetchAll)
                 return seenIds.Values
                     .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                     .ToList();

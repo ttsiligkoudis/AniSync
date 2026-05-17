@@ -78,12 +78,12 @@ namespace AnimeList.Services
             if (isUserList && !string.IsNullOrEmpty(resolvedAnimeId))
                 return await GetSingleUserListEntryAsync(resolvedAnimeId, tokenData, groupSeasons);
 
-            // For "browse my list" requests we walk every page server-side and dedup across
-            // all of them. The user-list catalogs no longer carry a `skip` extra in the
-            // manifest (one request per catalog open), so the deduped result is returned in
-            // full at the end rather than sliced. Mirrors the AnilistService MediaListCollection
-            // approach.
-            var fetchAll = isUserList;
+            // For "browse my list" with grouping on we walk every page server-side and dedup
+            // across all of them, then UserListCache caches the deduped result so each
+            // Stremio re-render is free. With grouping off the manifest declares the `skip`
+            // extra so Stremio paginates — one upstream page per request, no global dedup
+            // pass needed (every entry already has a unique native id when grouping is off).
+            var fetchAll = isUserList && groupSeasons;
             // MAL caps animelist at 1000/page, so a single round-trip covers most users; the
             // ranking/seasonal/search endpoints stay at CatalogPageSize.
             var pageSize = fetchAll ? FullFetchPageSize : CatalogPageSize;
@@ -180,9 +180,12 @@ namespace AnimeList.Services
             }
 
             // Sort user libraries alphabetically by name so franchise cours sit next to each
-            // other ("Show", "Show Part 2", "Show Season 2", …). Discovery catalogs keep
-            // their API ranking.
-            if (isUserList)
+            // other ("Show", "Show Part 2", "Show Season 2", …) — only meaningful when we
+            // have the whole library in memory (grouping on). With grouping off we return
+            // a single upstream page so the sort would only reorder within that window and
+            // make the global order jagged across pages; keep MAL's own list_updated_at
+            // ordering instead. Discovery catalogs always keep their API ranking.
+            if (isUserList && fetchAll)
                 return seenIds.Values
                     .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                     .ToList();

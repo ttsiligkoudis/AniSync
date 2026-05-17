@@ -61,6 +61,13 @@ namespace AnimeList.Controllers
                     : await _tokenService.GetAccessTokenAsync(config);
             }
             var isAuthenticated = tokenData != null && !tokenData.anonymousUser;
+            // Drives whether user-list catalogs render with the `skip` extra. When
+            // grouping is off the underlying service can stream one upstream page
+            // at a time (MAL/Kitsu — AniList's MediaListCollection has no nested
+            // pagination, so it still fetches the whole list and gets cached only
+            // when grouping is on).
+            var groupSeasons = configuration?.enableSeasonGrouping == true;
+            var animeService = tokenData?.anime_service ?? AnimeService.Kitsu;
             var name = "AniSync";
 
 #if DEBUG
@@ -97,31 +104,31 @@ namespace AnimeList.Controllers
             // intentionally has no genre options unless discover-only is set.
             if (isAuthenticated && configuration.showCurrent)
                 manifest.catalogs.Add(BuildUserListCatalog(ListType.Current, "Currently watching", tokenData,
-                    configuration.discoverOnlyCurrent, currentListVariant: true));
+                    configuration.discoverOnlyCurrent, groupSeasons, animeService, currentListVariant: true));
 
             if (isAuthenticated && configuration.showCompleted)
                 manifest.catalogs.Add(BuildUserListCatalog(ListType.Completed, "Completed", tokenData,
-                    configuration.discoverOnlyCompleted));
+                    configuration.discoverOnlyCompleted, groupSeasons, animeService));
 
             if (isAuthenticated && configuration.showPlanning)
                 manifest.catalogs.Add(BuildUserListCatalog(ListType.Planning, "Plan to Watch", tokenData,
-                    configuration.discoverOnlyPlanning));
+                    configuration.discoverOnlyPlanning, groupSeasons, animeService));
 
             if (isAuthenticated && configuration.showPaused)
                 manifest.catalogs.Add(BuildUserListCatalog(ListType.Paused, "On Hold", tokenData,
-                    configuration.discoverOnlyPaused));
+                    configuration.discoverOnlyPaused, groupSeasons, animeService));
 
             if (isAuthenticated && configuration.showDropped)
                 manifest.catalogs.Add(BuildUserListCatalog(ListType.Dropped, "Dropped", tokenData,
-                    configuration.discoverOnlyDropped));
+                    configuration.discoverOnlyDropped, groupSeasons, animeService));
 
             // AniList and MyAnimeList both expose a rewatching concept (a separate status on
             // AniList, an is_rewatching boolean on MAL); Kitsu has neither.
             if (isAuthenticated && configuration.showRepeating
-                && (tokenData?.anime_service == AnimeService.Anilist
-                    || tokenData?.anime_service == AnimeService.MyAnimeList))
+                && (animeService == AnimeService.Anilist
+                    || animeService == AnimeService.MyAnimeList))
                 manifest.catalogs.Add(BuildUserListCatalog(ListType.Repeating, "Rewatching", tokenData,
-                    configuration.discoverOnlyRepeating));
+                    configuration.discoverOnlyRepeating, groupSeasons, animeService));
 
             if (configuration?.showTrending == true)
             {
@@ -202,7 +209,7 @@ namespace AnimeList.Controllers
         }
 
         private static Catalog BuildUserListCatalog(ListType list, string name, TokenData tokenData,
-            bool discoverOnly, bool currentListVariant = false)
+            bool discoverOnly, bool groupSeasons, AnimeService service, bool currentListVariant = false)
         {
             // Currently-watching has no genre options unless the user explicitly set discover-only;
             // every other user list always shows the full genre list.
@@ -210,16 +217,26 @@ namespace AnimeList.Controllers
                 ? (discoverOnly ? [DefaultOption] : new List<string>())
                 : GetOptions(discoverOnly);
 
+            var extras = new List<Extra>
+            {
+                new("genre") { options = genreOptions, isRequired = discoverOnly },
+            };
+            // Expose `skip` so Stremio paginates when grouping is off and the upstream
+            // can stream one page per request. Skipped for AniList because its
+            // MediaListCollection GraphQL has no nested pagination — the server would
+            // still fetch everything internally, so paging would just be cosmetic. With
+            // grouping on the result is cached in full, also no paging needed.
+            if (!groupSeasons && service != AnimeService.Anilist)
+            {
+                extras.Add(new Extra("skip"));
+            }
+
             return new Catalog
             {
                 type = MetaType.anime.ToString(),
                 id = list.ToString(),
                 name = name,
-                // No `skip` extra: user-list services already fetch the entire library in one
-                // round-trip on the server side, so paginated client requests would repeat that
-                // cost for nothing. Returning the full list lets Stremio render it locally
-                // without any further calls.
-                extra = [new("genre") { options = genreOptions, isRequired = discoverOnly }],
+                extra = extras,
             };
         }
     }
