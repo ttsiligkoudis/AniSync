@@ -16,7 +16,7 @@ namespace AnimeList.Services
     /// only existed because we wanted a timer; .NET has one in-process.
     /// One AniList airing-schedule fetch per day instead of 288.
     /// </summary>
-    public class EpisodeNotificationScheduler : BackgroundService
+    public class EpisodeNotificationScheduler : BackgroundService, IEpisodeNotificationScheduler
     {
         // Cron grace: a small backstop in case the schedule's airingAt and
         // AniList's "actually publishable" moment disagree by a minute.
@@ -65,6 +65,17 @@ namespace AnimeList.Services
                 await BackstopRefreshWatchingCachesAsync(stoppingToken);
             }
         }
+
+        /// <summary>
+        /// External-trigger entry point. Runs the same refresh + arm +
+        /// dispatch-past-episodes pass the background loop runs at
+        /// midnight, on demand. Used by the <c>POST /api/v1/cron/check-releases</c>
+        /// endpoint that the Cloudflare Worker pings when an episode is
+        /// due — wakes the Fly.io machine, runs this, and the dispatcher's
+        /// 24h recovery logic catches anything that just aired.
+        /// </summary>
+        public Task TriggerRefreshAsync(CancellationToken ct = default)
+            => RefreshAndArmAsync(ct);
 
         private async Task RefreshAndArmAsync(CancellationToken stoppingToken)
         {

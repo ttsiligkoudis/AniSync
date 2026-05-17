@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using AnimeList.Models.Api;
 using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
@@ -144,4 +146,69 @@ namespace AnimeList.Controllers
 
     /// <summary>Body shape for the /bulk-read and /bulk-delete endpoints.</summary>
     public record NotificationIdsRequest(List<long> Ids);
+
+    /// <summary>
+    /// Internal entry-point for the <c>cf-episode-notifier</c> Cloudflare
+    /// Worker. Wakes a (possibly sleeping) Fly.io machine and asks the
+    /// in-process scheduler to run a refresh + dispatch-past-episodes
+    /// pass — so an episode airing while the machine was auto-stopped
+    /// produces a notification the moment the Worker's cron tick fires.
+    /// Intentionally outside the <c>EnableRateLimiting("api")</c>
+    /// partition so a 1-minute Worker doesn't throttle itself; the
+    /// shared-secret check is the auth boundary. Hidden from Swagger
+    /// via <c>[ApiExplorerSettings(IgnoreApi = true)]</c>.
+    /// </summary>
+    [ApiController]
+    [Route("api/v1/cron")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public class CronController : ControllerBase
+    {
+        private readonly IEpisodeNotificationScheduler _scheduler;
+        private readonly IConfiguration _configuration;
+        private readonly ILogger<CronController> _logger;
+
+        public CronController(
+            IEpisodeNotificationScheduler scheduler,
+            IConfiguration configuration,
+            ILogger<CronController> logger)
+        {
+            _scheduler = scheduler;
+            _configuration = configuration;
+            _logger = logger;
+        }
+
+        [HttpPost("check-releases")]
+        public async Task<IActionResult> CheckReleases(CancellationToken ct)
+        {
+            var expected = _configuration["ANISYNC_CRON_SECRET"]
+                ?? Environment.GetEnvironmentVariable("ANISYNC_CRON_SECRET");
+            if (string.IsNullOrEmpty(expected))
+            {
+                _logger.LogError("CronController.CheckReleases invoked with no ANISYNC_CRON_SECRET configured");
+                return StatusCode(500, new ApiError("cron secret not configured"));
+            }
+
+            var provided = Request.Headers["X-Cron-Secret"].FirstOrDefault() ?? string.Empty;
+            // Constant-time compare so timing attacks can't recover the secret
+            // byte-by-byte off the public endpoint.
+            var providedBytes = Encoding.UTF8.GetBytes(provided);
+            var expectedBytes = Encoding.UTF8.GetBytes(expected);
+            if (providedBytes.Length != expectedBytes.Length
+                || !CryptographicOperations.FixedTimeEquals(providedBytes, expectedBytes))
+            {
+                return Unauthorized();
+            }
+
+            try
+            {
+                await _scheduler.TriggerRefreshAsync(ct);
+                return new JsonResult(new { ok = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "CronController.CheckReleases dispatch failed");
+                return StatusCode(500, new ApiError("dispatch failed"));
+            }
+        }
+    }
 }
