@@ -5,21 +5,34 @@
 //                   from AniSync and stores the airing timestamps in KV.
 //   - * * * * *  →  per-minute tick. Reads the cached schedule from KV
 //                   and POSTs /api/v1/cron/check-releases on AniSync if
-//                   any episode airs within the last ~90s window.
+//                   any episode airs within the last ~90s window AND
+//                   that airing hasn't already been pinged-for in a
+//                   previous tick.
 //
-// The Worker burns ~1,440 cron ticks/day (free) but AniSync only wakes
-// when an episode is actually due (~20 times/day). The dispatcher's
-// own 24h recovery + the notifications table's UNIQUE INDEX make the
-// ping idempotent — if multiple ticks fire within the same airing
-// window, duplicate work collapses to no-ops via INSERT OR IGNORE.
+// Worker side: burns ~1,440 cron ticks/day (free), ~1,500 KV reads/day,
+// ~20 KV writes/day — all well under free-plan ceilings.
+// AniSync side: woken ~once per actual airing (~20 times/day), with
+// the per-airing dedup eliminating the ~5–10 boundary-overlap double-
+// wakes the previous design produced.
 
 const SCHEDULE_KEY = 'schedule';
 const DAILY_CRON = '0 1 * * *';
 
 // 90 seconds back-look catches typical Cloudflare cron skew without
-// missing events. AniSync handles redundant pings via its idempotent
-// dispatch, so erring on the side of slightly-wider is safe.
+// missing events. AniSync's schedule_entries.notified_at flag + the
+// per-airing KV dedup below mean even repeated catches collapse to
+// zero AniSync wakes after the first.
 const DUE_WINDOW_SEC = 90;
+
+// 24h TTL on per-airing pinged-marker keys. Long enough to outlast
+// the schedule's 1h past-lookback (an airing can't keep landing in
+// the 90s due window past ~T+90s anyway), short enough to keep the
+// KV namespace tidy without manual pruning.
+const PINGED_KEY_TTL_SEC = 86400;
+
+function pingedKey(airingAt) {
+    return `pinged:${airingAt}`;
+}
 
 async function refreshSchedule(env) {
     if (!env.ANISYNC_URL) {
@@ -53,7 +66,7 @@ async function refreshSchedule(env) {
 async function pingAniSync(env, dueCount) {
     if (!env.ANISYNC_URL || !env.CRON_SECRET) {
         console.error('ANISYNC_URL or CRON_SECRET not configured');
-        return;
+        return false;
     }
     const base = env.ANISYNC_URL.replace(/\/$/, '');
     const started = Date.now();
@@ -69,8 +82,10 @@ async function pingAniSync(env, dueCount) {
         });
         const elapsed = Date.now() - started;
         console.log(`pingAniSync: ${dueCount} due, status=${res.status} elapsed=${elapsed}ms`);
+        return res.ok;
     } catch (e) {
         console.error(`pingAniSync failed: ${e && e.message ? e.message : e}`);
+        return false;
     }
 }
 
@@ -96,13 +111,53 @@ async function tick(env) {
 
     const nowSec = Math.floor(Date.now() / 1000);
     const cutoff = nowSec - DUE_WINDOW_SEC;
-    const dueCount = times.reduce(
-        (acc, t) => (t >= cutoff && t <= nowSec ? acc + 1 : acc),
-        0,
-    );
-    if (dueCount === 0) return;
+    const due = times.filter((t) => t >= cutoff && t <= nowSec);
+    if (due.length === 0) return;
 
-    await pingAniSync(env, dueCount);
+    // Filter out airings we've already pinged for in a previous tick.
+    // Each ping sets a `pinged:<airingAt>` KV key with a 24h TTL so
+    // the 90s-window double-catch (a boundary airing landing in two
+    // consecutive ticks' windows) doesn't produce two wake calls to
+    // AniSync. Reads are cheap on the free plan (~100K/day budget,
+    // we use a couple per tick when something's actually due).
+    const newlyDue = [];
+    for (const t of due) {
+        try {
+            const marker = await env.SCHEDULE.get(pingedKey(t));
+            if (!marker) newlyDue.push(t);
+        } catch (e) {
+            // KV read failure → assume not pinged (better to double-
+            // ping than miss; AniSync's schedule_entries.notified_at
+            // dedupes the work on its end either way).
+            console.error(`tick: pinged-marker read for ${t} failed: ${e && e.message ? e.message : e}`);
+            newlyDue.push(t);
+        }
+    }
+    if (newlyDue.length === 0) {
+        // Everything in the due window has already been pinged for —
+        // the most common case during the 30s overlap between two
+        // consecutive ticks.
+        return;
+    }
+
+    const ok = await pingAniSync(env, newlyDue.length);
+    // Mark pinged regardless of ok — a 5xx from AniSync means the
+    // request reached the machine (which is the whole point of the
+    // ping). If the request never landed at all, the next tick will
+    // see this airing still in the due window and retry.
+    if (!ok) {
+        console.log(`tick: AniSync ping failed but airings will retry on the next tick`);
+        return;
+    }
+    for (const t of newlyDue) {
+        try {
+            await env.SCHEDULE.put(pingedKey(t), '1', {
+                expirationTtl: PINGED_KEY_TTL_SEC,
+            });
+        } catch (e) {
+            console.error(`tick: mark-pinged for ${t} failed: ${e && e.message ? e.message : e}`);
+        }
+    }
 }
 
 // We deliberately swallow every error path back to a 2xx response or a

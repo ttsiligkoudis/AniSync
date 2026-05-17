@@ -132,9 +132,13 @@ EpisodeNotificationScheduler armed N future timers, recovered M past episodes
 | Resource | Per day | Free-plan limit | Headroom |
 |---|---|---|---|
 | Worker invocations (cron ticks) | 1,441 | 100,000 | ~70× |
-| KV reads (schedule lookup per tick) | ~1,440 | 100,000 | ~70× |
-| KV writes (daily schedule write) | 1 | 1,000 | huge |
-| AniSync POSTs (real dispatches) | ~20 | (Fly's billing applies) | n/a |
+| KV reads (schedule + pinged-marker checks) | ~1,470 | 100,000 | ~68× |
+| KV writes (daily refresh + per-airing pinged markers) | ~21 | 1,000 | ~47× |
+| AniSync wake POSTs (one per actual airing, dedup'd) | ~20 | (Fly's billing applies) | n/a |
+
+The per-airing dedup eliminates the boundary-overlap double-wakes — a
+single airing that spans two consecutive 90s windows produces one wake,
+not two.
 
 ## Local development
 
