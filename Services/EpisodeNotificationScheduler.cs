@@ -77,15 +77,10 @@ namespace AnimeList.Services
                 var entries = schedule.GetSchedule();
                 var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 var armedThisPass = 0;
+                var recoveredThisPass = 0;
                 foreach (var ep in entries)
                 {
                     if (stoppingToken.IsCancellationRequested) break;
-
-                    // Skip episodes already past — startup or daily refresh can
-                    // surface these inside the lookback window. The dispatcher's
-                    // idempotency would absorb a re-fire anyway, but skipping is
-                    // cheaper than firing-then-no-op'ing.
-                    if (ep.AiringAt <= nowUnix) continue;
 
                     var key = $"{ep.AnilistId}:{ep.Episode}";
                     lock (_armedLock)
@@ -93,17 +88,77 @@ namespace AnimeList.Services
                         if (!_armed.Add(key)) continue;
                     }
 
-                    armedThisPass++;
-                    _ = ArmTimerAsync(ep, key, stoppingToken);
+                    if (ep.AiringAt <= nowUnix)
+                    {
+                        // Past episode — dispatch immediately rather than
+                        // arm-and-fire-later. Covers the Fly.io auto-stop
+                        // sleep-recovery case: when the machine was asleep
+                        // at the original airing moment, the Task.Delay
+                        // timer died with the process and the user never
+                        // got a notification. On wake the schedule fetch
+                        // (24h lookback) surfaces those past episodes and
+                        // we dispatch them here. NotificationStore's UNIQUE
+                        // INDEX (uid, anime_id, season, episode) makes the
+                        // dispatch idempotent — episodes that DID fire
+                        // before the sleep (or already fired in a prior
+                        // RefreshAndArmAsync pass) collide and become
+                        // no-ops via INSERT OR IGNORE.
+                        recoveredThisPass++;
+                        _ = DispatchImmediateAsync(ep, key, stoppingToken);
+                    }
+                    else
+                    {
+                        armedThisPass++;
+                        _ = ArmTimerAsync(ep, key, stoppingToken);
+                    }
                 }
 
                 _logger.LogInformation(
-                    "EpisodeNotificationScheduler armed {Armed} timers (snapshot has {Total} entries)",
-                    armedThisPass, entries.Count);
+                    "EpisodeNotificationScheduler armed {Armed} future timers, recovered {Recovered} past episodes (snapshot has {Total} entries)",
+                    armedThisPass, recoveredThisPass, entries.Count);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "EpisodeNotificationScheduler.RefreshAndArmAsync failed");
+            }
+        }
+
+        /// <summary>
+        /// Fires a past episode through the dispatcher immediately —
+        /// covers sleep-recovery on auto-stopped hosts where the
+        /// original Task.Delay timer didn't survive the process death.
+        /// Same scope / logging / cleanup shape as <see cref="ArmTimerAsync"/>;
+        /// just skips the wait.
+        /// </summary>
+        private async Task DispatchImmediateAsync(UpcomingEpisode ep, string key, CancellationToken stoppingToken)
+        {
+            try
+            {
+                using var scope = _services.CreateScope();
+                var dispatcher = scope.ServiceProvider.GetRequiredService<IEpisodeNotificationDispatcher>();
+                var result = await dispatcher.DispatchEpisodeAsync(ep, stoppingToken);
+                _logger.LogInformation(
+                    "sleep-recovery dispatch {Anime} ep{Ep} (aired {Ago}s ago): users={Users} refreshed={Refreshed} failed={Failed} created={Created} suppressed={Suppressed}",
+                    ep.Title, ep.Episode,
+                    DateTimeOffset.UtcNow.ToUnixTimeSeconds() - ep.AiringAt,
+                    result.UsersChecked, result.CachesRefreshed,
+                    result.CachesFailed, result.NotificationsCreated, result.NotificationsSuppressed);
+            }
+            catch (OperationCanceledException)
+            {
+                // App shutting down — drop the dispatch silently.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "DispatchImmediateAsync failed for {Key}", key);
+            }
+            finally
+            {
+                // Same dedup-slot cleanup as ArmTimerAsync — clear the
+                // key so a later refresh that still has this episode
+                // in its window can re-attempt (no-ops via INSERT OR
+                // IGNORE on the second pass).
+                lock (_armedLock) { _armed.Remove(key); }
             }
         }
 

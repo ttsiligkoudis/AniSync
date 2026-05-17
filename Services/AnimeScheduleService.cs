@@ -12,10 +12,14 @@ namespace AnimeList.Services
     /// </summary>
     public class AnimeScheduleService : IAnimeScheduleService
     {
-        // Window the scheduler walks per refresh. Wide enough that even with
-        // late-firing daily refreshes we always have tomorrow's morning
-        // airings queued before they happen.
-        private static readonly TimeSpan LookbackWindow = TimeSpan.FromHours(1);
+        // Window the scheduler walks per refresh. Lookback is wide enough
+        // that on wake-from-sleep we can dispatch episodes the now-dead
+        // Task.Delay timers were supposed to fire while the host was
+        // suspended — fits the Fly.io auto-stop case where the machine
+        // might be down for hours between requests. Lookahead is wide
+        // enough that even with late-firing daily refreshes we always
+        // have tomorrow's morning airings queued before they happen.
+        private static readonly TimeSpan LookbackWindow = TimeSpan.FromHours(24);
         private static readonly TimeSpan LookaheadWindow = TimeSpan.FromHours(48);
 
         // IServiceProvider rather than a direct IAnilistFallback so we can
