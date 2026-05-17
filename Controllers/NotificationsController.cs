@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using AnimeList.Models;
 using AnimeList.Models.Api;
 using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
@@ -27,23 +28,26 @@ namespace AnimeList.Controllers
         private readonly ITokenService _tokenService;
         private readonly IConfigStore _configStore;
         private readonly IAnimeScheduleService _schedule;
+        private readonly IAnimeMappingService _mapping;
 
         public NotificationsController(
             INotificationStore store,
             ITokenService tokenService,
             IConfigStore configStore,
-            IAnimeScheduleService schedule)
+            IAnimeScheduleService schedule,
+            IAnimeMappingService mapping)
         {
             _store = store;
             _tokenService = tokenService;
             _configStore = configStore;
             _schedule = schedule;
+            _mapping = mapping;
         }
 
-        private async Task<string> ResolveCurrentUidAsync()
+        private async Task<(string uid, TokenData token)> ResolveCurrentAsync()
         {
-            var (_, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
-            return uid;
+            var (token, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+            return (uid, token);
         }
 
         /// <summary>
@@ -57,12 +61,18 @@ namespace AnimeList.Controllers
         [HttpGet]
         public async Task<IActionResult> List(int limit = 20, int skip = 0)
         {
-            var uid = await ResolveCurrentUidAsync();
+            var (uid, token) = await ResolveCurrentAsync();
             if (uid == null) return Unauthorized(new ApiError("not signed in"));
             if (limit < 1) limit = 1;
             if (limit > 50) limit = 50;
             if (skip < 0) skip = 0;
             var items = await _store.ListForUserAsync(uid, limit, skip);
+            // Translate stored anime_id / LinkPath into the user's CURRENT
+            // primary service so a click after a provider swap lands on
+            // /anime/{primary-service-id}/watch/... rather than the
+            // creation-time service. Falls back to the stored link when
+            // no cross-service mapping exists.
+            await _mapping.RewriteLinksToServiceAsync(items, token.anime_service);
             return new JsonResult(new { items });
         }
 
@@ -79,7 +89,7 @@ namespace AnimeList.Controllers
         public async Task<IActionResult> Count()
         {
             var nextAiringAt = _schedule.GetNextAiringAt();
-            var uid = await ResolveCurrentUidAsync();
+            var (uid, _) = await ResolveCurrentAsync();
             if (uid == null) return new JsonResult(new { count = 0, nextAiringAt });
             var count = await _store.GetUnreadCountAsync(uid);
             return new JsonResult(new { count, nextAiringAt });
@@ -88,7 +98,7 @@ namespace AnimeList.Controllers
         [HttpPost("{id:long}/read")]
         public async Task<IActionResult> MarkRead(long id)
         {
-            var uid = await ResolveCurrentUidAsync();
+            var (uid, _) = await ResolveCurrentAsync();
             if (uid == null) return Unauthorized(new ApiError("not signed in"));
             var ok = await _store.MarkReadAsync(uid, id);
             return ok ? Ok() : NotFound();
@@ -97,7 +107,7 @@ namespace AnimeList.Controllers
         [HttpPost("read-all")]
         public async Task<IActionResult> MarkAllRead()
         {
-            var uid = await ResolveCurrentUidAsync();
+            var (uid, _) = await ResolveCurrentAsync();
             if (uid == null) return Unauthorized(new ApiError("not signed in"));
             var marked = await _store.MarkAllReadAsync(uid);
             return new JsonResult(new { marked });
@@ -110,7 +120,7 @@ namespace AnimeList.Controllers
         [HttpPost("bulk-read")]
         public async Task<IActionResult> BulkRead([FromBody] NotificationIdsRequest body)
         {
-            var uid = await ResolveCurrentUidAsync();
+            var (uid, _) = await ResolveCurrentAsync();
             if (uid == null) return Unauthorized(new ApiError("not signed in"));
             if (body?.Ids == null || body.Ids.Count == 0)
                 return new JsonResult(new { marked = 0 });
@@ -122,7 +132,7 @@ namespace AnimeList.Controllers
         [HttpDelete("{id:long}")]
         public async Task<IActionResult> Delete(long id)
         {
-            var uid = await ResolveCurrentUidAsync();
+            var (uid, _) = await ResolveCurrentAsync();
             if (uid == null) return Unauthorized(new ApiError("not signed in"));
             var ok = await _store.DeleteAsync(uid, id);
             return ok ? Ok() : NotFound();
@@ -135,7 +145,7 @@ namespace AnimeList.Controllers
         [HttpPost("bulk-delete")]
         public async Task<IActionResult> BulkDelete([FromBody] NotificationIdsRequest body)
         {
-            var uid = await ResolveCurrentUidAsync();
+            var (uid, _) = await ResolveCurrentAsync();
             if (uid == null) return Unauthorized(new ApiError("not signed in"));
             if (body?.Ids == null || body.Ids.Count == 0)
                 return new JsonResult(new { deleted = 0 });
