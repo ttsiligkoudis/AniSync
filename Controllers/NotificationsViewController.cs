@@ -16,7 +16,7 @@ namespace AnimeList.Controllers
     {
         // Initial server-rendered chunk + the chunk size the
         // infinite-scroll JS asks for on each append. Mirrors the
-        // Discover paginator's sentinel-watch pattern.
+        // Discover paginator's pattern (LibraryPageSize).
         private const int PageSize = 20;
 
         private readonly ITokenService _tokenService;

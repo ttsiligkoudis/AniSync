@@ -59,6 +59,11 @@ namespace AnimeList.Controllers
             "Sports", "Supernatural", "Music", "Horror", "Thriller",
         ];
 
+        // Page size for the infinite-scroll slice. Mirrors Discover's
+        // CatalogPageSize so the cards-per-row layout is consistent and the
+        // sentinel triggers at the same scroll depth.
+        private const int LibraryPageSize = 50;
+
         [Route("/library")]
         public async Task<IActionResult> Index(string list = null, string search = null, string genre = null)
         {
@@ -73,8 +78,14 @@ namespace AnimeList.Controllers
 
             var hasSearch = !string.IsNullOrWhiteSpace(search);
             var hasGenre = !string.IsNullOrWhiteSpace(genre);
+
+            // Parse the ?list= query param; default to Current and silently coerce
+            // unknown / non-user-list values rather than 400'ing — keeps shareable URLs
+            // tolerant of typos and old links.
             var activeList = ParseListType(list);
 
+            // Honor the "Hide unaired from Watching" site preference — only affects
+            // ListType.Current, every other tab passes the flag through harmlessly.
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
 
@@ -83,7 +94,52 @@ namespace AnimeList.Controllers
             // Watching, not every Naruto in the catalog. So the upstream
             // dispatch always uses activeList (Watching/Completed/etc.); the
             // search term is applied as an in-memory post-filter below.
-            var (metas, useUpstreamPaging) = await FetchAsync(tokenData, activeList, search, genre, hasSearch, hasGenre, hideUnreleased, requestedSkip: 0);
+            var listForCall = activeList;
+            const bool groupSeasonsForCall = false;
+
+            // No caching on the library path — each load reflects live state
+            // off the upstream service. Each per-service call internally
+            // returns the full list (services paginate upstream where
+            // possible); we slice the visible window here to LibraryPageSize
+            // so the first render is fast and the rest streams in through
+            // library-pagination.js.
+            var metas = tokenData.anime_service switch
+            {
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
+            };
+
+            if (hasSearch && metas?.Count > 0)
+            {
+                var normalisedQuery = NormalizeTitle(search);
+                const double minScore = 0.4;
+                metas = metas
+                    .Select(m => (meta: m, score: ScoreMatch(normalisedQuery, m.name)))
+                    .Where(x => x.score >= minScore)
+                    .OrderByDescending(x => x.score)
+                    .Select(x => x.meta)
+                    .ToList();
+            }
+
+            metas ??= [];
+            // Alphabetical sort on non-search list views — keeps pagination
+            // deterministic so /library/page?skip=N hits the same page the
+            // user sees in the rendered grid. Search keeps its relevance
+            // ranking (sorted by ScoreMatch above) since alphabetical ordering
+            // would bury the obvious matches under "Aharen-san" / "Akira" /
+            // etc.
+            if (!hasSearch)
+            {
+                metas = metas
+                    .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            var total = metas.Count;
+            // Search is single-shot (already relevance-ranked, small slice on
+            // the server) so we render the whole result; non-search list views
+            // are paginated by LibraryPageSize so scrolling streams the rest.
+            var slice = hasSearch ? metas : metas.Take(LibraryPageSize).ToList();
 
             return View(new LibraryViewModel
             {
@@ -94,15 +150,9 @@ namespace AnimeList.Controllers
                 Search = hasSearch ? search.Trim() : null,
                 Genre = hasGenre ? genre.Trim() : null,
                 AvailableGenres = PopularGenres,
-                Items = metas,
-                // Scroll pagination only kicks in for upstream-paginated mode
-                // (MAL/Kitsu, no filter). AniList returns the whole library in
-                // one MediaListCollection call so we render every card up front
-                // and the scroll listener doesn't even bind. Filter modes also
-                // render flat — search and genre are both post-fetch for user
-                // lists, so a single full-library fetch is the only way to
-                // surface every match in one shot.
-                Paginated = useUpstreamPaging && metas.Count > 0,
+                Items = slice,
+                TotalItems = total,
+                Paginated = !hasSearch && total > slice.Count,
             });
         }
 
@@ -116,13 +166,13 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
-        /// Returns just the poster-grid HTML (or the full pane partial when
-        /// fullPane=true) for the requested filter combo + scroll offset, so
-        /// library-pagination.js can append on scroll and filter-search.js can
-        /// swap the results pane in place. Mirrors Index's fetch path —
-        /// upstream-paginated for MAL/Kitsu with no filter, full-library for
-        /// AniList or any filter mode. Anonymous users are bounced (the JS
-        /// shouldn't hit this for them, but defend in depth).
+        /// Returns just the poster-grid HTML for the requested filter combo, so
+        /// filter-search.js can swap the results pane in place instead of
+        /// triggering a full page reload when the user clicks Search / changes
+        /// the genre dropdown. Mirrors Index's data-fetch verbatim — same
+        /// per-service dispatch, same search-relevance re-rank, same cache
+        /// bypass behaviour. Anonymous users are bounced (the JS shouldn't
+        /// hit this for them, but defend in depth).
         /// </summary>
         [Route("/library/page")]
         public async Task<IActionResult> Page(string list = null, string search = null, string genre = null, int skip = 0, bool fullPane = false)
@@ -146,87 +196,19 @@ namespace AnimeList.Controllers
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
 
-            // fullPane swap (filter-search Submit) resets to the first upstream
-            // page; the paginator data-skip in the swapped HTML starts the next
-            // scroll run from there. Scroll appends pass skip explicitly. Filter
-            // mode and AniList ignore skip — FetchAsync fetches the whole
-            // library either way.
-            var requestedSkip = fullPane ? 0 : Math.Max(0, skip);
-            var (metas, useUpstreamPaging) = await FetchAsync(tokenData, activeList, search, genre, hasSearch, hasGenre, hideUnreleased, requestedSkip);
-
-            var activeLabel = labels[activeList];
-            var grid = new PosterGridViewModel
-            {
-                Items = metas,
-                ConfigUid = uid,
-                EmptyMessage = fullPane
-                    ? (hasSearch
-                        ? $"No matches for \"{search.Trim()}\"."
-                        : hasGenre
-                            ? $"No {genre.Trim().ToLower()} anime in your {activeLabel} list."
-                            : $"Nothing in your {activeLabel} list on {tokenData.anime_service}.")
-                    : null,
-            };
-
-            // fullPane swaps come from the Search-button click and want the
-            // shared pane partial (paginator wrapper + sentinel for upstream-
-            // paged views, plain grid for AniList / filter modes) so
-            // library-pagination.js can rebind against the freshly-rendered
-            // wrapper. Scroll appends just want the grid chunk to splice into
-            // the existing one.
-            if (fullPane)
-            {
-                return PartialView("_LibraryPane", new LibraryPaneViewModel
-                {
-                    Grid = grid,
-                    ShowPaginator = useUpstreamPaging && metas.Count > 0,
-                    ListSlug = list?.ToLower() ?? activeList.ToString().ToLower(),
-                    Search = hasSearch ? search.Trim() : null,
-                    Genre = hasGenre ? genre.Trim() : null,
-                    // data-skip seeds the next scroll request; on the first
-                    // upstream page this is the page size, which the JS adds
-                    // to as more cards land.
-                    Skip = metas.Count,
-                });
-            }
-            return PartialView("_PosterGrid", grid);
-        }
-
-        /// <summary>
-        /// Shared fetch + in-memory transform pipeline for Index and Page.
-        /// Decides per-service whether to paginate upstream or fetch the whole
-        /// library, dispatches the call, then applies search ranking (when
-        /// active) and alphabetical sorting (only when we have the entire
-        /// library in memory — per-page sort would jumble order across
-        /// boundaries). The <paramref name="requestedSkip"/> argument is the
-        /// scroll offset the JS is asking to start at — only consulted in
-        /// upstream-paging mode (MAL/Kitsu with no filter). Other modes always
-        /// fetch the whole library; the JS doesn't scroll-fetch on those.
-        /// </summary>
-        private async Task<(List<Meta> metas, bool useUpstreamPaging)> FetchAsync(
-            TokenData tokenData, ListType activeList, string search, string genre,
-            bool hasSearch, bool hasGenre, bool hideUnreleased, int requestedSkip)
-        {
-            // No caching on the library path — every load reflects live state
-            // off the upstream service. Mirrors DiscoverController: MAL/Kitsu
-            // paginate upstream one page at a time, AniList returns the whole
-            // library in one MediaListCollection call (no nested pagination).
-            // Filter modes (search or genre) fall back to a full-library fetch
-            // because both filters are post-fetch for user-list endpoints, so
-            // per-page filtering would return sparse or empty pages.
-            var isAnilist = tokenData.anime_service == AnimeService.Anilist;
-            var useUpstreamPaging = !isAnilist && !hasSearch && !hasGenre;
-            // Service-level skip-presence is the trigger for "single upstream
-            // page" vs "fetch the whole library" — see MalService /
-            // KitsuService. Pass null when we want everything.
-            var serviceSkip = useUpstreamPaging ? requestedSkip.ToString() : null;
+            var listForCall = activeList;
             const bool groupSeasonsForCall = false;
 
+            // Same no-cache, same per-service dispatch as Index. The slice
+            // logic below trims to a single LibraryPageSize-sized window so
+            // scroll appends only render their chunk; fullPane callers
+            // (filter-search.js Search-button swap) get the first page only,
+            // since search results are single-shot anyway.
             var metas = tokenData.anime_service switch
             {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, activeList, serviceSkip, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, activeList, serviceSkip, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, activeList, serviceSkip, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
             };
 
             if (hasSearch && metas?.Count > 0)
@@ -242,20 +224,58 @@ namespace AnimeList.Controllers
             }
 
             metas ??= [];
-
-            // Alphabetical sort only when we have the entire library in memory.
-            // In upstream-paged mode we'd be sorting one page at a time, which
-            // would shuffle the global order across page boundaries — let
-            // MAL's list_updated_at / Kitsu's progressed_at ordering carry
-            // through instead. Search already imposes its ScoreMatch ranking.
-            if (!hasSearch && !useUpstreamPaging)
+            // Same alphabetical sort as Index so scroll-appended chunks line
+            // up with the order the user sees server-rendered. Search keeps
+            // its ScoreMatch ordering applied above.
+            if (!hasSearch)
             {
                 metas = metas
                     .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                     .ToList();
             }
+            var total = metas.Count;
 
-            return (metas, useUpstreamPaging);
+            // Slice for the requested window. fullPane swaps land back at the
+            // first page (matches the Index render shape); scroll appends ask
+            // for an offset and get just that window. Skip beyond the upstream
+            // total returns empty — the JS reads that as end-of-catalog and
+            // stops the observer.
+            var slice = hasSearch
+                ? metas
+                : metas.Skip(Math.Max(0, skip)).Take(LibraryPageSize).ToList();
+
+            var activeLabel = labels[activeList];
+            var grid = new PosterGridViewModel
+            {
+                Items = slice,
+                ConfigUid = uid,
+                EmptyMessage = fullPane
+                    ? (hasSearch
+                        ? $"No matches for \"{search.Trim()}\"."
+                        : hasGenre
+                            ? $"No {genre.Trim().ToLower()} anime in your {activeLabel} list."
+                            : $"Nothing in your {activeLabel} list on {tokenData.anime_service}.")
+                    : null,
+            };
+
+            // fullPane swaps come from the Search-button click and want the
+            // shared pane partial (paginator wrapper + sentinel for list
+            // views, plain grid for search) so library-pagination.js can
+            // rebind against the freshly-rendered wrapper. Scroll appends
+            // just want the grid chunk to splice into the existing one.
+            if (fullPane)
+            {
+                return PartialView("_LibraryPane", new LibraryPaneViewModel
+                {
+                    Grid = grid,
+                    ShowPaginator = !hasSearch && total > slice.Count,
+                    ListSlug = list?.ToLower() ?? activeList.ToString().ToLower(),
+                    Search = hasSearch ? search.Trim() : null,
+                    Genre = hasGenre ? genre.Trim() : null,
+                    Skip = slice.Count,
+                });
+            }
+            return PartialView("_PosterGrid", grid);
         }
     }
 
@@ -279,10 +299,12 @@ namespace AnimeList.Controllers
         public string Genre { get; set; }
         public IReadOnlyList<string> AvailableGenres { get; set; } = [];
         public List<Meta> Items { get; set; } = [];
-        // True when scroll pagination should fire — only in upstream-paged
-        // mode (MAL/Kitsu, no filter). AniList user lists and filter modes
-        // (search or genre) render every match server-side in one go, so the
-        // scroll listener stays unbound.
+        // Total items the upstream returned before slicing — used by the
+        // view to seed the paginator's data-skip + sentinel-driven scroll.
+        public int TotalItems { get; set; }
+        // True when the rendered slice is smaller than the upstream total,
+        // i.e. there's more to fetch via /library/page. Always false in
+        // search mode (search returns a single relevance-ranked slice).
         public bool Paginated { get; set; }
     }
 }
