@@ -360,6 +360,16 @@
         }
     }
 
+    // Drop the dashboard's Continue-Watching localStorage cache so the
+    // next dashboard load re-fetches /Home/ContinueWatchingPartial. Any
+    // user-list write (modal save, +1 quick-action, delete) potentially
+    // shuffles the dashboard shelf — same content the server-side
+    // _listCache.Invalidate already does for the per-list cache.
+    function invalidateContinueWatchingCache() {
+        try { localStorage.removeItem('anisync.continueWatching.v1'); }
+        catch (e) { /* quota / private mode — best-effort */ }
+    }
+
     // Stat-cell adjustment — keeps the dashboard's Watching / Completed /
     // Hours numbers in sync with optimistic card removals/additions. No-ops
     // gracefully when the dashboard isn't on the current page (Library /
@@ -463,6 +473,7 @@
                     // Persist on the card itself so subsequent clicks see the
                     // updated value (data attr is the source of truth here).
                     card.setAttribute('data-meta-progress', String(newProgress));
+                    invalidateContinueWatchingCache();
                 } else {
                     if (window.AniSyncToast) window.AniSyncToast.show('Save failed');
                 }
@@ -631,6 +642,7 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data && data.success) {
+                    invalidateContinueWatchingCache();
                     if (cardForUpdate) {
                         // Card-context delete: fade the card out and
                         // tick down the dashboard stats. Same path the
@@ -748,6 +760,7 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data && data.success) {
+                    invalidateContinueWatchingCache();
                     if (cardForUpdate) {
                         // Card-context save — optimistic in-place update +
                         // toast inline. Scroll position preserved.

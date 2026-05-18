@@ -91,7 +91,6 @@ public class HomeController : Controller
             tokenData = DeserializeObject<TokenData>(sessionStr);
 
         string uid = null;
-        List<Meta> continueWatching = [];
         bool hasStats = false;
         List<string> contributingNames = [];
         // Lifted to outer scope so the view-model construction below can
@@ -159,8 +158,12 @@ public class HomeController : Controller
                 contributingNames.Add(AnimeService.Anilist.ToString());
             }
 
-            continueWatching = (await SafeFetchListAsync(tokenData, ListType.Current, groupSeasons, /* nocache */ true, hideUnreleased))
-                .Take(ContinueWatchingMaxItems).ToList();
+            // Continue Watching is now fetched client-side from
+            // /Home/ContinueWatchingPartial and cached in localStorage
+            // (anisync.continueWatching.v1, 10 min TTL) so each dashboard
+            // render doesn't pay the per-user list round-trip. The view
+            // renders the section structure unconditionally for logged-in
+            // non-anonymous users and the JS un-hides it once items load.
         }
 
         // Seasonal stats + popularity shelves apply to every visitor
@@ -218,7 +221,6 @@ public class HomeController : Controller
         {
             TokenData = tokenData,
             ConfigUid = uid,
-            ContinueWatching = continueWatching,
             LinkedServices = linkedServiceNames,
             HasStats = hasStats,
             ContributingServices = contributingNames,
@@ -511,6 +513,50 @@ public class HomeController : Controller
             return new JsonResult(new { success = false, error = "unknown uid" });
 
         return new JsonResult(new { success = true, token });
+    }
+
+    /// <summary>
+    /// Renders the dashboard's "Continue watching" shelf as a _PosterGrid
+    /// partial for the signed-in user's top items from their currently-
+    /// watching list. The dashboard JS fetches this on first load, caches
+    /// the response HTML in localStorage for 10 minutes, and re-renders
+    /// from cache on subsequent visits within the TTL. Returns 204 No
+    /// Content when the user has no Watching entries so the JS can hide
+    /// the section entirely. Manage-entry writes (modal save, +1 quick-
+    /// action, delete) wipe the localStorage key from the client side so
+    /// the next dashboard render picks up the change.
+    /// </summary>
+    [HttpGet("Home/ContinueWatchingPartial")]
+    public async Task<IActionResult> ContinueWatchingPartial()
+    {
+        var (token, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+        if (string.IsNullOrEmpty(uid) || token == null || token.anonymousUser)
+        {
+            return Unauthorized();
+        }
+
+        // Match Index() exactly: dashboard always uses groupSeasons=false
+        // (each cour is its own card on the shelf) and honors the
+        // hideUnreleased site pref so post-finale episodes the user
+        // hasn't checked off don't sit at the front of the shelf.
+        const bool groupSeasons = false;
+        var dashboardConfig = await GetConfigByUidAsync(uid, _configStore);
+        var hideUnreleased = dashboardConfig?.hideUnreleasedFromWatching == true;
+
+        var items = (await SafeFetchListAsync(token, ListType.Current, groupSeasons, /* nocache */ true, hideUnreleased))
+            .Take(ContinueWatchingMaxItems).ToList();
+
+        if (items.Count == 0)
+        {
+            return NoContent();
+        }
+
+        return PartialView("_PosterGrid", new PosterGridViewModel
+        {
+            Items = items,
+            ConfigUid = uid,
+            Variant = "scroll",
+        });
     }
 
     /// <summary>

@@ -1,9 +1,6 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
-using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json.Linq;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace AnimeList.Services
@@ -23,10 +20,8 @@ namespace AnimeList.Services
     public class AddonStreamService : IAddonStreamService
     {
         private readonly IHttpClientFactory _clientFactory;
-        private readonly IMemoryCache _cache;
         private readonly ILogger<AddonStreamService> _logger;
 
-        private static readonly TimeSpan StreamsCacheTtl = TimeSpan.FromMinutes(10);
         private static readonly TimeSpan ManifestTimeout = TimeSpan.FromSeconds(8);
         private static readonly TimeSpan StreamsTimeout = TimeSpan.FromSeconds(12);
 
@@ -94,11 +89,9 @@ namespace AnimeList.Services
 
         public AddonStreamService(
             IHttpClientFactory clientFactory,
-            IMemoryCache cache,
             ILogger<AddonStreamService> logger)
         {
             _clientFactory = clientFactory;
-            _cache = cache;
             _logger = logger;
         }
 
@@ -210,23 +203,12 @@ namespace AnimeList.Services
             var idType = stremioId.Value.Type;
             var idPath = stremioId.Value.Path;
 
-            // Fingerprint the manifest URL so addon-specific encrypted
-            // config segments don't leak into the in-process cache
-            // namespace (memory dumps stay sanitised). Bake the client
-            // IP into the cache key as well: addons like MediaFusion
-            // bind playback tokens to the requesting IP, so two users
-            // on different IPs hitting the same episode genuinely need
-            // different cached responses — sharing would hand user B
-            // a URL token-bound to user A's IP.
-            var keyFingerprint = ShortFingerprint(manifestUrl);
-            var ipKey = string.IsNullOrEmpty(clientIp) ? "anon" : ShortFingerprint(clientIp);
-            var cacheKey = $"addon:{keyFingerprint}:{ipKey}:{idPath}";
-
-            if (_cache.TryGetValue<IReadOnlyList<AddonStream>>(cacheKey, out var hit) && hit != null)
-            {
-                return hit;
-            }
-
+            // No server-side cache: stream URLs are token-bound to the
+            // requesting IP (MediaFusion / Real-Debrid signed paths) so
+            // a shared per-process cache would hand user B a URL minted
+            // for user A's IP. The watch page only re-hits this when the
+            // user navigates back to the episode, so the duplicate-fetch
+            // window is small in practice.
             var streamsUrl = $"{addonRoot}/stream/{idType}/{idPath}.json";
 
             try
@@ -266,10 +248,6 @@ namespace AnimeList.Services
                     parsed.Count, idPath, addonRoot,
                     string.IsNullOrEmpty(clientIp) ? "(none)" : clientIp);
 
-                _cache.Set(cacheKey, parsed, new MemoryCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = StreamsCacheTtl,
-                });
                 return parsed;
             }
             catch (OperationCanceledException)
@@ -696,15 +674,6 @@ namespace AnimeList.Services
                 }
             }
             return string.Empty;
-        }
-
-        private static string ShortFingerprint(string s)
-        {
-            using var sha = SHA256.Create();
-            var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(s));
-            var sb = new StringBuilder(8);
-            for (int i = 0; i < 4; i++) sb.Append(hash[i].ToString("x2"));
-            return sb.ToString();
         }
     }
 }

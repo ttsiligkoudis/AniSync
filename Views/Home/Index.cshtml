@@ -13,7 +13,6 @@
     var allConnectedLabel = isLoggedIn && !anonymousUser
         ? string.Join(" · ", new[] { serviceLabel }.Concat(Model.LinkedServices ?? []))
         : serviceLabel;
-    var hasContinueWatching = Model.ContinueWatching?.Count > 0;
 }
 
 @* Hero card — StreamD-style pill badge + two-tone heading + dual CTAs. Copy
@@ -423,15 +422,17 @@
     </script>
 }
 
-@* Continue Watching: a small slice of the user's Currently Watching list
-   surfaced on the dashboard so the front door does something useful for
-   returning users instead of just showing three nav tiles. Only renders for
-   logged-in non-anonymous users with at least one item; falls back to the
-   plain dashboard otherwise. The grid uses the existing _PosterGrid partial
-   for visual consistency with /library and /discover. *@
-@if (hasContinueWatching)
+@* Continue Watching: a small slice of the user's Currently Watching list,
+   fetched client-side from /Home/ContinueWatchingPartial and cached in
+   localStorage for 10 minutes so each dashboard render doesn't pay the
+   per-user list round-trip. The section's outer skeleton renders for
+   every logged-in non-anonymous user and starts [hidden]; the JS at the
+   bottom of this section either fills the container from the localStorage
+   cache or fetches the partial and injects it. On empty list (204 from
+   the endpoint) the section stays hidden. *@
+@if (isLoggedIn && !anonymousUser)
 {
-    <section class="dashboard-section">
+    <section class="dashboard-section" data-continue-watching-section hidden>
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">Continue watching</h2>
             <a class="dashboard-section-link" href="/library">
@@ -442,16 +443,74 @@
                 </svg>
             </a>
         </div>
-        @* Horizontal-scroll variant rather than the wrapping grid — matches the
-           StreamD "shelf" pattern where the dashboard surfaces multiple short
-           rows rather than a few full grids. *@
-        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
-        {
-            Items = Model.ContinueWatching,
-            ConfigUid = Model.ConfigUid,
-            Variant = "scroll",
-        })
+        <div data-continue-watching-container></div>
     </section>
+    <script>
+        (function () {
+            var section = document.querySelector('[data-continue-watching-section]');
+            if (!section) return;
+            var container = section.querySelector('[data-continue-watching-container]');
+            if (!container) return;
+
+            // 10-minute TTL mirrors the prior server-side UserListCache:
+            // long enough for a Home → Library → Home cycle to be free,
+            // short enough that cross-channel writes (scrobble webhook
+            // from another device, an edit on AniList's site directly)
+            // can't sit stale forever. In-app writes drop the key
+            // explicitly via invalidateContinueWatchingCache() in
+            // wwwroot/js/manage-entry-modal.js.
+            var KEY = 'anisync.continueWatching.v1';
+            var TTL_MS = 10 * 60 * 1000;
+
+            function readCache() {
+                try {
+                    var raw = localStorage.getItem(KEY);
+                    if (!raw) return null;
+                    var obj = JSON.parse(raw);
+                    if (!obj || typeof obj.ts !== 'number' || (Date.now() - obj.ts) > TTL_MS) return null;
+                    return obj;
+                } catch (_) { return null; }
+            }
+            function writeCache(hasItems, html) {
+                try { localStorage.setItem(KEY, JSON.stringify({ ts: Date.now(), hasItems: hasItems, html: html })); }
+                catch (_) { /* quota / private mode — best-effort */ }
+            }
+            function paint(hasItems, html) {
+                if (hasItems && html) {
+                    container.innerHTML = html;
+                    section.hidden = false;
+                } else {
+                    container.innerHTML = '';
+                    section.hidden = true;
+                }
+            }
+
+            async function fetchAndPaint() {
+                try {
+                    var resp = await fetch('/Home/ContinueWatchingPartial', {
+                        credentials: 'same-origin',
+                        skipLoader: true,
+                    });
+                    if (resp.status === 204) {
+                        writeCache(false, '');
+                        paint(false, '');
+                        return;
+                    }
+                    if (!resp.ok) return;
+                    var html = await resp.text();
+                    writeCache(true, html);
+                    paint(true, html);
+                } catch (_) { /* network blip — leave the section hidden */ }
+            }
+
+            var cached = readCache();
+            if (cached) {
+                paint(cached.hasItems, cached.html);
+            } else {
+                fetchAndPaint();
+            }
+        })();
+    </script>
 }
 
 @* Browse By: secondary discovery surfaces. Replaces the previous three nav
