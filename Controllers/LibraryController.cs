@@ -83,6 +83,11 @@ namespace AnimeList.Controllers
             // ListType.Current, every other tab passes the flag through harmlessly.
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
+            // 18+ gate — when off, the library hides any R18 / nsfw=black /
+            // isAdult entries the user has in their list. Same site pref the
+            // Discover and Stremio surfaces respect, so toggling once carries
+            // through every browsing view.
+            var hideAdult = configuration?.showAdultContent != true;
 
             // Library scopes search to the active tab's user list — typing
             // "naruto" on Watching surfaces only Naruto entries already in
@@ -104,9 +109,9 @@ namespace AnimeList.Controllers
             // few-hundred-card grid fine.
             var metas = tokenData.anime_service switch
             {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
             };
 
             if (hasSearch && metas?.Count > 0)
@@ -184,15 +189,16 @@ namespace AnimeList.Controllers
 
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
+            var hideAdult = configuration?.showAdultContent != true;
 
             var listForCall = activeList;
             const bool groupSeasonsForCall = false;
 
             var metas = tokenData.anime_service switch
             {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
             };
 
             if (hasSearch && metas?.Count > 0)

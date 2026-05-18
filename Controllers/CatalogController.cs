@@ -55,6 +55,9 @@ namespace AnimeList.Controllers
                 var configuration = await ResolveConfigAsync(config, _configStore);
                 var groupSeasons = configuration?.enableSeasonGrouping == true;
                 var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
+                // 18+ gate — anonymous (no config) and default-zero installs
+                // get family-safe catalogs; users opt in via /configure.
+                var hideAdult = configuration?.showAdultContent != true;
 
                 // Search always runs with groupSeasons=false so the per-service dedup
                 // doesn't rewrite a movie's name to the shortest among entries that
@@ -66,9 +69,9 @@ namespace AnimeList.Controllers
 
                 var metas = animeService switch
                 {
-                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased),
-                    _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased),
+                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
                 };
 
                 // Search splits into separate series + movie catalogs in the manifest

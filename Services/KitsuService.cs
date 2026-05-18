@@ -32,7 +32,7 @@ namespace AnimeList.Services
             _logger = logger;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null, bool hideUnreleased = false)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null, bool hideUnreleased = false, bool hideAdult = false)
         {
             // Kitsu has no native airing-schedule endpoint; delegate to the AniList fallback
             // and translate ids back to Kitsu for downstream meta/manage flows. genre
@@ -195,6 +195,17 @@ namespace AnimeList.Services
 
                 var status = SafeGet<string>(anime, "attributes", "status");
                 if (hideUnreleased && list == ListType.Current && status is "tba" or "unreleased" or "upcoming") continue;
+
+                // 18+ gate — Kitsu classifies via attributes.ageRating
+                // (G / PG / R / R18). Only R18 is filtered; R covers
+                // standard mature content (violence, language, partial
+                // nudity) which we don't gate. Matches the AniList
+                // isAdult / MAL nsfw=black tier-equivalence.
+                if (hideAdult)
+                {
+                    var ageRating = SafeGet<string>(anime, "attributes", "ageRating");
+                    if (string.Equals(ageRating, "R18", StringComparison.Ordinal)) continue;
+                }
 
                 var animeKitsuId = (string)anime["id"];
 

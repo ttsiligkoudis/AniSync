@@ -75,8 +75,13 @@ namespace AnimeList.Services
             await EnsureSuccessOrThrow(response, "AniList", op);
         }
 
-        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null, string search = null, string sort = null, string season = null)
+        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null, string search = null, string sort = null, string season = null, bool hideAdult = false)
         {
+            // Inline filter argument appended to every media(...) clause when
+            // the caller asked to hide 18+ entries. AniList filters server-
+            // side via media(isAdult: false), so we don't have to post-process
+            // the response.
+            var adultArg = hideAdult ? ", isAdult: false" : string.Empty;
             var requestBody = string.Empty;
 
             if (list == ListType.Search)
@@ -124,7 +129,7 @@ namespace AnimeList.Services
                     query = $@"
                     query ($search: String, $page: Int, $perPage: Int{genreVarDecl}{seasonVarDecl}) {{
                         Page (page: $page, perPage: $perPage) {{
-                            media(search: $search, type: ANIME{genreArg}{seasonArg}) {{
+                            media(search: $search, type: ANIME{genreArg}{seasonArg}{adultArg}) {{
                                 id
                                 format
                                 episodes
@@ -166,6 +171,7 @@ namespace AnimeList.Services
                                     episodes
                                     averageScore
                                     seasonYear
+                                    isAdult
                                     title {{
                                         english
                                         romaji
@@ -202,6 +208,7 @@ namespace AnimeList.Services
                                             episodes
                                             averageScore
                                             seasonYear
+                                            isAdult
                                             title {{
                                                 english
                                                 romaji
@@ -248,7 +255,7 @@ namespace AnimeList.Services
                     query = $@"
                     query ($page: Int, $perPage: Int, $season: MediaSeason, $seasonYear: Int, $sort: [MediaSort]{genreVarDecl}) {{
                         Page (page: $page, perPage: $perPage) {{
-                            media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: $sort{genreArg}) {{
+                            media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: $sort{genreArg}{adultArg}) {{
                                 id
                                 format
                                 episodes
@@ -286,7 +293,7 @@ namespace AnimeList.Services
                     query = $@"
                     query ($sort: [MediaSort], $page: Int, $perPage: Int{genreVarDecl}) {{
                         Page (page: $page, perPage: $perPage) {{
-                            media(sort: $sort, type: ANIME{genreArg}) {{
+                            media(sort: $sort, type: ANIME{genreArg}{adultArg}) {{
                                 id
                                 format
                                 episodes
@@ -312,7 +319,7 @@ namespace AnimeList.Services
             return requestBody;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null, bool hideUnreleased = false)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null, bool hideUnreleased = false, bool hideAdult = false)
         {
             // Airing schedule is shared between services and lives in the cross-service helper.
             // genre threads through so the Discover page's "Airing + Action" filter swaps
@@ -321,7 +328,7 @@ namespace AnimeList.Services
                 return await _anilistFallback.GetAiringScheduleAsync(AnimeService.Anilist, skip, genre);
 
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
-            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, search, sort, season);
+            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, search, sort, season, hideAdult);
 
             var data = await PostGraphQLAsync(requestBody, tokenData);
             if (data == null) return [];
@@ -368,6 +375,13 @@ namespace AnimeList.Services
                 }
 
                 if (hideUnreleased && list == ListType.Current && (string)media.status == "NOT_YET_RELEASED") continue;
+
+                // Catalog (Discover/Search/Seasonal/Trending) queries filter via
+                // media(isAdult: false, …) up at the GraphQL layer, so this
+                // post-check only really matters for user-list queries
+                // (MediaList / MediaListCollection) where the filter doesn't
+                // sit on the media selector. Cheap defensive check either way.
+                if (hideAdult && (bool?)media.isAdult == true) continue;
 
                 // Filter user list entries by genre when discover-only provides a genre selection
                 if (!string.IsNullOrEmpty(genre) && isUserList && media.genres != null)
