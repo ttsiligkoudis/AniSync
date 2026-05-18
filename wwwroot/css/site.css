@@ -3511,19 +3511,11 @@ body.modal-open {
     z-index: 100;
 }
 
-/* @media (hover: hover) keeps touch devices from triggering :hover on tap —
-   on iOS Safari especially, the first tap fires :hover and a synthetic
-   click, which would race the JS toggle and leave the popover stuck open. */
-@media (hover: hover) {
-    .dashboard-stats-info:hover .dashboard-stats-info-tooltip,
-    .dashboard-stats-info:focus-within .dashboard-stats-info-tooltip {
-        visibility: visible;
-        opacity: 1;
-        transform: translateY(0);
-        pointer-events: auto;
-    }
-}
-
+/* Click-only popover — the .is-open class is the single trigger, toggled
+   by the JS click handler in Index.cshtml. No :hover / :focus-within
+   rules so touch and desktop both open the same way (an earlier
+   :hover trigger left the popover stuck open on iOS Safari's first
+   tap, racing the synthetic click event). */
 .dashboard-stats-info.is-open .dashboard-stats-info-tooltip {
     visibility: visible;
     opacity: 1;

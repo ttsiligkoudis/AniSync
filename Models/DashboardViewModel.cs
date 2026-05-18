@@ -20,17 +20,15 @@ namespace AnimeList.Models
         // not just their primary. Empty when no secondaries are linked.
         public List<string> LinkedServices { get; set; } = [];
 
-        // Stats panel — populated only when the viewer has an AniList token
-        // (primary or linked), since the dashboard now reads stats from
-        // AniList's User.statistics GraphQL rather than computing them
-        // locally over the full Watching + Completed lists. MAL / Kitsu
-        // primaries without an AniList link see the panel hidden (HasStats =
-        // false); they can link AniList from /configure to unlock it.
+        // Stats panel gate — true when the viewer has an AniList token
+        // (primary or linked) we can fetch from. The actual numbers don't
+        // live on this model anymore: the view renders skeleton "—"
+        // placeholders and the dashboard JS hits /Home/AnilistStats from
+        // the client (with a 24 h localStorage cache in front), so each
+        // dashboard render doesn't pay the AniList round-trip. MAL / Kitsu
+        // primaries without an AniList link see the panel hidden; they
+        // can link AniList from /configure to unlock it.
         public bool HasStats { get; set; }
-        public int WatchingTotal { get; set; }
-        public int CompletedTotal { get; set; }
-        public int TotalHoursWatched { get; set; }
-        public double? MeanScore { get; set; }
 
         // Names of the services that contributed data to the stats. Stats
         // are AniList-only now, so this is either ["Anilist"] (panel shown)

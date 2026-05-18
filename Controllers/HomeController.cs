@@ -93,10 +93,6 @@ public class HomeController : Controller
         string uid = null;
         List<Meta> continueWatching = [];
         bool hasStats = false;
-        int watchingTotal = 0;
-        int completedTotal = 0;
-        int totalHoursWatched = 0;
-        double? meanScore = null;
         List<string> contributingNames = [];
         // Lifted to outer scope so the view-model construction below can
         // surface the currently-working linked services alongside the
@@ -150,30 +146,21 @@ public class HomeController : Controller
                 }
             }
 
-            // Fire the AniList stats call alongside the primary's Watching
-            // fetch. Continue Watching still comes from the primary so the
-            // "Ep N / Total" progress is meaningful to the user (per-service
-            // progress differs based on which service they actively update).
-            // Lists are no longer cached — every dashboard hit reflects live
-            // state.
-            var statsTask = anilistTokenForStats != null
-                ? _anilistService.GetUserStatsAsync(anilistTokenForStats)
-                : Task.FromResult<AnilistUserStats?>(null);
-            var watchingTask = SafeFetchListAsync(tokenData, ListType.Current, groupSeasons, /* nocache */ true, hideUnreleased);
-            await Task.WhenAll(statsTask, watchingTask);
-
-            continueWatching = watchingTask.Result.Take(ContinueWatchingMaxItems).ToList();
-
-            var stats = await statsTask;
-            if (stats != null)
+            // Stats are no longer fetched server-side — the dashboard JS
+            // hits /Home/AnilistStats from the client (with a 24 h
+            // localStorage cache in front) so each dashboard render
+            // doesn't pay the AniList round-trip. Only flag whether the
+            // panel should render at all (user has a usable AniList
+            // token); the actual numbers fill in via JS once the page
+            // mounts.
+            if (anilistTokenForStats != null)
             {
                 hasStats = true;
-                watchingTotal = stats.Watching;
-                completedTotal = stats.Completed;
-                totalHoursWatched = stats.TotalHoursWatched;
-                meanScore = stats.MeanScore;
                 contributingNames.Add(AnimeService.Anilist.ToString());
             }
+
+            continueWatching = (await SafeFetchListAsync(tokenData, ListType.Current, groupSeasons, /* nocache */ true, hideUnreleased))
+                .Take(ContinueWatchingMaxItems).ToList();
         }
 
         // Seasonal stats + popularity shelves apply to every visitor
@@ -234,10 +221,6 @@ public class HomeController : Controller
             ContinueWatching = continueWatching,
             LinkedServices = linkedServiceNames,
             HasStats = hasStats,
-            WatchingTotal = watchingTotal,
-            CompletedTotal = completedTotal,
-            TotalHoursWatched = totalHoursWatched,
-            MeanScore = meanScore,
             ContributingServices = contributingNames,
             SeasonCurrentlyAiring = seasonAiring,
             SeasonNewThis = seasonNew,
@@ -528,6 +511,52 @@ public class HomeController : Controller
             return new JsonResult(new { success = false, error = "unknown uid" });
 
         return new JsonResult(new { success = true, token });
+    }
+
+    /// <summary>
+    /// Returns the signed-in user's AniList "Your stats" panel data
+    /// (watching count, completed count, hours watched, mean score) so the
+    /// dashboard JS can render the cells without a server round-trip
+    /// blocking the SSR. Cached client-side in localStorage for 24 h;
+    /// the "refresh your stats" link in the stats-info popover wipes that
+    /// key and re-hits this endpoint. Returns 200 with stats=null when the
+    /// user has no AniList token (primary or linked) so the JS can keep
+    /// its placeholders without retrying.
+    /// </summary>
+    [HttpGet("Home/AnilistStats")]
+    public async Task<JsonResult> AnilistStats()
+    {
+        var (token, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+        if (string.IsNullOrEmpty(uid))
+        {
+            Response.StatusCode = 401;
+            return new JsonResult(new { success = false, error = "Sign in first." });
+        }
+
+        TokenData anilistToken = null;
+        if (token.anime_service == AnimeService.Anilist)
+        {
+            anilistToken = token;
+        }
+        else
+        {
+            var linked = await _configStore.GetLinkedTokensAsync(uid);
+            foreach (var lt in linked)
+            {
+                if (lt.NeedsReauth || lt.TokenData == null || lt.TokenData.anonymousUser) continue;
+                if (lt.Service != AnimeService.Anilist) continue;
+                anilistToken = lt.TokenData;
+                break;
+            }
+        }
+
+        if (anilistToken == null)
+        {
+            return new JsonResult(new { success = true, stats = (AnilistUserStats?)null });
+        }
+
+        var stats = await _anilistService.GetUserStatsAsync(anilistToken);
+        return new JsonResult(new { success = true, stats });
     }
 
     /// <summary>
