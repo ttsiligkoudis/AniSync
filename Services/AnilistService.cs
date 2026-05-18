@@ -522,6 +522,10 @@ namespace AnimeList.Services
                             relationType
                             node {
                               id
+                              type
+                              format
+                              isAdult
+                              title { english romaji }
                             }
                           }
                         }
@@ -703,6 +707,70 @@ namespace AnimeList.Services
                         episodes = (int?)rec.episodes,
                         year = (int?)rec.seasonYear,
                         format = NormalizeFormat((string)rec.format),
+                    });
+                }
+            }
+
+            // Relations → Stremio meta links. Each PREQUEL / SEQUEL /
+            // SIDE_STORY / etc. becomes a clickable chip on the meta page
+            // whose URL uses the stremio:///detail/{type}/{id} scheme so
+            // a click in Stremio opens the related entry's meta directly
+            // (same mechanic the existing cast / studios / genres links
+            // use, just pointing at a specific id instead of a filter).
+            //   - Adult relations are dropped from the link list — the
+            //     detail-page gate already 404s adult entries when the
+            //     viewer hasn't opted in, so surfacing a dead navigation
+            //     would just confuse the click.
+            //   - Restricted to the relation types that read meaningfully
+            //     as "another thing to watch" (PREQUEL / SEQUEL / PARENT
+            //     / SIDE_STORY / SPIN_OFF / ALTERNATIVE). CHARACTER /
+            //     SUMMARY / OTHER are intentionally skipped — Stremio's
+            //     link bar is small and noisy chips dilute the useful
+            //     ones.
+            if (result.relations?.edges != null)
+            {
+                var relLabels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["PREQUEL"]     = "Prequel",
+                    ["SEQUEL"]      = "Sequel",
+                    ["PARENT"]      = "Parent story",
+                    ["SIDE_STORY"]  = "Side story",
+                    ["SPIN_OFF"]    = "Spin-off",
+                    ["ALTERNATIVE"] = "Alternative",
+                };
+                foreach (var edge in result.relations.edges)
+                {
+                    var relType = (string)edge.relationType;
+                    if (relType == null || !relLabels.TryGetValue(relType, out var label)) continue;
+                    var node = edge.node;
+                    if (node == null) continue;
+                    var relId = (int?)node.id;
+                    if (!relId.HasValue) continue;
+                    if ((bool?)node.isAdult == true) continue;
+                    var nodeType = (string)node.type;
+                    // Only ANIME relations — manga relations would 404 if
+                    // a Stremio click tried to open them on the anime
+                    // meta endpoint.
+                    if (!string.Equals(nodeType, "ANIME", StringComparison.OrdinalIgnoreCase)) continue;
+                    var name = string.IsNullOrEmpty((string)node.title?.english)
+                        ? (string)node.title?.romaji
+                        : (string)node.title?.english;
+                    if (string.IsNullOrEmpty(name)) continue;
+
+                    // Type in the stremio:/// URL has to match a type our
+                    // manifest declares ("movie" / "series") so the click
+                    // resolves to our /meta/{type}/{id} endpoint. Individual
+                    // metas already use series/movie too (see Meta.cs default
+                    // and IsMovieFormat); the catalog's outer "anime" type
+                    // is just a catalog-list label, not the per-meta type.
+                    var isRelMovie = IsMovieFormat((string)node.format);
+                    var stremioType = isRelMovie ? MetaType.movie.ToString() : MetaType.series.ToString();
+                    anime.links.Add(new Link
+                    {
+                        name = name,
+                        category = label,
+                        url = $"stremio:///detail/{stremioType}/{anilistPrefix}{relId.Value}",
+                        anilistId = relId.Value,
                     });
                 }
             }
