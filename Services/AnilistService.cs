@@ -725,15 +725,16 @@ namespace AnimeList.Services
             // tap the chips on web/desktop or type the title into
             // search on mobile.
             //
-            // Filters:
-            //   - PREQUEL / SEQUEL / PARENT / SIDE_STORY / SPIN_OFF
-            //     / ALTERNATIVE only; CHARACTER / SUMMARY /
-            //     ADAPTATION / OTHER skipped as catalog-link noise.
-            //   - ANIME-only; manga relations would 404 on the meta
-            //     route.
-            //   - Adult relations dropped — AnimeController's gate
-            //     already 404s the click, so surfacing a dead chip
-            //     just confuses the user.
+            // Filter: PREQUEL / SEQUEL only — matches the set
+            // AnilistFallback.GetRelatedAsync emits to the web app's
+            // /anime/{id} "Related" carousel, so the two surfaces stay
+            // in sync. SIDE_STORY / SPIN_OFF / ALTERNATIVE / PARENT
+            // are intentionally NOT here; they'd be inline-watchable
+            // but the web app treats them as catalog-link noise, and
+            // mixing different sets across surfaces was confusing.
+            // ANIME-only; manga relations would 404 on the meta route.
+            // Adult relations dropped — AnimeController's detail gate
+            // already 404s the click, so a dead chip just confuses.
             //
             // URL shape: stremio:///detail/{series|movie}/anilist%3A{id}.
             // The id's colon is URL-encoded so strict Stremio clients
@@ -743,12 +744,8 @@ namespace AnimeList.Services
             {
                 var relLabels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["PREQUEL"]     = "Prequel",
-                    ["SEQUEL"]      = "Sequel",
-                    ["PARENT"]      = "Parent story",
-                    ["SIDE_STORY"]  = "Side story",
-                    ["SPIN_OFF"]    = "Spin-off",
-                    ["ALTERNATIVE"] = "Alternative",
+                    ["PREQUEL"] = "Prequel",
+                    ["SEQUEL"]  = "Sequel",
                 };
                 var descriptionExtras = new List<string>();
                 foreach (var edge in result.relations.edges)
