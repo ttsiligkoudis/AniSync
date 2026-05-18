@@ -1,5 +1,6 @@
 using AnimeList.Models;
 using AnimeList.Models.Api;
+using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -37,6 +38,8 @@ namespace AnimeList.Controllers
         private readonly IFillerListService _fillerListService;
         private readonly ISubtitleService _subtitleService;
         private readonly IWyzieSubtitlesService _wyzieSubtitleService;
+        private readonly ITokenService _tokenService;
+        private readonly IConfigStore _configStore;
         private readonly ILogger<ApiController> _logger;
 
         public ApiController(
@@ -51,6 +54,8 @@ namespace AnimeList.Controllers
             IFillerListService fillerListService,
             ISubtitleService subtitleService,
             IWyzieSubtitlesService wyzieSubtitleService,
+            ITokenService tokenService,
+            IConfigStore configStore,
             ILogger<ApiController> logger)
         {
             _anilistService = anilistService;
@@ -64,7 +69,33 @@ namespace AnimeList.Controllers
             _fillerListService = fillerListService;
             _subtitleService = subtitleService;
             _wyzieSubtitleService = wyzieSubtitleService;
+            _tokenService = tokenService;
+            _configStore = configStore;
             _logger = logger;
+        }
+
+        // True when the caller's session has explicitly opted in to 18+
+        // content via /configure → "Show 18+ content". Anonymous viewers
+        // (no session), unsigned-in browsers, and external programmatic
+        // callers all default to family-safe (hideAdult = true) since
+        // they have no Configuration to set the bit. Used by the search
+        // / match / catalog endpoints below so the same toggle that
+        // governs /discover and /library also governs the public site
+        // surface that hits this controller.
+        private async Task<bool> ResolveHideAdultAsync()
+        {
+            try
+            {
+                var (_, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+                if (string.IsNullOrEmpty(uid)) return true;
+                var cfg = await GetConfigByUidAsync(uid, _configStore);
+                return cfg?.showAdultContent != true;
+            }
+            catch
+            {
+                // Session corrupt / store hiccup — fall back to safe.
+                return true;
+            }
         }
 
         /// <summary>
@@ -213,6 +244,7 @@ namespace AnimeList.Controllers
         [ProducesResponseType(typeof(MetaListResponse), StatusCodes.Status200OK)]
         public async Task<IActionResult> Search(string q, AnimeService service = AnimeService.Anilist, string skip = null)
         {
+            var hideAdult = await ResolveHideAdultAsync();
             try
             {
                 if (string.IsNullOrWhiteSpace(q))
@@ -220,9 +252,9 @@ namespace AnimeList.Controllers
 
                 var metas = service switch
                 {
-                    AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, ListType.Search, skip, search: q),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, ListType.Search, skip, search: q),
-                    _ => await _anilistService.GetAnimeListAsync(null, ListType.Search, skip, search: q),
+                    AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, ListType.Search, skip, search: q, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, ListType.Search, skip, search: q, hideAdult: hideAdult),
+                    _ => await _anilistService.GetAnimeListAsync(null, ListType.Search, skip, search: q, hideAdult: hideAdult),
                 };
                 return new JsonResult(new MetaListResponse(metas));
             }
@@ -257,6 +289,7 @@ namespace AnimeList.Controllers
         [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> Match(string title, AnimeService service = AnimeService.Anilist, int limit = 5)
         {
+            var hideAdult = await ResolveHideAdultAsync();
             try
             {
                 if (string.IsNullOrWhiteSpace(title))
@@ -272,9 +305,9 @@ namespace AnimeList.Controllers
                 // native id space, so handing back an IMDb id would 400 on save.
                 var raw = service switch
                 {
-                    AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, ListType.Search, search: title, groupSeasons: false),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, ListType.Search, search: title, groupSeasons: false),
-                    _ => await _anilistService.GetAnimeListAsync(null, ListType.Search, search: title, groupSeasons: false),
+                    AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, ListType.Search, search: title, groupSeasons: false, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, ListType.Search, search: title, groupSeasons: false, hideAdult: hideAdult),
+                    _ => await _anilistService.GetAnimeListAsync(null, ListType.Search, search: title, groupSeasons: false, hideAdult: hideAdult),
                 };
 
                 var ranked = raw
@@ -332,6 +365,7 @@ namespace AnimeList.Controllers
         public async Task<IActionResult> Discover(string kind, AnimeService service = AnimeService.Anilist,
             string skip = null, string genre = null, string sort = null)
         {
+            var hideAdult = await ResolveHideAdultAsync();
             try
             {
                 var listType = kind?.ToLowerInvariant() switch
@@ -345,9 +379,9 @@ namespace AnimeList.Controllers
 
                 var metas = service switch
                 {
-                    AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, listType.Value, skip, genre: genre, sort: sort),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, listType.Value, skip, genre: genre, sort: sort),
-                    _ => await _anilistService.GetAnimeListAsync(null, listType.Value, skip, genre: genre, sort: sort),
+                    AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, listType.Value, skip, genre: genre, sort: sort, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, listType.Value, skip, genre: genre, sort: sort, hideAdult: hideAdult),
+                    _ => await _anilistService.GetAnimeListAsync(null, listType.Value, skip, genre: genre, sort: sort, hideAdult: hideAdult),
                 };
                 return new JsonResult(new MetaListResponse(metas));
             }
