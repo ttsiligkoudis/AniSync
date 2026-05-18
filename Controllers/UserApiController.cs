@@ -801,8 +801,12 @@ namespace AnimeList.Controllers
 
                 // 18+ gate from the user's site preferences. Honored on the
                 // external API surface too so a programmatic client respects
-                // the same toggle the web app does.
-                var hideAdult = resolvedConfig?.showAdultContent != true;
+                // the same toggle the web app does. ResolvedConfig is the raw
+                // header string; ResolveConfigAsync decodes it (v3 inline or
+                // v5 store-backed) into the Configuration object that carries
+                // the flag bits.
+                var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
+                var hideAdult = configuration?.showAdultContent != true;
                 var metas = tokenData.anime_service switch
                 {
                     AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, ListType.Current, hideAdult: hideAdult),
