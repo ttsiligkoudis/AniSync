@@ -711,36 +711,34 @@ namespace AnimeList.Services
                 }
             }
 
-            // Relations → Stremio meta links AND a fallback "Related"
-            // section appended to the description.
+            // Relations → Stremio meta links + an informational
+            // "Related" section appended to the description.
             //
-            // Stremio's meta.links bar renders custom-category chips
-            // inconsistently across clients — most reliably on
-            // Stremio web/desktop, observed to silently drop the whole
-            // chip row on the mobile client. To make the related-anime
-            // navigation work on every client, we ALSO emit the same
-            // entries inline at the bottom of the description with a
-            // stremio:///detail/... URL on each line. Stremio's
-            // description renderer auto-linkifies bare URLs, so each
-            // line becomes a clickable nav target wherever the chips
-            // don't render.
+            // Stremio's meta.links chip bar renders the entries on
+            // web / desktop but the mobile client silently drops the
+            // whole row (confirmed against the existing AniList / MAL
+            // / Kitsu external chips, which suffer the same fate).
+            // We mirror the list into the description so mobile users
+            // at least SEE which related entries exist — Stremio's
+            // description is plain text with no auto-linkify and no
+            // HTML, so the lines aren't clickable, but the user can
+            // tap the chips on web/desktop or type the title into
+            // search on mobile.
             //
             // Filters:
-            //   - Restricted to relation types that read meaningfully
-            //     as "another thing to watch" (PREQUEL / SEQUEL /
-            //     PARENT / SIDE_STORY / SPIN_OFF / ALTERNATIVE).
-            //     CHARACTER / SUMMARY / ADAPTATION / OTHER skipped as
-            //     catalog-link noise.
+            //   - PREQUEL / SEQUEL / PARENT / SIDE_STORY / SPIN_OFF
+            //     / ALTERNATIVE only; CHARACTER / SUMMARY /
+            //     ADAPTATION / OTHER skipped as catalog-link noise.
             //   - ANIME-only; manga relations would 404 on the meta
             //     route.
             //   - Adult relations dropped — AnimeController's gate
-            //     already 404s the click anyway, so a dead chip just
-            //     confuses the user.
+            //     already 404s the click, so surfacing a dead chip
+            //     just confuses the user.
             //
-            // URL shape: stremio:///detail/{series|movie}/anilist%3A{id}
-            // (the id's colon is URL-encoded so strict Stremio clients
+            // URL shape: stremio:///detail/{series|movie}/anilist%3A{id}.
+            // The id's colon is URL-encoded so strict Stremio clients
             // that don't decode path-segment colons still route
-            // correctly).
+            // correctly.
             if (result.relations?.edges != null)
             {
                 var relLabels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -772,15 +770,14 @@ namespace AnimeList.Services
                     var isRelMovie = IsMovieFormat((string)node.format);
                     var stremioType = isRelMovie ? MetaType.movie.ToString() : MetaType.series.ToString();
                     var encodedId = Uri.EscapeDataString($"{anilistPrefix}{relId.Value}");
-                    var stremioUrl = $"stremio:///detail/{stremioType}/{encodedId}";
                     anime.links.Add(new Link
                     {
                         name = name,
                         category = label,
-                        url = stremioUrl,
+                        url = $"stremio:///detail/{stremioType}/{encodedId}",
                         anilistId = relId.Value,
                     });
-                    descriptionExtras.Add($"{label}: {name} — {stremioUrl}");
+                    descriptionExtras.Add($"{label}: {name}");
                 }
 
                 if (descriptionExtras.Count > 0)
