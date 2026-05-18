@@ -30,9 +30,13 @@ namespace AnimeList.Services
         private static readonly TimeSpan ManifestTimeout = TimeSpan.FromSeconds(8);
         private static readonly TimeSpan StreamsTimeout = TimeSpan.FromSeconds(12);
 
-        // Quality detection follows the de-facto Torrentio convention
-        // every well-known stream addon adopted: "1080p" / "4k" / "720p"
-        // tokens in the name or description.
+        // Quality detection follows the de-facto Torrentio convention every
+        // well-known stream addon adopted: "1080p" / "4k" / "720p" tokens
+        // in the name or description. Used as a DISPLAY label only —
+        // streams whose quality we can't detect still pass through with
+        // Quality = null so the source picker matches what the addon
+        // itself returned in Stremio (filtering belongs upstream, in the
+        // addon's own config URL).
         private static readonly (string Needle, string Quality)[] QualityNeedles =
         [
             ("2160p", "2160p"),
@@ -42,15 +46,6 @@ namespace AnimeList.Services
             ("720p",  "720p"),
             ("480p",  "480p"),
         ];
-
-        // Anything below 720p is dropped — anime users almost always
-        // want at least 720p, and surfacing 480p just dilutes the picker.
-        private static readonly string[] AllowedQualities = ["2160p", "1440p", "1080p", "720p"];
-        // Per-quality cap applies *per addon* (so a 3-addon setup with
-        // 5/quality each surfaces up to 60 entries across 4 buckets).
-        // The merge step in AnimeController re-applies the cap after
-        // dedupe so the rendered list stays manageable regardless.
-        private const int PerQualityCap = 5;
 
         private static readonly Regex SizeRegex = new(@"💾\s*([\d.,]+)\s*(GB|MB|KB|TB)",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -435,8 +430,6 @@ namespace AnimeList.Services
                 var combined = $"{name}\n{rawDescription}\n{rawTitle}";
 
                 var quality = DetectQuality(combined);
-                if (quality == null || Array.IndexOf(AllowedQualities, quality) < 0)
-                    continue;
 
                 var size = DetectSize(combined);
                 var seeders = DetectSeeders(combined);
@@ -487,46 +480,14 @@ namespace AnimeList.Services
                     IsHevc: isHevc));
             }
 
-            return RankAndCap(raw);
-        }
-
-        private static List<AddonStream> RankAndCap(List<AddonStream> raw)
-        {
-            var byQuality = raw
-                .GroupBy(s => s.Quality)
-                .ToDictionary(g => g.Key, g => g
-                    .OrderByDescending(s => s.Seeders)
-                    .ThenByDescending(s => ParseSizeBytes(s.Size))
-                    .Take(PerQualityCap)
-                    .ToList());
-
-            var ranked = new List<AddonStream>(AllowedQualities.Length * PerQualityCap);
-            foreach (var q in AllowedQualities)
-            {
-                if (byQuality.TryGetValue(q, out var bucket))
-                {
-                    ranked.AddRange(bucket);
-                }
-            }
-            return ranked;
-        }
-
-        private static long ParseSizeBytes(string size)
-        {
-            if (string.IsNullOrEmpty(size)) return 0;
-            var parts = size.Split(' ');
-            if (parts.Length != 2) return 0;
-            if (!double.TryParse(parts[0], System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var v))
-                return 0;
-            return parts[1].ToUpperInvariant() switch
-            {
-                "TB" => (long)(v * 1024L * 1024L * 1024L * 1024L),
-                "GB" => (long)(v * 1024L * 1024L * 1024L),
-                "MB" => (long)(v * 1024L * 1024L),
-                "KB" => (long)(v * 1024L),
-                _    => 0,
-            };
+            // Return in the addon's emit order — no re-sort, no cap. Each
+            // addon's config URL is where the user already expressed their
+            // filtering / ordering preferences (Torrentio's qualityfilter=,
+            // sort=, perpage=); second-guessing that here is what made
+            // MediaFusion's single-result responses for some episodes
+            // collapse to zero rows on AniSync vs. the same result
+            // appearing in Stremio.
+            return raw;
         }
 
         private static string DetectQuality(string haystack)

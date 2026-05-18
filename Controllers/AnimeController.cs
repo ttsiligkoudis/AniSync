@@ -503,49 +503,6 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
-        /// Combines stream lists from every configured addon into one
-        /// ranked view. De-dupes by lowercased infoHash, keeping the
-        /// higher-seeder entry on conflict — same SHA-1 means the same
-        /// torrent regardless of which addon surfaced it, so a head-
-        /// to-head usually just resolves to "addon A saw more peers
-        /// than addon B" rather than meaningfully different sources.
-        /// Streams without an infoHash dedupe by URL (rare; means an
-        /// addon emitted a non-torrent entry). Re-bucketed by quality
-        /// and capped per bucket so the merged result mirrors the per-
-        /// addon rank+cap rather than emitting N× entries when many
-        /// addons are configured.
-        /// </summary>
-        private static List<AddonStream> MergeAddonStreams(IReadOnlyList<AddonStream> all)
-        {
-            const int PerQualityCap = 5;
-            string[] qualityOrder = ["2160p", "1440p", "1080p", "720p"];
-
-            var deduped = all
-                .GroupBy(s => string.IsNullOrEmpty(s.InfoHash)
-                    ? "url::" + (s.Url ?? Guid.NewGuid().ToString())
-                    : "hash::" + s.InfoHash.ToLowerInvariant())
-                .Select(g => g.OrderByDescending(s => s.Seeders).First())
-                .ToList();
-
-            var byQuality = deduped
-                .GroupBy(s => s.Quality)
-                .ToDictionary(g => g.Key, g => g
-                    .OrderByDescending(s => s.Seeders)
-                    .Take(PerQualityCap)
-                    .ToList());
-
-            var ranked = new List<AddonStream>(qualityOrder.Length * PerQualityCap);
-            foreach (var q in qualityOrder)
-            {
-                if (byQuality.TryGetValue(q, out var bucket))
-                {
-                    ranked.AddRange(bucket);
-                }
-            }
-            return ranked;
-        }
-
-        /// <summary>
         /// Renumbers <see cref="Meta.videos"/> to within-cour 1..N collapsed
         /// into a single virtual season, preserving the original IMDb
         /// coordinates on each <see cref="Video.imdbSeason"/> /
@@ -744,6 +701,16 @@ namespace AnimeList.Controllers
                 // fallback with the addon's persisted display name
                 // (pulled from manifest.name on save), since the addon
                 // doesn't echo its name on the /stream response.
+                // Preserve the addon's emit order — no post-fetch
+                // dedupe, no per-quality cap. Whatever the user's
+                // configured addons return (in the order they returned
+                // it) is what the source picker shows; filtering /
+                // ordering belongs in each addon's own config URL.
+                // Earlier passes dedup-and-rebucketed across addons,
+                // which silently dropped MediaFusion's lone result on
+                // anime where its quality marker didn't match our
+                // allowlist or hashed equal to a higher-seeder Torrentio
+                // row.
                 var labelledStreams = new List<AddonStream>();
                 for (int i = 0; i < addons.Count; i++)
                 {
@@ -753,8 +720,7 @@ namespace AnimeList.Controllers
                     }
                 }
 
-                var merged = MergeAddonStreams(labelledStreams);
-                debridStreams = merged.Select(s => (object)new
+                debridStreams = labelledStreams.Select(s => (object)new
                 {
                     name = s.Name,
                     title = s.Title,
