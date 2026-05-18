@@ -328,6 +328,27 @@
         </div>
     </header>
 
+    @* Upstream-outage banner — lights up when AniList GraphQL has returned a
+       transport-level / 5xx failure in the last 5 minutes. AniList is the
+       backbone for both AniList-primary users (their library + metadata) and
+       the shared dashboard shelves (Popular This Season, New Episodes Today
+       all read AniList anonymously). When the upstream is down we'd rather
+       tell the user explicitly than show empty shelves. The banner clears
+       automatically on the first successful call after recovery. *@
+    @if (AnimeList.Services.AnilistHealthMonitor.IsDown)
+    {
+        <div class="container" role="status" aria-live="polite">
+            <div style="margin: 12px 0; padding: 10px 14px; border-radius: 6px;
+                        background: #5a2e00; color: #ffd9b3; border: 1px solid #8a4600;
+                        font-size: 14px; line-height: 1.4;">
+                <strong>AniList is having trouble right now.</strong>
+                Some catalog data may be missing or stale.
+                <a href="https://status.anilist.co/" target="_blank" rel="noopener"
+                   style="color: #ffd9b3; text-decoration: underline;">Check status →</a>
+            </div>
+        </div>
+    }
+
     <div class="container">
         <main role="main" style="min-height: 100vh;">
             @RenderBody()

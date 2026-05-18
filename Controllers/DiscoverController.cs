@@ -1,4 +1,5 @@
 using AnimeList.Models;
+using AnimeList.Services;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -116,6 +117,20 @@ namespace AnimeList.Controllers
             // Kitsu's detail page.
             var routeSeasonalViaAnilist = listForCall == ListType.Seasonal
                 && tokenData.anime_service == AnimeService.Kitsu;
+            // Discover lists are all catalog reads (no user state), so when
+            // AniList — the primary — is down we can serve them from Kitsu
+            // anonymously. The cards will link to kitsu:N for the duration of
+            // the outage; click-through still works because /anime/{id} dispatches
+            // on the prefix. Tag routing already goes through AniList unconditionally;
+            // skip the fallback there because Kitsu doesn't expose the same tag taxonomy.
+            var fallbackToKitsu = tokenData.anime_service == AnimeService.Anilist
+                && AnilistHealthMonitor.IsDown
+                && !hasTag
+                && !routeSeasonalViaAnilist;
+            var catalogService = fallbackToKitsu ? AnimeService.Kitsu : tokenData.anime_service;
+            var catalogToken = fallbackToKitsu
+                ? new TokenData { anime_service = AnimeService.Kitsu }
+                : tokenData;
             List<Meta> metas;
             if (hasTag)
             {
@@ -132,11 +147,11 @@ namespace AnimeList.Controllers
             }
             else
             {
-                metas = tokenData.anime_service switch
+                metas = catalogService switch
                 {
-                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                    _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(catalogToken, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(catalogToken, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    _                        => await _kitsuService.GetAnimeListAsync(catalogToken, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
                 };
             }
 
@@ -227,6 +242,16 @@ namespace AnimeList.Controllers
             // initial render.
             var routeSeasonalViaAnilist = listForCall == ListType.Seasonal
                 && tokenData.anime_service == AnimeService.Kitsu;
+            // Same fallback gate as Index() — when AniList is the primary and
+            // the upstream is down, swap to Kitsu for the duration of the outage.
+            var fallbackToKitsu = tokenData.anime_service == AnimeService.Anilist
+                && AnilistHealthMonitor.IsDown
+                && !hasTag
+                && !routeSeasonalViaAnilist;
+            var catalogService = fallbackToKitsu ? AnimeService.Kitsu : tokenData.anime_service;
+            var catalogToken = fallbackToKitsu
+                ? new TokenData { anime_service = AnimeService.Kitsu }
+                : tokenData;
 
             // Per-service translation. The services internally accept an
             // item-count skip (matching the Stremio addon's catalog-extras
@@ -236,7 +261,7 @@ namespace AnimeList.Controllers
             // duplicates a constant that lives on each service, but the
             // alternative is exposing CatalogPageSize through every
             // service interface for one consumer.
-            var pageSize = (tokenData.anime_service == AnimeService.Kitsu && !routeSeasonalViaAnilist) ? 20 : 50;
+            var pageSize = (catalogService == AnimeService.Kitsu && !routeSeasonalViaAnilist) ? 20 : 50;
             var skip = page <= 1 ? null : ((page - 1) * pageSize).ToString();
             if (page < 1) page = 1;
 
@@ -258,11 +283,11 @@ namespace AnimeList.Controllers
             }
             else
             {
-                metas = tokenData.anime_service switch
+                metas = catalogService switch
                 {
-                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                    _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(catalogToken, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(catalogToken, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    _                        => await _kitsuService.GetAnimeListAsync(catalogToken, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
                 };
             }
 
