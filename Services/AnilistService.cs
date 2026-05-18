@@ -998,7 +998,7 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(tokenData?.access_token) || string.IsNullOrEmpty(tokenData.user_id))
                 return null;
-            if (!int.TryParse(tokenData.user_id, out var _)) return null;
+            if (!int.TryParse(tokenData.user_id, out var userId)) return null;
 
             // No server-side cache: the dashboard hits /Home/AnilistStats
             // from JS at most once per 24 h per browser (localStorage TTL),
