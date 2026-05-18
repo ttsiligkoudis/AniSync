@@ -658,7 +658,7 @@ namespace AnimeList.Services
                         query ($page: Int, $season: MediaSeason, $seasonYear: Int) {
                             Page(page: $page, perPage: 50) {
                                 pageInfo { hasNextPage }
-                                media(season: $season, seasonYear: $seasonYear, type: ANIME) {
+                                media(season: $season, seasonYear: $seasonYear, type: ANIME, isAdult: false) {
                                     status
                                 }
                             }
@@ -746,6 +746,7 @@ namespace AnimeList.Services
                                         episodes
                                         averageScore
                                         seasonYear
+                                        isAdult
                                         title { english romaji }
                                         coverImage { large }
                                     }
@@ -768,6 +769,14 @@ namespace AnimeList.Services
                 {
                     var media = sched.media;
                     if (media == null) continue;
+
+                    // Dashboard shelf cache is shared across every viewer, so
+                    // we can't honor a per-user showAdultContent toggle here.
+                    // Match the safer default — explicit 18+ entries never
+                    // surface on the dashboard for anyone. Users who opt in
+                    // can still find them via Discover / search where the
+                    // toggle is per-user.
+                    if ((bool?)media.isAdult == true) continue;
 
                     var anilistId = (int?)media.id;
                     if (!anilistId.HasValue || !seen.Add(anilistId.Value)) continue;
