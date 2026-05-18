@@ -176,24 +176,85 @@
 </section>
 
 @section Scripts {
-    @* Intercept clicks on the "← {Anime title}" header link so /watch is
-       REPLACED in the history stack with /anime/{id} rather than /anime
-       being pushed on top of it. Without this, a flow like
-           dashboard → notification → /watch → back-link → /anime
-       leaves /watch on the back stack, so the browser Back button rewinds
-       to /watch instead of the dashboard the user actually came from.
-       Modifier-clicks (Ctrl / Cmd / Shift / middle button) fall through
-       to the default <a> behaviour so opening the destination in a new
-       tab still works. *@
+    @* History-stack hygiene for the /watch flow:
+       - On page load, classify how we got here (from /anime, from another
+         /watch, or from elsewhere) and stash that on sessionStorage so the
+         back-link knows whether the /anime entry should also be popped.
+       - Replace episode → episode navigations (prev/next buttons) with
+         location.replace so the back stack accumulates at most one /watch
+         entry no matter how many "next" clicks the user does. Without
+         this, three forward clicks left three /watch entries the browser
+         Back button would walk through one at a time.
+       - The "← {Anime title}" back-link then pops 1 entry (when we came
+         from a non-/anime page) or 2 (when we came from /anime), landing
+         the user on whatever was on the stack before they entered the
+         watch flow. Falls back to a plain location.replace of the link's
+         /anime/{id} href when the stack is too shallow (deep-link /watch
+         in a fresh tab) so the user still gets somewhere sensible.
+       Modifier-clicks (Ctrl / Cmd / Shift / middle button) on any of
+       these links fall through to the default <a> behaviour so opening
+       in a new tab still works. *@
     <script>
         (function () {
+            var ENTRY_KEY = 'aniSyncWatchEntry';
+            var watchRe  = /^https?:\/\/[^/]+\/anime\/[^/]+\/watch\//;
+            var animeRe  = /^https?:\/\/[^/]+\/anime\/[^/]+\/?(?:[?#]|$)/;
+
+            // Classify the entry referrer once on page load.
+            try {
+                var ref = document.referrer || '';
+                if (watchRe.test(ref)) {
+                    // From another /watch — keep whatever the original
+                    // entry recorded (fromAnime vs. fromOther).
+                } else if (animeRe.test(ref)) {
+                    sessionStorage.setItem(ENTRY_KEY, 'fromAnime');
+                } else {
+                    sessionStorage.setItem(ENTRY_KEY, 'fromOther');
+                }
+            } catch (e) { /* sessionStorage unavailable — best effort */ }
+
+            // Replace, don't push, when stepping between adjacent
+            // episodes. Keeps the back stack flat.
+            var navLinks = document.querySelectorAll('.watch-nav-prev, .watch-nav-next');
+            for (var i = 0; i < navLinks.length; i++) {
+                navLinks[i].addEventListener('click', function (e) {
+                    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                    e.preventDefault();
+                    window.location.replace(this.href);
+                });
+            }
+
+            // Back-link: pop /watch (+ /anime if we came from there) so
+            // browser Back lands on the page the user was on BEFORE
+            // entering the watch flow.
             var back = document.querySelector('.watch-back');
-            if (!back) return;
-            back.addEventListener('click', function (e) {
-                if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-                e.preventDefault();
-                window.location.replace(back.href);
-            });
+            if (back) {
+                back.addEventListener('click', function (e) {
+                    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                    e.preventDefault();
+
+                    var entry;
+                    try { entry = sessionStorage.getItem(ENTRY_KEY); }
+                    catch (_) { entry = null; }
+                    try { sessionStorage.removeItem(ENTRY_KEY); } catch (_) {}
+
+                    var steps = entry === 'fromAnime' ? 2 : 1;
+                    // history.length counts forward entries too, but in
+                    // the linear forward-only flow this represents the
+                    // tab's accumulated depth. Cap so a shallow stack
+                    // (fresh-tab deep link to /watch) doesn't no-op or
+                    // overshoot into nothing.
+                    var maxBack = window.history.length - 1;
+                    var n = Math.min(steps, maxBack);
+                    if (n > 0) {
+                        window.history.go(-n);
+                    } else {
+                        // No prior entry to pop — land on the anime
+                        // detail page as the next best thing.
+                        window.location.replace(back.href);
+                    }
+                });
+            }
         })();
     </script>
     <script src="https://unpkg.com/artplayer@5/dist/artplayer.js"></script>
