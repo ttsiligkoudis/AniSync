@@ -711,38 +711,19 @@ namespace AnimeList.Services
                 }
             }
 
-            // Relations → Stremio meta links + an informational
-            // "Related" section appended to the description.
-            //
-            // Stremio web silently drops links whose URL uses the
-            // stremio:/// scheme — observed against the current build
-            // where the Tag / Studio / Staff / Similar chips render
-            // (all https URLs) but Prequel / Sequel chips emitted with
-            // stremio:/// URLs do not. Switching the chip URL to
-            // https://web.stremio.com/#/detail/{type}/{id} threads the
-            // needle: Stremio web's link filter accepts the https
-            // scheme and renders the chip; the native Stremio apps
-            // (desktop / mobile) intercept web.stremio.com via
-            // Universal Links / App Links and open the meta in-app.
-            // Worst case on a native client where the interception
-            // isn't registered, the URL opens in the user's browser
-            // which loads Stremio web — still a working navigation.
-            //
-            // We mirror the list into the description so mobile users
-            // (where the chip row is silently dropped entirely, even
-            // for https URLs) at least SEE which related entries
-            // exist — description is plain text with no auto-linkify,
-            // so the lines aren't clickable, but the user can tap the
-            // chips on web/desktop or type the title into search on
-            // mobile.
+            // Relations → Stremio meta links.
             //
             // Filter: PREQUEL / SEQUEL only — matches the set
             // AnilistFallback.GetRelatedAsync emits to the web app's
-            // /anime/{id} "Related" carousel, so the two surfaces stay
-            // in sync. ANIME-only; manga relations would 404 on the
-            // meta route. Adult relations dropped — AnimeController's
-            // detail gate already 404s the click, so a dead chip just
-            // confuses the user.
+            // /anime/{id} "Related" carousel. ANIME-only; manga
+            // relations would 404 on the meta route. Adult relations
+            // dropped (AnimeController's detail gate would 404 the
+            // click anyway).
+            //
+            // URL: https://web.stremio.com/#/detail/{type}/{id}.
+            // Stremio web's hash-routed SPA navigates on click.
+            // Native apps intercept web.stremio.com via Universal
+            // Links / App Links and open the meta in-app.
             if (result.relations?.edges != null)
             {
                 var relLabels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -750,7 +731,6 @@ namespace AnimeList.Services
                     ["PREQUEL"] = "Prequel",
                     ["SEQUEL"]  = "Sequel",
                 };
-                var descriptionExtras = new List<string>();
                 foreach (var edge in result.relations.edges)
                 {
                     var relType = (string)edge.relationType;
@@ -769,9 +749,6 @@ namespace AnimeList.Services
 
                     var isRelMovie = IsMovieFormat((string)node.format);
                     var stremioType = isRelMovie ? MetaType.movie.ToString() : MetaType.series.ToString();
-                    // Stremio web's hash-routed SPA uses #/detail/{type}/{id};
-                    // anilist:{id}'s colon is URL-encoded so the route parser
-                    // doesn't choke on the literal character.
                     var encodedId = Uri.EscapeDataString($"{anilistPrefix}{relId.Value}");
                     anime.links.Add(new Link
                     {
@@ -780,14 +757,6 @@ namespace AnimeList.Services
                         url = $"https://web.stremio.com/#/detail/{stremioType}/{encodedId}",
                         anilistId = relId.Value,
                     });
-                    descriptionExtras.Add($"{label}: {name}");
-                }
-
-                if (descriptionExtras.Count > 0)
-                {
-                    var sep = string.IsNullOrEmpty(anime.description) ? string.Empty : "\n\n";
-                    anime.description = (anime.description ?? string.Empty)
-                        + sep + "Related:\n" + string.Join("\n", descriptionExtras);
                 }
             }
 
