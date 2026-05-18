@@ -531,54 +531,6 @@ public class HomeController : Controller
     }
 
     /// <summary>
-    /// Triggers AniList's <c>UpdateUserStats</c> mutation against the
-    /// signed-in user's AniList account so the "Your stats" panel can
-    /// pick up fresh numbers on the next read. AniList rate-limits this
-    /// per-user (the rejection message includes a "Slow down" timeout);
-    /// surfaces whatever message AniList returns as the error body so
-    /// the dashboard can toast it verbatim. Returns 401 for anonymous
-    /// users and a structured error when no AniList account is linked.
-    /// </summary>
-    [HttpPost("Home/RefreshAnilistStats")]
-    public async Task<JsonResult> RefreshAnilistStats()
-    {
-        var (token, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
-        if (string.IsNullOrEmpty(uid))
-        {
-            Response.StatusCode = 401;
-            return new JsonResult(new { success = false, error = "Sign in first." });
-        }
-
-        // Primary AniList beats linked AniList; same selector the
-        // dashboard's stats fetch uses so the mutation hits the same
-        // account whose numbers the user is looking at.
-        TokenData anilistToken = null;
-        if (token.anime_service == AnimeService.Anilist)
-        {
-            anilistToken = token;
-        }
-        else
-        {
-            var linked = await _configStore.GetLinkedTokensAsync(uid);
-            foreach (var lt in linked)
-            {
-                if (lt.NeedsReauth || lt.TokenData == null || lt.TokenData.anonymousUser) continue;
-                if (lt.Service != AnimeService.Anilist) continue;
-                anilistToken = lt.TokenData;
-                break;
-            }
-        }
-
-        if (anilistToken == null)
-        {
-            return new JsonResult(new { success = false, error = "Link an AniList account first." });
-        }
-
-        var (ok, err) = await _anilistService.UpdateUserStatsAsync(anilistToken);
-        return new JsonResult(new { success = ok, error = err });
-    }
-
-    /// <summary>
     /// Stores the optional Plex Home username filter for shared servers. Empty / whitespace
     /// clears the filter (events from any username will scrobble).
     /// </summary>
