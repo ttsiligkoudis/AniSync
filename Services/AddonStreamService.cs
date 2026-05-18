@@ -198,6 +198,7 @@ namespace AnimeList.Services
             AnimeSourceLinks links,
             int? season,
             int? episode,
+            AnimeService primaryService,
             string clientIp = null,
             CancellationToken ct = default)
         {
@@ -209,7 +210,7 @@ namespace AnimeList.Services
             var addonRoot = ExtractAddonRoot(manifestUrl);
             if (addonRoot == null) return [];
 
-            var stremioId = BuildStremioId(links, season, episode);
+            var stremioId = BuildStremioId(links, season, episode, primaryService);
             if (stremioId == null) return [];
             var idType = stremioId.Value.Type;
             var idPath = stremioId.Value.Path;
@@ -311,11 +312,18 @@ namespace AnimeList.Services
         /// <summary>
         /// Builds the Stremio id segment for the addon's /stream path.
         /// Priority: IMDb (best coverage, Cinemeta-aligned) → Kitsu
-        /// (anime catalog variant). Returns null when neither id is
-        /// available, or when an episode lookup is requested without
-        /// season/episode info.
+        /// (anime catalog variant) → caller's primary-tracker id
+        /// (<c>mal:N</c> / <c>anilist:N</c>) as a last-resort fallback
+        /// for entries that have no IMDb / Kitsu mapping in our local
+        /// data (very new shows, anime with sparse cross-service rows).
+        /// Returns null when none of those resolve, or when an episode
+        /// lookup is requested without season/episode info.
         /// </summary>
-        private static (string Type, string Path)? BuildStremioId(AnimeSourceLinks links, int? season, int? episode)
+        private static (string Type, string Path)? BuildStremioId(
+            AnimeSourceLinks links,
+            int? season,
+            int? episode,
+            AnimeService primaryService)
         {
             if (episode.HasValue && episode.Value > 0)
             {
@@ -332,6 +340,11 @@ namespace AnimeList.Services
                 {
                     return ("series", $"kitsu:{links.KitsuId.Value}:{episode.Value}");
                 }
+                var primaryPath = BuildPrimaryServicePath(links, primaryService, episode.Value);
+                if (primaryPath != null)
+                {
+                    return ("series", primaryPath);
+                }
                 return null;
             }
 
@@ -343,7 +356,43 @@ namespace AnimeList.Services
             {
                 return ("movie", $"kitsu:{links.KitsuId.Value}");
             }
+            var primaryMoviePath = BuildPrimaryServicePath(links, primaryService, episode: null);
+            if (primaryMoviePath != null)
+            {
+                return ("movie", primaryMoviePath);
+            }
             return null;
+        }
+
+        /// <summary>
+        /// Builds the <c>{prefix}:{id}</c> (movie) or <c>{prefix}:{id}:{ep}</c>
+        /// (series) shape for the user's primary-tracker id-space when
+        /// neither IMDb nor Kitsu resolved. Kitsu is intentionally not
+        /// handled here — the caller already covered that branch with the
+        /// dedicated <c>kitsu:</c> fallback, so a Kitsu primary with a
+        /// missing KitsuId genuinely has no third id to try.
+        /// </summary>
+        private static string BuildPrimaryServicePath(AnimeSourceLinks links, AnimeService primaryService, int? episode)
+        {
+            int? id;
+            string prefix;
+            switch (primaryService)
+            {
+                case AnimeService.MyAnimeList:
+                    id = links.MalId;
+                    prefix = "mal";
+                    break;
+                case AnimeService.Anilist:
+                    id = links.AnilistId;
+                    prefix = "anilist";
+                    break;
+                default:
+                    return null;
+            }
+            if (!id.HasValue) return null;
+            return episode.HasValue
+                ? $"{prefix}:{id.Value}:{episode.Value}"
+                : $"{prefix}:{id.Value}";
         }
 
         private List<AddonStream> ParseStreams(string json, string addonRoot)

@@ -728,9 +728,15 @@ namespace AnimeList.Controllers
                 // Fan out in parallel — addons are independent
                 // endpoints with no shared rate-limit, so total latency
                 // floors at max(addon latency) rather than summing.
+                // tokenData.anime_service feeds BuildStremioId's
+                // third-tier fallback (IMDb → Kitsu → primary tracker
+                // id-space) so a show missing both an IMDb and a Kitsu
+                // mapping still produces a request the user's addons
+                // might know about under mal:N / anilist:N.
+                var primaryService = tokenData.anime_service;
                 var fetchTasks = addons
                     .Select(a => _addonStreamService.GetStreamsAsync(
-                        a.Url, sourceLinks, lookupSeason, lookupEpisode, clientIp))
+                        a.Url, sourceLinks, lookupSeason, lookupEpisode, primaryService, clientIp))
                     .ToArray();
                 await Task.WhenAll(fetchTasks);
 
