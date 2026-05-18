@@ -25,7 +25,7 @@ namespace AnimeList.Models
         public string id { get; set; }
         public string name { get; set; }
         public string poster { get; set; }
-        public string description { get; }
+        public string description { get; set; }
 
         // Surfaced by the per-service catalog queries for the StreamD-style card
         // chrome — the score badge overlay on the poster and the "format · eps ·

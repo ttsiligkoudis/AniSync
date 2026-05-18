@@ -711,22 +711,36 @@ namespace AnimeList.Services
                 }
             }
 
-            // Relations → Stremio meta links. Each PREQUEL / SEQUEL /
-            // SIDE_STORY / etc. becomes a clickable chip on the meta page
-            // whose URL uses the stremio:///detail/{type}/{id} scheme so
-            // a click in Stremio opens the related entry's meta directly
-            // (same mechanic the existing cast / studios / genres links
-            // use, just pointing at a specific id instead of a filter).
-            //   - Adult relations are dropped from the link list — the
-            //     detail-page gate already 404s adult entries when the
-            //     viewer hasn't opted in, so surfacing a dead navigation
-            //     would just confuse the click.
-            //   - Restricted to the relation types that read meaningfully
-            //     as "another thing to watch" (PREQUEL / SEQUEL / PARENT
-            //     / SIDE_STORY / SPIN_OFF / ALTERNATIVE). CHARACTER /
-            //     SUMMARY / OTHER are intentionally skipped — Stremio's
-            //     link bar is small and noisy chips dilute the useful
-            //     ones.
+            // Relations → Stremio meta links AND a fallback "Related"
+            // section appended to the description.
+            //
+            // Stremio's meta.links bar renders custom-category chips
+            // inconsistently across clients — most reliably on
+            // Stremio web/desktop, observed to silently drop the whole
+            // chip row on the mobile client. To make the related-anime
+            // navigation work on every client, we ALSO emit the same
+            // entries inline at the bottom of the description with a
+            // stremio:///detail/... URL on each line. Stremio's
+            // description renderer auto-linkifies bare URLs, so each
+            // line becomes a clickable nav target wherever the chips
+            // don't render.
+            //
+            // Filters:
+            //   - Restricted to relation types that read meaningfully
+            //     as "another thing to watch" (PREQUEL / SEQUEL /
+            //     PARENT / SIDE_STORY / SPIN_OFF / ALTERNATIVE).
+            //     CHARACTER / SUMMARY / ADAPTATION / OTHER skipped as
+            //     catalog-link noise.
+            //   - ANIME-only; manga relations would 404 on the meta
+            //     route.
+            //   - Adult relations dropped — AnimeController's gate
+            //     already 404s the click anyway, so a dead chip just
+            //     confuses the user.
+            //
+            // URL shape: stremio:///detail/{series|movie}/anilist%3A{id}
+            // (the id's colon is URL-encoded so strict Stremio clients
+            // that don't decode path-segment colons still route
+            // correctly).
             if (result.relations?.edges != null)
             {
                 var relLabels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -738,6 +752,7 @@ namespace AnimeList.Services
                     ["SPIN_OFF"]    = "Spin-off",
                     ["ALTERNATIVE"] = "Alternative",
                 };
+                var descriptionExtras = new List<string>();
                 foreach (var edge in result.relations.edges)
                 {
                     var relType = (string)edge.relationType;
@@ -748,30 +763,31 @@ namespace AnimeList.Services
                     if (!relId.HasValue) continue;
                     if ((bool?)node.isAdult == true) continue;
                     var nodeType = (string)node.type;
-                    // Only ANIME relations — manga relations would 404 if
-                    // a Stremio click tried to open them on the anime
-                    // meta endpoint.
                     if (!string.Equals(nodeType, "ANIME", StringComparison.OrdinalIgnoreCase)) continue;
                     var name = string.IsNullOrEmpty((string)node.title?.english)
                         ? (string)node.title?.romaji
                         : (string)node.title?.english;
                     if (string.IsNullOrEmpty(name)) continue;
 
-                    // Type in the stremio:/// URL has to match a type our
-                    // manifest declares ("movie" / "series") so the click
-                    // resolves to our /meta/{type}/{id} endpoint. Individual
-                    // metas already use series/movie too (see Meta.cs default
-                    // and IsMovieFormat); the catalog's outer "anime" type
-                    // is just a catalog-list label, not the per-meta type.
                     var isRelMovie = IsMovieFormat((string)node.format);
                     var stremioType = isRelMovie ? MetaType.movie.ToString() : MetaType.series.ToString();
+                    var encodedId = Uri.EscapeDataString($"{anilistPrefix}{relId.Value}");
+                    var stremioUrl = $"stremio:///detail/{stremioType}/{encodedId}";
                     anime.links.Add(new Link
                     {
                         name = name,
                         category = label,
-                        url = $"stremio:///detail/{stremioType}/{anilistPrefix}{relId.Value}",
+                        url = stremioUrl,
                         anilistId = relId.Value,
                     });
+                    descriptionExtras.Add($"{label}: {name} — {stremioUrl}");
+                }
+
+                if (descriptionExtras.Count > 0)
+                {
+                    var sep = string.IsNullOrEmpty(anime.description) ? string.Empty : "\n\n";
+                    anime.description = (anime.description ?? string.Empty)
+                        + sep + "Related:\n" + string.Join("\n", descriptionExtras);
                 }
             }
 
