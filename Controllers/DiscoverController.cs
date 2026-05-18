@@ -127,7 +127,7 @@ namespace AnimeList.Controllers
                     tokenData: null, listForCall,
                     search: search, genre: genre,
                     groupSeasons: groupSeasonsForCall, season: season,
-                    hideUnreleased: hideUnreleased);
+                    hideUnreleased: hideUnreleased, hideAdult: hideAdult);
                 metas = await _anilistFallback.TranslateMetaIdsAsync(metas, AnimeService.Kitsu);
             }
             else
@@ -253,7 +253,7 @@ namespace AnimeList.Controllers
                     tokenData: null, listForCall,
                     skip: skip, genre: genre, search: search,
                     groupSeasons: groupSeasonsForCall, season: season,
-                    hideUnreleased: hideUnreleased);
+                    hideUnreleased: hideUnreleased, hideAdult: hideAdult);
                 metas = await _anilistFallback.TranslateMetaIdsAsync(metas, AnimeService.Kitsu);
             }
             else
