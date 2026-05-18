@@ -773,6 +773,20 @@ body.modal-open {
         transition-duration: 0.01ms !important;
         scroll-behavior: auto !important;
     }
+
+    /* Loaders are essential feedback (WCAG 2.1 SC 2.3.3 carve-out for
+       animations that are essential for understanding) — a frozen
+       spinner just looks like a stack of static circles and gives the
+       user no signal that work is in flight. Re-enable the spin for
+       loader elements specifically so the dashboard's Continue-Watching
+       fetch, infinite-scroll pagination, and the Manage Entry overlay
+       all surface a moving indicator even when the user has reduced
+       motion enabled at the OS level. */
+    .loader-spinner,
+    .paginator-loader-spinner {
+        animation-duration: 0.8s !important;
+        animation-iteration-count: infinite !important;
+    }
 }
 
 /* ── Logo ── */
