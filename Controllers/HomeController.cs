@@ -107,18 +107,6 @@ public class HomeController : Controller
             var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
             uid = resolved;
 
-            // Site UI is always ungrouped — the enableSeasonGrouping pref now
-            // only governs Stremio's catalog / meta endpoints. On the dashboard
-            // we always want each cour visible as its own card so Continue
-            // Watching matches what the user sees in /library.
-            const bool groupSeasons = false;
-
-            // Honor the "Hide unaired from Watching" site preference. Default off
-            // (matches the dashboard's behaviour before the toggle existed for
-            // the entries the user explicitly moved to Watching).
-            var dashboardConfig = await GetConfigByUidAsync(uid, _configStore);
-            var hideUnreleased = dashboardConfig?.hideUnreleasedFromWatching == true;
-
             // Pick the AniList token (primary or linked) — stats now go
             // through AniList's User.statistics GraphQL, which is a single
             // query that's vastly cheaper than fetching the full Watching +
@@ -238,13 +226,13 @@ public class HomeController : Controller
     // without three nested switch expressions. groupSeasons is plumbed through so
     // the dashboard's Continue Watching / stats slice respects the user's
     // "Group anime seasons" toggle the same way the addon catalog does.
-    private async Task<List<Meta>> FetchListAsync(TokenData tokenData, ListType listType, bool groupSeasons = true, bool hideUnreleased = false)
+    private async Task<List<Meta>> FetchListAsync(TokenData tokenData, ListType listType, bool groupSeasons = true, bool hideUnreleased = false, bool hideAdult = false)
     {
         var metas = tokenData.anime_service switch
         {
-            AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased),
-            AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased),
-            _                        => await _kitsuService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased),
+            AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+            AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+            _                        => await _kitsuService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
         };
         return metas ?? [];
     }
@@ -276,7 +264,14 @@ public class HomeController : Controller
                     tokenData: null,
                     list: ListType.Seasonal,
                     genre: seasonOption,
-                    groupSeasons: false);
+                    groupSeasons: false,
+                    // Dashboard shelves are cached globally (every viewer
+                    // hits the same row) so we can't honor a per-user
+                    // showAdultContent toggle here. Default to the safer
+                    // shape — explicit 18+ entries don't surface on the
+                    // dashboard for anyone. Users who opt in can still
+                    // find them via Discover / search.
+                    hideAdult: true);
 
                 top = list?.Take(15).ToList() ?? [];
 
@@ -312,11 +307,11 @@ public class HomeController : Controller
     // call sites but is now a no-op; lists are no longer cached on the
     // dashboard path (every load reflects live state).
     private async Task<List<Meta>> SafeFetchListAsync(TokenData tokenData, ListType listType,
-        bool groupSeasons = true, bool bypassCache = false, bool hideUnreleased = false)
+        bool groupSeasons = true, bool bypassCache = false, bool hideUnreleased = false, bool hideAdult = false)
     {
         try
         {
-            return await FetchListAsync(tokenData, listType, groupSeasons, hideUnreleased);
+            return await FetchListAsync(tokenData, listType, groupSeasons, hideUnreleased, hideAdult);
         }
         catch { return []; }
     }
@@ -544,8 +539,9 @@ public class HomeController : Controller
         const bool groupSeasons = false;
         var dashboardConfig = await GetConfigByUidAsync(uid, _configStore);
         var hideUnreleased = dashboardConfig?.hideUnreleasedFromWatching == true;
+        var hideAdult = dashboardConfig?.showAdultContent != true;
 
-        var metas = (await SafeFetchListAsync(token, ListType.Current, groupSeasons, /* nocache */ true, hideUnreleased))
+        var metas = (await SafeFetchListAsync(token, ListType.Current, groupSeasons, /* nocache */ true, hideUnreleased, hideAdult))
             .Take(ContinueWatchingMaxItems);
 
         // Anonymous projection keeps the payload to only the fields the

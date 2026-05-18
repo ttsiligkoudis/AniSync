@@ -799,11 +799,15 @@ namespace AnimeList.Controllers
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new ApiError("config has no primary token"));
 
+                // 18+ gate from the user's site preferences. Honored on the
+                // external API surface too so a programmatic client respects
+                // the same toggle the web app does.
+                var hideAdult = resolvedConfig?.showAdultContent != true;
                 var metas = tokenData.anime_service switch
                 {
-                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, ListType.Current),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Current),
-                    _ => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Current),
+                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, ListType.Current, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Current, hideAdult: hideAdult),
+                    _ => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Current, hideAdult: hideAdult),
                 };
 
                 return new JsonResult(new ContinueWatchingResponse(

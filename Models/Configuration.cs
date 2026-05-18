@@ -57,5 +57,16 @@
         // entries manually moved to Watching stay visible unless the user opts in
         // to filtering them out via the /configure Site Preferences toggle.
         public bool hideUnreleasedFromWatching { get; set; }
+
+        // Allow 18+ / hentai entries to surface in listing surfaces (Discover,
+        // Library, Stremio catalogs). Positive-sense default-zero so existing
+        // installs are family-safe by default and have to explicitly opt in.
+        // Detail-page navigation always works — the toggle only affects which
+        // entries appear in the catalogue grids. Per-service signal:
+        //   - AniList: media.isAdult boolean (filtered at query time via
+        //     the media(isAdult: false) argument).
+        //   - MAL: node.nsfw == "black" (filtered client-side after fetch).
+        //   - Kitsu: attributes.ageRating == "R18" (filtered client-side).
+        public bool showAdultContent { get; set; }
     }
 }

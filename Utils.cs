@@ -533,6 +533,7 @@ namespace AnimeList
             cfg.discoverOnlyAiring = (flags3 & 0x10) != 0;
             cfg.enableSeasonGrouping = (flags3 & 0x20) != 0;
             cfg.hideUnreleasedFromWatching = (flags3 & 0x40) != 0;
+            cfg.showAdultContent = (flags3 & 0x80) != 0;
         }
 
         /// <summary>
@@ -574,6 +575,7 @@ namespace AnimeList
             if (cfg.discoverOnlyAiring)     f3 |= 0x10;
             if (cfg.enableSeasonGrouping)   f3 |= 0x20;
             if (cfg.hideUnreleasedFromWatching) f3 |= 0x40;
+            if (cfg.showAdultContent)       f3 |= 0x80;
 
             return (f1, f2, f3);
         }

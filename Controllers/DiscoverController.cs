@@ -90,6 +90,9 @@ namespace AnimeList.Controllers
             // ListType.Current discover-only tab; harmless on every other list.
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
+            // 18+ gate — default-zero installs and anonymous viewers get
+            // family-safe results; users opt in via /configure Preferences.
+            var hideAdult = configuration?.showAdultContent != true;
 
             // Discover is always ungrouped — the enableSeasonGrouping pref now
             // only governs Stremio's catalog endpoints. The site renders every
@@ -131,9 +134,9 @@ namespace AnimeList.Controllers
             {
                 metas = tokenData.anime_service switch
                 {
-                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
-                    _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
+                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
                 };
             }
 
@@ -205,6 +208,8 @@ namespace AnimeList.Controllers
 
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
+            // Same gate as Index — see comment there.
+            var hideAdult = configuration?.showAdultContent != true;
 
             // Search runs as ListType.Search across the full anime database;
             // matches the addon-side branch. Pagination scroll calls don't
@@ -255,9 +260,9 @@ namespace AnimeList.Controllers
             {
                 metas = tokenData.anime_service switch
                 {
-                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
-                    _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
+                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
                 };
             }
 
