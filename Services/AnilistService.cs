@@ -1079,6 +1079,20 @@ namespace AnimeList.Services
             return result;
         }
 
+        // AniList exposes two GraphQL endpoints with DIFFERENT schemas.
+        // The public, documented API at graphql.anilist.co covers reads
+        // and the documented Save*/Delete*/Toggle* mutations but does
+        // NOT define UpdateUserStats — querying it there returns
+        //   "Cannot query field UpdateUserStats on type Mutation. Did
+        //    you mean UpdateUser?"
+        // The web-app's own /settings/lists "Update Stats" button posts
+        // to the unlisted internal endpoint anilist.co/graphql, whose
+        // schema is a superset that DOES include UpdateUserStats. Same
+        // OAuth2 bearer token authenticates both endpoints, so we use
+        // the internal URL specifically for this mutation while every
+        // other call stays on the documented one.
+        private const string AnilistInternalGraphQl = "https://anilist.co/graphql";
+
         public async Task<(bool Success, string ErrorMessage)> UpdateUserStatsAsync(TokenData tokenData)
         {
             if (tokenData == null
@@ -1097,7 +1111,7 @@ namespace AnimeList.Services
             // button fires (observed in browser devtools). No variables
             // — the authenticated user is implicit via the bearer token.
             var requestBody = SerializeObject(new { query = "mutation{UpdateUserStats}" });
-            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
+            var request = new HttpRequestMessage(HttpMethod.Post, AnilistInternalGraphQl)
             {
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json"),
             };
