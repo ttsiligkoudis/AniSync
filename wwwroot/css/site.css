@@ -3531,19 +3531,34 @@ body.modal-open {
     pointer-events: auto;
 }
 
-.dashboard-stats-info-tooltip a,
-.dashboard-stats-info-tooltip a:link,
-.dashboard-stats-info-tooltip a:visited {
+/* "Force refresh now" button inside the popover — fires AniList's
+   UpdateUserStats mutation server-side. Quiet primary look; same
+   accent the rest of the dashboard uses for actionable affordances. */
+.dashboard-stats-refresh-btn {
     display: inline-block;
-    margin-top: 0.35rem;
-    color: #6ea8fe;
-    text-decoration: underline;
-    text-underline-offset: 2px;
+    margin-top: 0.5rem;
+    padding: 0.35rem 0.75rem;
+    background: rgba(59, 130, 246, 0.18);
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    border-radius: 6px;
+    color: #d8e6ff;
+    font-size: 0.78rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
-.dashboard-stats-info-tooltip a:hover,
-.dashboard-stats-info-tooltip a:focus {
+.dashboard-stats-refresh-btn:hover,
+.dashboard-stats-refresh-btn:focus {
+    background: rgba(59, 130, 246, 0.32);
+    border-color: rgba(59, 130, 246, 0.65);
     color: #fff;
+    outline: none;
+}
+
+.dashboard-stats-refresh-btn:disabled {
+    opacity: 0.55;
+    cursor: progress;
 }
 
 /* Library variant sits inline inside the page-subtitle line; nudge it up a
