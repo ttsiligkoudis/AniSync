@@ -385,6 +385,7 @@ namespace AnimeList.Services
                 // `source` enum on Kitsu so source stays null — the view's
                 // info row gracefully omits.
                 airStatus = NormalizeAirStatus(SafeGet<string>(entry, "attributes", "status")),
+                isAdult = string.Equals(SafeGet<string>(entry, "attributes", "ageRating"), "R18", StringComparison.Ordinal),
             };
 
             var youtubeId = SafeGet<string>(entry, "attributes", "youtubeVideoId");

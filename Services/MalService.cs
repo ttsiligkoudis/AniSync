@@ -209,7 +209,7 @@ namespace AnimeList.Services
             // as the trailer and fall back to AniList through the mapping otherwise.
             const string fields =
                 "id,title,alternative_titles,main_picture,pictures,synopsis,mean,media_type,status," +
-                "num_episodes,start_season,broadcast,source,genres,studios,recommendations,related_anime,videos";
+                "num_episodes,start_season,broadcast,source,genres,studios,recommendations,related_anime,videos,nsfw";
 
             var json = await GetJsonAsync($"{MalApi}/anime/{resolvedAnimeId}?fields={fields}", tokenData);
             if (json == null) return null;
@@ -257,6 +257,7 @@ namespace AnimeList.Services
                 format = NormalizeFormat(mediaType),
                 airStatus = NormalizeAirStatus((string)json["status"]),
                 source = NormalizeSource((string)json["source"]),
+                isAdult = string.Equals((string)json["nsfw"], "black", StringComparison.Ordinal),
             };
 
             // Trailer: try MAL's own `videos` first (rare but present on some titles), then

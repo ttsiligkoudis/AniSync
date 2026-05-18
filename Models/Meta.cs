@@ -39,6 +39,13 @@ namespace AnimeList.Models
         public int? year { get; set; }
         public string format { get; set; }
 
+        // 18+ tier flag (hentai / R18 / nsfw=black). Populated on detail-fetch
+        // by per-service GetAnimeByIdAsync so AnimeController.Detail can gate
+        // the page behind the user's showAdultContent preference; null/false
+        // on catalog responses where every adult entry is already filtered
+        // upstream via the same toggle.
+        public bool isAdult { get; set; }
+
         // Display-ready airing status ("Airing" / "Finished" / "Hiatus" /
         // "Cancelled" / "Not Yet Released") and source-material label
         // ("Manga adaptation" / "Original" / "Novel adaptation" / etc.).
