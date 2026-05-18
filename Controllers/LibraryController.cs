@@ -59,11 +59,6 @@ namespace AnimeList.Controllers
             "Sports", "Supernatural", "Music", "Horror", "Thriller",
         ];
 
-        // Page size for the infinite-scroll slice. Mirrors Discover's
-        // CatalogPageSize so the cards-per-row layout is consistent and the
-        // sentinel triggers at the same scroll depth.
-        private const int LibraryPageSize = 50;
-
         [Route("/library")]
         public async Task<IActionResult> Index(string list = null, string search = null, string genre = null)
         {
@@ -98,11 +93,15 @@ namespace AnimeList.Controllers
             const bool groupSeasonsForCall = false;
 
             // No caching on the library path — each load reflects live state
-            // off the upstream service. Each per-service call internally
-            // returns the full list (services paginate upstream where
-            // possible); we slice the visible window here to LibraryPageSize
-            // so the first render is fast and the rest streams in through
-            // library-pagination.js.
+            // off the upstream service. Each per-service call returns the
+            // user's FULL list for the requested status; we don't paginate
+            // server-side and don't slice — render every card. Earlier code
+            // used a server-side scroll-fetch (sliced 50 entries per page,
+            // sentinel-driven), but each /library/page call had to re-fetch
+            // the entire list from upstream just to throw away everything
+            // outside the requested window, so the pagination saved no
+            // upstream work — only the HTML size. The browser handles a
+            // few-hundred-card grid fine.
             var metas = tokenData.anime_service switch
             {
                 AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
@@ -123,23 +122,16 @@ namespace AnimeList.Controllers
             }
 
             metas ??= [];
-            // Alphabetical sort on non-search list views — keeps pagination
-            // deterministic so /library/page?skip=N hits the same page the
-            // user sees in the rendered grid. Search keeps its relevance
-            // ranking (sorted by ScoreMatch above) since alphabetical ordering
-            // would bury the obvious matches under "Aharen-san" / "Akira" /
-            // etc.
+            // Alphabetical sort on non-search list views. Search keeps its
+            // relevance ranking (sorted by ScoreMatch above) since
+            // alphabetical ordering would bury the obvious matches under
+            // "Aharen-san" / "Akira" / etc.
             if (!hasSearch)
             {
                 metas = metas
                     .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                     .ToList();
             }
-            var total = metas.Count;
-            // Search is single-shot (already relevance-ranked, small slice on
-            // the server) so we render the whole result; non-search list views
-            // are paginated by LibraryPageSize so scrolling streams the rest.
-            var slice = hasSearch ? metas : metas.Take(LibraryPageSize).ToList();
 
             return View(new LibraryViewModel
             {
@@ -150,9 +142,7 @@ namespace AnimeList.Controllers
                 Search = hasSearch ? search.Trim() : null,
                 Genre = hasGenre ? genre.Trim() : null,
                 AvailableGenres = PopularGenres,
-                Items = slice,
-                TotalItems = total,
-                Paginated = !hasSearch && total > slice.Count,
+                Items = metas,
             });
         }
 
@@ -166,16 +156,15 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
-        /// Returns just the poster-grid HTML for the requested filter combo, so
-        /// filter-search.js can swap the results pane in place instead of
-        /// triggering a full page reload when the user clicks Search / changes
-        /// the genre dropdown. Mirrors Index's data-fetch verbatim — same
-        /// per-service dispatch, same search-relevance re-rank, same cache
-        /// bypass behaviour. Anonymous users are bounced (the JS shouldn't
-        /// hit this for them, but defend in depth).
+        /// Returns the library pane partial for the requested filter combo —
+        /// used by filter-search.js to swap the results pane in place when
+        /// the user clicks Search / changes genre / etc., without a full
+        /// page reload. Mirrors Index's data-fetch verbatim (same per-
+        /// service dispatch, same search-relevance re-rank, same alphabetical
+        /// sort, no cache, no slicing). Anonymous users are bounced.
         /// </summary>
         [Route("/library/page")]
-        public async Task<IActionResult> Page(string list = null, string search = null, string genre = null, int skip = 0, bool fullPane = false)
+        public async Task<IActionResult> Page(string list = null, string search = null, string genre = null)
         {
             var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             if (uid == null) return Unauthorized();
@@ -199,11 +188,6 @@ namespace AnimeList.Controllers
             var listForCall = activeList;
             const bool groupSeasonsForCall = false;
 
-            // Same no-cache, same per-service dispatch as Index. The slice
-            // logic below trims to a single LibraryPageSize-sized window so
-            // scroll appends only render their chunk; fullPane callers
-            // (filter-search.js Search-button swap) get the first page only,
-            // since search results are single-shot anyway.
             var metas = tokenData.anime_service switch
             {
                 AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased),
@@ -224,58 +208,27 @@ namespace AnimeList.Controllers
             }
 
             metas ??= [];
-            // Same alphabetical sort as Index so scroll-appended chunks line
-            // up with the order the user sees server-rendered. Search keeps
-            // its ScoreMatch ordering applied above.
             if (!hasSearch)
             {
                 metas = metas
                     .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                     .ToList();
             }
-            var total = metas.Count;
-
-            // Slice for the requested window. fullPane swaps land back at the
-            // first page (matches the Index render shape); scroll appends ask
-            // for an offset and get just that window. Skip beyond the upstream
-            // total returns empty — the JS reads that as end-of-catalog and
-            // stops the observer.
-            var slice = hasSearch
-                ? metas
-                : metas.Skip(Math.Max(0, skip)).Take(LibraryPageSize).ToList();
 
             var activeLabel = labels[activeList];
-            var grid = new PosterGridViewModel
+            return PartialView("_LibraryPane", new LibraryPaneViewModel
             {
-                Items = slice,
-                ConfigUid = uid,
-                EmptyMessage = fullPane
-                    ? (hasSearch
+                Grid = new PosterGridViewModel
+                {
+                    Items = metas,
+                    ConfigUid = uid,
+                    EmptyMessage = hasSearch
                         ? $"No matches for \"{search.Trim()}\"."
                         : hasGenre
                             ? $"No {genre.Trim().ToLower()} anime in your {activeLabel} list."
-                            : $"Nothing in your {activeLabel} list on {tokenData.anime_service}.")
-                    : null,
-            };
-
-            // fullPane swaps come from the Search-button click and want the
-            // shared pane partial (paginator wrapper + sentinel for list
-            // views, plain grid for search) so library-pagination.js can
-            // rebind against the freshly-rendered wrapper. Scroll appends
-            // just want the grid chunk to splice into the existing one.
-            if (fullPane)
-            {
-                return PartialView("_LibraryPane", new LibraryPaneViewModel
-                {
-                    Grid = grid,
-                    ShowPaginator = !hasSearch && total > slice.Count,
-                    ListSlug = list?.ToLower() ?? activeList.ToString().ToLower(),
-                    Search = hasSearch ? search.Trim() : null,
-                    Genre = hasGenre ? genre.Trim() : null,
-                    Skip = slice.Count,
-                });
-            }
-            return PartialView("_PosterGrid", grid);
+                            : $"Nothing in your {activeLabel} list on {tokenData.anime_service}.",
+                },
+            });
         }
     }
 
@@ -299,12 +252,5 @@ namespace AnimeList.Controllers
         public string Genre { get; set; }
         public IReadOnlyList<string> AvailableGenres { get; set; } = [];
         public List<Meta> Items { get; set; } = [];
-        // Total items the upstream returned before slicing — used by the
-        // view to seed the paginator's data-skip + sentinel-driven scroll.
-        public int TotalItems { get; set; }
-        // True when the rendered slice is smaller than the upstream total,
-        // i.e. there's more to fetch via /library/page. Always false in
-        // search mode (search returns a single relevance-ranked slice).
-        public bool Paginated { get; set; }
     }
 }

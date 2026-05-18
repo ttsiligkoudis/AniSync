@@ -2,18 +2,13 @@ namespace AnimeList.Models
 {
     /// <summary>
     /// View model for Views/Library/_LibraryPane.cshtml — the shared partial
-    /// that renders either a paginator-wrapped grid (non-search list view with
-    /// more results upstream) or a plain grid (search results / non-paginated
-    /// list). Used by both the initial /library render and /library/page's
-    /// fullPane swap so the swapped-in pane keeps infinite-scroll behaviour.
+    /// that renders the poster grid for both the initial /library render
+    /// and /library/page's filter-search.js pane-swap. Just wraps the
+    /// grid view-model; kept as its own type so the partial signature
+    /// can grow without churning every call site.
     /// </summary>
     public class LibraryPaneViewModel
     {
         public PosterGridViewModel Grid { get; set; }
-        public bool ShowPaginator { get; set; }
-        public string ListSlug { get; set; }
-        public string Search { get; set; }
-        public string Genre { get; set; }
-        public int Skip { get; set; }
     }
 }
