@@ -465,6 +465,7 @@ namespace AnimeList.Services
                         duration
                         averageScore
                         seasonYear
+                        isAdult
                         title {
                             english
                             romaji
@@ -566,6 +567,7 @@ namespace AnimeList.Services
                 airStatus = NormalizeAirStatus((string)result.status),
                 source = NormalizeSource((string)result.source),
                 avgDuration = (int?)result.duration,
+                isAdult = (bool?)result.isAdult ?? false,
             };
 
             // Tags subselection is already fetched (rank + isAdult). Filter

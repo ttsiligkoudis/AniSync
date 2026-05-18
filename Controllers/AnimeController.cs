@@ -153,6 +153,22 @@ namespace AnimeList.Controllers
                 return View("NotFound");
             }
 
+            // 18+ gate — if the viewer hasn't opted into adult content, a
+            // direct /anime/{id} request to an isAdult entry 404s. Anonymous
+            // viewers (uid == null) hit the same gate via a null config →
+            // showAdultContent defaults false. Matches the per-service
+            // filtering on Discover / Library: same toggle, same effect,
+            // no sneaking adult entries in via deep-link.
+            if (anime.isAdult)
+            {
+                var detailConfig = await GetConfigByUidAsync(uid, _configStore);
+                if (detailConfig?.showAdultContent != true)
+                {
+                    Response.StatusCode = 404;
+                    return View("NotFound");
+                }
+            }
+
             // Normalise the videos array to within-cour 1..N — see Watch
             // action's matching block for the full rationale. Both pages
             // need to stay in sync so a Detail-page click of "Ep 6" maps
@@ -355,6 +371,20 @@ namespace AnimeList.Controllers
                 _logger.LogError(ex, "AnimeController.Watch failed (id={Id}).", id);
                 Response.StatusCode = 404;
                 return View("NotFound");
+            }
+
+            // 18+ gate — same as Detail. A deep-link to
+            // /anime/{adult}/watch/N must 404 for viewers without the
+            // showAdultContent opt-in so the toggle can't be bypassed
+            // via the watch URL.
+            if (anime != null && anime.isAdult)
+            {
+                var watchConfig = await GetConfigByUidAsync(uid, _configStore);
+                if (watchConfig?.showAdultContent != true)
+                {
+                    Response.StatusCode = 404;
+                    return View("NotFound");
+                }
             }
 
             if (anime?.videos == null || anime.videos.Count == 0)
