@@ -1079,6 +1079,64 @@ namespace AnimeList.Services
             return result;
         }
 
+        public async Task<(bool Success, string ErrorMessage)> UpdateUserStatsAsync(TokenData tokenData)
+        {
+            if (tokenData == null
+                || tokenData.anime_service != AnimeService.Anilist
+                || string.IsNullOrWhiteSpace(tokenData.access_token)
+                || string.IsNullOrWhiteSpace(tokenData.user_id))
+            {
+                return (false, "AniList account not linked");
+            }
+            if (!int.TryParse(tokenData.user_id, out var userId))
+            {
+                return (false, "AniList user id missing from token");
+            }
+
+            // Same mutation AniList's own /settings/lists "Update Stats"
+            // button fires (observed in browser devtools). No variables
+            // — the authenticated user is implicit via the bearer token.
+            var requestBody = SerializeObject(new { query = "mutation{UpdateUserStats}" });
+            var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
+            {
+                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json"),
+            };
+            ApplyBearerAuth(request, tokenData);
+
+            try
+            {
+                var response = await _clientFactory.CreateClient().SendAsync(request);
+                var content = await response.Content.ReadAsStringAsync();
+
+                // AniList puts errors in the response body even on 4xx,
+                // so parse before short-circuiting on status. The rate-
+                // limit rejection ("Too many stat update requests …") is
+                // a 400 with the message in errors[0].message.
+                dynamic parsed = null;
+                try { parsed = DeserializeObject<dynamic>(content); } catch { /* fall through */ }
+
+                if (parsed?.errors is JArray errs && errs.Count > 0)
+                {
+                    var msg = (string)errs[0]?["message"];
+                    return (false, string.IsNullOrEmpty(msg) ? "AniList rejected the request" : msg);
+                }
+                if (!response.IsSuccessStatusCode)
+                {
+                    return (false, $"AniList returned HTTP {(int)response.StatusCode}");
+                }
+
+                // Evict the 48 h GetUserStatsAsync cache so the next read
+                // round-trips against the freshly-recomputed numbers.
+                _cache.Remove($"anilist_user_stats:{userId}");
+                return (true, null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "UpdateUserStats failed for user {UserId}", userId);
+                return (false, "Couldn't reach AniList — try again in a moment.");
+            }
+        }
+
         public async Task<List<AnimeEntry>> GetUserListEntriesAsync(TokenData tokenData)
         {
             if (string.IsNullOrEmpty(tokenData?.access_token) || string.IsNullOrEmpty(tokenData.user_id))

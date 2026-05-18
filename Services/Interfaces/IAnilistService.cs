@@ -60,6 +60,24 @@ namespace AnimeList.Services.Interfaces
         /// Returns null if the call fails or the token has no user_id attached.
         /// </summary>
         Task<AnilistUserStats?> GetUserStatsAsync(TokenData tokenData);
+
+        /// <summary>
+        /// Force-refreshes the user's AniList-side cached statistics by posting
+        /// <c>mutation{UpdateUserStats}</c> against the GraphQL endpoint —
+        /// the same call AniList's own /settings/lists "Update Stats" button
+        /// fires. AniList rate-limits to one update per 6 hours per user;
+        /// the rejection comes back as
+        /// <c>"Too many stat update requests created recently. Slow down."</c>
+        /// in the GraphQL errors array, which is what callers surface to the
+        /// user as-is.
+        /// <para>
+        /// On success, evicts the local 48 h <see cref="GetUserStatsAsync"/>
+        /// cache entry for this user so the next read fetches fresh
+        /// numbers. Returns <c>(false, message)</c> when the token isn't
+        /// AniList, the mutation 4xx's, or any transport error fires.
+        /// </para>
+        /// </summary>
+        Task<(bool Success, string ErrorMessage)> UpdateUserStatsAsync(TokenData tokenData);
     }
 }
 

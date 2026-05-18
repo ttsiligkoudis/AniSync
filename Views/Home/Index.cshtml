@@ -231,11 +231,14 @@
                         </svg>
                     </button>
                     <span id="dashboardStatsInfoTooltip" class="dashboard-stats-info-tooltip">
-                        AniList caches your stats for up to 48 hours and only
-                        refreshes them on its own schedule. To force an
-                        immediate refresh, click "Update Stats" on AniList's
-                        list settings.
-                        <a href="https://anilist.co/settings/lists" target="_blank" rel="noopener noreferrer">Open AniList settings&nbsp;→</a>
+                        AniList recomputes these on its own schedule (typically
+                        every 48 hours). Force an immediate refresh with the
+                        button below — AniList rate-limits each account to one
+                        update every few hours, so a second click in a short
+                        window will return a "slow down" notice.
+                        <button type="button" class="dashboard-stats-refresh-btn" data-stats-refresh>
+                            Force refresh now
+                        </button>
                     </span>
                 </span>
             </span>
@@ -323,13 +326,6 @@
                 btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
             });
 
-            // Don't swallow the link click — let navigation happen, but
-            // close on the way out so the popover doesn't stay "open" in
-            // history-back / back-forward-cache restores.
-            wrap.addEventListener('click', function (e) {
-                if (e.target.closest('a')) close();
-            });
-
             document.addEventListener('click', function (e) {
                 if (!wrap.contains(e.target)) close();
             });
@@ -340,6 +336,55 @@
                     btn.focus();
                 }
             });
+
+            // "Force refresh now" button — fires AniList's UpdateUserStats
+            // mutation server-side, then reloads so the stats panel picks
+            // up the freshly-recomputed numbers from the server-rendered
+            // model. AniList's rate-limit rejection ("Too many stat
+            // update requests created recently. Slow down.") gets surfaced
+            // verbatim as a toast.
+            var refreshBtn = wrap.querySelector('[data-stats-refresh]');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', async function (e) {
+                    e.stopPropagation();
+                    if (refreshBtn.disabled) return;
+                    refreshBtn.disabled = true;
+                    var prevLabel = refreshBtn.textContent;
+                    refreshBtn.textContent = 'Refreshing…';
+                    try {
+                        var resp = await fetch('/Home/RefreshAnilistStats', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: '{}',
+                        });
+                        var data = null;
+                        try { data = await resp.json(); } catch (_) { /* non-JSON */ }
+                        if (resp.ok && data && data.success) {
+                            // Queue a toast that survives the reload —
+                            // toast.js drains the sessionStorage key on
+                            // every page load, see wwwroot/js/toast.js.
+                            try { sessionStorage.setItem('anisync-toast', 'AniList stats refreshed.'); }
+                            catch (_) {}
+                            window.location.reload();
+                            return;
+                        }
+                        var msg = (data && data.error) || ('Refresh failed (HTTP ' + resp.status + ')');
+                        if (window.AniSyncToast) window.AniSyncToast.show(msg, 5000);
+                        else alert(msg);
+                    } catch (err) {
+                        var fallback = "Couldn't reach AniSync — try again in a moment.";
+                        if (window.AniSyncToast) window.AniSyncToast.show(fallback, 5000);
+                        else alert(fallback);
+                    } finally {
+                        refreshBtn.disabled = false;
+                        refreshBtn.textContent = prevLabel;
+                        // Hand off to the toast — popover can step out
+                        // of the way now (only matters on the failure
+                        // path; the success path reloaded already).
+                        close();
+                    }
+                });
+            }
         })();
     </script>
 }
