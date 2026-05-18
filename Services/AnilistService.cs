@@ -48,7 +48,9 @@ namespace AnimeList.Services
 
         // null on transport failure. Bearer auth is applied when tokenData carries
         // an access_token; reads with no token (e.g. anonymous summary lookups) pass
-        // null.
+        // null. HTTP-level failures (5xx, network, timeout) feed AnilistHealthMonitor
+        // so the layout banner can light up and Discover can fall back to Kitsu;
+        // auth / rate-limit / 4xx don't trip it because they're not "AniList is down".
         private async Task<dynamic> PostGraphQLAsync(string requestBody, TokenData tokenData = null)
         {
             var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
@@ -56,14 +58,30 @@ namespace AnimeList.Services
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
             };
             ApplyBearerAuth(request, tokenData);
-            var response = await _clientFactory.CreateClient().SendAsync(request);
-            if (!response.IsSuccessStatusCode) return null;
+            HttpResponseMessage response;
+            try
+            {
+                response = await _clientFactory.CreateClient().SendAsync(request);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                AnilistHealthMonitor.RecordFailure();
+                return null;
+            }
+            if (!response.IsSuccessStatusCode)
+            {
+                if ((int)response.StatusCode >= 500) AnilistHealthMonitor.RecordFailure();
+                return null;
+            }
+            AnilistHealthMonitor.RecordSuccess();
             var content = await response.Content.ReadAsStringAsync();
             return DeserializeObject<dynamic>(content)?.data;
         }
 
         // Posts a GraphQL mutation and surfaces non-success responses via
         // EnsureSuccessOrThrow so SyncService can flag NeedsReauth on a stale token.
+        // Same health-monitor wiring as PostGraphQLAsync: transport / 5xx feed the
+        // banner, 4xx (most importantly 401 reauth) doesn't.
         private async Task PostGraphQLMutationAsync(string requestBody, TokenData tokenData, string op)
         {
             var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
@@ -71,7 +89,24 @@ namespace AnimeList.Services
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
             };
             ApplyBearerAuth(request, tokenData);
-            var response = await _clientFactory.CreateClient().SendAsync(request);
+            HttpResponseMessage response;
+            try
+            {
+                response = await _clientFactory.CreateClient().SendAsync(request);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                AnilistHealthMonitor.RecordFailure();
+                throw;
+            }
+            if (!response.IsSuccessStatusCode && (int)response.StatusCode >= 500)
+            {
+                AnilistHealthMonitor.RecordFailure();
+            }
+            else if (response.IsSuccessStatusCode)
+            {
+                AnilistHealthMonitor.RecordSuccess();
+            }
             await EnsureSuccessOrThrow(response, "AniList", op);
         }
 

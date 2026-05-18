@@ -590,8 +590,22 @@ namespace AnimeList.Services
             };
 
             var client = _clientFactory.CreateClient();
-            var response = await client.SendAsync(request);
-            if (!response.IsSuccessStatusCode) return null;
+            HttpResponseMessage response;
+            try
+            {
+                response = await client.SendAsync(request);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                AnilistHealthMonitor.RecordFailure();
+                return null;
+            }
+            if (!response.IsSuccessStatusCode)
+            {
+                if ((int)response.StatusCode >= 500) AnilistHealthMonitor.RecordFailure();
+                return null;
+            }
+            AnilistHealthMonitor.RecordSuccess();
 
             var content = await response.Content.ReadAsStringAsync();
             return DeserializeObject<dynamic>(content)?.data;

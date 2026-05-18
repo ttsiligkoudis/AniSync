@@ -1,3 +1,4 @@
+using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -67,11 +68,27 @@ namespace AnimeList.Controllers
                 // Seasonal / Airing).
                 var groupSeasonsForCall = listType == ListType.Search ? false : groupSeasons;
 
-                var metas = animeService switch
+                // When AniList is the user's primary and the upstream is currently
+                // down, fall back to Kitsu for non-user-list catalogs so Stremio
+                // rows don't go empty. User lists (Currently Watching / Completed
+                // / etc.) live in the user's AniList account — there's nothing to
+                // fall back to, so we let those return empty during an outage.
+                var isUserList = listType is ListType.Current or ListType.Completed
+                    or ListType.Planning or ListType.Paused
+                    or ListType.Dropped or ListType.Repeating;
+                var fallbackToKitsu = animeService == AnimeService.Anilist
+                    && AnimeList.Services.AnilistHealthMonitor.IsDown
+                    && !isUserList;
+                var catalogService = fallbackToKitsu ? AnimeService.Kitsu : animeService;
+                var catalogToken = fallbackToKitsu
+                    ? new TokenData { anime_service = AnimeService.Kitsu }
+                    : tokenData;
+
+                var metas = catalogService switch
                 {
-                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                    _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(catalogToken, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(catalogToken, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    _ => await _kitsuService.GetAnimeListAsync(catalogToken, listType, skip, animeId, genre, search, sort, groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
                 };
 
                 // Search splits into separate series + movie catalogs in the manifest

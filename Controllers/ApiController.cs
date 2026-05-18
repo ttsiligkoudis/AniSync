@@ -250,7 +250,13 @@ namespace AnimeList.Controllers
                 if (string.IsNullOrWhiteSpace(q))
                     return new JsonResult(new MetaListResponse([]));
 
-                var metas = service switch
+                // Outage fallback: caller picked (or defaulted to) AniList but the
+                // upstream is down — re-route the search through Kitsu so the
+                // header search-as-you-type doesn't go silent for users on AniList.
+                var effectiveService = service;
+                if (effectiveService == AnimeService.Anilist && AnimeList.Services.AnilistHealthMonitor.IsDown)
+                    effectiveService = AnimeService.Kitsu;
+                var metas = effectiveService switch
                 {
                     AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, ListType.Search, skip, search: q, hideAdult: hideAdult),
                     AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, ListType.Search, skip, search: q, hideAdult: hideAdult),
@@ -303,7 +309,12 @@ namespace AnimeList.Controllers
                 // Downstream callers — including the browser-extension auto-tracker —
                 // use the returned id with /entries/{id} which expects the provider's
                 // native id space, so handing back an IMDb id would 400 on save.
-                var raw = service switch
+                // Same outage fallback as /search — Kitsu when AniList is down,
+                // so the global header search-as-you-type stays useful.
+                var effectiveService = service;
+                if (effectiveService == AnimeService.Anilist && AnimeList.Services.AnilistHealthMonitor.IsDown)
+                    effectiveService = AnimeService.Kitsu;
+                var raw = effectiveService switch
                 {
                     AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, ListType.Search, search: title, groupSeasons: false, hideAdult: hideAdult),
                     AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, ListType.Search, search: title, groupSeasons: false, hideAdult: hideAdult),
