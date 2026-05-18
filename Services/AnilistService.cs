@@ -1,6 +1,5 @@
 ﻿using AnimeList.Models;
 using AnimeList.Services.Interfaces;
-using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json.Linq;
 
 namespace AnimeList.Services
@@ -12,7 +11,6 @@ namespace AnimeList.Services
         private readonly IKitsuService _kitsuService;
         private readonly IAnilistFallback _anilistFallback;
         private readonly ICinemetaService _cinemetaService;
-        private readonly IMemoryCache _cache;
         private readonly ILogger<AnilistService> _logger;
         private readonly string _anilistApi = "https://graphql.anilist.co";
         private static readonly HashSet<ListType> _userLists =
@@ -21,25 +19,13 @@ namespace AnimeList.Services
             ListType.Planning, ListType.Paused, ListType.Dropped, ListType.Repeating,
         ];
 
-        // AniList re-aggregates User.statistics on its end at most once every
-        // 48 hours (per anilist.co/settings/lists "Stats" panel). Polling
-        // more often just returns the same payload, so we mirror their TTL
-        // locally — the dashboard pays one round-trip per user per 48 h
-        // instead of one per page load. There's no public mutation to
-        // force-recompute on AniList's side, so cache-busting our copy
-        // wouldn't surface a fresher value anyway; the view tells users
-        // where to click on AniList itself if they really need an
-        // immediate refresh.
-        private static readonly TimeSpan UserStatsCacheTtl = TimeSpan.FromHours(48);
-
-        public AnilistService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IKitsuService kitsuService, IAnilistFallback anilistFallback, ICinemetaService cinemetaService, IMemoryCache cache, ILogger<AnilistService> logger)
+        public AnilistService(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IKitsuService kitsuService, IAnilistFallback anilistFallback, ICinemetaService cinemetaService, ILogger<AnilistService> logger)
         {
             _clientFactory = clientFactory;
             _mappingService = mappingService;
             _kitsuService = kitsuService;
             _anilistFallback = anilistFallback;
             _cinemetaService = cinemetaService;
-            _cache = cache;
             _logger = logger;
         }
 
@@ -1012,22 +998,18 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(tokenData?.access_token) || string.IsNullOrEmpty(tokenData.user_id))
                 return null;
-            if (!int.TryParse(tokenData.user_id, out var userId)) return null;
+            if (!int.TryParse(tokenData.user_id, out var _)) return null;
 
-            // Per-user 48h cache mirrors AniList's own stats-recompute
-            // cadence (see UserStatsCacheTtl). Negative results (network
-            // hiccup, AniList 5xx) aren't cached so the next page load
-            // gets a retry instead of a 48-h gap.
-            var cacheKey = $"anilist_user_stats:{userId}";
-            if (_cache.TryGetValue(cacheKey, out AnilistUserStats cached))
-                return cached;
-
+            // No server-side cache: the dashboard hits /Home/AnilistStats
+            // from JS at most once per 24 h per browser (localStorage TTL),
+            // so a per-process IMemoryCache would mostly cache nothing
+            // useful and double-up against the client cache. Per-page-load
+            // round-trip moved off the SSR critical path too.
+            //
             // Single GraphQL — no list pagination, no per-entry deserialisation.
             // statuses[] returns one row per MediaListStatus value the user has
             // any entries in (CURRENT, COMPLETED, PLANNING, …); we read the
-            // counts for the two the dashboard surfaces. genres[] is already
-            // server-side aggregated and pre-sorted by count desc, so the
-            // top-5 slice is just a Take(5).
+            // counts for the two the dashboard surfaces.
             var requestBody = SerializeObject(new
             {
                 query = @"
@@ -1074,9 +1056,7 @@ namespace AnimeList.Services
             var minutes = (int?)anime.minutesWatched ?? 0;
             var hours = minutes / 60;
 
-            var result = new AnilistUserStats(watching, completed, hours, meanScore);
-            _cache.Set(cacheKey, result, UserStatsCacheTtl);
-            return result;
+            return new AnilistUserStats(watching, completed, hours, meanScore);
         }
 
         public async Task<List<AnimeEntry>> GetUserListEntriesAsync(TokenData tokenData)

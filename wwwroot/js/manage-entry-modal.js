@@ -368,19 +368,24 @@
         var num = document.querySelector('.stats-cell[data-stat="' + name + '"] .stats-number');
         if (!num) return;
         // Strip locale separators (commas) before parsing so "1,234" → 1234.
-        var current = parseInt(num.textContent.replace(/[^\d-]/g, ''), 10) || 0;
+        // Skip when the cell still shows the "—" placeholder (stats fetch
+        // hasn't resolved yet) — applying delta to NaN would write a wrong
+        // optimistic value the user might see before the fetch corrects it.
+        var current = parseInt(num.textContent.replace(/[^\d-]/g, ''), 10);
+        if (isNaN(current)) return;
         var next = Math.max(0, current + delta);
         num.textContent = next.toLocaleString();
     }
 
     // Hours bucket adjusts in lockstep with Completed when the entry has a
     // known total-episodes count. Uses the same 24-min/episode assumption
-    // HomeController.Index applies server-side so the client-side delta
+    // the AniList stats fetch normalises against so the client-side delta
     // matches the next full render.
     function adjustHours(episodesDelta) {
         var num = document.querySelector('.stats-cell[data-stat="hours"] .stats-number');
         if (!num) return;
-        var current = parseInt(num.textContent.replace(/[^\d-]/g, ''), 10) || 0;
+        var current = parseInt(num.textContent.replace(/[^\d-]/g, ''), 10);
+        if (isNaN(current)) return; // see adjustStat — same placeholder guard
         var next = Math.max(0, current + Math.round(episodesDelta * 24 / 60));
         num.textContent = next.toLocaleString();
     }
