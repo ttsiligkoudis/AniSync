@@ -159,8 +159,8 @@ public class HomeController : Controller
             }
 
             // Continue Watching is now fetched client-side from
-            // /Home/ContinueWatchingPartial and cached in localStorage
-            // (anisync.continueWatching.v1, 10 min TTL) so each dashboard
+            // /Home/ContinueWatchingData and cached in localStorage
+            // (anisync.continueWatching.v2, 10 min TTL) so each dashboard
             // render doesn't pay the per-user list round-trip. The view
             // renders the section structure unconditionally for logged-in
             // non-anonymous users and the JS un-hides it once items load.
@@ -516,23 +516,25 @@ public class HomeController : Controller
     }
 
     /// <summary>
-    /// Renders the dashboard's "Continue watching" shelf as a _PosterGrid
-    /// partial for the signed-in user's top items from their currently-
-    /// watching list. The dashboard JS fetches this on first load, caches
-    /// the response HTML in localStorage for 10 minutes, and re-renders
-    /// from cache on subsequent visits within the TTL. Returns 204 No
-    /// Content when the user has no Watching entries so the JS can hide
-    /// the section entirely. Manage-entry writes (modal save, +1 quick-
-    /// action, delete) wipe the localStorage key from the client side so
-    /// the next dashboard render picks up the change.
+    /// JSON projection of the signed-in user's top "Continue watching"
+    /// items — slim shape (just the nine fields the dashboard's poster
+    /// card actually renders) so the localStorage payload stays small.
+    /// The dashboard JS hits this on first load, caches the data in
+    /// localStorage for 10 minutes, and rebuilds the card DOM client-
+    /// side on every render. Returns <c>items: []</c> when the user
+    /// has no Watching entries so the JS can hide the section entirely.
+    /// Manage-entry writes (modal save, +1 quick-action, delete) wipe
+    /// the localStorage key from the client so the next dashboard
+    /// render picks up the change.
     /// </summary>
-    [HttpGet("Home/ContinueWatchingPartial")]
-    public async Task<IActionResult> ContinueWatchingPartial()
+    [HttpGet("Home/ContinueWatchingData")]
+    public async Task<JsonResult> ContinueWatchingData()
     {
         var (token, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
         if (string.IsNullOrEmpty(uid) || token == null || token.anonymousUser)
         {
-            return Unauthorized();
+            Response.StatusCode = 401;
+            return new JsonResult(new { success = false, error = "Sign in first." });
         }
 
         // Match Index() exactly: dashboard always uses groupSeasons=false
@@ -543,20 +545,27 @@ public class HomeController : Controller
         var dashboardConfig = await GetConfigByUidAsync(uid, _configStore);
         var hideUnreleased = dashboardConfig?.hideUnreleasedFromWatching == true;
 
-        var items = (await SafeFetchListAsync(token, ListType.Current, groupSeasons, /* nocache */ true, hideUnreleased))
-            .Take(ContinueWatchingMaxItems).ToList();
+        var metas = (await SafeFetchListAsync(token, ListType.Current, groupSeasons, /* nocache */ true, hideUnreleased))
+            .Take(ContinueWatchingMaxItems);
 
-        if (items.Count == 0)
+        // Anonymous projection keeps the payload to only the fields the
+        // card needs. Skipping Meta.recommendations / videos / trailers /
+        // links / tags / genres / etc. is the difference between a ~1 KB
+        // and ~20 KB per-card payload for users with long watchlists.
+        var items = metas.Select(m => new
         {
-            return NoContent();
-        }
+            id          = m.id,
+            name        = m.name,
+            poster      = m.poster,
+            format      = m.format,
+            episodes    = m.episodes,
+            year        = m.year,
+            score       = m.score,
+            progress    = m.progress,
+            entryStatus = m.entryStatus,
+        }).ToList();
 
-        return PartialView("_PosterGrid", new PosterGridViewModel
-        {
-            Items = items,
-            ConfigUid = uid,
-            Variant = "scroll",
-        });
+        return new JsonResult(new { success = true, items });
     }
 
     /// <summary>

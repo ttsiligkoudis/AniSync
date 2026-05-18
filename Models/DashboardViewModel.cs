@@ -5,7 +5,7 @@ namespace AnimeList.Models
     /// the session-derived token data (so the view can branch on login state and
     /// service) and the resolved UID for per-card Manage Entry hand-offs. The
     /// "Continue watching" shelf is fetched client-side from
-    /// <c>/Home/ContinueWatchingPartial</c> with a localStorage cache in front
+    /// <c>/Home/ContinueWatchingData</c> with a localStorage cache in front
     /// — it doesn't live on this model anymore.
     /// </summary>
     public class DashboardViewModel

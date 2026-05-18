@@ -361,12 +361,13 @@
     }
 
     // Drop the dashboard's Continue-Watching localStorage cache so the
-    // next dashboard load re-fetches /Home/ContinueWatchingPartial. Any
+    // next dashboard load re-fetches /Home/ContinueWatchingData. Any
     // user-list write (modal save, +1 quick-action, delete) potentially
     // shuffles the dashboard shelf — same content the server-side
-    // _listCache.Invalidate already does for the per-list cache.
+    // _listCache.Invalidate already does for the per-list cache. Key
+    // must match Views/Home/Index.cshtml's cache key.
     function invalidateContinueWatchingCache() {
-        try { localStorage.removeItem('anisync.continueWatching.v1'); }
+        try { localStorage.removeItem('anisync.continueWatching.v2'); }
         catch (e) { /* quota / private mode — best-effort */ }
     }
 

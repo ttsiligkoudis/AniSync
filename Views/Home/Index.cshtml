@@ -423,13 +423,14 @@
 }
 
 @* Continue Watching: a small slice of the user's Currently Watching list,
-   fetched client-side from /Home/ContinueWatchingPartial and cached in
-   localStorage for 10 minutes so each dashboard render doesn't pay the
-   per-user list round-trip. The section's outer skeleton renders for
-   every logged-in non-anonymous user and starts [hidden]; the JS at the
-   bottom of this section either fills the container from the localStorage
-   cache or fetches the partial and injects it. On empty list (204 from
-   the endpoint) the section stays hidden. *@
+   fetched client-side from /Home/ContinueWatchingData (slim JSON projection)
+   and cached in localStorage for 10 minutes. The cards are reconstructed
+   in JS via the renderCard function below — it mirrors Views/Shared/_PosterGrid.cshtml
+   one-to-one for the subset of fields the shelf surfaces (no airing-time
+   variant, no empty-message branch — neither applies to Continue Watching
+   since every item has progress > 0 by definition). The section's outer
+   skeleton always renders for logged-in non-anonymous users and starts
+   [hidden]; the JS un-hides it once items load. *@
 @if (isLoggedIn && !anonymousUser)
 {
     <section class="dashboard-section" data-continue-watching-section hidden>
@@ -459,7 +460,10 @@
             // can't sit stale forever. In-app writes drop the key
             // explicitly via invalidateContinueWatchingCache() in
             // wwwroot/js/manage-entry-modal.js.
-            var KEY = 'anisync.continueWatching.v1';
+            // .v2 = data cache (was .v1 = HTML cache); bumping the key
+            // forces a re-fetch for users with the old shape sitting in
+            // localStorage.
+            var KEY = 'anisync.continueWatching.v2';
             var TTL_MS = 10 * 60 * 1000;
 
             function readCache() {
@@ -468,44 +472,127 @@
                     if (!raw) return null;
                     var obj = JSON.parse(raw);
                     if (!obj || typeof obj.ts !== 'number' || (Date.now() - obj.ts) > TTL_MS) return null;
-                    return obj;
+                    return obj.items;
                 } catch (_) { return null; }
             }
-            function writeCache(hasItems, html) {
-                try { localStorage.setItem(KEY, JSON.stringify({ ts: Date.now(), hasItems: hasItems, html: html })); }
+            function writeCache(items) {
+                try { localStorage.setItem(KEY, JSON.stringify({ ts: Date.now(), items: items })); }
                 catch (_) { /* quota / private mode — best-effort */ }
             }
-            function paint(hasItems, html) {
-                if (hasItems && html) {
-                    container.innerHTML = html;
-                    section.hidden = false;
-                } else {
-                    container.innerHTML = '';
-                    section.hidden = true;
+
+            // Mirrors Views/Shared/_PosterGrid.cshtml's card markup for
+            // the Continue-Watching case (Variant=scroll, no airing-time
+            // badge, no empty-message branch). All user-controlled text
+            // goes through textContent / DOM properties — never
+            // innerHTML — so an anime title with stray <> can't escape.
+            function renderCard(meta) {
+                var card = document.createElement('a');
+                card.className = 'library-card';
+                card.href = '/anime/' + meta.id;
+                card.title = meta.name;
+                card.setAttribute('data-meta-id', meta.id);
+                card.setAttribute('data-meta-name', meta.name);
+                if (meta.entryStatus) card.setAttribute('data-meta-status', meta.entryStatus);
+                if (meta.progress != null) card.setAttribute('data-meta-progress', String(meta.progress));
+                if (meta.episodes != null && meta.episodes > 0) {
+                    card.setAttribute('data-meta-total', String(meta.episodes));
                 }
+
+                var posterWrap = document.createElement('div');
+                posterWrap.className = 'library-card-poster-wrap';
+
+                if (meta.poster) {
+                    var img = document.createElement('img');
+                    img.className = 'library-card-poster';
+                    img.src = meta.poster;
+                    img.alt = meta.name;
+                    img.loading = 'lazy';
+                    posterWrap.appendChild(img);
+                } else {
+                    var placeholder = document.createElement('div');
+                    placeholder.className = 'library-card-poster library-card-poster-placeholder';
+                    posterWrap.appendChild(placeholder);
+                }
+
+                if (meta.progress != null && meta.progress > 0) {
+                    var progressBadge = document.createElement('span');
+                    progressBadge.className = 'library-card-progress';
+                    progressBadge.textContent = (meta.episodes != null && meta.episodes > 0)
+                        ? meta.progress + ' / ' + meta.episodes
+                        : 'Ep ' + meta.progress;
+                    posterWrap.appendChild(progressBadge);
+                }
+
+                if (meta.score != null && meta.score > 0) {
+                    var scoreBadge = document.createElement('span');
+                    scoreBadge.className = 'library-card-score';
+                    scoreBadge.textContent = '★ ' + Number(meta.score).toFixed(1);
+                    posterWrap.appendChild(scoreBadge);
+                }
+
+                if (meta.entryStatus) {
+                    var plus = document.createElement('button');
+                    plus.type = 'button';
+                    plus.className = 'library-card-plus';
+                    plus.setAttribute('aria-label', 'Mark next episode watched');
+                    plus.title = '+1 episode';
+                    plus.textContent = '+1';
+                    posterWrap.appendChild(plus);
+                }
+
+                card.appendChild(posterWrap);
+
+                var titleEl = document.createElement('span');
+                titleEl.className = 'library-card-title';
+                titleEl.textContent = meta.name;
+                card.appendChild(titleEl);
+
+                var infoBits = [];
+                if (meta.format) infoBits.push(meta.format);
+                if (meta.episodes != null && meta.episodes > 0) {
+                    infoBits.push(meta.episodes + ' ep' + (meta.episodes > 1 ? 's' : ''));
+                }
+                if (meta.year != null && meta.year > 0) infoBits.push(String(meta.year));
+                if (infoBits.length > 0) {
+                    var infoEl = document.createElement('span');
+                    infoEl.className = 'library-card-meta';
+                    infoEl.textContent = infoBits.join(' · ');
+                    card.appendChild(infoEl);
+                }
+
+                return card;
+            }
+
+            function paint(items) {
+                container.replaceChildren();
+                if (!items || items.length === 0) {
+                    section.hidden = true;
+                    return;
+                }
+                var row = document.createElement('div');
+                row.className = 'poster-scroll-row';
+                items.forEach(function (m) { row.appendChild(renderCard(m)); });
+                container.appendChild(row);
+                section.hidden = false;
             }
 
             async function fetchAndPaint() {
                 try {
-                    var resp = await fetch('/Home/ContinueWatchingPartial', {
+                    var resp = await fetch('/Home/ContinueWatchingData', {
                         credentials: 'same-origin',
                         skipLoader: true,
                     });
-                    if (resp.status === 204) {
-                        writeCache(false, '');
-                        paint(false, '');
-                        return;
-                    }
                     if (!resp.ok) return;
-                    var html = await resp.text();
-                    writeCache(true, html);
-                    paint(true, html);
+                    var data = await resp.json();
+                    if (!data || !data.success) return;
+                    writeCache(data.items || []);
+                    paint(data.items || []);
                 } catch (_) { /* network blip — leave the section hidden */ }
             }
 
             var cached = readCache();
             if (cached) {
-                paint(cached.hasItems, cached.html);
+                paint(cached);
             } else {
                 fetchAndPaint();
             }
