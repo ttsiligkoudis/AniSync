@@ -4267,8 +4267,6 @@ a.stats-cell-link:hover {
         text-align: center;
     }
 
-    .anime-detail-meta .anime-detail-genres,
-    .anime-detail-meta .anime-detail-actions,
     .anime-detail-meta .anime-detail-user-state {
         justify-content: center;
     }
@@ -4371,61 +4369,6 @@ a.stats-cell-link:hover {
 @keyframes airing-pulse {
     0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5); }
     50%      { opacity: 0.6; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0); }
-}
-
-.anime-detail-genres {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
-    margin-top: 0.2rem;
-}
-
-/* Themes strip below genres — smaller / lighter than the genre chips so
-   the visual hierarchy stays "broad genres first, themes second". */
-.anime-detail-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
-    margin-top: 0.05rem;
-}
-
-.anime-detail-tag {
-    padding: 0.15rem 0.55rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 999px;
-    color: #999;
-    font-size: 0.72rem;
-    font-weight: 500;
-}
-
-/* "By: KyoAni, MAPPA" production credit line. Linked studio names get a
-   subtle underline-on-hover so they read as clickable without the heavy
-   blue "Streaming" pill treatment used in the bottom link list. */
-.anime-detail-studios {
-    font-size: 0.85rem;
-    color: #aaa;
-    margin-top: 0.1rem;
-}
-
-.anime-detail-studio-link {
-    color: #d0d0d0;
-    text-decoration: none;
-    border-bottom: 1px dotted rgba(255, 255, 255, 0.25);
-    transition: color 0.15s, border-color 0.15s;
-}
-
-.anime-detail-studio-link:hover {
-    color: #fff;
-    border-bottom-color: rgba(255, 255, 255, 0.6);
-    text-decoration: none;
-}
-
-.anime-detail-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
 }
 
 /* ── External source chips (AniList / MAL / Kitsu / IMDb) ── */
