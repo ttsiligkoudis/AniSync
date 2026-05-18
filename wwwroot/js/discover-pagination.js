@@ -6,11 +6,14 @@
 // when the server returns an empty payload (end of catalog) or any other
 // failure mode.
 //
-// Page-size lives server-side (50 for AniList/MAL, 20 for Kitsu via
-// CatalogPageSize). The client just tracks the running count of cards
-// already rendered ("skip") and increments it by however many the next
-// fetch returned — service-agnostic, no client-side knowledge of the
-// per-service page size.
+// 1-indexed page numbers on the wire. The server-rendered initial view
+// is page 1 (data-page="1"); each loadMore() increments and sends the
+// next page number. Previous version sent item-count skip, then the
+// server divided by per-service CatalogPageSize to recover the page —
+// that worked only when every page came back full. A seasonal listing
+// that returned 30 cards on page 1 made the JS send skip=30, the server
+// computed (30 / 50) + 1 = page 1 again, the JS deduped every card as
+// already-seen and tore down the observer.
 (function () {
     'use strict';
 
@@ -26,7 +29,9 @@
     var genre = paginator.getAttribute('data-genre') || '';
     var season = paginator.getAttribute('data-season') || '';
     var tag = paginator.getAttribute('data-tag') || '';
-    var skip = parseInt(paginator.getAttribute('data-skip') || '0', 10);
+    // Last page already rendered. JS bumps this before each fetch so
+    // the next request asks for page+1.
+    var page = parseInt(paginator.getAttribute('data-page') || '1', 10);
     if (!list) return;
 
     var loading = false;
@@ -101,8 +106,9 @@
         loading = true;
         showLoader();
 
+        var nextPage = page + 1;
         var params = 'list=' + encodeURIComponent(list)
-            + '&skip=' + skip;
+            + '&page=' + nextPage;
         if (genre) params += '&genre=' + encodeURIComponent(genre);
         if (season) params += '&season=' + encodeURIComponent(season);
         if (tag) params += '&tag=' + encodeURIComponent(tag);
@@ -125,7 +131,7 @@
                     // Drop the sentinel so the observer can't fire again.
                     teardown();
                 } else {
-                    skip += added;
+                    page = nextPage;
                 }
             })
             .catch(function () { /* swallow — sentinel stays, user can scroll back up and retry by re-scrolling */ })

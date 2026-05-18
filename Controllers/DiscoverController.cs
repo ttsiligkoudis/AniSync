@@ -169,7 +169,7 @@ namespace AnimeList.Controllers
         /// list, so the scroll handler simply doesn't fire on search pages.
         /// </summary>
         [Route("/discover/page")]
-        public async Task<IActionResult> Page(string list, string genre = null, string skip = null, string season = null, string search = null, string tag = null, bool fullPane = false)
+        public async Task<IActionResult> Page(string list, string genre = null, int page = 1, string season = null, string search = null, string tag = null, bool fullPane = false)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync()
                 ?? new TokenData { anime_service = AnimeService.Kitsu };
@@ -193,6 +193,19 @@ namespace AnimeList.Controllers
             var listForCall = hasSearch ? ListType.Search : activeList;
             const bool groupSeasonsForCall = false;
             var hasTag = !string.IsNullOrWhiteSpace(tag);
+
+            // Per-service translation. The services internally accept an
+            // item-count skip (matching the Stremio addon's catalog-extras
+            // semantics, which CatalogController shares this path with),
+            // so we convert the 1-indexed page → item offset using the
+            // active service's catalog page size. Hardcoding 20 / 50 here
+            // duplicates a constant that lives on each service, but the
+            // alternative is exposing CatalogPageSize through every
+            // service interface for one consumer.
+            var pageSize = tokenData.anime_service == AnimeService.Kitsu ? 20 : 50;
+            var skip = page <= 1 ? null : ((page - 1) * pageSize).ToString();
+            if (page < 1) page = 1;
+
             List<Meta> metas;
             if (hasTag)
             {
