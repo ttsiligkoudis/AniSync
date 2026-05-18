@@ -176,6 +176,26 @@
 </section>
 
 @section Scripts {
+    @* Intercept clicks on the "← {Anime title}" header link so /watch is
+       REPLACED in the history stack with /anime/{id} rather than /anime
+       being pushed on top of it. Without this, a flow like
+           dashboard → notification → /watch → back-link → /anime
+       leaves /watch on the back stack, so the browser Back button rewinds
+       to /watch instead of the dashboard the user actually came from.
+       Modifier-clicks (Ctrl / Cmd / Shift / middle button) fall through
+       to the default <a> behaviour so opening the destination in a new
+       tab still works. *@
+    <script>
+        (function () {
+            var back = document.querySelector('.watch-back');
+            if (!back) return;
+            back.addEventListener('click', function (e) {
+                if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                e.preventDefault();
+                window.location.replace(back.href);
+            });
+        })();
+    </script>
     <script src="https://unpkg.com/artplayer@5/dist/artplayer.js"></script>
     @* SSA / ASS embedded subtitle support. matroska-subtitles parses
        the MKV stream client-side; jassub (a libass WebAssembly port)
