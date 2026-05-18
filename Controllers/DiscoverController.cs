@@ -103,10 +103,29 @@ namespace AnimeList.Controllers
             // AnilistFallback's anonymous browse regardless of the viewer's
             // primary service. Cards still translate ids into the user's
             // primary's space so Manage Entry / detail-page hand-offs work.
+            //
+            // Kitsu's /anime?filter[season] endpoint silently ignores
+            // page[offset] — every "next" page returns the same 20 entries.
+            // Re-route Kitsu users' seasonal browse through AniList's
+            // anonymous query (seasonal data is a global catalog, not
+            // user-scoped) and translate the anilist:N ids back into
+            // kitsu:M for click-through so Manage Entry still lands on
+            // Kitsu's detail page.
+            var routeSeasonalViaAnilist = listForCall == ListType.Seasonal
+                && tokenData.anime_service == AnimeService.Kitsu;
             List<Meta> metas;
             if (hasTag)
             {
                 metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service);
+            }
+            else if (routeSeasonalViaAnilist)
+            {
+                metas = await _anilistService.GetAnimeListAsync(
+                    tokenData: null, listForCall,
+                    search: search, genre: genre,
+                    groupSeasons: groupSeasonsForCall, season: season,
+                    hideUnreleased: hideUnreleased);
+                metas = await _anilistFallback.TranslateMetaIdsAsync(metas, AnimeService.Kitsu);
             }
             else
             {
@@ -194,6 +213,16 @@ namespace AnimeList.Controllers
             const bool groupSeasonsForCall = false;
             var hasTag = !string.IsNullOrWhiteSpace(tag);
 
+            // Kitsu's /anime?filter[season] endpoint silently ignores
+            // page[offset] — every "next" page returns the same 20 entries
+            // — so route Kitsu users' seasonal scrolls through AniList's
+            // anonymous browse instead. The skip math below uses AniList's
+            // 50-item page size in that case so the offset maps to AniList
+            // pages cleanly. See the matching branch in Index() for the
+            // initial render.
+            var routeSeasonalViaAnilist = listForCall == ListType.Seasonal
+                && tokenData.anime_service == AnimeService.Kitsu;
+
             // Per-service translation. The services internally accept an
             // item-count skip (matching the Stremio addon's catalog-extras
             // semantics, which CatalogController shares this path with),
@@ -202,7 +231,7 @@ namespace AnimeList.Controllers
             // duplicates a constant that lives on each service, but the
             // alternative is exposing CatalogPageSize through every
             // service interface for one consumer.
-            var pageSize = tokenData.anime_service == AnimeService.Kitsu ? 20 : 50;
+            var pageSize = (tokenData.anime_service == AnimeService.Kitsu && !routeSeasonalViaAnilist) ? 20 : 50;
             var skip = page <= 1 ? null : ((page - 1) * pageSize).ToString();
             if (page < 1) page = 1;
 
@@ -212,6 +241,15 @@ namespace AnimeList.Controllers
                 // Mirror Index's tag-routing: tag filtering goes through the
                 // AniList anonymous browse regardless of primary.
                 metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service, skip);
+            }
+            else if (routeSeasonalViaAnilist)
+            {
+                metas = await _anilistService.GetAnimeListAsync(
+                    tokenData: null, listForCall,
+                    skip: skip, genre: genre, search: search,
+                    groupSeasons: groupSeasonsForCall, season: season,
+                    hideUnreleased: hideUnreleased);
+                metas = await _anilistFallback.TranslateMetaIdsAsync(metas, AnimeService.Kitsu);
             }
             else
             {
