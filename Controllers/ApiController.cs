@@ -37,7 +37,6 @@ namespace AnimeList.Controllers
         private readonly IAniSkipService _aniSkipService;
         private readonly IFillerListService _fillerListService;
         private readonly ISubtitleService _subtitleService;
-        private readonly IWyzieSubtitlesService _wyzieSubtitleService;
         private readonly ITokenService _tokenService;
         private readonly IConfigStore _configStore;
         private readonly ILogger<ApiController> _logger;
@@ -53,7 +52,6 @@ namespace AnimeList.Controllers
             IAniSkipService aniSkipService,
             IFillerListService fillerListService,
             ISubtitleService subtitleService,
-            IWyzieSubtitlesService wyzieSubtitleService,
             ITokenService tokenService,
             IConfigStore configStore,
             ILogger<ApiController> logger)
@@ -68,7 +66,6 @@ namespace AnimeList.Controllers
             _aniSkipService = aniSkipService;
             _fillerListService = fillerListService;
             _subtitleService = subtitleService;
-            _wyzieSubtitleService = wyzieSubtitleService;
             _tokenService = tokenService;
             _configStore = configStore;
             _logger = logger;
@@ -726,10 +723,9 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
-        /// Aggregated subtitle tracks for one episode (OpenSubtitles + Wyzie
-        /// merged, dedup'd by URL). Anime without an IMDb mapping return an
-        /// empty list. Same source the watch page and the Stremio
-        /// SubtitlesController draw from.
+        /// Subtitle tracks for one episode from OpenSubtitles. Anime without
+        /// an IMDb mapping return an empty list. Same source the watch page
+        /// and the Stremio SubtitlesController draw from.
         /// </summary>
         /// <param name="id">Service-prefixed anime id.</param>
         /// <param name="episode">Episode number (within the chosen season).</param>
@@ -744,20 +740,12 @@ namespace AnimeList.Controllers
                 var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
                 var imdbId = sourceLinks?.ImdbId;
                 if (string.IsNullOrEmpty(imdbId))
-                    return new JsonResult(new SubtitlesResponse([], new SubtitleProviderCounts(0, 0)));
+                    return new JsonResult(new SubtitlesResponse([], new SubtitleProviderCounts(0)));
 
-                var osTask = SafeOpenSubtitlesSearch(imdbId, season, episode);
-                var wyzieTask = SafeWyzieSearch(imdbId, season, episode);
-                await Task.WhenAll(osTask, wyzieTask);
-
-                var merged = new List<SubtitleTrack>(osTask.Result.Count + wyzieTask.Result.Count);
-                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var t in osTask.Result) { if (seen.Add(t.Url)) merged.Add(t); }
-                foreach (var t in wyzieTask.Result) { if (seen.Add(t.Url)) merged.Add(t); }
-
+                var tracks = await SafeOpenSubtitlesSearch(imdbId, season, episode);
                 return new JsonResult(new SubtitlesResponse(
-                    merged,
-                    new SubtitleProviderCounts(osTask.Result.Count, wyzieTask.Result.Count)));
+                    tracks,
+                    new SubtitleProviderCounts(tracks.Count)));
             }
             catch (Exception ex)
             {
@@ -770,12 +758,6 @@ namespace AnimeList.Controllers
         {
             try { return await _subtitleService.SearchAsync(imdbId, season, episode); }
             catch (Exception ex) { _logger.LogWarning(ex, "OpenSubtitles search failed (imdb={Imdb}, ep={Ep})", imdbId, episode); return []; }
-        }
-
-        private async Task<IReadOnlyList<SubtitleTrack>> SafeWyzieSearch(string imdbId, int? season, int episode)
-        {
-            try { return await _wyzieSubtitleService.SearchAsync(imdbId, season, episode); }
-            catch (Exception ex) { _logger.LogWarning(ex, "Wyzie search failed (imdb={Imdb}, ep={Ep})", imdbId, episode); return []; }
         }
 
         // ── Season / catalog metadata ───────────────────────────────────────────

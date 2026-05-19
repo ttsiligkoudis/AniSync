@@ -27,7 +27,6 @@ namespace AnimeList.Controllers
         private readonly IAddonStreamService _addonStreamService;
         private readonly IAniSkipService _aniSkipService;
         private readonly ISubtitleService _subtitleService;
-        private readonly IWyzieSubtitlesService _wyzieSubtitleService;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ISyncService _syncService;
         private readonly ILogger<AnimeController> _logger;
@@ -45,7 +44,6 @@ namespace AnimeList.Controllers
             IAddonStreamService addonStreamService,
             IAniSkipService aniSkipService,
             ISubtitleService subtitleService,
-            IWyzieSubtitlesService wyzieSubtitleService,
             IHttpClientFactory httpClientFactory,
             ISyncService syncService,
             ILogger<AnimeController> logger)
@@ -62,7 +60,6 @@ namespace AnimeList.Controllers
             _addonStreamService = addonStreamService;
             _aniSkipService = aniSkipService;
             _subtitleService = subtitleService;
-            _wyzieSubtitleService = wyzieSubtitleService;
             _httpClientFactory = httpClientFactory;
             _syncService = syncService;
             _logger = logger;
@@ -793,8 +790,8 @@ namespace AnimeList.Controllers
                 .Select(l => new { site = l.Site, url = l.Url })
                 .ToList();
 
-            // Cross-service links + AniSkip + Wyzie subtitles all use the
-            // same anime id — fetch the source-links bundle once.
+            // Cross-service links + AniSkip both key off the same anime id —
+            // fetch the source-links bundle once.
             var sourceLinksForExtras = await _mappingService.BuildSourceLinksAsync(id);
 
             // AniSkip — same lookup chain StreamController.BuildSkipHintsAsync
@@ -873,9 +870,8 @@ namespace AnimeList.Controllers
             var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
             if (string.IsNullOrEmpty(sourceLinks.ImdbId))
             {
-                // Both providers are IMDb-keyed (Wyzie via /search?id=tt…,
-                // OpenSubtitles via the Stremio addon's series/tt:s:e
-                // shape). No IMDb mapping = nothing to ask either of.
+                // OpenSubtitles is IMDb-keyed via the Stremio addon's
+                // series/tt:s:e shape. No IMDb mapping = nothing to ask.
                 return Json(new { subtitles = Array.Empty<object>() });
             }
 
@@ -885,35 +881,11 @@ namespace AnimeList.Controllers
             // season of the IMDb listing otherwise.
             var effectiveSeason = sourceLinks.ImdbSeason ?? season;
 
-            // Fire both providers concurrently — the slower of the
-            // two sets the response latency rather than the sum.
-            var osTask = SafeOpenSubtitlesSearch(sourceLinks.ImdbId, effectiveSeason, episode, filename, id);
-            var wyzieTask = SafeWyzieSearch(sourceLinks.ImdbId, effectiveSeason, episode, id);
-
-            await Task.WhenAll(osTask, wyzieTask);
-
-            // Merge OpenSubtitles first, then Wyzie. Within a single
-            // language the user gets the OpenSubtitles variants at the
-            // top and Wyzie variants after — OpenSubtitles is still
-            // the primary, Wyzie fills the long tail with Subdl /
-            // Addic7ed uploads. Dedup by proxy URL — the URL embeds
-            // the upstream URL verbatim, so identical upstreams (same
-            // file surfaced through both routes) collapse to one menu
-            // entry.
-            var merged = new List<SubtitleTrack>(osTask.Result.Count + wyzieTask.Result.Count);
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var t in osTask.Result)
-            {
-                if (seen.Add(t.Url)) merged.Add(t);
-            }
-            foreach (var t in wyzieTask.Result)
-            {
-                if (seen.Add(t.Url)) merged.Add(t);
-            }
+            var tracks = await SafeOpenSubtitlesSearch(sourceLinks.ImdbId, effectiveSeason, episode, filename, id);
 
             return Json(new
             {
-                subtitles = merged.Select(t => (object)new
+                subtitles = tracks.Select(t => (object)new
                 {
                     lang = t.Lang,
                     label = t.Label,
@@ -921,12 +893,11 @@ namespace AnimeList.Controllers
                     source = t.Source,
                 }).ToList(),
                 // Per-provider counts so the UI can surface a
-                // "OpenSubtitles: X · Wyzie: Y" status chip without
-                // having to derive the breakdown from track labels.
+                // "Subs · OS: X" status chip without having to derive
+                // the breakdown from track labels.
                 providerCounts = new
                 {
-                    opensubtitles = osTask.Result.Count,
-                    wyzie = wyzieTask.Result.Count,
+                    opensubtitles = tracks.Count,
                 },
             });
         }
@@ -938,17 +909,6 @@ namespace AnimeList.Controllers
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "OpenSubtitles search failed for {Id} ep {Ep}.", id, episode);
-                return Array.Empty<SubtitleTrack>();
-            }
-        }
-
-        private async Task<IReadOnlyList<SubtitleTrack>> SafeWyzieSearch(
-            string imdbId, int? season, int episode, string id)
-        {
-            try { return await _wyzieSubtitleService.SearchAsync(imdbId, season, episode); }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Wyzie search failed for {Id} ep {Ep}.", id, episode);
                 return Array.Empty<SubtitleTrack>();
             }
         }

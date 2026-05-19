@@ -307,8 +307,7 @@ namespace AnimeList.Services
                 || host.EndsWith("opensubtitles.com")
                 || host.EndsWith("opensubtitles-v3.strem.io")
                 || host.EndsWith("strem.io")
-                || host.EndsWith("subdl.com")
-                || host.EndsWith("wyzie.ru");   // Wyzie aggregator + its own subtitle CDN
+                || host.EndsWith("subdl.com");
         }
 
         /// <summary>

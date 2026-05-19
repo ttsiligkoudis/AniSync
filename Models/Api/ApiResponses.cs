@@ -76,11 +76,11 @@ namespace AnimeList.Models.Api
     /// <summary>One page of anime tagged with a given tag.</summary>
     public record TagMediaResponse(string Tag, List<Meta> Items, bool HasNextPage);
 
-    /// <summary>Aggregated subtitle tracks for one episode (OpenSubtitles + Wyzie, dedup'd by URL).</summary>
+    /// <summary>Subtitle tracks for one episode from OpenSubtitles.</summary>
     public record SubtitlesResponse(List<SubtitleTrack> Subtitles, SubtitleProviderCounts ProviderCounts);
 
     /// <summary>Per-provider count breakdown returned alongside <see cref="SubtitlesResponse"/>.</summary>
-    public record SubtitleProviderCounts(int OpenSubtitles, int Wyzie);
+    public record SubtitleProviderCounts(int OpenSubtitles);
 
     /// <summary>Episode list extracted from an anime's full meta — same data the detail page renders, without the show envelope.</summary>
     public record EpisodesResponse(string AnimeId, List<EpisodeInfo> Episodes);

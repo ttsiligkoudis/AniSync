@@ -129,10 +129,10 @@
                pipeline is alive when nothing new appears in the
                Subtitles menu. Hidden until the pipeline kicks off. *@
             <span id="watchEmbeddedStatus" class="watch-embed-status" hidden></span>
-            @* Per-provider subtitle count chip. Populated after the
+            @* Subtitle count chip. Populated after the
                /anime/episode-subtitles fetch resolves so the user can
-               see at a glance whether OpenSubtitles, Wyzie, or both
-               returned anything. Hidden when no subtitles loaded. *@
+               see at a glance how many OpenSubtitles tracks loaded.
+               Hidden when no subtitles loaded. *@
             <span id="watchSubsProvider" class="watch-embed-status" hidden></span>
         </div>
         <div id="watchPlayerFallback" class="watch-player-fallback" hidden>
@@ -638,7 +638,7 @@
                     // CORS/WebCodecs/local-font moving parts. The
                     // dialogue is readable, which is what users
                     // actually need from an embedded sub when
-                    // OpenSubtitles / Wyzie don't have a match.
+                    // OpenSubtitles don't have a match.
                     art.subtitle.show = false;
                     currentSubKind = 'ass';
                     currentSubKey = item.html || (item.label || 'Embedded') + ' SSA';
@@ -1338,7 +1338,7 @@
                             // memory pressure on the browser side
                             // (worse, actually — it reads sequentially
                             // and can't shard). Let OpenSubtitles /
-                            // Wyzie carry the sub UX from here.
+                            // OpenSubtitles carries the sub UX from here.
                             onComplete([]);
                             return;
                         }
@@ -1370,7 +1370,7 @@
                     // Worker would just hit Cloudflare's bot-block
                     // again, so skip extraction quietly: hide the
                     // pill, fire onComplete([]), let OpenSubtitles /
-                    // Wyzie carry the subtitle UX for this pick.
+                    // OpenSubtitles carries the subtitle UX for this pick.
                     if (abortCtl.signal.aborted) return;
                     console.info('embedded sub extraction skipped — resolve never returned a CDN URL:', err && err.message);
                     setEmbedStatus(null);
@@ -1401,7 +1401,7 @@
                 // lang=auto behaviour: mirror the cf-mkv-extractor
                 // Worker — collect cues only from the first English-
                 // tagged track. Anything else falls through to the
-                // OpenSubtitles / Wyzie path the same way an
+                // OpenSubtitles path the same way an
                 // English-less Worker response does. -1 means "we
                 // haven't decided yet", > 0 is a real EBML track
                 // number, 0 means "no English track found, drop
@@ -1494,7 +1494,7 @@
                     // auto-promote rule downstream would drop them
                     // anyway. 0 means "no English here"; in that
                     // case we abort the extract entirely and let
-                    // OpenSubtitles / Wyzie carry the UX, matching
+                    // OpenSubtitles carry the UX, matching
                     // what the Worker does when its lang=auto
                     // filter returns empty.
                     var english = null;
@@ -2021,7 +2021,6 @@
                             '[AniSync] subtitles loaded:',
                             subs.length, 'tracks',
                             'opensubtitles=' + (pc.opensubtitles || 0),
-                            'wyzie=' + (pc.wyzie || 0),
                             subs);
                     } catch (_) {}
                     renderSubsProviderChip(pc);
@@ -2064,7 +2063,7 @@
                 // otherwise leave at -1 so the "None" entry is selected.
                 // We deliberately don't fall back to the first non-
                 // English track — users with no English coverage from
-                // OpenSubtitles / Wyzie are better served by no subs
+                // OpenSubtitles are better served by no subs
                 // than by a surprise Spanish / Russian / etc. overlay
                 // they didn't ask for. They can still pick any track
                 // manually from the selector.
@@ -2100,7 +2099,7 @@
                     // Order: None → embedded SSA → external VTT.
                     // Embedded tracks come from the user's actual file
                     // so they're release-matched by definition and
-                    // beat OpenSubtitles / Wyzie on accuracy almost
+                    // beat OpenSubtitles on accuracy almost
                     // always. Surfacing them right after "None" puts
                     // the highest-quality options at the top of the
                     // menu where the user looks first.
@@ -2469,23 +2468,21 @@
             var embedStatusEl = document.getElementById('watchEmbeddedStatus');
             var subsProviderEl = document.getElementById('watchSubsProvider');
 
-            // Render a "OpenSubtitles: X · Wyzie: Y" chip after the
-            // subtitle fetch resolves. data-kind drives the colour so
-            // a totally empty result reads visually distinct from a
-            // partial one.
+            // Render a "Subs · OS: X" chip after the subtitle fetch
+            // resolves. data-kind drives the colour so a totally empty
+            // result reads visually distinct from a populated one.
             function renderSubsProviderChip(counts) {
                 if (!subsProviderEl) return;
                 var os = (counts && counts.opensubtitles) || 0;
-                var wy = (counts && counts.wyzie) || 0;
-                if (os + wy === 0) {
+                if (os === 0) {
                     subsProviderEl.hidden = false;
                     subsProviderEl.textContent = 'No remote subtitles';
                     subsProviderEl.setAttribute('data-kind', 'none');
                     return;
                 }
                 subsProviderEl.hidden = false;
-                subsProviderEl.textContent = 'Subs · OS: ' + os + ' · Wyzie: ' + wy;
-                subsProviderEl.setAttribute('data-kind', wy > 0 ? 'success' : 'loading');
+                subsProviderEl.textContent = 'Subs · OS: ' + os;
+                subsProviderEl.setAttribute('data-kind', 'success');
             }
 
             // Surface the embedded-subtitle pipeline state to the user.
