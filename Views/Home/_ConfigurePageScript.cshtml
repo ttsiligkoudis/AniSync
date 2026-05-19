@@ -257,6 +257,14 @@
         });
 
         if (resp.ok || resp.redirected) {
+            // The dashboard's Continue Watching cache (anisync.continueWatching.v1)
+            // is keyed only by client storage, not by service. After a primary
+            // swap the cached HTML still describes the OLD service's library
+            // (different ids, different progress); without a wipe the user
+            // sees stale entries linking to the wrong provider's detail
+            // pages until the 10-minute TTL elapses.
+            try { localStorage.removeItem('anisync.continueWatching.v1'); }
+            catch (_) { /* quota / private mode — best-effort */ }
             window.location.href = resp.redirected ? resp.url : '/';
             return;
         }

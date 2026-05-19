@@ -134,7 +134,7 @@ namespace AnimeList.Controllers
             List<Meta> metas;
             if (hasTag)
             {
-                metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service);
+                metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service, hideAdult: hideAdult);
             }
             else if (routeSeasonalViaAnilist)
             {
@@ -270,7 +270,7 @@ namespace AnimeList.Controllers
             {
                 // Mirror Index's tag-routing: tag filtering goes through the
                 // AniList anonymous browse regardless of primary.
-                metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service, skip);
+                metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service, skip, hideAdult: hideAdult);
             }
             else if (routeSeasonalViaAnilist)
             {
@@ -380,7 +380,9 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
-            var (name, items, _) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service);
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var hideAdult = configuration?.showAdultContent != true;
+            var (name, items, _) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service, hideAdult: hideAdult);
             return View("StudioDetail", new StudioDetailViewModel
             {
                 Id = id,
@@ -403,7 +405,9 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
-            var (_, items, hasNext) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service, page);
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var hideAdult = configuration?.showAdultContent != true;
+            var (_, items, hasNext) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service, page, hideAdult: hideAdult);
             Response.Headers["X-Has-Next-Page"] = hasNext ? "true" : "false";
             return PartialView("_PosterGrid", new PosterGridViewModel
             {
@@ -432,7 +436,9 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
-            var (name, items) = await _anilistFallback.GetStaffMediaAsync(id, tokenData.anime_service);
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var hideAdult = configuration?.showAdultContent != true;
+            var (name, items) = await _anilistFallback.GetStaffMediaAsync(id, tokenData.anime_service, hideAdult: hideAdult);
 
             return View("StaffDetail", new StaffDetailViewModel
             {
@@ -476,7 +482,9 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
-            var (items, _) = await _anilistFallback.GetByTagPageAsync(tagStr, tokenData.anime_service, page: 1);
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var hideAdult = configuration?.showAdultContent != true;
+            var (items, _) = await _anilistFallback.GetByTagPageAsync(tagStr, tokenData.anime_service, page: 1, hideAdult: hideAdult);
             return View("TagDetail", new TagDetailViewModel
             {
                 Tag = tagStr,
@@ -498,7 +506,9 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
-            var (items, hasNext) = await _anilistFallback.GetByTagPageAsync(tagStr, tokenData.anime_service, page);
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var hideAdult = configuration?.showAdultContent != true;
+            var (items, hasNext) = await _anilistFallback.GetByTagPageAsync(tagStr, tokenData.anime_service, page, hideAdult: hideAdult);
             Response.Headers["X-Has-Next-Page"] = hasNext ? "true" : "false";
             return PartialView("_PosterGrid", new PosterGridViewModel
             {

@@ -146,7 +146,7 @@ namespace AnimeList.Services.Interfaces
         /// service's id space so card clicks land on the user's primary's
         /// detail page rather than AniList's.
         /// </summary>
-        Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null);
+        Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null, bool hideAdult = false);
 
         /// <summary>
         /// Page-based variant of <see cref="GetByTagAsync"/> backing the
@@ -155,7 +155,7 @@ namespace AnimeList.Services.Interfaces
         /// handler can stop at the real end of the catalog. Page is
         /// 1-indexed (AniList's convention).
         /// </summary>
-        Task<(List<Meta> Items, bool HasNextPage)> GetByTagPageAsync(string tag, AnimeService translateTo, int page = 1);
+        Task<(List<Meta> Items, bool HasNextPage)> GetByTagPageAsync(string tag, AnimeService translateTo, int page = 1, bool hideAdult = false);
 
         /// <summary>
         /// Full tag catalog from AniList's MediaTagCollection — surfaced by
@@ -174,7 +174,7 @@ namespace AnimeList.Services.Interfaces
         /// render "Anime by Hayao Miyazaki" without an extra round-trip.
         /// Name is null when the staff id doesn't resolve.
         /// </summary>
-        Task<(string Name, List<Meta> Items)> GetStaffMediaAsync(int staffId, AnimeService translateTo, string skip = null);
+        Task<(string Name, List<Meta> Items)> GetStaffMediaAsync(int staffId, AnimeService translateTo, string skip = null, bool hideAdult = false);
 
         /// <summary>
         /// Browse a studio's catalog — every anime the studio produced,
@@ -187,7 +187,7 @@ namespace AnimeList.Services.Interfaces
         /// callers must consult HasNextPage, not list emptiness).
         /// Page is 1-indexed.
         /// </summary>
-        Task<(string Name, List<Meta> Items, bool HasNextPage)> GetStudioMediaAsync(int studioId, AnimeService translateTo, int page = 1);
+        Task<(string Name, List<Meta> Items, bool HasNextPage)> GetStudioMediaAsync(int studioId, AnimeService translateTo, int page = 1, bool hideAdult = false);
 
         /// <summary>
         /// One page of studios from AniList's Page.studios connection,
