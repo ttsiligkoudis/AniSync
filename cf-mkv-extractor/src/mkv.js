@@ -34,31 +34,31 @@ import {
 // commit history and works out to ~80 MB worst case.
 const HEAD_BYTES = 256 * 1024;
 const TRACKS_FETCH = 256 * 1024;
-// Initial cues fetch. Typical anime cues element fits well under
-// 1 MB (a 24-min episode has ~150-300 cue points, each ~30 bytes).
-// If the actual element is bigger we top up with a second fetch —
-// see the cues block below — so we never silently truncate the
-// cluster offset list. Smaller initial size = much less likely to
-// be dropped mid-stream by RD's edges, which is the failure mode
-// the divide-and-conquer retry in reader.js is also targeting.
-const CUES_FETCH = 1 * 1024 * 1024;
-const CLUSTER_FETCH = 6 * 1024 * 1024;
-const CLUSTER_BATCH_GAP = 6 * 1024 * 1024;
-// Per-batch span. Sized to maximise the bytes-per-connection ratio
-// (each fetch carries more sub data → fewer total connections →
-// fewer mid-stream-drop opportunities) while staying clear of the
-// 128 MB Worker memory cap when combined with the cache, framework
-// overhead, and in-flight Response body.
-const MAX_BATCH_SIZE = 24 * 1024 * 1024;
-// Cloudflare Workers Free caps us at 50 subrequests per invocation.
-// Bigger batches → far fewer batches needed → MAX_CLUSTER_BATCHES
-// is rarely the binding constraint, but kept conservative so retries
-// against transient failures stay within the cap.
-const MAX_CLUSTER_BATCHES = 20;
-// Total bytes ceiling. Bumped to absorb the bigger per-batch size
-// while still leaving enough headroom under the 128 MB Worker cap
-// after cache + framework + in-flight buffer.
-const MAX_TOTAL_FETCH = 120 * 1024 * 1024;
+// Initial cues fetch. Tight on purpose — the smaller this is, the
+// less the open-ended Range fallback's buffered tail can grow
+// before we cancel, and the less memory the response body holds
+// across the moment when subsequent cluster batches are also in
+// flight. The top-up logic below handles cues elements that
+// exceed this size (most don't — a 24-min anime episode's cues
+// usually fits in 200 KB).
+const CUES_FETCH = 256 * 1024;
+const CLUSTER_FETCH = 4 * 1024 * 1024;
+const CLUSTER_BATCH_GAP = 4 * 1024 * 1024;
+// Per-batch span. Was 24 MB but the open-ended Range fallback for
+// cues leaves residual buffered bytes in CF's stream layer that
+// the memory accountant counts; stacked on top of a 24 MB batch
+// buffer the worker blew the 128 MB cap. Tighter batches + tighter
+// cache (RangeReader.read) trade more subrequests for smaller
+// peak memory. Each shard has 22-ish clusters anyway, so per-shard
+// subrequest pressure stays well under CF's 50/invocation cap.
+const MAX_BATCH_SIZE = 6 * 1024 * 1024;
+// Bumped from 20 to compensate for the smaller batches — same
+// total cluster coverage, just split across more fetches.
+const MAX_CLUSTER_BATCHES = 30;
+// Total bytes ceiling. Tighter to leave headroom for the open-
+// ended cues fetch's lingering buffer plus framework overhead
+// inside the 128 MB cap.
+const MAX_TOTAL_FETCH = 50 * 1024 * 1024;
 // Delay inserted between consecutive cluster-batch fetches. Small
 // enough to be invisible from the user's perspective (~2s of extra
 // wall-clock on a typical extraction) but enough to break up the
