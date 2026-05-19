@@ -121,31 +121,80 @@ export class RangeReader {
     }
 
     /**
-     * read() with one retry on transient network errors. Use this
-     * for fetches we can't proceed without (head / tracks / cues);
-     * cluster batches stay on the no-retry path to preserve the
-     * subrequest budget under CF Free's 50/invocation cap.
+     * read() with a divide-and-conquer retry strategy. Use for
+     * fetches we can't proceed without (head / tracks / cues). When
+     * RD's edges drop a large Range mid-stream — "Network connection
+     * lost" being the canonical CF surface error — the most reliable
+     * recovery is to ask for the same bytes in smaller pieces. Some
+     * RD edges accept a 512 KB Range after dropping a 4 MB one on
+     * the same offset.
+     *
+     * Attempts (with cumulative subrequest cost): 1 (full) → 2
+     * (halves) → 4 (quarters). Capped at 3 attempts and at a 64 KB
+     * floor on chunk size; past that the per-fetch overhead
+     * dominates and further splitting hurts more than it helps.
+     * Worst case 7 subrequests per critical read, leaving plenty of
+     * headroom under CF Free's 50-subrequest invocation cap for the
+     * 20-ish cluster-batch fetches in the main loop.
+     *
+     * Cluster batches stay on the no-retry path: they're individually
+     * skippable (the batch loop `continue`s past a failed batch),
+     * so spending the retry budget on them would crowd out the
+     * critical-read budget where retries actually matter.
      */
     async readCritical(start, length) {
-        try {
-            return await this.read(start, length);
-        } catch (e) {
-            const msg = (e && e.message) || String(e);
-            // Worth retrying on transient errors that signal the
-            // upstream dropped us mid-stream — RD's edges sometimes
-            // do this under load and recover on the next attempt.
-            // Don't retry on structural errors (bad URL, 4xx, etc.)
-            // because retrying won't change the outcome.
-            const transient =
-                msg.includes('Network connection lost') ||
-                msg.includes('fetch failed') ||
-                msg.includes('Memory limit') ||
-                msg.includes('upstream HTTP 5');
-            if (!transient) throw e;
-            // Brief backoff so the upstream has a moment to recover.
-            await new Promise(r => setTimeout(r, 350));
-            return await this.read(start, length);
+        const ATTEMPTS = [
+            { splits: 1, backoff: 0 },
+            { splits: 2, backoff: 350 },
+            { splits: 4, backoff: 1500 },
+        ];
+        let lastError = null;
+        for (let attempt = 0; attempt < ATTEMPTS.length; attempt++) {
+            const a = ATTEMPTS[attempt];
+            if (a.backoff > 0) {
+                await new Promise(r => setTimeout(r, a.backoff));
+            }
+            const chunkSize = Math.ceil(length / a.splits);
+            if (chunkSize < 64 * 1024 && a.splits > 1) {
+                // Skip this attempt — too small to help. Try the
+                // next one, or fall through to the final throw.
+                continue;
+            }
+            try {
+                const result = new Uint8Array(length);
+                let written = 0;
+                for (let i = 0; i < a.splits; i++) {
+                    const chunkStart = start + i * chunkSize;
+                    const remaining = length - written;
+                    const thisLen = Math.min(chunkSize, remaining);
+                    const chunk = await this.read(chunkStart, thisLen);
+                    result.set(chunk, written);
+                    written += chunk.length;
+                    if (chunk.length < thisLen) {
+                        // Server sent less than asked — return
+                        // partial and let the caller decide.
+                        console.log(`[readCritical] start=${start} length=${length} splits=${a.splits}: short read, returning ${written} bytes`);
+                        return result.subarray(0, written);
+                    }
+                }
+                if (attempt > 0) {
+                    console.log(`[readCritical] start=${start} length=${length} splits=${a.splits}: ok after ${attempt} prior failure(s)`);
+                }
+                return result;
+            } catch (e) {
+                lastError = e;
+                const msg = (e && e.message) || String(e);
+                const transient =
+                    msg.includes('Network connection lost') ||
+                    msg.includes('fetch failed') ||
+                    msg.includes('Memory limit') ||
+                    msg.includes('upstream HTTP 5');
+                console.warn(`[readCritical] start=${start} length=${length} splits=${a.splits}: failed (${msg})`);
+                if (!transient) throw e;
+                // Try next attempt with more splits + longer backoff.
+            }
         }
+        throw lastError || new Error(`readCritical exhausted retries for ${start}-${start + length - 1}`);
     }
 
     /**
