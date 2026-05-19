@@ -198,18 +198,22 @@
     <script>
         (function () {
             var ENTRY_KEY = 'aniSyncWatchEntry';
-            var watchRe  = /^https?:\/\/[^/]+\/anime\/[^/]+\/watch\//;
-            var animeRe  = /^https?:\/\/[^/]+\/anime\/[^/]+\/?(?:[?#]|$)/;
 
-            // Classify the entry referrer once on page load.
+            // Classify how we got here once on page load.
+            //
+            // Detail.cshtml writes ENTRY_KEY='fromAnime' just before
+            // navigating to /watch, so its presence here is a reliable
+            // signal that /anime/{id} is the previous history entry.
+            // No marker → reached via notification / dashboard / deep
+            // link / fresh tab; classify as fromOther so the back-link
+            // does location.replace and removes /watch from history.
+            //
+            // The site's <meta name="referrer" content="no-referrer">
+            // strips document.referrer on every same-origin navigation
+            // so referrer-sniffing is unusable; the explicit click
+            // marker is the only reliable detection.
             try {
-                var ref = document.referrer || '';
-                if (watchRe.test(ref)) {
-                    // From another /watch — keep whatever the original
-                    // entry recorded (fromAnime vs. fromOther).
-                } else if (animeRe.test(ref)) {
-                    sessionStorage.setItem(ENTRY_KEY, 'fromAnime');
-                } else {
+                if (!sessionStorage.getItem(ENTRY_KEY)) {
                     sessionStorage.setItem(ENTRY_KEY, 'fromOther');
                 }
             } catch (e) { /* sessionStorage unavailable — best effort */ }
@@ -225,10 +229,13 @@
                 });
             }
 
-            // Back-link: always lands on /anime/{id}. When that page is
-            // already the previous history entry, step back to reuse it
-            // (and drop /watch from the stack); otherwise replace /watch
-            // with the /anime href in place.
+            // Back-link: always lands on /anime/{id}.
+            //   - fromAnime: /anime/{id} is right behind us, so step back
+            //     to reuse that entry. /watch becomes a forward entry; the
+            //     stack does NOT grow a duplicate /anime/{id}.
+            //   - otherwise: replace /watch with /anime/{id} in place so
+            //     the entry behind the original /watch (notification,
+            //     dashboard, fresh tab) stays as the only Back target.
             var back = document.querySelector('.watch-back');
             if (back) {
                 back.addEventListener('click', function (e) {

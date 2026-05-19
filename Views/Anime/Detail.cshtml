@@ -714,6 +714,47 @@ else
    viewers too — that script bails early when the modal DOM isn't
    present, which used to silently disable these for logged-out users. *@
 <script>
+    // Mark sessionStorage right before navigating from /anime/{id} to
+    // /watch/{ep} so Watch.cshtml knows the previous history entry is
+    // this detail page and can reuse it with a simple history.back()
+    // (avoiding a duplicate /anime/{id} entry on the stack).
+    //
+    // Needed because the site sets <meta name="referrer" content="no-referrer">,
+    // which strips document.referrer on every same-origin navigation —
+    // without this marker the watch page can't tell whether to step
+    // back or do a fresh replace. Setting the marker only on the click
+    // that actually triggers the navigation keeps it from going stale
+    // (e.g., user visited /anime/X earlier in the session, then clicked
+    // a notification straight to /watch).
+    (function () {
+        function markWatchEntry() {
+            try { sessionStorage.setItem('aniSyncWatchEntry', 'fromAnime'); }
+            catch (_) { /* sessionStorage unavailable — best effort */ }
+        }
+        // Catches the static "Watch next" / movie CTA anchors and any
+        // future <a href="…/watch/…"> links the page might grow. Modifier
+        // clicks (Ctrl/Cmd/Shift/middle) open in a new tab — don't mark.
+        document.addEventListener('click', function (e) {
+            if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            var a = e.target.closest && e.target.closest('a[href*="/watch/"]');
+            if (!a) return;
+            markWatchEntry();
+        }, true);
+        // Episode rows in the list navigate via window.location.assign
+        // rather than <a> (see handleEpisodeActivate further down), so
+        // we hook the same delegated click event and mark the entry if
+        // the click landed on a non-future episode row. Cheap: the
+        // marker write is idempotent.
+        document.addEventListener('click', function (e) {
+            if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            var li = e.target.closest && e.target.closest('li.anime-detail-episode');
+            if (!li || li.classList.contains('anime-detail-episode-future')) return;
+            if (e.target.closest('button, a, [data-no-stream]')) return;
+            markWatchEntry();
+        }, true);
+    })();
+</script>
+<script>
     (function () {
         // ── Synopsis collapse/expand ──────────────────────────────────
         document.addEventListener('click', function (e) {
