@@ -24,7 +24,6 @@ namespace AnimeList.Services
 
         private const string AddonBase = "https://opensubtitles-v3.strem.io";
         private static readonly TimeSpan ListCacheTtl = TimeSpan.FromHours(2);
-        private static readonly TimeSpan VttCacheTtl  = TimeSpan.FromHours(6);
 
         // Common language pool surfaced first in the player's captions
         // menu. The addon returns ISO-639-2/B codes (eng, spa, fre …);
@@ -167,19 +166,6 @@ namespace AnimeList.Services
                 return null;
             }
 
-            // Force the subs5.strem.io UTF-8 transform when applicable
-            // (no-op for other hosts). Cache key still keys on the
-            // pre-transform URL so re-requests with the same upstream
-            // URL hit cache regardless of transform application.
-            // Version suffix is bumped whenever the post-fetch
-            // transformation pipeline changes (e.g. when StripFontTags
-            // was added) so pre-existing cached entries miss instead of
-            // serving stale un-cleaned VTT until the 6h TTL expires.
-            var cacheKey = $"opensubs:vtt:v2:{url}";
-            if (_cache.TryGetValue<string>(cacheKey, out var hit) && hit != null)
-            {
-                return hit;
-            }
             var fetchUrl = EnsureUtf8Transform(url);
 
             try
@@ -200,10 +186,8 @@ namespace AnimeList.Services
                 // ignoring them, so the line "It's so far away" shows up
                 // as "&lt;font face=...&gt;It's so far away&lt;/font&gt;"
                 // on screen. Strip the opening + closing tags (preserve
-                // the inner text) before caching/returning.
-                vtt = StripFontTags(vtt);
-                _cache.Set(cacheKey, vtt, new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = VttCacheTtl });
-                return vtt;
+                // the inner text) before returning.
+                return StripFontTags(vtt);
             }
             catch (Exception ex)
             {
