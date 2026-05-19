@@ -1,0 +1,19 @@
+name = "anisync-mkv-extractor-rs"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-12-30"
+
+# Same workers_dev = true default as the JS worker — gives us a
+# *.workers.dev URL out of the box so we can swap MKV_EXTRACTOR_URL
+# in AniSync's config without setting up a custom domain.
+workers_dev = true
+
+# Rust → WASM build via worker-build. Run `cargo install -q worker-build`
+# once globally, then `npx wrangler deploy` from this directory.
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+# Optional shared secret. Set with:
+#   npx wrangler secret put PROXY_SECRET
+# Mirrors the JS worker so the client's MKV_EXTRACTOR_SECRET
+# config works against either implementation.
+# [vars] left empty intentionally.
