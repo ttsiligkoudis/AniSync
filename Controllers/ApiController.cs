@@ -744,7 +744,7 @@ namespace AnimeList.Controllers
 
                 var tracks = await SafeOpenSubtitlesSearch(imdbId, season, episode);
                 return new JsonResult(new SubtitlesResponse(
-                    tracks,
+                    tracks.ToList(),
                     new SubtitleProviderCounts(tracks.Count)));
             }
             catch (Exception ex)
