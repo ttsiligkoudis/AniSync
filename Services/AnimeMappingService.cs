@@ -1,5 +1,6 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
+using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Net.Http.Headers;
@@ -35,6 +36,7 @@ namespace AnimeList.Services
 
         private readonly IHttpClientFactory _clientFactory;
         private readonly IConfiguration _configuration;
+        private readonly ILogger<AnimeMappingService> _logger;
         private readonly SemaphoreSlim _semaphore = new(1, 1);
         private readonly ConcurrentDictionary<string, string> _tmdbToImdbCache = new();
         private ConcurrentDictionary<string, List<AnimeIdMapping>> _enrichedImdbIndex = new();
@@ -71,10 +73,14 @@ namespace AnimeList.Services
         // and falls back to whatever's in the on-disk snapshot.
         private static readonly TimeSpan FetchTimeout = TimeSpan.FromSeconds(15);
 
-        public AnimeMappingService(IHttpClientFactory clientFactory, IConfiguration configuration)
+        public AnimeMappingService(
+            IHttpClientFactory clientFactory,
+            IConfiguration configuration,
+            ILogger<AnimeMappingService> logger)
         {
             _clientFactory = clientFactory;
             _configuration = configuration;
+            _logger = logger;
 
             // Persistent snapshot of the merged mapping list. Written after every
             // successful network load, read as a fallback when the network load
@@ -295,6 +301,7 @@ namespace AnimeList.Services
                 bool fromNetwork = false;
                 try
                 {
+                    _logger.LogInformation("[mappings] trying network load…");
                     var client = _clientFactory.CreateClient();
                     client.Timeout = FetchTimeout;
 
@@ -317,9 +324,11 @@ namespace AnimeList.Services
                         MergeOfflineDatabase(entries, offlineJson);
 
                     fromNetwork = true;
+                    _logger.LogInformation("[mappings] network load OK ({Count} entries)", entries.Count);
                 }
-                catch (Exception)
+                catch (Exception netEx)
                 {
+                    _logger.LogWarning(netEx, "[mappings] network load failed; trying disk + bundled fallbacks");
                     // Network load failed (timeout, DNS, 5xx, parse error, …).
                     // If we already have mappings in memory keep them — a
                     // stale snapshot is better than no mappings. If memory
@@ -327,35 +336,37 @@ namespace AnimeList.Services
                     // previous run.
                     if (_dataLoaded)
                     {
-                        // Stale-but-present: leave memory alone and bail.
-                        // Don't update _lastLoaded so the next request
-                        // retries (no FailureBackoff because we have data).
+                        _logger.LogInformation("[mappings] keeping stale in-memory data (no usable refresh)");
                         return;
                     }
                     entries = TryReadDiskCache();
-                    if (entries is null)
+                    if (entries is not null)
                     {
-                        // Disk cache empty too — try the bundled snapshot
-                        // baked into the Docker image. Always present
-                        // (committed to the repo + copied at publish
-                        // time), so this is the guaranteed-data path
-                        // when both upstreams are unreachable on first
-                        // cold start. Stale by definition (whatever was
-                        // current when the image was built), but stale
-                        // mappings serve the site infinitely better
-                        // than empty ones.
+                        _logger.LogInformation(
+                            "[mappings] disk cache HIT at {Path} ({Count} entries)",
+                            _diskCachePath, entries.Count);
+                    }
+                    else
+                    {
+                        _logger.LogInformation(
+                            "[mappings] disk cache MISS at {Path}; trying bundled snapshot",
+                            _diskCachePath);
                         entries = TryReadBundledSnapshot();
+                        if (entries is not null)
+                        {
+                            _logger.LogInformation(
+                                "[mappings] bundled snapshot HIT at {Path} ({Count} entries)",
+                                _bundledSnapshotPath, entries.Count);
+                        }
+                        else
+                        {
+                            _logger.LogWarning(
+                                "[mappings] bundled snapshot MISS at {Path} — no data available; backing off {Backoff}s",
+                                _bundledSnapshotPath, (int)FailureBackoff.TotalSeconds);
+                        }
                     }
                     if (entries is null)
                     {
-                        // No memory, no disk, no bundle, no network —
-                        // genuinely cannot get data. Degrade gracefully
-                        // by leaving the constructor's empty dictionaries
-                        // in place. The next request that needs a mapping
-                        // gets a "not found" response instead of a 500.
-                        // Record the failure timestamp so subsequent calls
-                        // within the backoff window short-circuit instead
-                        // of paying another timeout.
                         _lastFailedAttempt = DateTime.UtcNow;
                         return;
                     }

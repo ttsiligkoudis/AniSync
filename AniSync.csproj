@@ -46,11 +46,12 @@
          Refresh occasionally with:
            curl -o data/anime-mappings-bundled.json \
              https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json
-         Update (not Include) because the Web SDK already picks up *.json
-         files as default Content items — Include would duplicate. Update
-         just augments the auto-included item with the publish setting we
-         need so the runtime can read it at /app/data/. -->
-    <Content Update="data\anime-mappings-bundled.json">
+         Remove + Include so we end up with EXACTLY one Content item with
+         the publish setting we need, regardless of whether the Web SDK's
+         default globs auto-included it. Update-only didn't always take
+         effect; Include-only got NETSDK1022 duplicate-item errors. -->
+    <Content Remove="data\anime-mappings-bundled.json" />
+    <Content Include="data\anime-mappings-bundled.json">
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
