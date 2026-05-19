@@ -49,15 +49,25 @@ export class RangeReader {
         return bytes;
     }
 
-    async _fetch(start, length) {
+    async _fetch(start, length, opts) {
+        opts = opts || {};
+        // Open-ended ranges (`bytes=N-` with no upper bound) are
+        // a workaround for RD edges that drop bounded ranges at
+        // deep offsets. _readStreamCapped caps the actual read at
+        // `length` regardless, so the bandwidth cost is the same as
+        // a bounded range — RD just sends data through a different
+        // code path on its side.
+        const rangeHeader = opts.openEnded
+            ? `bytes=${start}-`
+            : `bytes=${start}-${start + length - 1}`;
         const headers = {
-            'Range': `bytes=${start}-${start + length - 1}`,
+            'Range': rangeHeader,
             'User-Agent': this.userAgent,
             'Accept': '*/*',
         };
         const res = await fetch(this.url, { headers, redirect: 'follow' });
         if (!res.ok && res.status !== 206) {
-            throw new Error(`upstream HTTP ${res.status} on range ${start}-${start + length - 1}`);
+            throw new Error(`upstream HTTP ${res.status} on range ${rangeHeader}`);
         }
         // Capture total size from Content-Range: "bytes start-end/total"
         if (this.totalSize === null) {
@@ -80,7 +90,7 @@ export class RangeReader {
         // that misbehave.)
         if (res.status === 200 && start > 0) {
             try { res.body.cancel && res.body.cancel(); } catch (_) {}
-            throw new Error(`upstream returned 200 (Range ignored) for range ${start}-${start + length - 1}; cannot fetch arbitrary offset`);
+            throw new Error(`upstream returned 200 (Range ignored) for ${rangeHeader}; cannot fetch arbitrary offset`);
         }
         // Stream the body chunk-by-chunk with a HARD CAP at the
         // requested length. Even if the upstream Content-Length lies
@@ -194,7 +204,29 @@ export class RangeReader {
                 // Try next attempt with more splits + longer backoff.
             }
         }
-        throw lastError || new Error(`readCritical exhausted retries for ${start}-${start + length - 1}`);
+
+        // All bounded-Range attempts failed. As a final fallback,
+        // try an open-ended Range request at the same start offset.
+        // Real-world finding (worker logs on big SubsPlease files,
+        // 2026-05): RD's CDN edges that serve CF worker IPs
+        // sometimes accept the TCP connection on bounded Ranges
+        // anchored at deep offsets but then drop the body
+        // mid-stream — "Network connection lost" — while
+        // accepting open-ended Ranges starting at the same offset.
+        // _readStreamCapped still caps the read locally at
+        // `length` so we don't actually transfer the rest of the
+        // file (RD's TCP send buffer might push a few hundred KB
+        // extra before our cancel takes effect, but no more).
+        try {
+            console.log(`[readCritical] start=${start} length=${length}: bounded attempts exhausted; trying open-ended Range`);
+            const bytes = await this._fetch(start, length, { openEnded: true });
+            this._chunks.push({ start, bytes });
+            console.log(`[readCritical] start=${start} length=${length}: open-ended Range ok`);
+            return bytes;
+        } catch (e) {
+            console.warn(`[readCritical] start=${start} length=${length}: open-ended Range also failed (${(e && e.message) || e})`);
+            throw lastError || e;
+        }
     }
 
     /**
