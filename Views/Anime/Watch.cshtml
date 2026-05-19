@@ -748,36 +748,56 @@
                 return u;
             }
 
-            // Two escalation factors, both at 4. They run on
-            // statistically different failure modes:
+            // Two escalation paths. They run on statistically
+            // different failure modes:
             //
-            //   * MKV_EXTRACT_SHARDS — fired when single-shot returned
-            //     truncated:true (the worker hit MAX_TOTAL_FETCH).
-            //     Four shards each fetch a 1/4 contiguous slice of
-            //     the cluster offset list, merge in the browser.
-            //     ALL must succeed; this is "split the work" so any
-            //     single failure means the merge is incomplete.
+            //   * Sharded extract — fired when single-shot returned
+            //     truncated:true (the worker hit either MAX_TOTAL_FETCH
+            //     or its CPU-budget cluster ceiling). N shards each
+            //     fetch a 1/N contiguous slice of the cluster offset
+            //     list, merge in the browser. ALL must succeed;
+            //     this is "split the work" so any single failure
+            //     means the merge is incomplete. N is computed
+            //     dynamically — see computeShardCount below.
             //
-            //   * MKV_EXTRACT_RETRIES — fired when single-shot
-            //     returned a transient failure (reason=network from
-            //     an RD edge drop / worker_error / browser-side
-            //     fetch error). Four IDENTICAL single-shot retries
-            //     race against each other; we take whichever
+            //   * Parallel retries — fired when single-shot returned
+            //     a transient failure (reason=network from an RD
+            //     edge drop / worker_error / browser-side fetch
+            //     error). MKV_EXTRACT_RETRIES identical single-shot
+            //     retries race against each other; we take whichever
             //     succeeds first. RD's drops are per-TCP-connection,
             //     so even if one attempt dies the others on fresh
             //     sockets almost always include a survivor. Sharding
             //     does NOT help this case — every shard still has
             //     to do its own RD critical reads and would face the
-            //     same drop probability, AND'd across 4 attempts.
-            // 8 shards on Free tier — each invocation's 10 ms CPU
-            // budget is unforgiving, and 4-way splits left some
-            // files (~80+ cluster releases) just over the per-shard
-            // budget. 8-way halves per-shard cluster work again at
-            // the cost of one extra Worker invocation per file.
-            // Doesn't affect quota meaningfully — 100K/day on Free
-            // is far above realistic usage.
-            var MKV_EXTRACT_SHARDS = 8;
+            //     same drop probability, AND'd across N attempts.
+            // Shard count is computed dynamically from the cluster
+            // count the worker reports in its truncated response.
+            // Free tier's 10 ms CPU budget per invocation lands at
+            // ~20 clusters of subtitle parsing once you add critical-
+            // read + cluster-fetch overhead. We aim for that target
+            // per shard; minimum 4 (small files don't need more);
+            // maximum 16 (caps RD bandwidth + Worker invocations
+            // per file — beyond this the file is realistically only
+            // extractable via streaming fallback or a paid plan).
+            //
+            // 339-cluster files in real-world testing land at
+            // ~17 shards, just over the floor. For very long
+            // movies / multi-disc rips with >320 subtitle-bearing
+            // clusters the 16-shard cap will leave each shard
+            // over budget and the extract will fail loud.
+            var MKV_EXTRACT_TARGET_PER_SHARD = 20;
+            var MKV_EXTRACT_MIN_SHARDS = 4;
+            var MKV_EXTRACT_MAX_SHARDS = 16;
             var MKV_EXTRACT_RETRIES = 4;
+
+            function computeShardCount(clustersTotal) {
+                if (!clustersTotal || clustersTotal <= 0) return MKV_EXTRACT_MIN_SHARDS;
+                var n = Math.ceil(clustersTotal / MKV_EXTRACT_TARGET_PER_SHARD);
+                if (n < MKV_EXTRACT_MIN_SHARDS) return MKV_EXTRACT_MIN_SHARDS;
+                if (n > MKV_EXTRACT_MAX_SHARDS) return MKV_EXTRACT_MAX_SHARDS;
+                return n;
+            }
 
             // Single Worker invocation. Returns a rich result shape
             //   { ok: true,  body: <extract body> }
@@ -903,18 +923,20 @@
             // merged track is worse than no embedded subs.
             function shardedExtract(directUrl, signal, firstAttempt) {
                 var clustersTotal = firstAttempt.clustersTotal || 0;
+                var shards = computeShardCount(clustersTotal);
                 console.info(
                     '[AniSync] mkv-extractor truncated single-shot ' +
-                    '(' + (firstAttempt.clustersInShard || 0) + '/' + clustersTotal + ' clusters fit); ' +
-                    'escalating to ' + MKV_EXTRACT_SHARDS + ' shards.');
+                    '(' + clustersTotal + ' clusters); escalating to ' +
+                    shards + ' shards (~' + Math.ceil(clustersTotal / shards) +
+                    ' clusters each).');
                 setEmbedStatus(
-                    'Big file — extracting across ' + MKV_EXTRACT_SHARDS + ' workers…',
+                    'Big file — extracting across ' + shards + ' workers…',
                     'loading');
 
                 var promises = [];
-                for (var i = 0; i < MKV_EXTRACT_SHARDS; i++) {
+                for (var i = 0; i < shards; i++) {
                     promises.push(callMkvExtractor(directUrl, signal,
-                        { shards: MKV_EXTRACT_SHARDS, shard: i }));
+                        { shards: shards, shard: i }));
                 }
                 return Promise.all(promises).then(function (results) {
                     var failures = [];
@@ -925,7 +947,7 @@
                                 (r.error ? ' (' + r.error + ')' : ''));
                         } else if (r.body.truncated) {
                             failures.push('shard ' + i + ': still truncated at ' +
-                                MKV_EXTRACT_SHARDS + '-way split');
+                                shards + '-way split');
                         }
                     }
                     if (failures.length > 0) {
@@ -939,7 +961,7 @@
                         results.map(function (r) { return r.body; }));
                     try {
                         console.log(
-                            '[AniSync] mkv-extractor merged from ' + MKV_EXTRACT_SHARDS + ' shards:',
+                            '[AniSync] mkv-extractor merged from ' + shards + ' shards:',
                             merged.tracks.map(function (t) {
                                 return { num: t.number, lang: t.language, cues: t.cues.length };
                             })
