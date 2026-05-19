@@ -367,7 +367,7 @@
     // _listCache.Invalidate already does for the per-list cache. Key
     // must match Views/Home/Index.cshtml's cache key.
     function invalidateContinueWatchingCache() {
-        try { localStorage.removeItem('anisync.continueWatching.v2'); }
+        try { localStorage.removeItem('anisync.continueWatching.v1'); }
         catch (e) { /* quota / private mode — best-effort */ }
     }
 
