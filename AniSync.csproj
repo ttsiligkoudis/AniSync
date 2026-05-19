@@ -39,6 +39,17 @@
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
+    <!-- Bundled snapshot of the Fribb anime-lists mapping file. Read by
+         AnimeMappingService as the deepest fallback (after live network
+         and the persistent on-disk cache) so the site always has SOMETHING
+         to serve when Fly's IP pool is being throttled by GitHub's CDN.
+         Refresh occasionally with:
+           curl -o data/anime-mappings-bundled.json \
+             https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json -->
+    <Content Include="data\anime-mappings-bundled.json">
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>

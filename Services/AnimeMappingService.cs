@@ -61,6 +61,7 @@ namespace AnimeList.Services
         // doesn't generate a per-request retry storm.
         private DateTime _lastFailedAttempt = DateTime.MinValue;
         private readonly string _diskCachePath;
+        private readonly string _bundledSnapshotPath;
 
         // Network timeout for the mapping-source fetches. HttpClient defaults to
         // 100 s, which makes "raw.githubusercontent.com is misbehaving today"
@@ -82,6 +83,16 @@ namespace AnimeList.Services
                 ?? Environment.GetEnvironmentVariable("ANISYNC_DATA_DIR")
                 ?? ".";
             _diskCachePath = Path.Combine(dataDir, "anime-mappings.json");
+
+            // Bundled snapshot — last-resort fallback when both network
+            // and the persistent disk cache come up empty (typical on a
+            // first cold start during a sustained upstream outage). Lives
+            // in the Docker image at /app/data/anime-mappings-bundled.json
+            // via the csproj's <Content Include="data\..." /> entry, so
+            // it's guaranteed to exist on every deploy regardless of
+            // volume state. Can be months stale; doesn't matter — the
+            // disk cache overwrites it on the first successful refresh.
+            _bundledSnapshotPath = Path.Combine(AppContext.BaseDirectory, "data", "anime-mappings-bundled.json");
         }
 
         public async Task<AnimeIdMapping> GetAnilistMapping(string anilistId)
@@ -324,13 +335,27 @@ namespace AnimeList.Services
                     entries = TryReadDiskCache();
                     if (entries is null)
                     {
-                        // No memory, no disk, no network — degrade gracefully
-                        // by leaving the constructor's empty dictionaries in
-                        // place. The next request that needs a mapping gets a
-                        // "not found" response instead of a 500. Record the
-                        // failure timestamp so subsequent calls within the
-                        // backoff window short-circuit instead of paying
-                        // another timeout.
+                        // Disk cache empty too — try the bundled snapshot
+                        // baked into the Docker image. Always present
+                        // (committed to the repo + copied at publish
+                        // time), so this is the guaranteed-data path
+                        // when both upstreams are unreachable on first
+                        // cold start. Stale by definition (whatever was
+                        // current when the image was built), but stale
+                        // mappings serve the site infinitely better
+                        // than empty ones.
+                        entries = TryReadBundledSnapshot();
+                    }
+                    if (entries is null)
+                    {
+                        // No memory, no disk, no bundle, no network —
+                        // genuinely cannot get data. Degrade gracefully
+                        // by leaving the constructor's empty dictionaries
+                        // in place. The next request that needs a mapping
+                        // gets a "not found" response instead of a 500.
+                        // Record the failure timestamp so subsequent calls
+                        // within the backoff window short-circuit instead
+                        // of paying another timeout.
                         _lastFailedAttempt = DateTime.UtcNow;
                         return;
                     }
@@ -438,6 +463,27 @@ namespace AnimeList.Services
             {
                 // Best-effort persistence — losing the write is OK,
                 // it just means the next cold start has no fallback.
+            }
+        }
+
+        // Bundled snapshot baked into the Docker image. Same JSON shape as
+        // the live Fribb mapping file — committed at the path declared in
+        // the csproj <Content Include="data\..."/> entry and copied into
+        // the publish output at /app/data/anime-mappings-bundled.json.
+        // Refreshed manually by re-downloading the file and committing;
+        // a CI workflow could automate this on a weekly schedule.
+        private List<AnimeIdMapping> TryReadBundledSnapshot()
+        {
+            try
+            {
+                if (!File.Exists(_bundledSnapshotPath)) return null;
+                var json = File.ReadAllText(_bundledSnapshotPath);
+                if (string.IsNullOrWhiteSpace(json)) return null;
+                return DeserializeObject<List<AnimeIdMapping>>(json);
+            }
+            catch
+            {
+                return null;
             }
         }
 
