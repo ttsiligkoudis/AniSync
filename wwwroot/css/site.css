@@ -2591,6 +2591,30 @@ body.modal-open {
         text-overflow: ellipsis;
         white-space: nowrap;
     }
+
+    /* Under-player toolbar: auto-skip toggle + embedded-sub status
+       pill + per-provider subtitle count chip. The desktop default
+       is `display: flex` with no flex-wrap, so when the combined
+       content exceeds the viewport (always, on a narrow phone)
+       flex shrinks each pill — which forces the pill's TEXT to
+       wrap onto two lines and makes the toolbar twice as tall
+       with awkward broken labels. Allow the pills to wrap onto
+       multiple rows instead, keep each pill's label on a single
+       line, and tighten padding + font so two pills can fit on
+       one row when they actually do. */
+    .watch-player-toolbar {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 0.4rem;
+    }
+    .watch-toggle,
+    .watch-embed-status {
+        flex-shrink: 0;
+        white-space: nowrap;
+        margin-left: 0;
+        font-size: 0.72rem;
+        padding: 0.35rem 0.6rem;
+    }
 }
 
 .episode-stream-video {
