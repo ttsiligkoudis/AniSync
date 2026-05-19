@@ -184,20 +184,24 @@ export async function extractSubtitles(reader, options) {
     )).sort((a, b) => a - b);
 
     // Free-tier CPU budget escape hatch. The cluster batch loop
-    // walks every EBML block header in every cluster — for a typical
-    // anime release that's ~500 blocks per cluster × N clusters,
-    // each block costing ~0.5-1μs of JS CPU. Free tier has 10ms
-    // CPU per invocation; ~50 clusters is roughly where a single
-    // invocation runs out of budget once critical-read + cluster-
-    // fetch overhead is accounted for. Above that we surface
-    // truncated:true immediately and let the client shard the work
-    // N ways — each shard's slice fits its own 10ms budget. Only
-    // applies to single-shot calls; shard-scoped invocations already
-    // process at most clustersTotal/shards clusters by construction.
-    const SINGLE_SHOT_CLUSTER_CEILING = 50;
+    // walks every EBML block header in every cluster. The fast-skip
+    // optimisation lower in this file cuts per-block cost ~10×,
+    // but cumulative CPU still scales linearly with cluster count.
+    // Threshold tuned empirically: at 30 clusters single-shot CPU
+    // lands ~8-9 ms — leaves zero headroom on Free. Past that we
+    // surface truncated:true immediately and let the client shard
+    // the work N ways, where each shard's slice fits its own 10 ms
+    // budget. Only applies to single-shot calls; shard-scoped
+    // invocations process at most clustersTotal/shards by construction.
+    const SINGLE_SHOT_CLUSTER_CEILING = 30;
     const isSingleShot = (opts.shards || 1) <= 1;
+    // Unconditional cluster-count log so the dashboard always
+    // shows what we decided about this file. Without this, files
+    // under the ceiling silently entered the cluster loop and we
+    // had no way to tell from logs why the ceiling didn't fire.
+    console.log(`[extract] clusters=${clusterAbsOffsets.length} ceiling=${SINGLE_SHOT_CLUSTER_CEILING} shards=${opts.shards || 1} shard=${opts.shard || 0}`);
     if (clusterAbsOffsets.length > SINGLE_SHOT_CLUSTER_CEILING && isSingleShot) {
-        console.log(`[extract] ${clusterAbsOffsets.length} clusters > ${SINGLE_SHOT_CLUSTER_CEILING} CPU-budget ceiling; returning truncated for client shard escalation`);
+        console.log(`[extract] over ceiling on single-shot; returning truncated for client shard escalation`);
         return {
             tracks: subtitleTracks.map(t => ({
                 number: t.number,
