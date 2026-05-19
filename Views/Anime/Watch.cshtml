@@ -119,8 +119,12 @@
         <div class="watch-player-toolbar">
             @* Auto-skip preference lives in localStorage so it persists
                across episodes — click once, intros / outros get jumped
-               silently for every subsequent episode. *@
-            <button id="watchSkipAuto" class="watch-toggle" type="button" aria-pressed="false">
+               silently for every subsequent episode. Starts hidden;
+               the fetch handler below reveals it only when AniSkip
+               actually returned markers for this episode (no markers →
+               nothing for the toggle to act on, hiding it keeps the
+               toolbar uncluttered). *@
+            <button id="watchSkipAuto" class="watch-toggle" type="button" aria-pressed="false" hidden>
                 <span class="watch-toggle-dot" aria-hidden="true"></span>
                 <span>Auto-skip intro / outro</span>
             </button>
