@@ -20,8 +20,19 @@ namespace AnimeList.Services
     public class AnimeMappingService : IAnimeMappingService
     {
         private const string FribbMappingUrl = "https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json";
+        // jsdelivr returns 403 host_not_allowed for the Fribb repo
+        // specifically, but we keep it listed because jsdelivr's
+        // edge cache occasionally serves stale snapshots for
+        // previously-allowed repos — costs one fast HTTP miss in
+        // the bad case, saves the whole load when it works.
         private const string FribbMappingUrlCdn = "https://cdn.jsdelivr.net/gh/Fribb/anime-lists@master/anime-list-full.json";
-        private const string OfflineDbUrl = "https://raw.githubusercontent.com/manami-project/anime-offline-database/master/anime-offline-database-minified.json";
+        // The minified JSON file used to live at the repo root on
+        // master. After manami-project's 2025-25 release it's
+        // served only via GitHub Releases — the in-tree path now
+        // returns 404. The "latest" release URL stays stable
+        // across new versions (GH redirects /releases/latest
+        // to whichever tag is current).
+        private const string OfflineDbUrl = "https://github.com/manami-project/anime-offline-database/releases/latest/download/anime-offline-database-minified.json";
         private const string OfflineDbUrlCdn = "https://cdn.jsdelivr.net/gh/manami-project/anime-offline-database@master/anime-offline-database-minified.json";
         private const string TmdbApiBase = "https://api.themoviedb.org/3";
 
