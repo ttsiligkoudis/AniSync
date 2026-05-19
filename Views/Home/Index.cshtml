@@ -423,14 +423,10 @@
 }
 
 @* Continue Watching: a small slice of the user's Currently Watching list,
-   fetched client-side from /Home/ContinueWatchingData (slim JSON projection)
-   and cached in localStorage for 10 minutes. The cards are reconstructed
-   in JS via the renderCard function below — it mirrors Views/Shared/_PosterGrid.cshtml
-   one-to-one for the subset of fields the shelf surfaces (no airing-time
-   variant, no empty-message branch — neither applies to Continue Watching
-   since every item has progress > 0 by definition). The section's outer
-   skeleton always renders for logged-in non-anonymous users and starts
-   [hidden]; the JS un-hides it once items load. *@
+   fetched client-side from /Home/ContinueWatchingData (a rendered
+   _PosterGrid partial) and cached in localStorage for 10 minutes. The
+   section's outer skeleton always renders for logged-in non-anonymous
+   users and starts [hidden]; the JS un-hides it once the HTML loads. *@
 @if (isLoggedIn && !anonymousUser)
 {
     <section class="dashboard-section" data-continue-watching-section hidden>
@@ -460,10 +456,7 @@
             // can't sit stale forever. In-app writes drop the key
             // explicitly via invalidateContinueWatchingCache() in
             // wwwroot/js/manage-entry-modal.js.
-            // .v2 = data cache (was .v1 = HTML cache); bumping the key
-            // forces a re-fetch for users with the old shape sitting in
-            // localStorage.
-            var KEY = 'anisync.continueWatching.v2';
+            var KEY = 'anisync.continueWatching.v1';
             var TTL_MS = 10 * 60 * 1000;
 
             function readCache() {
@@ -472,107 +465,26 @@
                     if (!raw) return null;
                     var obj = JSON.parse(raw);
                     if (!obj || typeof obj.ts !== 'number' || (Date.now() - obj.ts) > TTL_MS) return null;
-                    return obj.items;
+                    return obj.html;
                 } catch (_) { return null; }
             }
-            function writeCache(items) {
-                try { localStorage.setItem(KEY, JSON.stringify({ ts: Date.now(), items: items })); }
+            function writeCache(html) {
+                try { localStorage.setItem(KEY, JSON.stringify({ ts: Date.now(), html: html })); }
                 catch (_) { /* quota / private mode — best-effort */ }
             }
 
-            // Mirrors Views/Shared/_PosterGrid.cshtml's card markup for
-            // the Continue-Watching case (Variant=scroll, no airing-time
-            // badge, no empty-message branch). All user-controlled text
-            // goes through textContent / DOM properties — never
-            // innerHTML — so an anime title with stray <> can't escape.
-            function renderCard(meta) {
-                var card = document.createElement('a');
-                card.className = 'library-card';
-                card.href = '/anime/' + meta.id;
-                card.title = meta.name;
-                card.setAttribute('data-meta-id', meta.id);
-                card.setAttribute('data-meta-name', meta.name);
-                if (meta.entryStatus) card.setAttribute('data-meta-status', meta.entryStatus);
-                if (meta.progress != null) card.setAttribute('data-meta-progress', String(meta.progress));
-                if (meta.episodes != null && meta.episodes > 0) {
-                    card.setAttribute('data-meta-total', String(meta.episodes));
-                }
-
-                var posterWrap = document.createElement('div');
-                posterWrap.className = 'library-card-poster-wrap';
-
-                if (meta.poster) {
-                    var img = document.createElement('img');
-                    img.className = 'library-card-poster';
-                    img.src = meta.poster;
-                    img.alt = meta.name;
-                    img.loading = 'lazy';
-                    posterWrap.appendChild(img);
-                } else {
-                    var placeholder = document.createElement('div');
-                    placeholder.className = 'library-card-poster library-card-poster-placeholder';
-                    posterWrap.appendChild(placeholder);
-                }
-
-                if (meta.progress != null && meta.progress > 0) {
-                    var progressBadge = document.createElement('span');
-                    progressBadge.className = 'library-card-progress';
-                    progressBadge.textContent = (meta.episodes != null && meta.episodes > 0)
-                        ? meta.progress + ' / ' + meta.episodes
-                        : 'Ep ' + meta.progress;
-                    posterWrap.appendChild(progressBadge);
-                }
-
-                if (meta.score != null && meta.score > 0) {
-                    var scoreBadge = document.createElement('span');
-                    scoreBadge.className = 'library-card-score';
-                    scoreBadge.textContent = '★ ' + Number(meta.score).toFixed(1);
-                    posterWrap.appendChild(scoreBadge);
-                }
-
-                if (meta.entryStatus) {
-                    var plus = document.createElement('button');
-                    plus.type = 'button';
-                    plus.className = 'library-card-plus';
-                    plus.setAttribute('aria-label', 'Mark next episode watched');
-                    plus.title = '+1 episode';
-                    plus.textContent = '+1';
-                    posterWrap.appendChild(plus);
-                }
-
-                card.appendChild(posterWrap);
-
-                var titleEl = document.createElement('span');
-                titleEl.className = 'library-card-title';
-                titleEl.textContent = meta.name;
-                card.appendChild(titleEl);
-
-                var infoBits = [];
-                if (meta.format) infoBits.push(meta.format);
-                if (meta.episodes != null && meta.episodes > 0) {
-                    infoBits.push(meta.episodes + ' ep' + (meta.episodes > 1 ? 's' : ''));
-                }
-                if (meta.year != null && meta.year > 0) infoBits.push(String(meta.year));
-                if (infoBits.length > 0) {
-                    var infoEl = document.createElement('span');
-                    infoEl.className = 'library-card-meta';
-                    infoEl.textContent = infoBits.join(' · ');
-                    card.appendChild(infoEl);
-                }
-
-                return card;
-            }
-
-            function paint(items) {
-                container.replaceChildren();
-                if (!items || items.length === 0) {
+            function paint(html) {
+                if (!html || !html.trim()) {
+                    container.replaceChildren();
                     section.hidden = true;
                     return;
                 }
-                var row = document.createElement('div');
-                row.className = 'poster-scroll-row';
-                items.forEach(function (m) { row.appendChild(renderCard(m)); });
-                container.appendChild(row);
+                // Server-rendered partial; Razor escapes all user-controlled
+                // text. innerHTML is safe here and lets the same markup the
+                // other shelves use (Views/Shared/_PosterGrid.cshtml) drop
+                // straight in without a parallel JS card builder to keep
+                // in sync.
+                container.innerHTML = html;
                 section.hidden = false;
             }
 
@@ -583,15 +495,14 @@
                         skipLoader: true,
                     });
                     if (!resp.ok) return;
-                    var data = await resp.json();
-                    if (!data || !data.success) return;
-                    writeCache(data.items || []);
-                    paint(data.items || []);
+                    var html = await resp.text();
+                    writeCache(html);
+                    paint(html);
                 } catch (_) { /* network blip — leave the section hidden */ }
             }
 
             var cached = readCache();
-            if (cached) {
+            if (cached != null) {
                 paint(cached);
             } else {
                 fetchAndPaint();

@@ -146,12 +146,13 @@ public class HomeController : Controller
                 contributingNames.Add(AnimeService.Anilist.ToString());
             }
 
-            // Continue Watching is now fetched client-side from
-            // /Home/ContinueWatchingData and cached in localStorage
-            // (anisync.continueWatching.v2, 10 min TTL) so each dashboard
-            // render doesn't pay the per-user list round-trip. The view
-            // renders the section structure unconditionally for logged-in
-            // non-anonymous users and the JS un-hides it once items load.
+            // Continue Watching is fetched client-side from
+            // /Home/ContinueWatchingData (returns a rendered _PosterGrid
+            // partial) and cached in localStorage (anisync.continueWatching.v1,
+            // 10 min TTL) so each dashboard render doesn't pay the per-user
+            // list round-trip. The view renders the section structure
+            // unconditionally for logged-in non-anonymous users and the
+            // JS un-hides it once the HTML loads.
         }
 
         // Seasonal stats + popularity shelves apply to every visitor
@@ -523,13 +524,12 @@ public class HomeController : Controller
     /// render picks up the change.
     /// </summary>
     [HttpGet("Home/ContinueWatchingData")]
-    public async Task<JsonResult> ContinueWatchingData()
+    public async Task<IActionResult> ContinueWatchingData()
     {
         var (token, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
         if (string.IsNullOrEmpty(uid) || token == null || token.anonymousUser)
         {
-            Response.StatusCode = 401;
-            return new JsonResult(new { success = false, error = "Sign in first." });
+            return Unauthorized();
         }
 
         // Match Index() exactly: dashboard always uses groupSeasons=false
@@ -542,26 +542,19 @@ public class HomeController : Controller
         var hideAdult = dashboardConfig?.showAdultContent != true;
 
         var metas = (await SafeFetchListAsync(token, ListType.Current, groupSeasons, /* nocache */ true, hideUnreleased, hideAdult))
-            .Take(ContinueWatchingMaxItems);
+            .Take(ContinueWatchingMaxItems)
+            .ToList();
 
-        // Anonymous projection keeps the payload to only the fields the
-        // card needs. Skipping Meta.recommendations / videos / trailers /
-        // links / tags / genres / etc. is the difference between a ~1 KB
-        // and ~20 KB per-card payload for users with long watchlists.
-        var items = metas.Select(m => new
+        // Render the same _PosterGrid partial every other shelf uses.
+        // Keeping a single render path is the whole point of returning
+        // HTML here instead of a JSON projection + a JS card builder
+        // duplicating Views/Shared/_PosterGrid.cshtml's markup.
+        return PartialView("_PosterGrid", new PosterGridViewModel
         {
-            id          = m.id,
-            name        = m.name,
-            poster      = m.poster,
-            format      = m.format,
-            episodes    = m.episodes,
-            year        = m.year,
-            score       = m.score,
-            progress    = m.progress,
-            entryStatus = m.entryStatus,
-        }).ToList();
-
-        return new JsonResult(new { success = true, items });
+            Items = metas,
+            ConfigUid = uid,
+            Variant = "scroll",
+        });
     }
 
     /// <summary>
