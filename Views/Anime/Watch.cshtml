@@ -2558,10 +2558,19 @@
                     }
                     skipButton.hidden = false;
                 });
-                skipButton.onclick = function () {
+                // stopPropagation: ArtPlayer's player surface has a
+                // global click handler that toggles play/pause. Without
+                // this, clicking Skip seeks AND immediately pauses (or
+                // un-pauses), so the user sees the seek "cancelled".
+                // preventDefault for completeness — the button has no
+                // form submit but is defensive against future markup
+                // changes.
+                skipButton.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    e.preventDefault();
                     var t = parseFloat(skipButton.dataset.seekTo || '0');
                     if (t > 0) art.seek = t;
-                };
+                });
             }
 
             // Paint a translucent fill over the OP / ED ranges on the
@@ -2581,20 +2590,18 @@
                 function paint() {
                     var dur = art.duration || (art.video && art.video.duration) || 0;
                     if (!dur || !isFinite(dur)) return false;
-                    var wrap = art.template && art.template.$progress;
-                    if (!wrap) wrap = art.constructor.utils
+                    var host = art.template && art.template.$progress;
+                    if (!host) host = art.constructor.utils
                         ? art.constructor.utils.query('.art-control-progress', art.template && art.template.$player)
                         : null;
-                    if (!wrap) wrap = (art.template && art.template.$player || document)
+                    if (!host) host = (art.template && art.template.$player || document)
                         .querySelector('.art-control-progress');
-                    if (!wrap) return false;
-                    // .art-control-progress wraps a hit-area padding around
-                    // the actual .art-progress bar. Appending bands to the
-                    // wrapper made them as tall as the hit area, which is
-                    // why they read as "outside" the visible bar. Drill
-                    // down to .art-progress so top:0/bottom:0 lines up with
-                    // the painted bar exactly.
-                    var host = wrap.querySelector('.art-progress') || wrap;
+                    if (!host) return false;
+                    // .art-control-progress is taller than the visible bar
+                    // (~30px of hit area vs. ~4px painted track centered
+                    // vertically). The band's height + top:50%/translateY
+                    // are pinned in CSS to match the painted track, so we
+                    // just append here and let the CSS pin do the work.
                     // Idempotent: nuke any prior fills before re-paint.
                     var prior = host.querySelectorAll('.watch-skip-range');
                     for (var i = 0; i < prior.length; i++) prior[i].remove();

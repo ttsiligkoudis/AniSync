@@ -2445,25 +2445,31 @@ body.modal-open {
     display: none;
 }
 
-/* AniSkip OP / ED range fill on the ArtPlayer progress bar. We append
-   the band INSIDE .art-progress (the visible bar, not the hit-area
-   wrapper), so top:0/bottom:0 lines up with the bar's exact height
-   without spilling above or below. Pointer-events stay off so the
-   band doesn't steal hover / click from ArtPlayer's own seeker.
-   One flat light-yellow shade for both intro + outro — the markers
-   read as "here's where a skip is available", not as separate UI
-   for OP vs ED (the tooltip + button text already distinguish those). */
+/* AniSkip OP / ED range fill on the ArtPlayer progress bar.
+   .art-control-progress is the FULL hit area (~30px tall) — but
+   ArtPlayer paints the visible bar as a thin ~4px track centered
+   inside that wrapper, with the played / loaded children positioned
+   absolutely at top:50%. So we pin the band the same way (50%
+   centered, fixed 4px height that grows to 6px on hover to match
+   ArtPlayer's own bar resize behaviour) instead of stretching it
+   top:0/bottom:0 across the hit area — which is why earlier
+   revisions had the bands spilling above and below the visible bar.
+   Pointer-events stay off so ArtPlayer's seeker keeps the hover/
+   click. One flat light-yellow for both intro and outro — the
+   tooltip + skip-button text already distinguish OP from ED. */
 .watch-skip-range {
     position: absolute;
-    top: 0;
-    bottom: 0;
+    top: 50%;
+    height: 4px;
+    transform: translateY(-50%);
     z-index: 1;
     pointer-events: none;
     background: rgba(250, 204, 21, 0.55);
-    transition: opacity 0.15s;
+    transition: height 0.15s, background 0.15s;
 }
-.art-progress:hover .watch-skip-range {
-    opacity: 0.85;
+.art-control-progress:hover .watch-skip-range {
+    height: 6px;
+    background: rgba(250, 204, 21, 0.7);
 }
 
 .watch-player-toolbar {
