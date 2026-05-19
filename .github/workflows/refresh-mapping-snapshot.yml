@@ -1,0 +1,98 @@
+# Weekly refresh of the bundled mapping snapshot at
+# data/anime-mappings-bundled.json. This is the "deepest fallback"
+# the AnimeMappingService reads when both the live network fetch and
+# the Fly-volume disk cache are unavailable on a cold start. A
+# stale-by-weeks bundle is way better than empty mappings, but the
+# fresher we keep it the less stale the worst-case fallback is.
+#
+# Pushes directly to master when the upstream snapshot has actually
+# changed; the existing fly-deploy workflow's master-push trigger
+# then redeploys the image with the new bundle.
+
+name: Refresh bundled mapping snapshot
+
+on:
+  schedule:
+    # Sunday 03:00 UTC. GitHub Actions cron is best-effort — runs
+    # can be delayed by up to an hour during high-traffic windows.
+    # That's fine for a weekly data refresh.
+    - cron: '0 3 * * 0'
+  # Manual trigger from the Actions tab when you want to refresh
+  # ad-hoc (e.g. immediately after a known upstream update).
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    concurrency:
+      # Don't let two manual triggers race a scheduled run — pushing
+      # to master from parallel jobs would non-fast-forward and lose
+      # one of the commits.
+      group: refresh-bundled-snapshot
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need a real branch checked out (not a detached HEAD)
+          # so the `git push origin master` step below has somewhere
+          # to push.
+          ref: master
+
+      - name: Download latest snapshot from upstream
+        run: |
+          set -euo pipefail
+          curl -sSL --max-time 60 --fail \
+            -o data/anime-mappings-bundled.json.new \
+            https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json
+
+      - name: Validate snapshot
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          import json, os, sys
+          with open('data/anime-mappings-bundled.json.new') as f:
+              d = json.load(f)
+          if not isinstance(d, list):
+              print(f'Not a list: {type(d).__name__}', file=sys.stderr)
+              sys.exit(1)
+          # Sanity floor — the current file has ~42k entries. A sudden
+          # drop below 10k would be an upstream regression we shouldn't
+          # ship as our guaranteed fallback. Better to keep the stale
+          # known-good bundle and surface the anomaly via a failing
+          # workflow run.
+          if len(d) < 10000:
+              print(f'Suspiciously small: {len(d)} entries', file=sys.stderr)
+              sys.exit(1)
+          print(f'Validated: {len(d)} entries')
+          PY
+          mv data/anime-mappings-bundled.json.new data/anime-mappings-bundled.json
+
+      - name: Commit + push if changed
+        run: |
+          set -euo pipefail
+          # Pull anything that landed on master since checkout to
+          # minimise the non-fast-forward window. The concurrency
+          # group above already serialises refresh runs, so the only
+          # race is against an unrelated master push (a claude/*
+          # branch auto-merge from fly-deploy).
+          git fetch origin master
+          git reset --hard origin/master
+          # Re-download since the reset may have wiped our new file.
+          curl -sSL --max-time 60 --fail \
+            -o data/anime-mappings-bundled.json \
+            https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json
+
+          if git diff --quiet -- data/anime-mappings-bundled.json; then
+            echo "Upstream snapshot unchanged — skipping commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          ENTRIES=$(python3 -c "import json; print(len(json.load(open('data/anime-mappings-bundled.json'))))")
+          git add data/anime-mappings-bundled.json
+          git commit -m "Refresh bundled mapping snapshot (${ENTRIES} entries)"
+          git push origin master
