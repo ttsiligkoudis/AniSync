@@ -2423,7 +2423,13 @@ body.modal-open {
     position: absolute;
     bottom: 4.5rem;       /* clear ArtPlayer's bottom controls bar */
     right: 1rem;
-    z-index: 5;
+    /* ArtPlayer paints overlays at z-index 30 (.art-mask), 40
+       (.art-state), 60 (.art-controls); anything below 60 gets the
+       click swallowed by .art-mask before it reaches the button.
+       70 puts us above the mask + state but still below the
+       controls so the button can't accidentally cover ArtPlayer's
+       own toolbar. */
+    z-index: 70;
     padding: 0.55rem 1rem;
     background: rgba(0, 0, 0, 0.75);
     border: 1px solid rgba(255, 255, 255, 0.2);
@@ -2446,29 +2452,22 @@ body.modal-open {
 }
 
 /* AniSkip OP / ED range fill on the ArtPlayer progress bar.
-   .art-control-progress is the FULL hit area (~30px tall) — but
-   ArtPlayer paints the visible bar as a thin ~4px track centered
-   inside that wrapper, with the played / loaded children positioned
-   absolutely at top:50%. So we pin the band the same way (50%
-   centered, fixed 4px height that grows to 6px on hover to match
-   ArtPlayer's own bar resize behaviour) instead of stretching it
-   top:0/bottom:0 across the hit area — which is why earlier
-   revisions had the bands spilling above and below the visible bar.
-   Pointer-events stay off so ArtPlayer's seeker keeps the hover/
-   click. One flat light-yellow for both intro and outro — the
-   tooltip + skip-button text already distinguish OP from ED. */
+   ArtPlayer's painted bar (.art-progress-played / .art-progress-loaded)
+   isn't centered inside .art-control-progress — it sits near the
+   bottom of the hit-area wrapper. JS reads the played-bar's live
+   offsetTop / offsetHeight and writes them onto the band as inline
+   styles, so the band lines up exactly with the rendered bar.
+   Pointer-events stay off so ArtPlayer's seeker keeps hover/click.
+   One flat light-yellow for both intro and outro — the tooltip +
+   skip-button text already distinguish OP from ED. */
 .watch-skip-range {
     position: absolute;
-    top: 50%;
-    height: 4px;
-    transform: translateY(-50%);
     z-index: 1;
     pointer-events: none;
     background: rgba(250, 204, 21, 0.55);
-    transition: height 0.15s, background 0.15s;
+    transition: background 0.15s;
 }
 .art-control-progress:hover .watch-skip-range {
-    height: 6px;
     background: rgba(250, 204, 21, 0.7);
 }
 

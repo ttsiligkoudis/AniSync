@@ -2597,11 +2597,17 @@
                     if (!host) host = (art.template && art.template.$player || document)
                         .querySelector('.art-control-progress');
                     if (!host) return false;
-                    // .art-control-progress is taller than the visible bar
-                    // (~30px of hit area vs. ~4px painted track centered
-                    // vertically). The band's height + top:50%/translateY
-                    // are pinned in CSS to match the painted track, so we
-                    // just append here and let the CSS pin do the work.
+                    // ArtPlayer doesn't center its progress bar inside the
+                    // hit-area wrapper — the played/loaded children sit at
+                    // a specific offset near the bottom. CSS top:50% put
+                    // the band a few px above the actual painted bar. Read
+                    // the played-bar's live offsetTop/Height and copy them
+                    // onto the band so we sit exactly on top of the bar
+                    // regardless of ArtPlayer's internal layout numbers.
+                    var ref = host.querySelector('.art-progress-played')
+                        || host.querySelector('.art-progress-loaded');
+                    var refTop = ref ? ref.offsetTop : null;
+                    var refHeight = ref ? ref.offsetHeight : null;
                     // Idempotent: nuke any prior fills before re-paint.
                     var prior = host.querySelectorAll('.watch-skip-range');
                     for (var i = 0; i < prior.length; i++) prior[i].remove();
@@ -2615,6 +2621,10 @@
                         band.className = 'watch-skip-range';
                         band.style.left = startPct + '%';
                         band.style.width = width + '%';
+                        if (refTop != null) {
+                            band.style.top = refTop + 'px';
+                            band.style.height = refHeight + 'px';
+                        }
                         band.title = (kind === 'intro' ? 'Opening' : 'Ending')
                             + ' — ' + Math.round(range.start) + 's → ' + Math.round(range.end) + 's';
                         host.appendChild(band);
