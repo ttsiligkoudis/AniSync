@@ -769,7 +769,14 @@
             //     does NOT help this case — every shard still has
             //     to do its own RD critical reads and would face the
             //     same drop probability, AND'd across 4 attempts.
-            var MKV_EXTRACT_SHARDS = 4;
+            // 8 shards on Free tier — each invocation's 10 ms CPU
+            // budget is unforgiving, and 4-way splits left some
+            // files (~80+ cluster releases) just over the per-shard
+            // budget. 8-way halves per-shard cluster work again at
+            // the cost of one extra Worker invocation per file.
+            // Doesn't affect quota meaningfully — 100K/day on Free
+            // is far above realistic usage.
+            var MKV_EXTRACT_SHARDS = 8;
             var MKV_EXTRACT_RETRIES = 4;
 
             // Single Worker invocation. Returns a rich result shape
