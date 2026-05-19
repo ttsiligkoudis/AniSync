@@ -179,18 +179,19 @@
     @* History-stack hygiene for the /watch flow:
        - On page load, classify how we got here (from /anime, from another
          /watch, or from elsewhere) and stash that on sessionStorage so the
-         back-link knows whether the /anime entry should also be popped.
+         back-link knows whether to step back or replace.
        - Replace episode → episode navigations (prev/next buttons) with
          location.replace so the back stack accumulates at most one /watch
          entry no matter how many "next" clicks the user does. Without
          this, three forward clicks left three /watch entries the browser
          Back button would walk through one at a time.
-       - The "← {Anime title}" back-link then pops 1 entry (when we came
-         from a non-/anime page) or 2 (when we came from /anime), landing
-         the user on whatever was on the stack before they entered the
-         watch flow. Falls back to a plain location.replace of the link's
-         /anime/{id} href when the stack is too shallow (deep-link /watch
-         in a fresh tab) so the user still gets somewhere sensible.
+       - The "← {Anime title}" back-link always lands the user on the
+         anime detail page. When /anime/{id} is already right behind us
+         in history (fromAnime), a plain history.back() reuses it and
+         drops the /watch entry off the stack. Otherwise (notification
+         deep-link, fresh-tab, …), location.replace swaps /watch for
+         /anime/{id} in place so the user can still go Back to wherever
+         they were before clicking the notification.
        Modifier-clicks (Ctrl / Cmd / Shift / middle button) on any of
        these links fall through to the default <a> behaviour so opening
        in a new tab still works. *@
@@ -224,9 +225,10 @@
                 });
             }
 
-            // Back-link: pop /watch (+ /anime if we came from there) so
-            // browser Back lands on the page the user was on BEFORE
-            // entering the watch flow.
+            // Back-link: always lands on /anime/{id}. When that page is
+            // already the previous history entry, step back to reuse it
+            // (and drop /watch from the stack); otherwise replace /watch
+            // with the /anime href in place.
             var back = document.querySelector('.watch-back');
             if (back) {
                 back.addEventListener('click', function (e) {
@@ -238,19 +240,9 @@
                     catch (_) { entry = null; }
                     try { sessionStorage.removeItem(ENTRY_KEY); } catch (_) {}
 
-                    var steps = entry === 'fromAnime' ? 2 : 1;
-                    // history.length counts forward entries too, but in
-                    // the linear forward-only flow this represents the
-                    // tab's accumulated depth. Cap so a shallow stack
-                    // (fresh-tab deep link to /watch) doesn't no-op or
-                    // overshoot into nothing.
-                    var maxBack = window.history.length - 1;
-                    var n = Math.min(steps, maxBack);
-                    if (n > 0) {
-                        window.history.go(-n);
+                    if (entry === 'fromAnime' && window.history.length > 1) {
+                        window.history.back();
                     } else {
-                        // No prior entry to pop — land on the anime
-                        // detail page as the next best thing.
                         window.location.replace(back.href);
                     }
                 });
