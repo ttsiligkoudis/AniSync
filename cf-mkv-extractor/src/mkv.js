@@ -70,6 +70,7 @@ const BATCH_PACING_MS = 100;
 export async function extractSubtitles(reader, options) {
     const opts = options || {};
     await reader.probeSize();
+    console.log(`[extract] file totalSize=${reader.totalSize} shards=${opts.shards || 1} shard=${opts.shard || 0}`);
 
     // ── 1. Read the file head ─────────────────────────────────────
     const head = await reader.readCritical(0, HEAD_BYTES);
@@ -155,6 +156,7 @@ export async function extractSubtitles(reader, options) {
         throw new Error('SeekHead has no Cues pointer — file has no index');
     }
     const cuesAbs = absoluteFromSegment(cuesOff);
+    console.log(`[extract] cues at absolute offset=${cuesAbs} (totalSize=${reader.totalSize})`);
     let cuesBuf = await reader.readCritical(cuesAbs, CUES_FETCH);
     const cuesEl = readElement(cuesBuf, 0);
     if (cuesEl.id !== ID.Cues) {
