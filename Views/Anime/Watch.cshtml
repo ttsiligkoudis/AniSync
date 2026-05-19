@@ -2581,13 +2581,20 @@
                 function paint() {
                     var dur = art.duration || (art.video && art.video.duration) || 0;
                     if (!dur || !isFinite(dur)) return false;
-                    var host = art.template && art.template.$progress;
-                    if (!host) host = art.constructor.utils
+                    var wrap = art.template && art.template.$progress;
+                    if (!wrap) wrap = art.constructor.utils
                         ? art.constructor.utils.query('.art-control-progress', art.template && art.template.$player)
                         : null;
-                    if (!host) host = (art.template && art.template.$player || document)
+                    if (!wrap) wrap = (art.template && art.template.$player || document)
                         .querySelector('.art-control-progress');
-                    if (!host) return false;
+                    if (!wrap) return false;
+                    // .art-control-progress wraps a hit-area padding around
+                    // the actual .art-progress bar. Appending bands to the
+                    // wrapper made them as tall as the hit area, which is
+                    // why they read as "outside" the visible bar. Drill
+                    // down to .art-progress so top:0/bottom:0 lines up with
+                    // the painted bar exactly.
+                    var host = wrap.querySelector('.art-progress') || wrap;
                     // Idempotent: nuke any prior fills before re-paint.
                     var prior = host.querySelectorAll('.watch-skip-range');
                     for (var i = 0; i < prior.length; i++) prior[i].remove();
@@ -2598,7 +2605,7 @@
                         var width = Math.max(0, endPct - startPct);
                         if (width <= 0) return;
                         var band = document.createElement('span');
-                        band.className = 'watch-skip-range watch-skip-range-' + kind;
+                        band.className = 'watch-skip-range';
                         band.style.left = startPct + '%';
                         band.style.width = width + '%';
                         band.title = (kind === 'intro' ? 'Opening' : 'Ending')
