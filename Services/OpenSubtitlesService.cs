@@ -171,7 +171,11 @@ namespace AnimeList.Services
             // (no-op for other hosts). Cache key still keys on the
             // pre-transform URL so re-requests with the same upstream
             // URL hit cache regardless of transform application.
-            var cacheKey = $"opensubs:vtt:{url}";
+            // Version suffix is bumped whenever the post-fetch
+            // transformation pipeline changes (e.g. when StripFontTags
+            // was added) so pre-existing cached entries miss instead of
+            // serving stale un-cleaned VTT until the 6h TTL expires.
+            var cacheKey = $"opensubs:vtt:v2:{url}";
             if (_cache.TryGetValue<string>(cacheKey, out var hit) && hit != null)
             {
                 return hit;
