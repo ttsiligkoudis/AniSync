@@ -19,24 +19,47 @@ namespace AnimeList.Services
     public class AnimeMappingService : IAnimeMappingService
     {
         private const string FribbMappingUrl = "https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json";
+        private const string FribbMappingUrlCdn = "https://cdn.jsdelivr.net/gh/Fribb/anime-lists@master/anime-list-full.json";
         private const string OfflineDbUrl = "https://raw.githubusercontent.com/manami-project/anime-offline-database/master/anime-offline-database-minified.json";
+        private const string OfflineDbUrlCdn = "https://cdn.jsdelivr.net/gh/manami-project/anime-offline-database@master/anime-offline-database-minified.json";
         private const string TmdbApiBase = "https://api.themoviedb.org/3";
 
         private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(24);
+        // When BOTH network and disk fall through, hold off retrying for
+        // this long. Without backoff, every user request would hammer
+        // raw.githubusercontent.com — which is exactly what got us
+        // rate-limited / throttled in the first place. 5 min lets a
+        // transient GitHub blip resolve quickly while a longer outage
+        // doesn't generate a request storm.
+        private static readonly TimeSpan FailureBackoff = TimeSpan.FromMinutes(5);
 
         private readonly IHttpClientFactory _clientFactory;
         private readonly IConfiguration _configuration;
         private readonly SemaphoreSlim _semaphore = new(1, 1);
         private readonly ConcurrentDictionary<string, string> _tmdbToImdbCache = new();
         private ConcurrentDictionary<string, List<AnimeIdMapping>> _enrichedImdbIndex = new();
-        private FrozenDictionary<int, AnimeIdMapping> _anilistMapping;
-        private FrozenDictionary<int, AnimeIdMapping> _kitsuMapping;
-        private FrozenDictionary<int, AnimeIdMapping> _malMapping;
+        // Dictionaries default to FrozenDictionary.Empty so callers'
+        // TryGetValue still works (returns false → "not found") even
+        // when the mapping load has failed and no disk fallback exists.
+        // Without this, the site 500s every request that needs a
+        // mapping until GitHub recovers — far worse UX than "anime
+        // not found" pages while the upstream is being weird.
+        private FrozenDictionary<int, AnimeIdMapping> _anilistMapping = FrozenDictionary<int, AnimeIdMapping>.Empty;
+        private FrozenDictionary<int, AnimeIdMapping> _kitsuMapping = FrozenDictionary<int, AnimeIdMapping>.Empty;
+        private FrozenDictionary<int, AnimeIdMapping> _malMapping = FrozenDictionary<int, AnimeIdMapping>.Empty;
         private ConcurrentDictionary<string, List<AnimeIdMapping>> _imdbMapping = new();
-        private FrozenDictionary<string, List<AnimeIdMapping>> _tmdbMapping;
-        private FrozenDictionary<int, List<AnimeIdMapping>> _tvdbMapping;
-        private FrozenDictionary<int, AnimeIdMapping> _anidbMapping;
+        private FrozenDictionary<string, List<AnimeIdMapping>> _tmdbMapping = FrozenDictionary<string, List<AnimeIdMapping>>.Empty;
+        private FrozenDictionary<int, List<AnimeIdMapping>> _tvdbMapping = FrozenDictionary<int, List<AnimeIdMapping>>.Empty;
+        private FrozenDictionary<int, AnimeIdMapping> _anidbMapping = FrozenDictionary<int, AnimeIdMapping>.Empty;
         private DateTime _lastLoaded = DateTime.MinValue;
+        // Set to "data is real" (vs the constructor-default empties)
+        // once a load succeeds via any source — network or disk.
+        // Until this flips true the 24h cache window doesn't apply.
+        private bool _dataLoaded = false;
+        // Time of the last full-failure load attempt. Used to gate
+        // retries via FailureBackoff so a sustained GitHub outage
+        // doesn't generate a per-request retry storm.
+        private DateTime _lastFailedAttempt = DateTime.MinValue;
         private readonly string _diskCachePath;
 
         // Network timeout for the mapping-source fetches. HttpClient defaults to
@@ -239,13 +262,22 @@ namespace AnimeList.Services
 
         private async Task EnsureMappingsLoadedAsync()
         {
-            if (_anilistMapping is not null && DateTime.UtcNow - _lastLoaded < CacheDuration)
+            // Fresh data already loaded — no work to do.
+            if (_dataLoaded && DateTime.UtcNow - _lastLoaded < CacheDuration)
+                return;
+            // No data and last attempt failed recently — don't hammer
+            // upstream while still inside the backoff window. Callers
+            // will see the empty dictionaries and degrade to "not found"
+            // instead of paying another 15 s timeout each.
+            if (!_dataLoaded && DateTime.UtcNow - _lastFailedAttempt < FailureBackoff)
                 return;
 
             await _semaphore.WaitAsync();
             try
             {
-                if (_anilistMapping is not null && DateTime.UtcNow - _lastLoaded < CacheDuration)
+                if (_dataLoaded && DateTime.UtcNow - _lastLoaded < CacheDuration)
+                    return;
+                if (!_dataLoaded && DateTime.UtcNow - _lastFailedAttempt < FailureBackoff)
                     return;
 
                 List<AnimeIdMapping> entries = null;
@@ -255,9 +287,14 @@ namespace AnimeList.Services
                     var client = _clientFactory.CreateClient();
                     client.Timeout = FetchTimeout;
 
-                    // Download primary and secondary sources in parallel
-                    var fribbTask = client.GetStringAsync(FribbMappingUrl);
-                    var offlineTask = DownloadSafeAsync(client, OfflineDbUrl);
+                    // Each source has a primary URL on raw.githubusercontent.com
+                    // and a jsdelivr CDN mirror as fallback. jsdelivr is on
+                    // different infrastructure with a different IP egress
+                    // pattern, so when Fly's IP pool is being rate-limited
+                    // or routed badly by GitHub's CDN, jsdelivr usually
+                    // still works.
+                    var fribbTask = DownloadWithFallbacksAsync(client, FribbMappingUrl, FribbMappingUrlCdn);
+                    var offlineTask = DownloadSafeWithFallbacksAsync(client, OfflineDbUrl, OfflineDbUrlCdn);
 
                     var fribbJson = await fribbTask;
                     var offlineJson = await offlineTask;
@@ -270,29 +307,32 @@ namespace AnimeList.Services
 
                     fromNetwork = true;
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
                     // Network load failed (timeout, DNS, 5xx, parse error, …).
-                    // If we already have mappings in memory keep them — a stale
-                    // 24h+ snapshot is better than no mappings. If memory is
-                    // empty, try the on-disk snapshot from a previous run.
-                    if (_anilistMapping is not null)
+                    // If we already have mappings in memory keep them — a
+                    // stale snapshot is better than no mappings. If memory
+                    // is empty, fall back to the on-disk snapshot from a
+                    // previous run.
+                    if (_dataLoaded)
                     {
-                        // Stale-but-present: leave memory alone and bail out.
-                        // Don't update _lastLoaded so the next request retries.
+                        // Stale-but-present: leave memory alone and bail.
+                        // Don't update _lastLoaded so the next request
+                        // retries (no FailureBackoff because we have data).
                         return;
                     }
                     entries = TryReadDiskCache();
                     if (entries is null)
                     {
-                        // No memory, no disk — actually propagate the error so
-                        // the caller knows the mapping pipeline is unavailable.
-                        // Pre-existing callers either catch this (Program.cs's
-                        // startup pre-warm) or let it surface as a 500 (which is
-                        // honest — without mappings we can't service the call).
-                        throw new InvalidOperationException(
-                            "Failed to load anime mappings from network and no disk fallback exists.",
-                            ex);
+                        // No memory, no disk, no network — degrade gracefully
+                        // by leaving the constructor's empty dictionaries in
+                        // place. The next request that needs a mapping gets a
+                        // "not found" response instead of a 500. Record the
+                        // failure timestamp so subsequent calls within the
+                        // backoff window short-circuit instead of paying
+                        // another timeout.
+                        _lastFailedAttempt = DateTime.UtcNow;
+                        return;
                     }
                 }
 
@@ -336,6 +376,8 @@ namespace AnimeList.Services
                     .ToFrozenDictionary(e => e.AnidbId!.Value, e => e);
 
                 _lastLoaded = DateTime.UtcNow;
+                _dataLoaded = true;
+                _lastFailedAttempt = DateTime.MinValue;
 
                 // Persist the merged list so the NEXT cold start has
                 // something to fall back to if the GitHub fetch fails or
@@ -488,6 +530,51 @@ namespace AnimeList.Services
             {
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Tries each URL in order, returning the first successful body.
+        /// Rethrows the LAST exception if every URL fails. Use for
+        /// must-have downloads where giving up means the caller has
+        /// to handle no-data.
+        /// </summary>
+        private static async Task<string> DownloadWithFallbacksAsync(HttpClient client, params string[] urls)
+        {
+            Exception last = null;
+            foreach (var url in urls)
+            {
+                try
+                {
+                    return await client.GetStringAsync(url);
+                }
+                catch (Exception ex)
+                {
+                    last = ex;
+                }
+            }
+            throw last ?? new HttpRequestException("no URLs provided");
+        }
+
+        /// <summary>
+        /// Non-throwing variant: tries each URL in order, returns the
+        /// first successful body, or null if every URL fails. Use for
+        /// optional downloads where the caller can carry on with what
+        /// it has.
+        /// </summary>
+        private static async Task<string> DownloadSafeWithFallbacksAsync(HttpClient client, params string[] urls)
+        {
+            foreach (var url in urls)
+            {
+                try
+                {
+                    return await client.GetStringAsync(url);
+                }
+                catch
+                {
+                    // try next
+                }
+            }
+            return null;
         }
 
         /// <summary>
