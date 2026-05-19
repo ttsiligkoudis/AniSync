@@ -2599,15 +2599,22 @@
                     if (!host) return false;
                     // ArtPlayer doesn't center its progress bar inside the
                     // hit-area wrapper — the played/loaded children sit at
-                    // a specific offset near the bottom. CSS top:50% put
-                    // the band a few px above the actual painted bar. Read
-                    // the played-bar's live offsetTop/Height and copy them
-                    // onto the band so we sit exactly on top of the bar
-                    // regardless of ArtPlayer's internal layout numbers.
+                    // a specific offset near the bottom. Read the played
+                    // bar's position relative to the host via
+                    // getBoundingClientRect (more robust than offsetTop,
+                    // which depends on the offsetParent chain and can land
+                    // in the wrong frame of reference if .art-control-progress
+                    // isn't itself positioned). Copy that position onto the
+                    // band so it sits exactly on top of the bar.
                     var ref = host.querySelector('.art-progress-played')
                         || host.querySelector('.art-progress-loaded');
-                    var refTop = ref ? ref.offsetTop : null;
-                    var refHeight = ref ? ref.offsetHeight : null;
+                    var refTop = null, refHeight = null;
+                    if (ref) {
+                        var hostRect = host.getBoundingClientRect();
+                        var refRect = ref.getBoundingClientRect();
+                        refTop = refRect.top - hostRect.top;
+                        refHeight = refRect.height;
+                    }
                     // Idempotent: nuke any prior fills before re-paint.
                     var prior = host.querySelectorAll('.watch-skip-range');
                     for (var i = 0; i < prior.length; i++) prior[i].remove();
