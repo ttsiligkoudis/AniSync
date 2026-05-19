@@ -36,10 +36,14 @@ namespace AnimeList.Services
             if (_cache.TryGetValue(key, out var cached) && DateTime.UtcNow < cached.Expires)
                 return cached.Data;
 
-            // Ask for every relevant marker type. Building the query as repeated
-            // `types=` params is what the v2 API expects (rather than a comma list).
+            // AniSkip v2 expects the array form `types[]=…` and a
+            // mandatory `episodeLength` (seconds). We don't know the
+            // runtime until the user picks a source, but the API
+            // accepts 0 — used in the same way the official player
+            // extension does — and still returns the markers.
             var url = $"{AniSkipApi}/skip-times/{malId}/{episode}"
-                + "?types=op&types=ed&types=mixed-op&types=mixed-ed&types=recap&types=preview";
+                + "?types[]=op&types[]=ed&types[]=mixed-op&types[]=mixed-ed&types[]=recap&types[]=preview"
+                + "&episodeLength=0";
 
             var data = new List<SkipTime>();
             try
