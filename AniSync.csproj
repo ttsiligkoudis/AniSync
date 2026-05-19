@@ -45,9 +45,12 @@
          to serve when Fly's IP pool is being throttled by GitHub's CDN.
          Refresh occasionally with:
            curl -o data/anime-mappings-bundled.json \
-             https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json -->
-    <Content Include="data\anime-mappings-bundled.json">
-      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+             https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json
+         Update (not Include) because the Web SDK already picks up *.json
+         files as default Content items — Include would duplicate. Update
+         just augments the auto-included item with the publish setting we
+         need so the runtime can read it at /app/data/. -->
+    <Content Update="data\anime-mappings-bundled.json">
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
