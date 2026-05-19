@@ -34,7 +34,14 @@ import {
 // commit history and works out to ~80 MB worst case.
 const HEAD_BYTES = 256 * 1024;
 const TRACKS_FETCH = 256 * 1024;
-const CUES_FETCH = 4 * 1024 * 1024;
+// Initial cues fetch. Typical anime cues element fits well under
+// 1 MB (a 24-min episode has ~150-300 cue points, each ~30 bytes).
+// If the actual element is bigger we top up with a second fetch —
+// see the cues block below — so we never silently truncate the
+// cluster offset list. Smaller initial size = much less likely to
+// be dropped mid-stream by RD's edges, which is the failure mode
+// the divide-and-conquer retry in reader.js is also targeting.
+const CUES_FETCH = 1 * 1024 * 1024;
 const CLUSTER_FETCH = 6 * 1024 * 1024;
 const CLUSTER_BATCH_GAP = 6 * 1024 * 1024;
 // Per-batch span. Sized to maximise the bytes-per-connection ratio
@@ -148,12 +155,27 @@ export async function extractSubtitles(reader, options) {
         throw new Error('SeekHead has no Cues pointer — file has no index');
     }
     const cuesAbs = absoluteFromSegment(cuesOff);
-    const cuesBuf = await reader.readCritical(cuesAbs, CUES_FETCH);
+    let cuesBuf = await reader.readCritical(cuesAbs, CUES_FETCH);
     const cuesEl = readElement(cuesBuf, 0);
     if (cuesEl.id !== ID.Cues) {
         throw new Error(`expected Cues at ${cuesAbs}, got id 0x${cuesEl.id.toString(16)}`);
     }
-    const cuePositions = parseCues(cuesBuf, cuesEl.dataOffset, cuesEl.dataOffset + cuesEl.size, subTrackNumbers);
+    // Top up if the cues element extends past our initial fetch.
+    // Without this, parseCues would silently stop at the buffer
+    // boundary and we'd miss every cluster offset past it —
+    // producing a track that ends abruptly partway through the
+    // episode. Long movies / multi-hour rips routinely have cues
+    // elements in the 1-3 MB range.
+    const cuesNeeded = cuesEl.dataOffset + cuesEl.size;
+    if (cuesNeeded > cuesBuf.length) {
+        console.log(`[cues] element is ${cuesEl.size} bytes, initial fetch was ${cuesBuf.length}; topping up ${cuesNeeded - cuesBuf.length} bytes`);
+        const extra = await reader.readCritical(cuesAbs + cuesBuf.length, cuesNeeded - cuesBuf.length);
+        const combined = new Uint8Array(cuesNeeded);
+        combined.set(cuesBuf, 0);
+        combined.set(extra, cuesBuf.length);
+        cuesBuf = combined;
+    }
+    const cuePositions = parseCues(cuesBuf, cuesEl.dataOffset, cuesNeeded, subTrackNumbers);
     // Unique cluster offsets — same cluster often has cues for multiple tracks.
     const clusterAbsOffsets = Array.from(new Set(
         cuePositions.map(cp => absoluteFromSegment(cp.clusterPosition))
