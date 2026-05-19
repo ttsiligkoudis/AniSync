@@ -37,11 +37,28 @@ namespace AnimeList.Services
         private FrozenDictionary<int, List<AnimeIdMapping>> _tvdbMapping;
         private FrozenDictionary<int, AnimeIdMapping> _anidbMapping;
         private DateTime _lastLoaded = DateTime.MinValue;
+        private readonly string _diskCachePath;
+
+        // Network timeout for the mapping-source fetches. HttpClient defaults to
+        // 100 s, which makes "raw.githubusercontent.com is misbehaving today"
+        // look like a hang to every caller. 15 s is enough for a healthy ~10 MB
+        // download on a slow link and short enough that a first user request
+        // after a Fly cold start with bad upstream connectivity errors out fast
+        // and falls back to whatever's in the on-disk snapshot.
+        private static readonly TimeSpan FetchTimeout = TimeSpan.FromSeconds(15);
 
         public AnimeMappingService(IHttpClientFactory clientFactory, IConfiguration configuration)
         {
             _clientFactory = clientFactory;
             _configuration = configuration;
+
+            // Persistent snapshot of the merged mapping list. Written after every
+            // successful network load, read as a fallback when the network load
+            // fails on a cold start. Lives next to anisync.db on the Fly volume.
+            var dataDir = configuration["ANISYNC_DATA_DIR"]
+                ?? Environment.GetEnvironmentVariable("ANISYNC_DATA_DIR")
+                ?? ".";
+            _diskCachePath = Path.Combine(dataDir, "anime-mappings.json");
         }
 
         public async Task<AnimeIdMapping> GetAnilistMapping(string anilistId)
@@ -231,20 +248,53 @@ namespace AnimeList.Services
                 if (_anilistMapping is not null && DateTime.UtcNow - _lastLoaded < CacheDuration)
                     return;
 
-                var client = _clientFactory.CreateClient();
+                List<AnimeIdMapping> entries = null;
+                bool fromNetwork = false;
+                try
+                {
+                    var client = _clientFactory.CreateClient();
+                    client.Timeout = FetchTimeout;
 
-                // Download primary and secondary sources in parallel
-                var fribbTask = client.GetStringAsync(FribbMappingUrl);
-                var offlineTask = DownloadSafeAsync(client, OfflineDbUrl);
+                    // Download primary and secondary sources in parallel
+                    var fribbTask = client.GetStringAsync(FribbMappingUrl);
+                    var offlineTask = DownloadSafeAsync(client, OfflineDbUrl);
 
-                var fribbJson = await fribbTask;
-                var offlineJson = await offlineTask;
+                    var fribbJson = await fribbTask;
+                    var offlineJson = await offlineTask;
 
-                var entries = DeserializeObject<List<AnimeIdMapping>>(fribbJson) ?? [];
+                    entries = DeserializeObject<List<AnimeIdMapping>>(fribbJson) ?? [];
 
-                // Merge anime-offline-database for broader AniList/Kitsu/MAL coverage
-                if (offlineJson != null)
-                    MergeOfflineDatabase(entries, offlineJson);
+                    // Merge anime-offline-database for broader AniList/Kitsu/MAL coverage
+                    if (offlineJson != null)
+                        MergeOfflineDatabase(entries, offlineJson);
+
+                    fromNetwork = true;
+                }
+                catch (Exception ex)
+                {
+                    // Network load failed (timeout, DNS, 5xx, parse error, …).
+                    // If we already have mappings in memory keep them — a stale
+                    // 24h+ snapshot is better than no mappings. If memory is
+                    // empty, try the on-disk snapshot from a previous run.
+                    if (_anilistMapping is not null)
+                    {
+                        // Stale-but-present: leave memory alone and bail out.
+                        // Don't update _lastLoaded so the next request retries.
+                        return;
+                    }
+                    entries = TryReadDiskCache();
+                    if (entries is null)
+                    {
+                        // No memory, no disk — actually propagate the error so
+                        // the caller knows the mapping pipeline is unavailable.
+                        // Pre-existing callers either catch this (Program.cs's
+                        // startup pre-warm) or let it surface as a 500 (which is
+                        // honest — without mappings we can't service the call).
+                        throw new InvalidOperationException(
+                            "Failed to load anime mappings from network and no disk fallback exists.",
+                            ex);
+                    }
+                }
 
                 _anilistMapping = entries
                     .Where(e => e.AnilistId.HasValue)
@@ -286,10 +336,66 @@ namespace AnimeList.Services
                     .ToFrozenDictionary(e => e.AnidbId!.Value, e => e);
 
                 _lastLoaded = DateTime.UtcNow;
+
+                // Persist the merged list so the NEXT cold start has
+                // something to fall back to if the GitHub fetch fails or
+                // hangs. Only writes when this load actually came from the
+                // network — re-writing a snapshot loaded from disk would
+                // be a no-op at best and a data-race risk at worst.
+                if (fromNetwork)
+                {
+                    _ = Task.Run(() => TryWriteDiskCache(entries));
+                }
             }
             finally
             {
                 _semaphore.Release();
+            }
+        }
+
+        // ── Disk cache for the merged mapping list ──────────────────────
+        //
+        // Saved to ANISYNC_DATA_DIR (Fly's persistent volume) so subsequent
+        // cold starts can boot with the last-known-good mapping table when
+        // raw.githubusercontent.com is unreachable. The on-disk format is
+        // just the JSON serialisation of the in-memory entries list — same
+        // shape Fribb's master file uses, so we can deserialize via the
+        // same path as the network response.
+
+        private List<AnimeIdMapping> TryReadDiskCache()
+        {
+            try
+            {
+                if (!File.Exists(_diskCachePath)) return null;
+                var json = File.ReadAllText(_diskCachePath);
+                if (string.IsNullOrWhiteSpace(json)) return null;
+                return DeserializeObject<List<AnimeIdMapping>>(json);
+            }
+            catch
+            {
+                // Best-effort fallback; a corrupt cache shouldn't crash
+                // the service. The next successful network load will
+                // overwrite it.
+                return null;
+            }
+        }
+
+        private void TryWriteDiskCache(List<AnimeIdMapping> entries)
+        {
+            try
+            {
+                var json = SerializeObject(entries);
+                // Atomic-ish write via temp file + rename so a crash mid-
+                // write can't leave a half-written JSON behind that
+                // TryReadDiskCache would later choke on.
+                var tmp = _diskCachePath + ".tmp";
+                File.WriteAllText(tmp, json);
+                File.Move(tmp, _diskCachePath, overwrite: true);
+            }
+            catch
+            {
+                // Best-effort persistence — losing the write is OK,
+                // it just means the next cold start has no fallback.
             }
         }
 
