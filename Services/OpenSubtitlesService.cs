@@ -188,6 +188,16 @@ namespace AnimeList.Services
                 var vtt = text.TrimStart().StartsWith("WEBVTT", StringComparison.OrdinalIgnoreCase)
                     ? text
                     : SrtToVtt(text);
+                // VTT spec only supports <c>, <i>, <b>, <u>, <ruby>, <rt>,
+                // <v>, <lang>, plus class spans. <font ...> is a SubRip
+                // (SRT) leftover — many providers ship .vtt files with
+                // <font face="…" size="…"> wrappers anyway. ArtPlayer's
+                // renderer prints unknown tags as literal text instead of
+                // ignoring them, so the line "It's so far away" shows up
+                // as "&lt;font face=...&gt;It's so far away&lt;/font&gt;"
+                // on screen. Strip the opening + closing tags (preserve
+                // the inner text) before caching/returning.
+                vtt = StripFontTags(vtt);
                 _cache.Set(cacheKey, vtt, new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = VttCacheTtl });
                 return vtt;
             }
@@ -379,5 +389,16 @@ namespace AnimeList.Services
                 $"{m.Groups[1].Value}.{m.Groups[2].Value} --> {m.Groups[3].Value}.{m.Groups[4].Value}");
             return "WEBVTT\n\n" + body.Replace("\r\n", "\n");
         }
+
+        // Matches <font ...> / </font> in any case, with any attribute soup
+        // (including the unquoted `size=24` form some converters emit).
+        // Singleline so a stray newline inside the attribute list doesn't
+        // leave half the tag behind.
+        private static readonly Regex FontTag = new(
+            @"<\s*/?\s*font\b[^>]*>",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        private static string StripFontTags(string vtt) =>
+            string.IsNullOrEmpty(vtt) ? vtt : FontTag.Replace(vtt, string.Empty);
     }
 }
