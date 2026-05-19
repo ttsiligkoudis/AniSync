@@ -2234,6 +2234,12 @@ body.modal-open {
     aspect-ratio: 16 / 9;
     background: #000;
     border-radius: 0.75rem;
+    /* The page background is near-black too, so the player frame was
+       reading as a hole in the page. A thin highlighted border + a
+       soft outer shadow gives the surface enough lift to register as
+       a distinct element without competing with the video content. */
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
     overflow: hidden;
     display: flex;
     align-items: center;
