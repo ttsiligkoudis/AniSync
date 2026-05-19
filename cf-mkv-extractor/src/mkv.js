@@ -183,6 +183,38 @@ export async function extractSubtitles(reader, options) {
         cuePositions.map(cp => absoluteFromSegment(cp.clusterPosition))
     )).sort((a, b) => a - b);
 
+    // Free-tier CPU budget escape hatch. The cluster batch loop
+    // walks every EBML block header in every cluster — for a typical
+    // anime release that's ~500 blocks per cluster × N clusters,
+    // each block costing ~0.5-1μs of JS CPU. Free tier has 10ms
+    // CPU per invocation; ~50 clusters is roughly where a single
+    // invocation runs out of budget once critical-read + cluster-
+    // fetch overhead is accounted for. Above that we surface
+    // truncated:true immediately and let the client shard the work
+    // N ways — each shard's slice fits its own 10ms budget. Only
+    // applies to single-shot calls; shard-scoped invocations already
+    // process at most clustersTotal/shards clusters by construction.
+    const SINGLE_SHOT_CLUSTER_CEILING = 50;
+    const isSingleShot = (opts.shards || 1) <= 1;
+    if (clusterAbsOffsets.length > SINGLE_SHOT_CLUSTER_CEILING && isSingleShot) {
+        console.log(`[extract] ${clusterAbsOffsets.length} clusters > ${SINGLE_SHOT_CLUSTER_CEILING} CPU-budget ceiling; returning truncated for client shard escalation`);
+        return {
+            tracks: subtitleTracks.map(t => ({
+                number: t.number,
+                language: t.language || 'und',
+                name: t.name || '',
+                codecID: t.codecID,
+                header: decodeHeader(t.codecPrivate, t.codecID),
+                cues: [],
+            })),
+            truncated: true,
+            shard: 0,
+            shards: 1,
+            clustersTotal: clusterAbsOffsets.length,
+            clustersInShard: 0,
+        };
+    }
+
     // Sharding: when the caller specifies shards>1, slice the offset
     // list into contiguous ranges and only process this shard's slice.
     // Each shard runs as its own Worker invocation with its own
@@ -310,17 +342,36 @@ export async function extractSubtitles(reader, options) {
             }
 
             if (child.id === ID.SimpleBlock) {
-                const sb = parseSimpleBlock(clusterBuf, child.dataOffset, child.size);
-                if (sb && subTrackNumbers.has(sb.trackNumber)) {
-                    const track = subtitleTracks.find(t => t.number === sb.trackNumber);
-                    cuesByTrack.get(sb.trackNumber).push({
-                        time: (clusterTimecode + sb.timecode) * (timecodeScale / 1e6),
-                        // SimpleBlock has no duration field; fall back
-                        // to a sensible default (most ASS dialogue is
-                        // 2-4s). Players ignore overlapping cue ends.
-                        duration: 4000,
-                        text: decodeSubtitle(sb.payload, track && track.codecID),
-                    });
+                // Fast-skip: peek the track-number VINT before full
+                // parse. Most blocks in a cluster are video frames
+                // we throw away; calling parseSimpleBlock on each
+                // burns CPU (reads timecode + flags + payload
+                // subarray). With this peek, non-subtitle blocks
+                // cost ~1 byte read + Set.has and we move on.
+                // 1-byte VINT covers track numbers 1-127 — virtually
+                // every real-world file. Multi-byte VINTs (track
+                // > 127) fall back to the general decoder.
+                const fb = clusterBuf[child.dataOffset];
+                let tn;
+                if (fb & 0x80) {
+                    tn = fb & 0x7F;
+                } else {
+                    try { tn = readVint(clusterBuf, child.dataOffset, false).value; }
+                    catch (_) { tn = -1; }
+                }
+                if (subTrackNumbers.has(tn)) {
+                    const sb = parseSimpleBlock(clusterBuf, child.dataOffset, child.size);
+                    if (sb) {
+                        const track = subtitleTracks.find(t => t.number === sb.trackNumber);
+                        cuesByTrack.get(sb.trackNumber).push({
+                            time: (clusterTimecode + sb.timecode) * (timecodeScale / 1e6),
+                            // SimpleBlock has no duration field; fall back
+                            // to a sensible default (most ASS dialogue is
+                            // 2-4s). Players ignore overlapping cue ends.
+                            duration: 4000,
+                            text: decodeSubtitle(sb.payload, track && track.codecID),
+                        });
+                    }
                 }
             } else if (child.id === ID.BlockGroup) {
                 const bg = parseBlockGroup(clusterBuf, child.dataOffset, child.size);
