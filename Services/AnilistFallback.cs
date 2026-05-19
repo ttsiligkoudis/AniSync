@@ -986,7 +986,7 @@ namespace AnimeList.Services
         // user's primary's per-cour detail page so Manage Entry resolves
         // directly. AniList id is the fallback when no native mapping
         // exists for the requested service.
-        private async Task<List<Meta>> BuildBrowseMetasAsync(dynamic mediaArr, AnimeService translateTo)
+        private async Task<List<Meta>> BuildBrowseMetasAsync(dynamic mediaArr, AnimeService translateTo, bool hideAdult = false)
         {
             if (mediaArr == null) return [];
             await _mappingService.EnsureLoadedAsync();
@@ -996,6 +996,16 @@ namespace AnimeList.Services
             {
                 var anilistId = (int?)media.id;
                 if (!anilistId.HasValue) continue;
+
+                // 18+ gate — per-user setting threaded through from the
+                // discover-side controllers. Each query selects isAdult so
+                // we can filter here without a second round-trip; queries
+                // that need a free-text-tag style filter (Page.media) also
+                // pass isAdult:false at the GraphQL layer, but the
+                // Staff.staffMedia / Studio.media connections don't expose
+                // that arg so the client-side filter is what enforces it
+                // for those paths.
+                if (hideAdult && (bool?)media.isAdult == true) continue;
 
                 var externalId = await ResolveNativeIdAsync(anilistId.Value, translateTo);
                 if (!seen.Add(externalId)) continue;
@@ -1029,63 +1039,69 @@ namespace AnimeList.Services
                 .ToList();
         }
 
-        public async Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null)
+        public async Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null, bool hideAdult = false)
         {
             if (string.IsNullOrWhiteSpace(tag)) return [];
             var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
+            // Page.media() supports isAdult — filter server-side so we
+            // don't waste a page slot on entries we'd drop anyway.
+            var adultArg = hideAdult ? ", isAdult: false" : string.Empty;
 
             var requestBody = SerializeObject(new
             {
-                query = @"
-                    query ($page: Int, $perPage: Int, $tag: String) {
-                        Page(page: $page, perPage: $perPage) {
-                            media(type: ANIME, tag: $tag, sort: TITLE_ROMAJI) {
+                query = $@"
+                    query ($page: Int, $perPage: Int, $tag: String) {{
+                        Page(page: $page, perPage: $perPage) {{
+                            media(type: ANIME, tag: $tag, sort: TITLE_ROMAJI{adultArg}) {{
                                 id
+                                isAdult
                                 format
                                 episodes
                                 averageScore
                                 seasonYear
-                                title { english romaji }
-                                coverImage { large }
+                                title {{ english romaji }}
+                                coverImage {{ large }}
                                 description
-                            }
-                        }
-                    }",
+                            }}
+                        }}
+                    }}",
                 variables = new { page, perPage = PageSize, tag },
             });
 
             var data = await PostJsonAsync(requestBody);
-            return await BuildBrowseMetasAsync(data?.Page?.media, translateTo);
+            return await BuildBrowseMetasAsync(data?.Page?.media, translateTo, hideAdult);
         }
 
-        public async Task<(List<Meta> Items, bool HasNextPage)> GetByTagPageAsync(string tag, AnimeService translateTo, int page = 1)
+        public async Task<(List<Meta> Items, bool HasNextPage)> GetByTagPageAsync(string tag, AnimeService translateTo, int page = 1, bool hideAdult = false)
         {
             if (string.IsNullOrWhiteSpace(tag)) return ([], false);
             if (page < 1) page = 1;
+            var adultArg = hideAdult ? ", isAdult: false" : string.Empty;
 
             var requestBody = SerializeObject(new
             {
-                query = @"
-                    query ($page: Int, $perPage: Int, $tag: String) {
-                        Page(page: $page, perPage: $perPage) {
-                            pageInfo { hasNextPage }
-                            media(type: ANIME, tag: $tag, sort: TITLE_ROMAJI) {
+                query = $@"
+                    query ($page: Int, $perPage: Int, $tag: String) {{
+                        Page(page: $page, perPage: $perPage) {{
+                            pageInfo {{ hasNextPage }}
+                            media(type: ANIME, tag: $tag, sort: TITLE_ROMAJI{adultArg}) {{
                                 id
+                                isAdult
                                 format
                                 episodes
                                 averageScore
                                 seasonYear
-                                title { english romaji }
-                                coverImage { large }
+                                title {{ english romaji }}
+                                coverImage {{ large }}
                                 description
-                            }
-                        }
-                    }",
+                            }}
+                        }}
+                    }}",
                 variables = new { page, perPage = PageSize, tag },
             });
 
             var data = await PostJsonAsync(requestBody);
-            var items = await BuildBrowseMetasAsync(data?.Page?.media, translateTo);
+            var items = await BuildBrowseMetasAsync(data?.Page?.media, translateTo, hideAdult);
             bool hasNext = data?.Page?.pageInfo?.hasNextPage != null
                 && (bool)data.Page.pageInfo.hasNextPage;
             return (items, hasNext);
@@ -1157,10 +1173,13 @@ namespace AnimeList.Services
             return tags;
         }
 
-        public async Task<(string Name, List<Meta> Items)> GetStaffMediaAsync(int staffId, AnimeService translateTo, string skip = null)
+        public async Task<(string Name, List<Meta> Items)> GetStaffMediaAsync(int staffId, AnimeService translateTo, string skip = null, bool hideAdult = false)
         {
             var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
 
+            // Staff.staffMedia doesn't accept an isAdult filter arg on the
+            // GraphQL connection, so we select the field and filter inside
+            // BuildBrowseMetasAsync. Costs one boolean per node — cheap.
             var requestBody = SerializeObject(new
             {
                 query = @"
@@ -1171,6 +1190,7 @@ namespace AnimeList.Services
                                 edges {
                                     node {
                                         id
+                                        isAdult
                                         format
                                         episodes
                                         averageScore
@@ -1199,13 +1219,16 @@ namespace AnimeList.Services
                 foreach (var edge in staff.staffMedia.edges)
                     if (edge.node != null) nodes.Add(edge.node);
             }
-            return (name, await BuildBrowseMetasAsync(nodes, translateTo));
+            return (name, await BuildBrowseMetasAsync(nodes, translateTo, hideAdult));
         }
 
-        public async Task<(string Name, List<Meta> Items, bool HasNextPage)> GetStudioMediaAsync(int studioId, AnimeService translateTo, int page = 1)
+        public async Task<(string Name, List<Meta> Items, bool HasNextPage)> GetStudioMediaAsync(int studioId, AnimeService translateTo, int page = 1, bool hideAdult = false)
         {
             if (page < 1) page = 1;
 
+            // Studio.media doesn't accept an isAdult filter arg on the
+            // GraphQL connection — same as Staff.staffMedia. Select the
+            // field and filter inside BuildBrowseMetasAsync.
             var requestBody = SerializeObject(new
             {
                 query = @"
@@ -1217,6 +1240,7 @@ namespace AnimeList.Services
                                 edges {
                                     node {
                                         id
+                                        isAdult
                                         type
                                         format
                                         episodes
@@ -1260,7 +1284,7 @@ namespace AnimeList.Services
             bool hasNext = studio.media?.pageInfo?.hasNextPage != null
                 && (bool)studio.media.pageInfo.hasNextPage;
 
-            return (name, await BuildBrowseMetasAsync(nodes, translateTo), hasNext);
+            return (name, await BuildBrowseMetasAsync(nodes, translateTo, hideAdult), hasNext);
         }
 
         public async Task<(List<StudioSummary> Studios, bool HasNextPage)> GetStudiosListAsync(int page = 1)

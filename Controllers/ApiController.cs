@@ -838,7 +838,8 @@ namespace AnimeList.Controllers
             if (page < 1) page = 1;
             try
             {
-                var (name, items, hasNext) = await _anilistFallback.GetStudioMediaAsync(studioId, service, page);
+                var hideAdult = await ResolveHideAdultAsync();
+                var (name, items, hasNext) = await _anilistFallback.GetStudioMediaAsync(studioId, service, page, hideAdult);
                 return new JsonResult(new StudioMediaResponse(name, items ?? [], hasNext));
             }
             catch (Exception ex)
@@ -858,7 +859,8 @@ namespace AnimeList.Controllers
         {
             try
             {
-                var (name, items) = await _anilistFallback.GetStaffMediaAsync(staffId, service, skip);
+                var hideAdult = await ResolveHideAdultAsync();
+                var (name, items) = await _anilistFallback.GetStaffMediaAsync(staffId, service, skip, hideAdult);
                 return new JsonResult(new StaffMediaResponse(name, items ?? []));
             }
             catch (Exception ex)
@@ -880,7 +882,8 @@ namespace AnimeList.Controllers
             if (page < 1) page = 1;
             try
             {
-                var (items, hasNext) = await _anilistFallback.GetByTagPageAsync(tag, service, page);
+                var hideAdult = await ResolveHideAdultAsync();
+                var (items, hasNext) = await _anilistFallback.GetByTagPageAsync(tag, service, page, hideAdult);
                 return new JsonResult(new TagMediaResponse(tag, items ?? [], hasNext));
             }
             catch (Exception ex)
