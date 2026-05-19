@@ -258,8 +258,25 @@ var app = builder.Build();
 // HttpsRedirection, the Razor view that builds the Stremio install URL, …).
 app.UseForwardedHeaders();
 
-// Pre-warm the anime ID mapping cache at startup
-await app.Services.GetRequiredService<IAnimeMappingService>().EnsureLoadedAsync();
+// Pre-warm the anime ID mapping cache at startup. Wrapped in
+// try/catch + timeout because the upstream is raw.githubusercontent.com
+// and its availability / Fly-IP rate limiting is out of our control —
+// we don't want a slow or unreachable GitHub to keep us from binding
+// to port 8080 (Fly's load balancer gives up after 15s and the
+// machine never enters service). Every caller (AnilistFallback,
+// MalService, KitsuService, etc.) already awaits EnsureLoadedAsync()
+// before use, so a missed pre-warm just means the first user
+// request pays the download cost instead of the deploy.
+try
+{
+    var mappings = app.Services.GetRequiredService<IAnimeMappingService>();
+    await mappings.EnsureLoadedAsync().WaitAsync(TimeSpan.FromSeconds(8));
+}
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex,
+        "Mapping pre-warm failed at startup; will load lazily on first request");
+}
 
 if (!app.Environment.IsDevelopment())
 {
