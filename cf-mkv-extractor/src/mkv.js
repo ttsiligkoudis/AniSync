@@ -193,7 +193,7 @@ export async function extractSubtitles(reader, options) {
     // the work N ways, where each shard's slice fits its own 10 ms
     // budget. Only applies to single-shot calls; shard-scoped
     // invocations process at most clustersTotal/shards by construction.
-    const SINGLE_SHOT_CLUSTER_CEILING = 30;
+    const SINGLE_SHOT_CLUSTER_CEILING = 20;
     const isSingleShot = (opts.shards || 1) <= 1;
     // Unconditional cluster-count log so the dashboard always
     // shows what we decided about this file. Without this, files
