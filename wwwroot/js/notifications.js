@@ -172,8 +172,28 @@
         } catch (_) { /* keep last state — user can retry by reopening */ }
     }
 
+    // The CSS makes .notif-panel position:fixed so it escapes the
+    // .site-header stacking context (which would otherwise let the watch
+    // page's video element paint over it). At desktop widths the visual
+    // anchor "panel hangs below the bell" is no longer free from CSS, so
+    // we measure the bell's screen rect and pin top/right inline.
+    function positionPanel() {
+        // ≤600px: full-width via media query — clear any inline overrides.
+        if (window.matchMedia('(max-width: 600px)').matches) {
+            panel.style.top = '';
+            panel.style.left = '';
+            panel.style.right = '';
+            return;
+        }
+        var rect = toggle.getBoundingClientRect();
+        panel.style.top = (rect.bottom + 8) + 'px';
+        panel.style.right = Math.max(8, window.innerWidth - rect.right) + 'px';
+        panel.style.left = 'auto';
+    }
+
     function openPanel() {
         panel.hidden = false;
+        positionPanel();
         toggle.setAttribute('aria-expanded', 'true');
         bell.classList.add('notif-bell-open');
         // Lazy-load on first open; subsequent opens reuse the rendered list
@@ -240,6 +260,12 @@
     });
     document.addEventListener('keydown', function (ev) {
         if (ev.key === 'Escape' && !panel.hidden) closePanel();
+    });
+
+    // Keep the panel anchored to the bell if the viewport changes while
+    // it's open (e.g. window resize, devtools open, orientation change).
+    window.addEventListener('resize', function () {
+        if (!panel.hidden) positionPanel();
     });
 
     document.addEventListener('visibilitychange', function () {
