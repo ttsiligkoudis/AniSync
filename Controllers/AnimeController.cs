@@ -27,6 +27,7 @@ namespace AnimeList.Controllers
         private readonly IAniSkipService _aniSkipService;
         private readonly ISubtitleService _subtitleService;
         private readonly IWyzieSubtitlesService _wyzieSubtitleService;
+        private readonly IMkvExtractorService _mkvExtractorService;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ISyncService _syncService;
         private readonly ILogger<AnimeController> _logger;
@@ -45,6 +46,7 @@ namespace AnimeList.Controllers
             IAniSkipService aniSkipService,
             ISubtitleService subtitleService,
             IWyzieSubtitlesService wyzieSubtitleService,
+            IMkvExtractorService mkvExtractorService,
             IHttpClientFactory httpClientFactory,
             ISyncService syncService,
             ILogger<AnimeController> logger)
@@ -62,6 +64,7 @@ namespace AnimeList.Controllers
             _aniSkipService = aniSkipService;
             _subtitleService = subtitleService;
             _wyzieSubtitleService = wyzieSubtitleService;
+            _mkvExtractorService = mkvExtractorService;
             _httpClientFactory = httpClientFactory;
             _syncService = syncService;
             _logger = logger;
@@ -849,6 +852,46 @@ namespace AnimeList.Controllers
                 _logger.LogWarning(ex, "Wyzie search failed for {Id} ep {Ep}.", id, episode);
                 return Array.Empty<SubtitleTrack>();
             }
+        }
+
+        /// <summary>
+        /// Indexed MKV embedded-subtitle extractor. Range-fetches the
+        /// SeekHead → Tracks → Cues index chain from the debrid CDN
+        /// URL, then pulls only the Clusters that contain subtitle
+        /// blocks. ~10-30 MB of network instead of the ~700 MB the
+        /// streaming matroska-subtitles fallback would pull through
+        /// the user's browser.
+        ///
+        /// Replaces the cf-mkv-extractor Cloudflare Worker — moving
+        /// the work in-process side-steps CF Workers' per-invocation
+        /// memory + CPU caps entirely. Behind <see cref="IMkvExtractorService"/>
+        /// so the work can be split into a separate Fly app later
+        /// (a remote impl over HTTP slots in here unchanged).
+        ///
+        /// Output shape matches what the watch page already consumes:
+        ///   { tracks: [{ number, language, name, codecID, header,
+        ///                cues: [{ time, duration, text }, …] }, …],
+        ///     extracted: true, stats: { fileSize, trackCount } }
+        /// On failure returns extracted:false + reason ∈ {"indexless",
+        /// "network", "parse"} so the client can fall back to the
+        /// streaming-subtitles path the same way it does for the JS
+        /// worker's fall-through.
+        /// </summary>
+        [HttpGet("/anime/episode-embedded-subtitles")]
+        public async Task<IActionResult> EpisodeEmbeddedSubtitles(
+            string url, string lang, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return BadRequest(new { error = "missing ?url parameter" });
+            }
+            if (!MkvExtractorService.IsAllowedHost(url))
+            {
+                return StatusCode(403, new { error = "host not allowed" });
+            }
+            var result = await _mkvExtractorService.ExtractAsync(
+                url, string.IsNullOrEmpty(lang) ? null : lang, ct);
+            return Json(result);
         }
 
         /// <summary>
