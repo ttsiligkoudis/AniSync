@@ -118,11 +118,31 @@ namespace AnimeList.Services.Mkv
             await using var stream = await res.Content.ReadAsStreamAsync(ct);
             var buf = new byte[length];
             int written = 0;
-            while (written < length)
+            try
             {
-                int n = await stream.ReadAsync(buf.AsMemory(written, length - written), ct);
-                if (n == 0) break;
-                written += n;
+                while (written < length)
+                {
+                    int n = await stream.ReadAsync(buf.AsMemory(written, length - written), ct);
+                    if (n == 0) break;
+                    written += n;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // honour the caller's cancellation token
+            }
+            catch (IOException)
+            {
+                // RD's edges sometimes close the connection before
+                // delivering all bytes promised by Content-Length —
+                // surfaces as "response ended prematurely" / HttpIOException.
+                // Treat as EOF and return whatever we got; the EBML
+                // parser's element walkers already handle short buffers
+                // by bailing when an element extends past the slab.
+                // For critical reads (head/tracks/cues) where we need
+                // a specific element, a too-short buffer will surface
+                // as "no SeekHead" / "expected Tracks" upstream which
+                // classifies as parse / indexless cleanly.
             }
             if (written < length)
             {
