@@ -113,6 +113,9 @@
         // Same positive-sense for hideUnreleasedFromWatching — default off (0 = show
         // all entries in Currently Watching), checked = filter out not-yet-aired.
         flags3 |= bitFor('#hideUnreleasedWatching', initialFlags3, 0x40);
+        // showAdultContent — positive-sense, default off (0 = hide 18+ entries
+        // from Discover / Library / Stremio catalogs). Checked = surface them.
+        flags3 |= bitFor('#showAdultContent', initialFlags3, 0x80);
 
         return { flags1: flags1, flags2: flags2, flags3: flags3 };
     }
@@ -162,7 +165,7 @@
     // refreshUrls change handler (keeps the install URL preview in sync),
     // the floating-save-bar dirty marker (reveals the Save bar when any
     // toggle flips), and the post-save re-init that hides the bar.
-    var FLAG_TOGGLE_SELECTOR = '.catalogCheck, .discoverCheck, #showExternalStreams, #showManageEntry, #autoTrackProgress, #groupSeasons, #hideUnreleasedWatching';
+    var FLAG_TOGGLE_SELECTOR = '.catalogCheck, .discoverCheck, #showExternalStreams, #showManageEntry, #autoTrackProgress, #groupSeasons, #hideUnreleasedWatching, #showAdultContent';
 
     // Catalog + stream toggles — recompute the manifest URL whenever flags change. (For
     // v5 the path bytes don't actually change since flags live in DB, but we still call
@@ -254,6 +257,14 @@
         });
 
         if (resp.ok || resp.redirected) {
+            // The dashboard's Continue Watching cache (anisync.continueWatching.v1)
+            // is keyed only by client storage, not by service. After a primary
+            // swap the cached HTML still describes the OLD service's library
+            // (different ids, different progress); without a wipe the user
+            // sees stale entries linking to the wrong provider's detail
+            // pages until the 10-minute TTL elapses.
+            try { localStorage.removeItem('anisync.continueWatching.v1'); }
+            catch (_) { /* quota / private mode — best-effort */ }
             window.location.href = resp.redirected ? resp.url : '/';
             return;
         }

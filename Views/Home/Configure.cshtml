@@ -180,6 +180,17 @@
             "When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.",
             Model.HideUnreleasedWatching));
     }
+    @* Adult-content gate. Available to everyone (anonymous included) so a
+       fresh visitor's Discover grid stays family-safe by default. Off →
+       Discover / Library / Stremio catalogs strip out anime AniList flags
+       as isAdult, MAL flags as nsfw=black, or Kitsu rates R18. Detail
+       navigation isn't filtered — a direct /anime/{id} link still works
+       — only listing surfaces. *@
+    configurePrefs.Add((
+        "showAdultContent",
+        "Show 18+ content",
+        "Off (default) hides hentai / R18 entries from Discover, Library, and the Stremio addon catalogs. Direct anime URLs still work either way — this only affects what shows up in the grid.",
+        Model.ShowAdultContent));
     @await Html.PartialAsync("_PreferencesSection", (IReadOnlyList<(string, string, string, bool)>)configurePrefs)
 
     @* Stremio-addon-specific config (catalogs, streams, install URL) lives

@@ -235,13 +235,6 @@ builder.Services.AddSingleton<IMkvExtractorService, MkvExtractorService>();
 // cache outlive individual requests — anime episodes are watched
 // repeatedly and the same /watch view re-fetches on every visit.
 builder.Services.AddSingleton<ISubtitleService, OpenSubtitlesService>();
-// Second subtitle provider — Wyzie federates Subdl / Addic7ed /
-// others behind a single IMDb-keyed endpoint. No API key, results
-// from "OpenSubtitles" upstream are filtered out at the service
-// boundary so this is purely complementary to the dedicated
-// OpenSubtitles addon path above. Singleton so the
-// (imdb, season, episode) → tracks cache outlives requests.
-builder.Services.AddSingleton<IWyzieSubtitlesService, WyzieSubtitlesService>();
 builder.Services.AddScoped<ISyncService, SyncService>();
 // Singleton — its (malId, episode) → markers cache is the whole point. Per-request
 // scoping would defeat the cache. The service depends only on IHttpClientFactory
@@ -258,6 +251,35 @@ builder.Services.AddSingleton<IFillerListService, FillerListService>();
 // writes (Plex/Jellyfin scrobble webhooks, edits made on the provider's own
 // website, etc.).
 builder.Services.AddSingleton<IUserListCache, UserListCache>();
+
+// Episode-release notification stack.
+//   - Stores are singleton (raw SQLite, same lifetime as IConfigStore which
+//     owns the schema).
+//   - AnimeScheduleService holds today's airing snapshot in memory and is
+//     the source of truth for the bell's "nextAiringAt" — singleton so the
+//     snapshot is shared.
+//   - The dispatcher is scoped (depends on the per-service IAnilistService
+//     / IMalService / IKitsuService); EpisodeNotificationScheduler creates
+//     fresh scopes per timer fire.
+//   - EpisodeNotificationScheduler is the hosted service that owns the
+//     daily refresh + per-episode Task.Delay timers.
+builder.Services.AddSingleton<INotificationStore, NotificationStore>();
+builder.Services.AddSingleton<IWatchingCacheStore, WatchingCacheStore>();
+builder.Services.AddSingleton<IPushSubscriptionStore, PushSubscriptionStore>();
+builder.Services.AddSingleton<IPushNotificationService, PushNotificationService>();
+builder.Services.AddSingleton<IAnimeScheduleService, AnimeScheduleService>();
+builder.Services.AddScoped<IWatchingCacheRefreshService, WatchingCacheRefreshService>();
+builder.Services.AddScoped<IEpisodeNotificationDispatcher, EpisodeNotificationDispatcher>();
+// Register the scheduler under all three of its identities so the
+// hosting infrastructure runs it as a BackgroundService AND
+// controllers can inject IEpisodeNotificationScheduler to trigger
+// refreshes on demand (used by CronController for the Cloudflare
+// Worker's per-minute wake pings).
+builder.Services.AddSingleton<EpisodeNotificationScheduler>();
+builder.Services.AddSingleton<IEpisodeNotificationScheduler>(sp =>
+    sp.GetRequiredService<EpisodeNotificationScheduler>());
+builder.Services.AddHostedService(sp =>
+    sp.GetRequiredService<EpisodeNotificationScheduler>());
 
 var app = builder.Build();
 

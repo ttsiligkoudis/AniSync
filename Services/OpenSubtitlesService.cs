@@ -24,7 +24,6 @@ namespace AnimeList.Services
 
         private const string AddonBase = "https://opensubtitles-v3.strem.io";
         private static readonly TimeSpan ListCacheTtl = TimeSpan.FromHours(2);
-        private static readonly TimeSpan VttCacheTtl  = TimeSpan.FromHours(6);
 
         // Common language pool surfaced first in the player's captions
         // menu. The addon returns ISO-639-2/B codes (eng, spa, fre …);
@@ -167,15 +166,6 @@ namespace AnimeList.Services
                 return null;
             }
 
-            // Force the subs5.strem.io UTF-8 transform when applicable
-            // (no-op for other hosts). Cache key still keys on the
-            // pre-transform URL so re-requests with the same upstream
-            // URL hit cache regardless of transform application.
-            var cacheKey = $"opensubs:vtt:{url}";
-            if (_cache.TryGetValue<string>(cacheKey, out var hit) && hit != null)
-            {
-                return hit;
-            }
             var fetchUrl = EnsureUtf8Transform(url);
 
             try
@@ -188,8 +178,16 @@ namespace AnimeList.Services
                 var vtt = text.TrimStart().StartsWith("WEBVTT", StringComparison.OrdinalIgnoreCase)
                     ? text
                     : SrtToVtt(text);
-                _cache.Set(cacheKey, vtt, new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = VttCacheTtl });
-                return vtt;
+                // VTT spec only supports <c>, <i>, <b>, <u>, <ruby>, <rt>,
+                // <v>, <lang>, plus class spans. <font ...> is a SubRip
+                // (SRT) leftover — many providers ship .vtt files with
+                // <font face="…" size="…"> wrappers anyway. ArtPlayer's
+                // renderer prints unknown tags as literal text instead of
+                // ignoring them, so the line "It's so far away" shows up
+                // as "&lt;font face=...&gt;It's so far away&lt;/font&gt;"
+                // on screen. Strip the opening + closing tags (preserve
+                // the inner text) before returning.
+                return StripFontTags(vtt);
             }
             catch (Exception ex)
             {
@@ -309,8 +307,7 @@ namespace AnimeList.Services
                 || host.EndsWith("opensubtitles.com")
                 || host.EndsWith("opensubtitles-v3.strem.io")
                 || host.EndsWith("strem.io")
-                || host.EndsWith("subdl.com")
-                || host.EndsWith("wyzie.ru");   // Wyzie aggregator + its own subtitle CDN
+                || host.EndsWith("subdl.com");
         }
 
         /// <summary>
@@ -379,5 +376,16 @@ namespace AnimeList.Services
                 $"{m.Groups[1].Value}.{m.Groups[2].Value} --> {m.Groups[3].Value}.{m.Groups[4].Value}");
             return "WEBVTT\n\n" + body.Replace("\r\n", "\n");
         }
+
+        // Matches <font ...> / </font> in any case, with any attribute soup
+        // (including the unquoted `size=24` form some converters emit).
+        // Singleline so a stray newline inside the attribute list doesn't
+        // leave half the tag behind.
+        private static readonly Regex FontTag = new(
+            @"<\s*/?\s*font\b[^>]*>",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        private static string StripFontTags(string vtt) =>
+            string.IsNullOrEmpty(vtt) ? vtt : FontTag.Replace(vtt, string.Empty);
     }
 }

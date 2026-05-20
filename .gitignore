@@ -369,3 +369,6 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 /anisync.db
+/cf-cors-proxy/package-lock.json
+/cf-cors-proxy/package.json
+/cf-episode-notifier/package-lock.json

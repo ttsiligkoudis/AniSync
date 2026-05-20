@@ -1,3 +1,5 @@
+using AnimeList.Services.Interfaces;
+
 namespace AnimeList.Models.Api
 {
     // Response shapes for the public HTTP API. Records keep boilerplate minimal
@@ -41,6 +43,57 @@ namespace AnimeList.Models.Api
     /// <summary>AnimeFillerList episode-number → category map.</summary>
     public record FillerResponse(string? Title, Dictionary<int, string> Categories);
 
+    /// <summary>Today's airing schedule (UTC-day window). Same shape as the dashboard's "New Episodes Today" shelf.</summary>
+    public record AiringTodayResponse(List<Meta> Items);
+
+    /// <summary>Upcoming episodes in an explicit Unix-seconds window.</summary>
+    public record AiringUpcomingResponse(long StartUnix, long EndUnix, List<UpcomingEpisode> Items);
+
+    /// <summary>YouTube trailer id for an anime, or null when the show has no trailer or it's hosted elsewhere.</summary>
+    public record TrailerResponse(string? YoutubeId);
+
+    /// <summary>Supplementary chips for the detail page (tags, studios, staff, composer, …) sourced anonymously from AniList.</summary>
+    public record SupplementaryResponse(List<Link> Links);
+
+    /// <summary>Cross-service id bundle (AniList/MAL/Kitsu/IMDb/TMDB/TVDB/AniDB) for an anime, used by detail-page "open on X" buttons.</summary>
+    public record SourceLinksResponse(AnimeSourceLinks Links);
+
+    /// <summary>Current-season aggregate counts from AniList.</summary>
+    public record SeasonStatsResponse(int CurrentlyAiring, int NewThisSeason, int TotalThisSeason);
+
+    /// <summary>Full AniList tag catalog (non-adult, grouped by category), refreshed daily upstream.</summary>
+    public record TagsListResponse(List<TagSummary> Tags);
+
+    /// <summary>One page of AniList animation studios sorted by popularity.</summary>
+    public record StudiosListResponse(List<StudioSummary> Studios, bool HasNextPage);
+
+    /// <summary>One page of a studio's filmography.</summary>
+    public record StudioMediaResponse(string? Name, List<Meta> Items, bool HasNextPage);
+
+    /// <summary>A staff member's filmography, paginated via opaque <c>skip</c>.</summary>
+    public record StaffMediaResponse(string? Name, List<Meta> Items);
+
+    /// <summary>One page of anime tagged with a given tag.</summary>
+    public record TagMediaResponse(string Tag, List<Meta> Items, bool HasNextPage);
+
+    /// <summary>Subtitle tracks for one episode from OpenSubtitles.</summary>
+    public record SubtitlesResponse(List<SubtitleTrack> Subtitles, SubtitleProviderCounts ProviderCounts);
+
+    /// <summary>Per-provider count breakdown returned alongside <see cref="SubtitlesResponse"/>.</summary>
+    public record SubtitleProviderCounts(int OpenSubtitles);
+
+    /// <summary>Episode list extracted from an anime's full meta — same data the detail page renders, without the show envelope.</summary>
+    public record EpisodesResponse(string AnimeId, List<EpisodeInfo> Episodes);
+
+    /// <summary>One episode row in <see cref="EpisodesResponse"/>.</summary>
+    public record EpisodeInfo(
+        int Season,
+        int Episode,
+        string? Title,
+        string? Thumbnail,
+        string? Released,
+        string? Overview);
+
     // ── User-scoped endpoints ────────────────────────────────────────────────
 
     /// <summary>Library export from the primary provider, optionally filtered by status.</summary>
@@ -48,6 +101,23 @@ namespace AnimeList.Models.Api
 
     /// <summary>One library entry's full state.</summary>
     public record EntryResponse(AnimeEntry Entry);
+
+    /// <summary>User's AniList statistics — counts, mean score, total hours watched. Requires an AniList token (primary or linked).</summary>
+    public record UserStatsResponse(AnilistUserStats Stats);
+
+    /// <summary>Continue-watching shelf — items from the user's <c>Watching</c> list capped at <paramref name="Items"/> length.</summary>
+    public record ContinueWatchingResponse(string Primary, List<Meta> Items);
+
+    /// <summary>Upcoming episodes airing in the next 24h that match the user's Watching list (same source the bell notifies from).</summary>
+    public record UserUpcomingResponse(List<UserUpcomingEpisode> Items);
+
+    /// <summary>One upcoming episode entry for <see cref="UserUpcomingResponse"/>.</summary>
+    public record UserUpcomingEpisode(
+        string AnimeId,
+        string Title,
+        int Episode,
+        long AiringAt,
+        string? CoverImage);
 
     /// <summary>Linked secondary providers attached to a config.</summary>
     public record LinkedResponse(string Primary, List<LinkedSummary> Linked);

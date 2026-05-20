@@ -189,6 +189,64 @@
                     </button>
                 }
             </div>
+
+            @* Continue-watching CTA. Lives on its own centered row beneath the
+               badges so it reads as the page's primary action without
+               competing with the cobalt-tinted user-state pill to its left.
+               Hidden when there's nothing playable (no addons / no External
+               services), the anime is a movie (those have their own
+               .anime-detail-movie-cta below the description), the user has
+               completed the show, progress is already past the last loaded
+               video, OR the next unseen episode hasn't aired yet — same
+               condition that makes the corresponding episode row inert in
+               the list below, so the CTA disappears in lockstep with its
+               click target. *@
+            @{
+                var watchProgress = Model.Entry?.Progress ?? 0;
+                var totalEps = a.videos?.Count ?? 0;
+                var entryTotal = Model.Entry?.TotalEpisodes;
+                var statusNorm = NormalizeListStatus(Model.Entry?.Status);
+                var isCompleted = statusNorm == "completed"
+                    || (entryTotal is int et && et > 0 && watchProgress >= et);
+                var nextEp = watchProgress + 1;
+
+                // Look up the target video (NormaliseCourEpisodeNumbering
+                // has already sorted + renumbered so episode == ordinal,
+                // matching the URL semantics) and consult its release
+                // date — if it's a future-aired episode, the click target
+                // is inert and the CTA shouldn't promise something we
+                // can't actually play.
+                var todayHero = DateTime.UtcNow.Date;
+                var targetVideo = a.videos?.FirstOrDefault(v => v.episode == nextEp);
+                var targetIsFuture = false;
+                if (targetVideo != null
+                    && !string.IsNullOrEmpty(targetVideo.released)
+                    && targetVideo.released.Length >= 10
+                    && DateTime.TryParse(targetVideo.released[..10], out var nextReleaseDate))
+                {
+                    targetIsFuture = nextReleaseDate.Date > todayHero;
+                }
+
+                var showWatchCta = a.type != MetaType.movie.ToString()
+                    && Model.HasStreamSources
+                    && totalEps > 0
+                    && nextEp <= totalEps
+                    && !isCompleted
+                    && !targetIsFuture;
+            }
+            @if (showWatchCta)
+            {
+                var watchLabel = watchProgress > 0 ? $"Continue · Ep {nextEp}" : $"Watch Ep {nextEp}";
+                <div class="anime-detail-watch-next-wrap">
+                    <a class="anime-detail-watch-next" href="@($"/anime/{a.id}/watch/{nextEp}")"
+                       aria-label="@watchLabel">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+                            <polygon points="6 4 20 12 6 20 6 4"></polygon>
+                        </svg>
+                        <span>@watchLabel</span>
+                    </a>
+                </div>
+            }
             @* Studios are rendered as their own section in the bottom
                linksByCategory loop now — same chip style as Tag / Staff
                / director. The hero stays focused on title + score +
@@ -390,6 +448,19 @@
     <section class="anime-detail-section anime-detail-episodes-wrap">
         <div class="anime-detail-episodes-header">
             <h2 class="anime-detail-section-title">Episodes <span class="anime-detail-section-count">(@a.videos.Count)</span></h2>
+            @if (a.videos.Count > 1)
+            {
+                @* Client-side filter — matches against the row's
+                   data-episode-num and the rendered title text. No
+                   extra network call; the rows are already in the DOM. *@
+                <input type="search"
+                       class="anime-detail-episodes-filter"
+                       placeholder="Filter episodes…"
+                       aria-label="Filter episodes by number or title"
+                       data-episodes-filter
+                       autocomplete="off"
+                       spellcheck="false" />
+            }
             <button type="button" class="anime-detail-episodes-toggle"
                     aria-expanded="true"
                     aria-controls="anime-detail-episodes-body">
@@ -529,6 +600,26 @@
         </div>
     </section>
 }
+else if (a.type == MetaType.movie.ToString() && Model.HasStreamSources)
+{
+    @* Movie meta has no per-episode list (the underlying service collapses
+       the whole feature into one streamable unit), so the user has no
+       click target to reach the watch page. Surface a single CTA pointed
+       at /anime/{id}/watch/1 — the watch route treats episode=1 as the
+       movie body for movie-typed entries. Gated on HasStreamSources for
+       the same reason episode rows are inert when neither stream addons
+       nor External services are wired up — without a source there'd be
+       nothing to play on the other side of the click. *@
+    <section class="anime-detail-section anime-detail-movie-cta-wrap">
+        <a class="anime-detail-movie-cta" href="@($"/anime/{a.id}/watch/1")">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polygon points="6 4 20 12 6 20 6 4"></polygon>
+            </svg>
+            <span>Watch movie</span>
+        </a>
+    </section>
+}
 
 @* Related (prequel/sequel) + Recommended carousels are populated client-side
    after page load via /anime/{id}/extras so the hero + episodes render off
@@ -622,6 +713,47 @@ else
    (rather than in manage-entry-modal.js) so they work for anonymous
    viewers too — that script bails early when the modal DOM isn't
    present, which used to silently disable these for logged-out users. *@
+<script>
+    // Mark sessionStorage right before navigating from /anime/{id} to
+    // /watch/{ep} so Watch.cshtml knows the previous history entry is
+    // this detail page and can reuse it with a simple history.back()
+    // (avoiding a duplicate /anime/{id} entry on the stack).
+    //
+    // Needed because the site sets <meta name="referrer" content="no-referrer">,
+    // which strips document.referrer on every same-origin navigation —
+    // without this marker the watch page can't tell whether to step
+    // back or do a fresh replace. Setting the marker only on the click
+    // that actually triggers the navigation keeps it from going stale
+    // (e.g., user visited /anime/X earlier in the session, then clicked
+    // a notification straight to /watch).
+    (function () {
+        function markWatchEntry() {
+            try { sessionStorage.setItem('aniSyncWatchEntry', 'fromAnime'); }
+            catch (_) { /* sessionStorage unavailable — best effort */ }
+        }
+        // Catches the static "Watch next" / movie CTA anchors and any
+        // future <a href="…/watch/…"> links the page might grow. Modifier
+        // clicks (Ctrl/Cmd/Shift/middle) open in a new tab — don't mark.
+        document.addEventListener('click', function (e) {
+            if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            var a = e.target.closest && e.target.closest('a[href*="/watch/"]');
+            if (!a) return;
+            markWatchEntry();
+        }, true);
+        // Episode rows in the list navigate via window.location.assign
+        // rather than <a> (see handleEpisodeActivate further down), so
+        // we hook the same delegated click event and mark the entry if
+        // the click landed on a non-future episode row. Cheap: the
+        // marker write is idempotent.
+        document.addEventListener('click', function (e) {
+            if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            var li = e.target.closest && e.target.closest('li.anime-detail-episode');
+            if (!li || li.classList.contains('anime-detail-episode-future')) return;
+            if (e.target.closest('button, a, [data-no-stream]')) return;
+            markWatchEntry();
+        }, true);
+    })();
+</script>
 <script>
     (function () {
         // ── Synopsis collapse/expand ──────────────────────────────────
@@ -963,6 +1095,42 @@ else
    the URL only when the show actually has more than one cour so
    single-season URLs stay clean. *@
 <script>
+    @* Episode filter — runs independent of the stream-source gate below
+       since the filter is useful even when the user has no addons wired
+       up (they can still browse + read titles). Pure DOM filter, no
+       network. *@
+    (function () {
+        var filter = document.querySelector('[data-episodes-filter]');
+        var list = document.querySelector('.anime-detail-episodes');
+        if (!filter || !list) return;
+        var rows = list.querySelectorAll('li.anime-detail-episode');
+        if (rows.length === 0) return;
+
+        function apply() {
+            var q = filter.value.trim().toLowerCase();
+            for (var i = 0; i < rows.length; i++) {
+                var li = rows[i];
+                if (!q) {
+                    li.classList.remove('anime-detail-episode-filtered');
+                    continue;
+                }
+                var num = (li.getAttribute('data-episode-num') || '').toLowerCase();
+                var titleEl = li.querySelector('.anime-detail-episode-title');
+                var title = (titleEl && titleEl.textContent ? titleEl.textContent : '').toLowerCase();
+                var match = num === q || num.indexOf(q) !== -1 || title.indexOf(q) !== -1;
+                li.classList.toggle('anime-detail-episode-filtered', !match);
+            }
+        }
+
+        filter.addEventListener('input', apply);
+        filter.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && filter.value !== '') {
+                filter.value = '';
+                apply();
+            }
+        });
+    })();
+
     (function () {
         var animeId = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.Anime?.id));
         if (!animeId) return;

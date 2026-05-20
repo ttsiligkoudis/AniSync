@@ -138,6 +138,19 @@ namespace AnimeList.Services
                 .ThenBy(IdFor)
                 .ToList();
 
+            // Single AniList entry for this IMDb id means the entire show is
+            // represented by one AniList entry — never slice. Returning the
+            // season-filtered subset here (mapping.Season is typically 1) would
+            // truncate long-running shows like Naruto (anilist:20, 220 eps
+            // across 5 IMDb seasons) to just the first IMDb season's 26
+            // episodes. Must come BEFORE the season-filter branch below.
+            if (mappings.Count <= 1)
+            {
+                _logger.LogInformation("GetCourEpisodes: imdb={Imdb} single-cour franchise — returning all {Count} videos.",
+                    imdbId, allVideos.Count);
+                return allVideos;
+            }
+
             // Skip the season filter when more than one cour shares the same Season
             // number — the value is then per-source ambiguous and would lump multiple
             // cours together.
@@ -152,13 +165,6 @@ namespace AnimeList.Services
                         imdbId, bySeason.Count, cinemetaSeason);
                     return bySeason;
                 }
-            }
-
-            if (mappings.Count <= 1)
-            {
-                _logger.LogInformation("GetCourEpisodes: imdb={Imdb} single-cour franchise — returning all {Count} videos.",
-                    imdbId, allVideos.Count);
-                return allVideos;
             }
 
             var index = mappings.FindIndex(m => IdFor(m) == currentId);

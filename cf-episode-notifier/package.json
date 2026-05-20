@@ -1,0 +1,13 @@
+{
+  "name": "anisync-episode-notifier",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker that polls AniSync's airing schedule and wakes the (sleeping) Fly.io machine the moment an episode airs.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

@@ -1,4 +1,5 @@
 using AnimeList.Models;
+using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
@@ -90,13 +91,12 @@ public class HomeController : Controller
             tokenData = DeserializeObject<TokenData>(sessionStr);
 
         string uid = null;
-        List<Meta> continueWatching = [];
         bool hasStats = false;
-        int watchingTotal = 0;
-        int completedTotal = 0;
-        int totalHoursWatched = 0;
-        double? meanScore = null;
         List<string> contributingNames = [];
+        // Lifted to outer scope so the view-model construction below can
+        // surface the currently-working linked services alongside the
+        // primary in the dashboard hero badge.
+        List<LinkedToken> linkedTokens = [];
 
         // Continue-watching + stats surfaces only fire for non-anonymous logged-in
         // users. Anonymous and not-logged-in visitors get the plain three-tile
@@ -107,18 +107,6 @@ public class HomeController : Controller
             var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
             uid = resolved;
 
-            // Site UI is always ungrouped — the enableSeasonGrouping pref now
-            // only governs Stremio's catalog / meta endpoints. On the dashboard
-            // we always want each cour visible as its own card so Continue
-            // Watching matches what the user sees in /library.
-            const bool groupSeasons = false;
-
-            // Honor the "Hide unaired from Watching" site preference. Default off
-            // (matches the dashboard's behaviour before the toggle existed for
-            // the entries the user explicitly moved to Watching).
-            var dashboardConfig = await GetConfigByUidAsync(uid, _configStore);
-            var hideUnreleased = dashboardConfig?.hideUnreleasedFromWatching == true;
-
             // Pick the AniList token (primary or linked) — stats now go
             // through AniList's User.statistics GraphQL, which is a single
             // query that's vastly cheaper than fetching the full Watching +
@@ -126,13 +114,16 @@ public class HomeController : Controller
             // stats panel hidden (HasStats = false); they can link AniList
             // from /configure to unlock it.
             TokenData anilistTokenForStats = null;
+            if (!string.IsNullOrEmpty(uid))
+            {
+                linkedTokens = await _configStore.GetLinkedTokensAsync(uid);
+            }
             if (tokenData.anime_service == AnimeService.Anilist)
             {
                 anilistTokenForStats = tokenData;
             }
-            else if (!string.IsNullOrEmpty(uid))
+            else
             {
-                var linkedTokens = await _configStore.GetLinkedTokensAsync(uid);
                 foreach (var lt in linkedTokens)
                 {
                     if (lt.NeedsReauth || lt.TokenData == null || lt.TokenData.anonymousUser) continue;
@@ -142,30 +133,26 @@ public class HomeController : Controller
                 }
             }
 
-            // Fire the AniList stats call alongside the primary's Watching
-            // fetch. Continue Watching still comes from the primary so the
-            // "Ep N / Total" progress is meaningful to the user (per-service
-            // progress differs based on which service they actively update).
-            // Lists are no longer cached — every dashboard hit reflects live
-            // state.
-            var statsTask = anilistTokenForStats != null
-                ? _anilistService.GetUserStatsAsync(anilistTokenForStats)
-                : Task.FromResult<AnilistUserStats?>(null);
-            var watchingTask = SafeFetchListAsync(tokenData, ListType.Current, groupSeasons, /* nocache */ true, hideUnreleased);
-            await Task.WhenAll(statsTask, watchingTask);
-
-            continueWatching = watchingTask.Result.Take(ContinueWatchingMaxItems).ToList();
-
-            var stats = await statsTask;
-            if (stats != null)
+            // Stats are no longer fetched server-side — the dashboard JS
+            // hits /Home/AnilistStats from the client (with a 24 h
+            // localStorage cache in front) so each dashboard render
+            // doesn't pay the AniList round-trip. Only flag whether the
+            // panel should render at all (user has a usable AniList
+            // token); the actual numbers fill in via JS once the page
+            // mounts.
+            if (anilistTokenForStats != null)
             {
                 hasStats = true;
-                watchingTotal = stats.Watching;
-                completedTotal = stats.Completed;
-                totalHoursWatched = stats.TotalHoursWatched;
-                meanScore = stats.MeanScore;
                 contributingNames.Add(AnimeService.Anilist.ToString());
             }
+
+            // Continue Watching is fetched client-side from
+            // /Home/ContinueWatchingData (returns a rendered _PosterGrid
+            // partial) and cached in localStorage (anisync.continueWatching.v1,
+            // 10 min TTL) so each dashboard render doesn't pay the per-user
+            // list round-trip. The view renders the section structure
+            // unconditionally for logged-in non-anonymous users and the
+            // JS un-hides it once the HTML loads.
         }
 
         // Seasonal stats + popularity shelves apply to every visitor
@@ -189,21 +176,42 @@ public class HomeController : Controller
         var primaryService = tokenData?.anime_service ?? AnimeService.Anilist;
         var popularThisSeasonTask = GetPopularBySeasonAsync(SeasonCurrent, primaryService);
         var mostAnticipatedTask = GetPopularBySeasonAsync(SeasonNext, primaryService);
-        var newEpisodesTodayTask = _anilistFallback.GetNewEpisodesTodayAsync(primaryService);
+        // Read the timezone-offset cookie stamped by the layout's inline
+        // script. Defaults to 0 (UTC) when the cookie isn't present yet
+        // (brand-new visitor's first request — the cookie is set during
+        // that render, so the next navigation picks up the right value).
+        var tzOffsetMinutes = 0;
+        var tzCookie = Request.Cookies["anisync_tz"];
+        if (!string.IsNullOrEmpty(tzCookie) && int.TryParse(tzCookie, out var parsed))
+        {
+            // JS getTimezoneOffset ranges from -840 (UTC+14) to +720
+            // (UTC-12). Clamp defensively so a malformed cookie can't
+            // make the cache key absurd.
+            tzOffsetMinutes = Math.Clamp(parsed, -840, 720);
+        }
+        var newEpisodesTodayTask = _anilistFallback.GetNewEpisodesTodayAsync(primaryService, tzOffsetMinutes);
         await Task.WhenAll(seasonStatsTask, popularThisSeasonTask, mostAnticipatedTask, newEpisodesTodayTask);
 
         var (seasonAiring, seasonNew, seasonTotal) = await seasonStatsTask;
+
+        // Surface the linked-secondary service names alongside the primary
+        // so the dashboard hero pill can read "✓ Synced with AniList · MAL"
+        // rather than just the primary. Quietly drops links flagged
+        // NeedsReauth / anonymous / null-token so the badge only counts
+        // currently-working connections.
+        var linkedServiceNames = (tokenData != null && !tokenData.anonymousUser)
+            ? linkedTokens
+                .Where(lt => !lt.NeedsReauth && lt.TokenData != null && !lt.TokenData.anonymousUser)
+                .Select(lt => lt.Service.ToString())
+                .ToList()
+            : [];
 
         return View(new DashboardViewModel
         {
             TokenData = tokenData,
             ConfigUid = uid,
-            ContinueWatching = continueWatching,
+            LinkedServices = linkedServiceNames,
             HasStats = hasStats,
-            WatchingTotal = watchingTotal,
-            CompletedTotal = completedTotal,
-            TotalHoursWatched = totalHoursWatched,
-            MeanScore = meanScore,
             ContributingServices = contributingNames,
             SeasonCurrentlyAiring = seasonAiring,
             SeasonNewThis = seasonNew,
@@ -219,13 +227,13 @@ public class HomeController : Controller
     // without three nested switch expressions. groupSeasons is plumbed through so
     // the dashboard's Continue Watching / stats slice respects the user's
     // "Group anime seasons" toggle the same way the addon catalog does.
-    private async Task<List<Meta>> FetchListAsync(TokenData tokenData, ListType listType, bool groupSeasons = true, bool hideUnreleased = false)
+    private async Task<List<Meta>> FetchListAsync(TokenData tokenData, ListType listType, bool groupSeasons = true, bool hideUnreleased = false, bool hideAdult = false)
     {
         var metas = tokenData.anime_service switch
         {
-            AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased),
-            AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased),
-            _                        => await _kitsuService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased),
+            AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+            AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+            _                        => await _kitsuService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
         };
         return metas ?? [];
     }
@@ -257,7 +265,14 @@ public class HomeController : Controller
                     tokenData: null,
                     list: ListType.Seasonal,
                     genre: seasonOption,
-                    groupSeasons: false);
+                    groupSeasons: false,
+                    // Dashboard shelves are cached globally (every viewer
+                    // hits the same row) so we can't honor a per-user
+                    // showAdultContent toggle here. Default to the safer
+                    // shape — explicit 18+ entries don't surface on the
+                    // dashboard for anyone. Users who opt in can still
+                    // find them via Discover / search.
+                    hideAdult: true);
 
                 top = list?.Take(15).ToList() ?? [];
 
@@ -293,11 +308,11 @@ public class HomeController : Controller
     // call sites but is now a no-op; lists are no longer cached on the
     // dashboard path (every load reflects live state).
     private async Task<List<Meta>> SafeFetchListAsync(TokenData tokenData, ListType listType,
-        bool groupSeasons = true, bool bypassCache = false, bool hideUnreleased = false)
+        bool groupSeasons = true, bool bypassCache = false, bool hideUnreleased = false, bool hideAdult = false)
     {
         try
         {
-            return await FetchListAsync(tokenData, listType, groupSeasons, hideUnreleased);
+            return await FetchListAsync(tokenData, listType, groupSeasons, hideUnreleased, hideAdult);
         }
         catch { return []; }
     }
@@ -494,6 +509,98 @@ public class HomeController : Controller
             return new JsonResult(new { success = false, error = "unknown uid" });
 
         return new JsonResult(new { success = true, token });
+    }
+
+    /// <summary>
+    /// JSON projection of the signed-in user's top "Continue watching"
+    /// items — slim shape (just the nine fields the dashboard's poster
+    /// card actually renders) so the localStorage payload stays small.
+    /// The dashboard JS hits this on first load, caches the data in
+    /// localStorage for 10 minutes, and rebuilds the card DOM client-
+    /// side on every render. Returns <c>items: []</c> when the user
+    /// has no Watching entries so the JS can hide the section entirely.
+    /// Manage-entry writes (modal save, +1 quick-action, delete) wipe
+    /// the localStorage key from the client so the next dashboard
+    /// render picks up the change.
+    /// </summary>
+    [HttpGet("Home/ContinueWatchingData")]
+    public async Task<IActionResult> ContinueWatchingData()
+    {
+        var (token, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+        if (string.IsNullOrEmpty(uid) || token == null || token.anonymousUser)
+        {
+            return Unauthorized();
+        }
+
+        // Match Index() exactly: dashboard always uses groupSeasons=false
+        // (each cour is its own card on the shelf) and honors the
+        // hideUnreleased site pref so post-finale episodes the user
+        // hasn't checked off don't sit at the front of the shelf.
+        const bool groupSeasons = false;
+        var dashboardConfig = await GetConfigByUidAsync(uid, _configStore);
+        var hideUnreleased = dashboardConfig?.hideUnreleasedFromWatching == true;
+        var hideAdult = dashboardConfig?.showAdultContent != true;
+
+        var metas = (await SafeFetchListAsync(token, ListType.Current, groupSeasons, /* nocache */ true, hideUnreleased, hideAdult))
+            .Take(ContinueWatchingMaxItems)
+            .ToList();
+
+        // Render the same _PosterGrid partial every other shelf uses.
+        // Keeping a single render path is the whole point of returning
+        // HTML here instead of a JSON projection + a JS card builder
+        // duplicating Views/Shared/_PosterGrid.cshtml's markup.
+        return PartialView("_PosterGrid", new PosterGridViewModel
+        {
+            Items = metas,
+            ConfigUid = uid,
+            Variant = "scroll",
+        });
+    }
+
+    /// <summary>
+    /// Returns the signed-in user's AniList "Your stats" panel data
+    /// (watching count, completed count, hours watched, mean score) so the
+    /// dashboard JS can render the cells without a server round-trip
+    /// blocking the SSR. Cached client-side in localStorage for 24 h;
+    /// the "refresh your stats" link in the stats-info popover wipes that
+    /// key and re-hits this endpoint. Returns 200 with stats=null when the
+    /// user has no AniList token (primary or linked) so the JS can keep
+    /// its placeholders without retrying.
+    /// </summary>
+    [HttpGet("Home/AnilistStats")]
+    public async Task<JsonResult> AnilistStats()
+    {
+        var (token, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+        if (string.IsNullOrEmpty(uid))
+        {
+            Response.StatusCode = 401;
+            return new JsonResult(new { success = false, error = "Sign in first." });
+        }
+
+        TokenData anilistToken = null;
+        if (token.anime_service == AnimeService.Anilist)
+        {
+            anilistToken = token;
+        }
+        else
+        {
+            var linked = await _configStore.GetLinkedTokensAsync(uid);
+            foreach (var lt in linked)
+            {
+                if (lt.NeedsReauth || lt.TokenData == null || lt.TokenData.anonymousUser) continue;
+                if (lt.Service != AnimeService.Anilist) continue;
+                anilistToken = lt.TokenData;
+                break;
+            }
+        }
+
+        if (anilistToken == null)
+        {
+            return new JsonResult(new { success = true, stats = (AnilistUserStats?)null });
+        }
+
+        var stats = await _anilistService.GetUserStatsAsync(anilistToken);
+        return new JsonResult(new { success = true, stats });
     }
 
     /// <summary>

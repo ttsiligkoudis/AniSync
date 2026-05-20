@@ -1,3 +1,4 @@
+@inject AnimeList.Services.Interfaces.IConfigStore _layoutConfigStore
 @{
     // Session-derived identity used by the site-header pill + the drawer's
     // sign-in / disconnect CTA. Reading directly here keeps every page's
@@ -20,6 +21,34 @@
        their session. *@
     var layoutHasSession = layoutToken != null;
     var activeNav = ViewData["ActiveNav"]?.ToString();
+
+    // Resolve linked-secondary services so the drawer footer can read
+    // "✓ Connected to AniList · MAL · Kitsu" rather than just the
+    // primary. Two indexed SQLite calls per request — sub-millisecond,
+    // and the drawer is rendered on every page so it's not worth
+    // plumbing through every controller. try/catch swallows any
+    // store/connection failure into "primary only" so a transient
+    // SQLite error doesn't 500 the entire layout.
+    var layoutConnectedServices = new List<string>();
+    if (layoutLoggedIn)
+    {
+        layoutConnectedServices.Add(layoutToken.anime_service.ToString());
+        try
+        {
+            var (layoutUid, _) = await _layoutConfigStore.FindUidByIdentityAsync(layoutToken);
+            if (!string.IsNullOrEmpty(layoutUid))
+            {
+                var layoutLinked = await _layoutConfigStore.GetLinkedTokensAsync(layoutUid);
+                foreach (var lt in layoutLinked)
+                {
+                    if (lt.NeedsReauth || lt.TokenData == null || lt.TokenData.anonymousUser) continue;
+                    layoutConnectedServices.Add(lt.Service.ToString());
+                }
+            }
+        }
+        catch { /* fall back to primary-only label */ }
+    }
+    var layoutConnectedLabel = string.Join(" · ", layoutConnectedServices);
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -63,6 +92,23 @@
        jQuery ajax hooks are in place before any other script can fire
        an HTTP request. *@
     <script src="~/js/loader.js" asp-append-version="true"></script>
+    @* Stamp the viewer's UTC offset (in minutes, JS getTimezoneOffset
+       convention — positive = west of UTC) into a cookie so server-
+       rendered "today" shelves (the dashboard's New Episodes Today, in
+       particular) can bucket against the viewer's local calendar day
+       rather than UTC. The cookie is set as early as possible so the
+       NEXT navigation already has the right offset; first-time visitors
+       see UTC-bucketed "today" on their initial render. *@
+    <script>
+        (function () {
+            try {
+                var offset = new Date().getTimezoneOffset();
+                var existing = document.cookie.split('; ').find(function (c) { return c.indexOf('anisync_tz=') === 0; });
+                if (existing === 'anisync_tz=' + offset) return;
+                document.cookie = 'anisync_tz=' + offset + '; path=/; max-age=31536000; SameSite=Lax';
+            } catch (_) { /* cookies disabled — server falls back to UTC */ }
+        })();
+    </script>
 </head>
 <body class="@ViewData["BodyClass"]">
     @* Persistent site chrome: slide-in drawer + mobile bottom-nav are lifted
@@ -124,7 +170,7 @@
             @if (layoutHasSession)
             {
                 <span class="nav-drawer-status">
-                    @(layoutLoggedIn ? $"✓ Connected to {layoutToken.anime_service}" : "✓ Connected without account")
+                    @(layoutLoggedIn ? $"✓ Connected to {layoutConnectedLabel}" : "✓ Connected without account")
                 </span>
                 <a class="nav-drawer-cta nav-drawer-cta-secondary" href="@Url.Action("Logout", "Auth")">Disconnect</a>
             }
@@ -137,12 +183,14 @@
     <div class="drawer-backdrop"
          onclick="document.body.classList.remove('drawer-open')"></div>
 
-    <div class="container">
-        <main role="main" style="min-height: 100vh;">
-            <header class="site-header">
-                <a class="site-logo" href="/" aria-label="AniSync home">
-                    <img src="/logo.png" alt="AniSync" />
-                </a>
+    @* Site header is intentionally OUTSIDE the page container so the
+       sticky bar can paint edge-to-edge on desktop while its inner
+       content stays aligned with the page via the inner .container. *@
+    <header class="site-header">
+        <div class="container site-header-inner">
+            <a class="site-logo" href="/" aria-label="AniSync home">
+                <img src="/logo.png" alt="AniSync" />
+            </a>
                 @* Inline desktop nav — mirrors the slide-in drawer's links.
                    Hidden under 992px (lg) where the hamburger takes over.
                    Same href + active-class logic as the drawer so adding a
@@ -213,6 +261,35 @@
                          role="listbox"
                          hidden></div>
                 </form>
+                @* Episode-release notifications. Bell + unread badge in the
+                   header; dropdown panel renders the most recent 20 rows on
+                   open. JS in /js/notifications.js polls /count every 60s
+                   and re-renders the list on click. Only for logged-in
+                   users — anonymous sessions have nothing to notify on. *@
+                @if (layoutLoggedIn)
+                {
+                    <div class="notif-bell" data-notif-bell>
+                        <button class="notif-bell-btn" type="button" aria-label="Notifications"
+                                aria-expanded="false" aria-controls="notif-panel" data-notif-toggle>
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+                                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                            </svg>
+                            <span class="notif-bell-badge" data-notif-count hidden>0</span>
+                        </button>
+                        <div class="notif-panel" id="notif-panel" role="dialog" aria-label="Notifications" hidden>
+                            <header class="notif-panel-header">
+                                <span class="notif-panel-title">Notifications</span>
+                                <button type="button" data-notif-read-all class="notif-read-all">Mark all read</button>
+                            </header>
+                            <div class="notif-panel-body" data-notif-list>
+                                <div class="notif-empty" data-notif-empty>You're all caught up.</div>
+                            </div>
+                            <a class="notif-panel-footer" href="/notifications" data-notif-view-all>View all</a>
+                        </div>
+                    </div>
+                }
                 @* Install pill — hidden by default, revealed by
                    pwa-install.js once the browser fires
                    beforeinstallprompt (Chromium / Edge / Android Chrome)
@@ -244,11 +321,36 @@
                 {
                     <a class="site-header-cta site-header-cta-primary" href="@Url.Action("Configure", "Home")">Sign in</a>
                 }
-                <button class="hamburger-btn" aria-label="Open menu"
-                        onclick="document.body.classList.toggle('drawer-open')">
-                    <span></span><span></span><span></span>
-                </button>
-            </header>
+            <button class="hamburger-btn" aria-label="Open menu"
+                    onclick="document.body.classList.toggle('drawer-open')">
+                <span></span><span></span><span></span>
+            </button>
+        </div>
+    </header>
+
+    @* Upstream-outage banner — lights up when AniList GraphQL has returned a
+       transport-level / 5xx failure in the last 5 minutes. AniList is the
+       backbone for both AniList-primary users (their library + metadata) and
+       the shared dashboard shelves (Popular This Season, New Episodes Today
+       all read AniList anonymously). When the upstream is down we'd rather
+       tell the user explicitly than show empty shelves. The banner clears
+       automatically on the first successful call after recovery. *@
+    @if (AnimeList.Services.AnilistHealthMonitor.IsDown)
+    {
+        <div class="container" role="status" aria-live="polite">
+            <div style="margin: 12px 0; padding: 10px 14px; border-radius: 6px;
+                        background: #5a2e00; color: #ffd9b3; border: 1px solid #8a4600;
+                        font-size: 14px; line-height: 1.4;">
+                <strong>AniList is having trouble right now.</strong>
+                Some catalog data may be missing or stale.
+                <a href="https://status.anilist.co/" target="_blank" rel="noopener"
+                   style="color: #ffd9b3; text-decoration: underline;">Check status →</a>
+            </div>
+        </div>
+    }
+
+    <div class="container">
+        <main role="main" style="min-height: 100vh;">
             @RenderBody()
         </main>
     </div>
@@ -408,6 +510,10 @@
     <script src="~/js/pwa-install.js" asp-append-version="true" defer></script>
     <script src="~/js/scroll-top.js" asp-append-version="true" defer></script>
     <script src="~/js/site-search.js" asp-append-version="true" defer></script>
+    @if (layoutLoggedIn)
+    {
+        <script src="~/js/notifications.js" asp-append-version="true" defer></script>
+    }
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>

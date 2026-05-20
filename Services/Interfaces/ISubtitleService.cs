@@ -40,13 +40,11 @@ namespace AnimeList.Services.Interfaces
     }
 
     /// <summary>
-    /// One subtitle track returned by a provider. Url is the *proxied*
+    /// One subtitle track returned by OpenSubtitles. Url is the *proxied*
     /// URL (served by /anime/subtitle), not the upstream URL — keeps
     /// the &lt;track&gt; load same-origin so the player can skip the
-    /// CORS opt-in dance. Source identifies the provider that
-    /// produced this entry ("opensubtitles" / "wyzie" / …) so the UI
-    /// can surface per-provider counts and the controller can dedup
-    /// across providers without losing attribution.
+    /// CORS opt-in dance. Source identifies the provider ("opensubtitles")
+    /// for forward-compat with any future second source.
     /// </summary>
     public record SubtitleTrack(string Lang, string Label, string Url, string Source = "");
 }

@@ -3,27 +3,32 @@ namespace AnimeList.Models
     /// <summary>
     /// Strongly-typed payload for the dashboard (Views/Home/Index.cshtml). Carries
     /// the session-derived token data (so the view can branch on login state and
-    /// service), the resolved UID for per-card Manage Entry hand-offs, and the
-    /// "Continue watching" slice — a small sample of the user's currently-watching
-    /// list surfaced on the front door so the dashboard isn't just three nav tiles.
+    /// service) and the resolved UID for per-card Manage Entry hand-offs. The
+    /// "Continue watching" shelf is fetched client-side from
+    /// <c>/Home/ContinueWatchingData</c> with a localStorage cache in front
+    /// — it doesn't live on this model anymore.
     /// </summary>
     public class DashboardViewModel
     {
         public TokenData TokenData { get; set; }
         public string ConfigUid { get; set; }
-        public List<Meta> ContinueWatching { get; set; } = [];
 
-        // Stats panel — populated only when the viewer has an AniList token
-        // (primary or linked), since the dashboard now reads stats from
-        // AniList's User.statistics GraphQL rather than computing them
-        // locally over the full Watching + Completed lists. MAL / Kitsu
-        // primaries without an AniList link see the panel hidden (HasStats =
-        // false); they can link AniList from /configure to unlock it.
+        // Linked secondary providers attached to this config (e.g. AniList
+        // primary + MAL + Kitsu linked). Names only — the dashboard's hero
+        // "✓ Synced with X" badge renders them alongside the primary
+        // service so the user sees every tracker their saves fan out to,
+        // not just their primary. Empty when no secondaries are linked.
+        public List<string> LinkedServices { get; set; } = [];
+
+        // Stats panel gate — true when the viewer has an AniList token
+        // (primary or linked) we can fetch from. The actual numbers don't
+        // live on this model anymore: the view renders skeleton "—"
+        // placeholders and the dashboard JS hits /Home/AnilistStats from
+        // the client (with a 24 h localStorage cache in front), so each
+        // dashboard render doesn't pay the AniList round-trip. MAL / Kitsu
+        // primaries without an AniList link see the panel hidden; they
+        // can link AniList from /configure to unlock it.
         public bool HasStats { get; set; }
-        public int WatchingTotal { get; set; }
-        public int CompletedTotal { get; set; }
-        public int TotalHoursWatched { get; set; }
-        public double? MeanScore { get; set; }
 
         // Names of the services that contributed data to the stats. Stats
         // are AniList-only now, so this is either ["Anilist"] (panel shown)

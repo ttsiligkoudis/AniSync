@@ -21,6 +21,7 @@ namespace AnimeList.Services
         // season's entry just expires unread.
         private static readonly TimeSpan SeasonStatsCacheDuration = TimeSpan.FromHours(24);
 
+
         public AnilistFallback(IHttpClientFactory clientFactory, IAnimeMappingService mappingService, IMemoryCache cache)
         {
             _clientFactory = clientFactory;
@@ -589,8 +590,22 @@ namespace AnimeList.Services
             };
 
             var client = _clientFactory.CreateClient();
-            var response = await client.SendAsync(request);
-            if (!response.IsSuccessStatusCode) return null;
+            HttpResponseMessage response;
+            try
+            {
+                response = await client.SendAsync(request);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                AnilistHealthMonitor.RecordFailure();
+                return null;
+            }
+            if (!response.IsSuccessStatusCode)
+            {
+                if ((int)response.StatusCode >= 500) AnilistHealthMonitor.RecordFailure();
+                return null;
+            }
+            AnilistHealthMonitor.RecordSuccess();
 
             var content = await response.Content.ReadAsStringAsync();
             return DeserializeObject<dynamic>(content)?.data;
@@ -657,7 +672,7 @@ namespace AnimeList.Services
                         query ($page: Int, $season: MediaSeason, $seasonYear: Int) {
                             Page(page: $page, perPage: 50) {
                                 pageInfo { hasNextPage }
-                                media(season: $season, seasonYear: $seasonYear, type: ANIME) {
+                                media(season: $season, seasonYear: $seasonYear, type: ANIME, isAdult: false) {
                                     status
                                 }
                             }
@@ -691,28 +706,36 @@ namespace AnimeList.Services
             return (airing, newThis, total);
         }
 
-        public async Task<List<Meta>> GetNewEpisodesTodayAsync(AnimeService translateTo = AnimeService.Anilist)
+        public async Task<List<Meta>> GetNewEpisodesTodayAsync(
+            AnimeService translateTo = AnimeService.Anilist,
+            int tzOffsetMinutes = 0)
         {
-            // Bound the query to [today 00:00 UTC, tomorrow 00:00 UTC) using
-            // AniList's airingAt_greater / airingAt_lesser unix-timestamp
-            // filters. Yes UTC fuzzes the edges for viewers far from GMT —
-            // a JST user just past midnight UTC sees a fresh "today" already
-            // populated with their early-morning JST airings — but it keeps
-            // the server-side cache key unambiguous and the boundary
-            // consistent for every visitor regardless of where they connect
-            // from.
-            var todayUtc = DateTime.UtcNow.Date;
-            var startUnix = new DateTimeOffset(todayUtc, TimeSpan.Zero).ToUnixTimeSeconds();
-            var endUnix = new DateTimeOffset(todayUtc.AddDays(1), TimeSpan.Zero).ToUnixTimeSeconds();
+            // Bucket "today" against the viewer's local calendar day rather
+            // than UTC. tzOffsetMinutes follows JS Date.getTimezoneOffset()
+            // convention: minutes WEST of UTC (UTC+3 = -180, UTC-5 = +300).
+            // Negate it to get the TimeSpan offset DateTimeOffset wants.
+            // A UTC+3 viewer at local 02:16 (their day 16) sees the window
+            // [16 00:00 local, 17 00:00 local) which translates to UTC
+            // [15 21:00, 16 21:00) — yesterday-UTC's late evening through
+            // today-UTC's afternoon. Without this, a rolling-now-±18h
+            // window over-included yesterday's afternoon airings (still
+            // within ±18h of UTC-midnight) and tomorrow's morning airings.
+            var tz = TimeSpan.FromMinutes(-tzOffsetMinutes);
+            var localNow = DateTimeOffset.UtcNow.ToOffset(tz);
+            var localToday = new DateTimeOffset(localNow.Date, tz);
+            var startUnix = localToday.ToUnixTimeSeconds();
+            var endUnix = localToday.AddDays(1).ToUnixTimeSeconds();
 
-            // Key on the UTC date so the entry auto-rotates at midnight; old
-            // day's entry just sits dead until eviction. The 'until end of
-            // day' expiration below means at most one upstream call per day.
-            var cacheKey = $"anilist:new-episodes-today:{todayUtc:yyyy-MM-dd}";
+            // Cache key includes the local-day + timezone offset so
+            // viewers in different timezones get their own cached
+            // bucket and each rotates at its own midnight. The hour
+            // suffix limits per-tz cache lifetime to roughly an hour
+            // so an airing-schedule shift propagates quickly.
+            var cacheKey = $"anilist:new-episodes-today:{localToday:yyyyMMdd}:tz{tzOffsetMinutes}:{localNow:HH}";
 
             if (_cache.TryGetValue<List<Meta>>(cacheKey, out var cached) && cached != null)
             {
-                // Cache stores anilist:N ids (one entry per day, shared
+                // Cache stores anilist:N ids (one entry per hour, shared
                 // across every viewer). Translate per-call into the
                 // requesting service's native id space so a MAL/Kitsu
                 // primary's clicks resolve directly. CloneMetas first so
@@ -737,6 +760,7 @@ namespace AnimeList.Services
                                         episodes
                                         averageScore
                                         seasonYear
+                                        isAdult
                                         title { english romaji }
                                         coverImage { large }
                                     }
@@ -759,6 +783,14 @@ namespace AnimeList.Services
                 {
                     var media = sched.media;
                     if (media == null) continue;
+
+                    // Dashboard shelf cache is shared across every viewer, so
+                    // we can't honor a per-user showAdultContent toggle here.
+                    // Match the safer default — explicit 18+ entries never
+                    // surface on the dashboard for anyone. Users who opt in
+                    // can still find them via Discover / search where the
+                    // toggle is per-user.
+                    if ((bool?)media.isAdult == true) continue;
 
                     var anilistId = (int?)media.id;
                     if (!anilistId.HasValue || !seen.Add(anilistId.Value)) continue;
@@ -798,15 +830,14 @@ namespace AnimeList.Services
                     // reorder the dashboard shelf.
                     result = result.OrderBy(m => m.airingAt ?? long.MaxValue).ToList();
 
-                    // Pin expiration to the next UTC midnight so the cache
-                    // holds for exactly today rather than a rolling 24h
-                    // window. A fetch at 23:00 UTC caches for 1h; a fetch
-                    // at 01:00 UTC caches for ~23h. Either way, the next
-                    // midnight wipes it and a fresh fetch builds tomorrow's
-                    // shelf.
+                    // Hold the snapshot for one hour. With the rolling
+                    // window the dashboard never shows episodes more than
+                    // LookbackHours old — caching longer would let the
+                    // user-facing "today" drift past that threshold
+                    // before the next refresh.
                     _cache.Set(cacheKey, result, new MemoryCacheEntryOptions
                     {
-                        AbsoluteExpiration = new DateTimeOffset(todayUtc.AddDays(1), TimeSpan.Zero),
+                        AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1),
                     });
                 }
                 // Same translate-on-return contract as the cache-hit path so
@@ -817,6 +848,70 @@ namespace AnimeList.Services
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"[AnilistFallback] GetNewEpisodesTodayAsync failed: {ex.Message}");
+                return [];
+            }
+        }
+
+        public async Task<List<UpcomingEpisode>> GetUpcomingEpisodesAsync(long startUnix, long endUnix)
+        {
+            // Same airingSchedules shape as GetNewEpisodesTodayAsync above, but
+            // parameterised on an arbitrary window with no caching — the caller's
+            // cron tick is the cadence (every 5 min). Pulls up to 100 entries per
+            // window which comfortably covers a 24h horizon (~50-80 airings/day
+            // peak Saturday); if the window grows we'd need to paginate.
+            try
+            {
+                var requestBody = SerializeObject(new
+                {
+                    query = @"
+                        query ($startUnix: Int, $endUnix: Int, $page: Int) {
+                            Page(page: $page, perPage: 100) {
+                                airingSchedules(airingAt_greater: $startUnix, airingAt_lesser: $endUnix, sort: TIME) {
+                                    airingAt
+                                    episode
+                                    media {
+                                        id
+                                        title { english romaji }
+                                        coverImage { large }
+                                    }
+                                }
+                            }
+                        }",
+                    variables = new { startUnix, endUnix, page = 1 }
+                });
+
+                var data = await PostJsonAsync(requestBody);
+                var schedules = data?.Page?.airingSchedules;
+                if (schedules == null) return [];
+
+                var result = new List<UpcomingEpisode>();
+                foreach (var sched in schedules)
+                {
+                    var media = sched.media;
+                    if (media == null) continue;
+
+                    var anilistId = (int?)media.id;
+                    var episode = (int?)sched.episode;
+                    var airingAt = (long?)sched.airingAt;
+                    if (!anilistId.HasValue || !episode.HasValue || !airingAt.HasValue) continue;
+
+                    var name = string.IsNullOrEmpty((string)media.title?.english)
+                        ? (string)media.title?.romaji
+                        : (string)media.title?.english;
+                    if (string.IsNullOrEmpty(name)) continue;
+
+                    result.Add(new UpcomingEpisode(
+                        AnilistId: anilistId.Value,
+                        Title: name,
+                        Episode: episode.Value,
+                        AiringAt: airingAt.Value,
+                        CoverImage: (string)media.coverImage?.large));
+                }
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[AnilistFallback] GetUpcomingEpisodesAsync failed: {ex.Message}");
                 return [];
             }
         }
@@ -891,7 +986,7 @@ namespace AnimeList.Services
         // user's primary's per-cour detail page so Manage Entry resolves
         // directly. AniList id is the fallback when no native mapping
         // exists for the requested service.
-        private async Task<List<Meta>> BuildBrowseMetasAsync(dynamic mediaArr, AnimeService translateTo)
+        private async Task<List<Meta>> BuildBrowseMetasAsync(dynamic mediaArr, AnimeService translateTo, bool hideAdult = false)
         {
             if (mediaArr == null) return [];
             await _mappingService.EnsureLoadedAsync();
@@ -901,6 +996,16 @@ namespace AnimeList.Services
             {
                 var anilistId = (int?)media.id;
                 if (!anilistId.HasValue) continue;
+
+                // 18+ gate — per-user setting threaded through from the
+                // discover-side controllers. Each query selects isAdult so
+                // we can filter here without a second round-trip; queries
+                // that need a free-text-tag style filter (Page.media) also
+                // pass isAdult:false at the GraphQL layer, but the
+                // Staff.staffMedia / Studio.media connections don't expose
+                // that arg so the client-side filter is what enforces it
+                // for those paths.
+                if (hideAdult && (bool?)media.isAdult == true) continue;
 
                 var externalId = await ResolveNativeIdAsync(anilistId.Value, translateTo);
                 if (!seen.Add(externalId)) continue;
@@ -934,63 +1039,69 @@ namespace AnimeList.Services
                 .ToList();
         }
 
-        public async Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null)
+        public async Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null, bool hideAdult = false)
         {
             if (string.IsNullOrWhiteSpace(tag)) return [];
             var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
+            // Page.media() supports isAdult — filter server-side so we
+            // don't waste a page slot on entries we'd drop anyway.
+            var adultArg = hideAdult ? ", isAdult: false" : string.Empty;
 
             var requestBody = SerializeObject(new
             {
-                query = @"
-                    query ($page: Int, $perPage: Int, $tag: String) {
-                        Page(page: $page, perPage: $perPage) {
-                            media(type: ANIME, tag: $tag, sort: TITLE_ROMAJI) {
+                query = $@"
+                    query ($page: Int, $perPage: Int, $tag: String) {{
+                        Page(page: $page, perPage: $perPage) {{
+                            media(type: ANIME, tag: $tag, sort: TITLE_ROMAJI{adultArg}) {{
                                 id
+                                isAdult
                                 format
                                 episodes
                                 averageScore
                                 seasonYear
-                                title { english romaji }
-                                coverImage { large }
+                                title {{ english romaji }}
+                                coverImage {{ large }}
                                 description
-                            }
-                        }
-                    }",
+                            }}
+                        }}
+                    }}",
                 variables = new { page, perPage = PageSize, tag },
             });
 
             var data = await PostJsonAsync(requestBody);
-            return await BuildBrowseMetasAsync(data?.Page?.media, translateTo);
+            return await BuildBrowseMetasAsync(data?.Page?.media, translateTo, hideAdult);
         }
 
-        public async Task<(List<Meta> Items, bool HasNextPage)> GetByTagPageAsync(string tag, AnimeService translateTo, int page = 1)
+        public async Task<(List<Meta> Items, bool HasNextPage)> GetByTagPageAsync(string tag, AnimeService translateTo, int page = 1, bool hideAdult = false)
         {
             if (string.IsNullOrWhiteSpace(tag)) return ([], false);
             if (page < 1) page = 1;
+            var adultArg = hideAdult ? ", isAdult: false" : string.Empty;
 
             var requestBody = SerializeObject(new
             {
-                query = @"
-                    query ($page: Int, $perPage: Int, $tag: String) {
-                        Page(page: $page, perPage: $perPage) {
-                            pageInfo { hasNextPage }
-                            media(type: ANIME, tag: $tag, sort: TITLE_ROMAJI) {
+                query = $@"
+                    query ($page: Int, $perPage: Int, $tag: String) {{
+                        Page(page: $page, perPage: $perPage) {{
+                            pageInfo {{ hasNextPage }}
+                            media(type: ANIME, tag: $tag, sort: TITLE_ROMAJI{adultArg}) {{
                                 id
+                                isAdult
                                 format
                                 episodes
                                 averageScore
                                 seasonYear
-                                title { english romaji }
-                                coverImage { large }
+                                title {{ english romaji }}
+                                coverImage {{ large }}
                                 description
-                            }
-                        }
-                    }",
+                            }}
+                        }}
+                    }}",
                 variables = new { page, perPage = PageSize, tag },
             });
 
             var data = await PostJsonAsync(requestBody);
-            var items = await BuildBrowseMetasAsync(data?.Page?.media, translateTo);
+            var items = await BuildBrowseMetasAsync(data?.Page?.media, translateTo, hideAdult);
             bool hasNext = data?.Page?.pageInfo?.hasNextPage != null
                 && (bool)data.Page.pageInfo.hasNextPage;
             return (items, hasNext);
@@ -1062,10 +1173,13 @@ namespace AnimeList.Services
             return tags;
         }
 
-        public async Task<(string Name, List<Meta> Items)> GetStaffMediaAsync(int staffId, AnimeService translateTo, string skip = null)
+        public async Task<(string Name, List<Meta> Items)> GetStaffMediaAsync(int staffId, AnimeService translateTo, string skip = null, bool hideAdult = false)
         {
             var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
 
+            // Staff.staffMedia doesn't accept an isAdult filter arg on the
+            // GraphQL connection, so we select the field and filter inside
+            // BuildBrowseMetasAsync. Costs one boolean per node — cheap.
             var requestBody = SerializeObject(new
             {
                 query = @"
@@ -1076,6 +1190,7 @@ namespace AnimeList.Services
                                 edges {
                                     node {
                                         id
+                                        isAdult
                                         format
                                         episodes
                                         averageScore
@@ -1104,13 +1219,16 @@ namespace AnimeList.Services
                 foreach (var edge in staff.staffMedia.edges)
                     if (edge.node != null) nodes.Add(edge.node);
             }
-            return (name, await BuildBrowseMetasAsync(nodes, translateTo));
+            return (name, await BuildBrowseMetasAsync(nodes, translateTo, hideAdult));
         }
 
-        public async Task<(string Name, List<Meta> Items, bool HasNextPage)> GetStudioMediaAsync(int studioId, AnimeService translateTo, int page = 1)
+        public async Task<(string Name, List<Meta> Items, bool HasNextPage)> GetStudioMediaAsync(int studioId, AnimeService translateTo, int page = 1, bool hideAdult = false)
         {
             if (page < 1) page = 1;
 
+            // Studio.media doesn't accept an isAdult filter arg on the
+            // GraphQL connection — same as Staff.staffMedia. Select the
+            // field and filter inside BuildBrowseMetasAsync.
             var requestBody = SerializeObject(new
             {
                 query = @"
@@ -1122,6 +1240,7 @@ namespace AnimeList.Services
                                 edges {
                                     node {
                                         id
+                                        isAdult
                                         type
                                         format
                                         episodes
@@ -1165,7 +1284,7 @@ namespace AnimeList.Services
             bool hasNext = studio.media?.pageInfo?.hasNextPage != null
                 && (bool)studio.media.pageInfo.hasNextPage;
 
-            return (name, await BuildBrowseMetasAsync(nodes, translateTo), hasNext);
+            return (name, await BuildBrowseMetasAsync(nodes, translateTo, hideAdult), hasNext);
         }
 
         public async Task<(List<StudioSummary> Studios, bool HasNextPage)> GetStudiosListAsync(int page = 1)

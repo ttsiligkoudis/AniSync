@@ -36,42 +36,56 @@ namespace AnimeList.Services
             if (_cache.TryGetValue(key, out var cached) && DateTime.UtcNow < cached.Expires)
                 return cached.Data;
 
-            // Ask for every relevant marker type. Building the query as repeated
-            // `types=` params is what the v2 API expects (rather than a comma list).
+            // AniSkip v2 expects the array form `types[]=…` and a
+            // mandatory `episodeLength` (seconds). We don't know the
+            // runtime until the user picks a source, but the API
+            // accepts 0 — used in the same way the official player
+            // extension does — and still returns the markers.
+            // `preview` is NOT a valid type — the API rejects the
+            // whole request with 400 if any value isn't in the
+            // {op, ed, mixed-op, mixed-ed, recap} set.
             var url = $"{AniSkipApi}/skip-times/{malId}/{episode}"
-                + "?types=op&types=ed&types=mixed-op&types=mixed-ed&types=recap&types=preview";
+                + "?types[]=op&types[]=ed&types[]=mixed-op&types[]=mixed-ed&types[]=recap"
+                + "&episodeLength=0";
 
-            var data = new List<SkipTime>();
             try
             {
                 var response = await _clientFactory.CreateClient().GetAsync(url);
-                if (response.IsSuccessStatusCode)
+                if (!response.IsSuccessStatusCode)
                 {
-                    var content = await response.Content.ReadAsStringAsync();
-                    var json = JObject.Parse(content);
-                    if ((bool?)json["found"] == true && json["results"] is JArray results)
+                    // 4xx/5xx — don't poison the 7-day cache with an
+                    // empty list. The next request will retry.
+                    return [];
+                }
+                var content = await response.Content.ReadAsStringAsync();
+                var json = JObject.Parse(content);
+                var data = new List<SkipTime>();
+                if ((bool?)json["found"] == true && json["results"] is JArray results)
+                {
+                    foreach (var r in results.OfType<JObject>())
                     {
-                        foreach (var r in results.OfType<JObject>())
-                        {
-                            var skipType = (string)r["skipType"];
-                            var startTime = (double?)r["interval"]?["startTime"];
-                            var endTime = (double?)r["interval"]?["endTime"];
-                            if (string.IsNullOrEmpty(skipType) || !startTime.HasValue || !endTime.HasValue) continue;
-                            data.Add(new SkipTime { Type = skipType, Start = startTime.Value, End = endTime.Value });
-                        }
+                        var skipType = (string)r["skipType"];
+                        var startTime = (double?)r["interval"]?["startTime"];
+                        var endTime = (double?)r["interval"]?["endTime"];
+                        if (string.IsNullOrEmpty(skipType) || !startTime.HasValue || !endTime.HasValue) continue;
+                        data.Add(new SkipTime { Type = skipType, Start = startTime.Value, End = endTime.Value });
                     }
                 }
+                // Cache the parsed result — including an empty list when the
+                // API said `found:true` with no usable markers, OR `found:false`
+                // (a legitimate "no markers exist for this episode"). Saves
+                // re-hitting AniSkip every time the user re-opens the same
+                // episode that genuinely has no submitted markers.
+                _cache[key] = (DateTime.UtcNow + CacheTtl, data);
+                return data;
             }
             catch
             {
-                // AniSkip is best-effort — a transient network blip just means no markers
-                // for this view. Don't poison the cache with a missing result though;
-                // skip the cache write so the next request can retry.
-                return data;
+                // Network blip / DNS fail / TLS error — best-effort: no markers
+                // for this view, but don't write the cache so the next request
+                // can retry.
+                return [];
             }
-
-            _cache[key] = (DateTime.UtcNow + CacheTtl, data);
-            return data;
         }
     }
 }

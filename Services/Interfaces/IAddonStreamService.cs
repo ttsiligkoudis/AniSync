@@ -32,6 +32,14 @@ namespace AnimeList.Services.Interfaces
         /// playable (no <c>url</c> field — magnets-only addons,
         /// external-only addons). Returns an empty list on any failure.
         ///
+        /// Id resolution chain inside <c>BuildStremioId</c>:
+        /// IMDb (<c>tt12345678:S:E</c>) → Kitsu (<c>kitsu:N:E</c>) →
+        /// the caller's <paramref name="primaryService"/> id-space
+        /// (<c>mal:N:E</c> / <c>anilist:N:E</c>). The primary fallback
+        /// lets users on tracker-only entries (no IMDb / no Kitsu mapping
+        /// in our local lists, e.g. very new shows) still get a request
+        /// out to addons that index by their primary tracker.
+        ///
         /// <paramref name="clientIp"/> is forwarded as the
         /// <c>X-Forwarded-For</c> / <c>Fly-Client-IP</c> /
         /// <c>CF-Connecting-IP</c> headers so addons that bind their
@@ -46,6 +54,7 @@ namespace AnimeList.Services.Interfaces
             AnimeSourceLinks links,
             int? season,
             int? episode,
+            AnimeService primaryService,
             string clientIp = null,
             CancellationToken ct = default);
     }

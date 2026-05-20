@@ -1,5 +1,6 @@
 using AnimeList.Models;
 using AnimeList.Services;
+using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -26,7 +27,6 @@ namespace AnimeList.Controllers
         private readonly IAddonStreamService _addonStreamService;
         private readonly IAniSkipService _aniSkipService;
         private readonly ISubtitleService _subtitleService;
-        private readonly IWyzieSubtitlesService _wyzieSubtitleService;
         private readonly IMkvExtractorService _mkvExtractorService;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ISyncService _syncService;
@@ -45,7 +45,6 @@ namespace AnimeList.Controllers
             IAddonStreamService addonStreamService,
             IAniSkipService aniSkipService,
             ISubtitleService subtitleService,
-            IWyzieSubtitlesService wyzieSubtitleService,
             IMkvExtractorService mkvExtractorService,
             IHttpClientFactory httpClientFactory,
             ISyncService syncService,
@@ -63,7 +62,6 @@ namespace AnimeList.Controllers
             _addonStreamService = addonStreamService;
             _aniSkipService = aniSkipService;
             _subtitleService = subtitleService;
-            _wyzieSubtitleService = wyzieSubtitleService;
             _mkvExtractorService = mkvExtractorService;
             _httpClientFactory = httpClientFactory;
             _syncService = syncService;
@@ -83,21 +81,12 @@ namespace AnimeList.Controllers
             // anonymous fresh-visitors get a Kitsu-default synthetic token like
             // /discover does so the per-service dispatch below has a service
             // to switch on. The detail data itself is public — no auth required
-            // to render the page.
-            var tokenData = await _tokenService.GetAccessTokenAsync()
-                ?? new TokenData { anime_service = AnimeService.Kitsu };
+            // to render the page. ResolveCurrentAsync returns null uid for
+            // anonymous / unauthenticated, so that double-purpose handles the
+            // existing "anonymousUser → no uid" branching for us.
+            var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+            tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
             var animeService = tokenData.anime_service;
-
-            // Resolve the row's UID for logged-in users so the entry-fetch
-            // path below can hit the user's tracker with the right identity.
-            // Anonymous viewers get null, which is fine — the entry block is
-            // gated on !anonymousUser anyway.
-            string uid = null;
-            if (!tokenData.anonymousUser)
-            {
-                var (resolvedUid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
-                uid = resolvedUid;
-            }
             // /anime/{id} is always ungrouped — the enableSeasonGrouping pref
             // now only governs Stremio's catalog / meta endpoints. The detail
             // page is the destination for a single-cour card, so resolving the
@@ -164,6 +153,28 @@ namespace AnimeList.Controllers
                 return View("NotFound");
             }
 
+            // 18+ gate — if the viewer hasn't opted into adult content, a
+            // direct /anime/{id} request to an isAdult entry 404s. Anonymous
+            // viewers (uid == null) hit the same gate via a null config →
+            // showAdultContent defaults false. Matches the per-service
+            // filtering on Discover / Library: same toggle, same effect,
+            // no sneaking adult entries in via deep-link.
+            if (anime.isAdult)
+            {
+                var detailConfig = await GetConfigByUidAsync(uid, _configStore);
+                if (detailConfig?.showAdultContent != true)
+                {
+                    Response.StatusCode = 404;
+                    return View("NotFound");
+                }
+            }
+
+            // Normalise the videos array to within-cour 1..N — see Watch
+            // action's matching block for the full rationale. Both pages
+            // need to stay in sync so a Detail-page click of "Ep 6" maps
+            // to /watch/6 and the Watch lookup actually finds the row.
+            NormaliseCourEpisodeNumbering(anime);
+
             // Filler / canon enrichment — same pattern as MetaController's
             // EnrichMetaWithFillerAsync used by the Stremio addon path.
             // Episodes get a coloured emoji prefix (🟦 canon, 🟨 filler,
@@ -184,13 +195,7 @@ namespace AnimeList.Controllers
                 // and the page renders without the user-state panel.
                 try
                 {
-                    var resolvedEntryId = await _mappingService.GetIdByService(anime.id, animeService);
-                    var entryId = string.IsNullOrEmpty(resolvedEntryId) ? anime.id : (animeService switch
-                    {
-                        AnimeService.Anilist     => $"{anilistPrefix}{resolvedEntryId}",
-                        AnimeService.MyAnimeList => $"{malPrefix}{resolvedEntryId}",
-                        _                        => $"{kitsuPrefix}{resolvedEntryId}",
-                    });
+                    var entryId = await _mappingService.GetIdWithPrefixAsync(anime.id, animeService) ?? anime.id;
 
                     var raw = animeService switch
                     {
@@ -349,16 +354,9 @@ namespace AnimeList.Controllers
                 return View("NotFound");
             }
 
-            var tokenData = await _tokenService.GetAccessTokenAsync()
-                ?? new TokenData { anime_service = AnimeService.Kitsu };
+            var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+            tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
             var animeService = tokenData.anime_service;
-
-            string uid = null;
-            if (!tokenData.anonymousUser)
-            {
-                var (resolvedUid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
-                uid = resolvedUid;
-            }
 
             id = await ResolveToServiceIdAsync(id, animeService) ?? id;
 
@@ -375,10 +373,48 @@ namespace AnimeList.Controllers
                 return View("NotFound");
             }
 
+            // 18+ gate — same as Detail. A deep-link to
+            // /anime/{adult}/watch/N must 404 for viewers without the
+            // showAdultContent opt-in so the toggle can't be bypassed
+            // via the watch URL.
+            if (anime != null && anime.isAdult)
+            {
+                var watchConfig = await GetConfigByUidAsync(uid, _configStore);
+                if (watchConfig?.showAdultContent != true)
+                {
+                    Response.StatusCode = 404;
+                    return View("NotFound");
+                }
+            }
+
             if (anime?.videos == null || anime.videos.Count == 0)
             {
-                Response.StatusCode = 404;
-                return View("NotFound");
+                // Movie meta path: services collapse the entire feature into a
+                // single streamable unit and leave videos empty. Synthesize a
+                // single Video for episode 1 so the existing per-episode
+                // rendering below works unchanged. Anything other than
+                // /watch/1 on a movie 404s — there's no "ep 2 of a movie".
+                if (anime != null
+                    && episode == 1
+                    && anime.type == MetaType.movie.ToString())
+                {
+                    anime.videos = [new Video
+                    {
+                        episode = 1,
+                        season = 1,
+                        title = anime.name,
+                        thumbnail = anime.poster ?? anime.background,
+                    }];
+                }
+                else
+                {
+                    Response.StatusCode = 404;
+                    return View("NotFound");
+                }
+            }
+            else
+            {
+                NormaliseCourEpisodeNumbering(anime);
             }
 
             // Match on episode + season — season null means "any cour", which
@@ -497,46 +533,78 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
-        /// Combines stream lists from every configured addon into one
-        /// ranked view. De-dupes by lowercased infoHash, keeping the
-        /// higher-seeder entry on conflict — same SHA-1 means the same
-        /// torrent regardless of which addon surfaced it, so a head-
-        /// to-head usually just resolves to "addon A saw more peers
-        /// than addon B" rather than meaningfully different sources.
-        /// Streams without an infoHash dedupe by URL (rare; means an
-        /// addon emitted a non-torrent entry). Re-bucketed by quality
-        /// and capped per bucket so the merged result mirrors the per-
-        /// addon rank+cap rather than emitting N× entries when many
-        /// addons are configured.
+        /// Renumbers <see cref="Meta.videos"/> to within-cour 1..N collapsed
+        /// into a single virtual season, preserving the original IMDb
+        /// coordinates on each <see cref="Video.imdbSeason"/> /
+        /// <see cref="Video.imdbEpisode"/> so the stream lookup can still
+        /// hit the right episode of the right IMDb season.
+        /// <para>
+        /// Why: the per-service GetAnimeByIdAsync's Cinemeta path returns
+        /// videos with their IMDb-absolute coordinates — for a flat-IMDb
+        /// franchise like anilist:171110's cour 4 that's
+        /// <c>videos[0..5].episode = 37..42, season = 1</c>; for a long-
+        /// running show like Naruto (anilist:20) that's 220 videos
+        /// split across IMDb seasons 1..5. Both shapes broke the site's
+        /// UX: the route <c>/watch/{episode}</c> 404'd for every
+        /// within-cour episode on flat-IMDb anime, and the Detail page
+        /// rendered "Season 1, 2, 3, 4, 5" tabs for shows whose AniList
+        /// entry is a single contiguous run.
+        /// </para>
+        /// <para>
+        /// After this call, all videos share <c>season = 1</c> and have
+        /// <c>episode = 1..N</c>, so the Detail page renders as one
+        /// season with continuous numbering and <c>/watch/{N}</c> means
+        /// "the Nth episode of this AniList entry" regardless of how
+        /// IMDb chose to slice the show. The Watch view's stream-fetch
+        /// JS reads the preserved <c>imdbSeason</c> / <c>imdbEpisode</c>
+        /// values when present so the addon query still goes to the
+        /// right IMDb coordinates.
+        /// </para>
         /// </summary>
-        private static List<AddonStream> MergeAddonStreams(IReadOnlyList<AddonStream> all)
+        private static void NormaliseCourEpisodeNumbering(Meta anime)
         {
-            const int PerQualityCap = 5;
-            string[] qualityOrder = ["2160p", "1440p", "1080p", "720p"];
-
-            var deduped = all
-                .GroupBy(s => string.IsNullOrEmpty(s.InfoHash)
-                    ? "url::" + (s.Url ?? Guid.NewGuid().ToString())
-                    : "hash::" + s.InfoHash.ToLowerInvariant())
-                .Select(g => g.OrderByDescending(s => s.Seeders).First())
+            if (anime?.videos == null || anime.videos.Count == 0) return;
+            var ordered = anime.videos
+                .OrderBy(v => v.season > 0 ? v.season : 1)
+                .ThenBy(v => v.episode)
                 .ToList();
-
-            var byQuality = deduped
-                .GroupBy(s => s.Quality)
-                .ToDictionary(g => g.Key, g => g
-                    .OrderByDescending(s => s.Seeders)
-                    .Take(PerQualityCap)
-                    .ToList());
-
-            var ranked = new List<AddonStream>(qualityOrder.Length * PerQualityCap);
-            foreach (var q in qualityOrder)
+            for (var i = 0; i < ordered.Count; i++)
             {
-                if (byQuality.TryGetValue(q, out var bucket))
+                var v = ordered[i];
+                var originalEpisode = v.episode;
+                // Preserve only when the source numbering looks like it
+                // came from Cinemeta — i.e. the video already had a
+                // non-zero episode. The streamingEpisodes fallback path
+                // in the per-service implementations renumbers to 1..N
+                // before reaching us, so its season/episode are AniList-
+                // cour values, not IMDb — preserving them would mislead
+                // the addon query downstream.
+                if (v.episode > 0 && v.imdbEpisode == null)
                 {
-                    ranked.AddRange(bucket);
+                    v.imdbSeason = v.season > 0 ? v.season : 1;
+                    v.imdbEpisode = v.episode;
+                }
+                v.season = 1;
+                v.episode = i + 1;
+
+                // Cinemeta emits placeholder names like "Episode 43" for
+                // not-yet-aired rows that don't have a real title yet.
+                // After we renumber, the row reads "7. Episode 43" which
+                // is off-by-one and confusing. Rewrite the placeholder
+                // to track the new ordinal — only when the existing
+                // name/title is literally "Episode <originalNumber>", so
+                // real titles like "Harspiel Concert" stay untouched.
+                if (originalEpisode > 0 && originalEpisode != v.episode)
+                {
+                    var placeholder = $"Episode {originalEpisode}";
+                    var rebuilt = $"Episode {v.episode}";
+                    if (string.Equals(v.name?.Trim(), placeholder, StringComparison.OrdinalIgnoreCase))
+                        v.name = rebuilt;
+                    if (string.Equals(v.title?.Trim(), placeholder, StringComparison.OrdinalIgnoreCase))
+                        v.title = rebuilt;
                 }
             }
-            return ranked;
+            anime.videos = ordered;
         }
 
         /// <summary>
@@ -590,22 +658,24 @@ namespace AnimeList.Controllers
         /// /anime/{*id} which would otherwise swallow any literal sub-path.
         /// </summary>
         [HttpGet("/anime/episode-streams")]
-        public async Task<IActionResult> EpisodeStreams(string id, int? season, int episode)
+        public async Task<IActionResult> EpisodeStreams(string id, int? season, int episode, string type = null)
         {
             if (string.IsNullOrWhiteSpace(id))
             {
                 return BadRequest(new { error = "id required" });
             }
 
-            var tokenData = await _tokenService.GetAccessTokenAsync()
-                ?? new TokenData { anime_service = AnimeService.Kitsu };
+            // For movie-typed entries we pass null episode + null season to
+            // the stream-addon fan-out so BuildStremioId emits the "movie"
+            // path shape (imdb / kitsu:N alone) instead of the "series"
+            // shape (imdb:S:E) — the latter doesn't match anything on the
+            // addon side for a feature film.
+            var isMovie = string.Equals(type, "movie", StringComparison.OrdinalIgnoreCase);
+            int? lookupEpisode = isMovie ? null : episode;
+            int? lookupSeason = isMovie ? null : season;
 
-            string uid = null;
-            if (!tokenData.anonymousUser)
-            {
-                var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
-                uid = resolved;
-            }
+            var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+            tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
 
             // Stream addons — one fan-out per configured manifest URL.
             // Anonymous installs and users with no addons see no debrid
@@ -620,6 +690,20 @@ namespace AnimeList.Controllers
             {
                 var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
 
+                // Override sourceLinks.ImdbSeason with the per-call value
+                // when the JS supplied one explicitly (Watch.cshtml passes
+                // the imdbSeason field NormaliseCourEpisodeNumbering
+                // preserved on each Video). BuildStremioId prefers
+                // links.ImdbSeason over the passed-in season, so without
+                // this override a long show like Naruto would request
+                // tt0409591:1:100 for /watch/100 (sourceLinks.ImdbSeason
+                // is 1 from the Fribb mapping) instead of the right
+                // tt0409591:3:28 the JS asked for via lookupSeason.
+                if (!isMovie && lookupSeason.HasValue)
+                {
+                    sourceLinks.ImdbSeason = lookupSeason.Value;
+                }
+
                 // The user's real client IP — forwarded to each addon
                 // so playback URLs that bind to the requesting IP (e.g.
                 // MediaFusion) sign tokens for the user's IP rather
@@ -631,9 +715,15 @@ namespace AnimeList.Controllers
                 // Fan out in parallel — addons are independent
                 // endpoints with no shared rate-limit, so total latency
                 // floors at max(addon latency) rather than summing.
+                // tokenData.anime_service feeds BuildStremioId's
+                // third-tier fallback (IMDb → Kitsu → primary tracker
+                // id-space) so a show missing both an IMDb and a Kitsu
+                // mapping still produces a request the user's addons
+                // might know about under mal:N / anilist:N.
+                var primaryService = tokenData.anime_service;
                 var fetchTasks = addons
                     .Select(a => _addonStreamService.GetStreamsAsync(
-                        a.Url, sourceLinks, season, episode, clientIp))
+                        a.Url, sourceLinks, lookupSeason, lookupEpisode, primaryService, clientIp))
                     .ToArray();
                 await Task.WhenAll(fetchTasks);
 
@@ -641,6 +731,16 @@ namespace AnimeList.Controllers
                 // fallback with the addon's persisted display name
                 // (pulled from manifest.name on save), since the addon
                 // doesn't echo its name on the /stream response.
+                // Preserve the addon's emit order — no post-fetch
+                // dedupe, no per-quality cap. Whatever the user's
+                // configured addons return (in the order they returned
+                // it) is what the source picker shows; filtering /
+                // ordering belongs in each addon's own config URL.
+                // Earlier passes dedup-and-rebucketed across addons,
+                // which silently dropped MediaFusion's lone result on
+                // anime where its quality marker didn't match our
+                // allowlist or hashed equal to a higher-seeder Torrentio
+                // row.
                 var labelledStreams = new List<AddonStream>();
                 for (int i = 0; i < addons.Count; i++)
                 {
@@ -650,8 +750,7 @@ namespace AnimeList.Controllers
                     }
                 }
 
-                var merged = MergeAddonStreams(labelledStreams);
-                debridStreams = merged.Select(s => (object)new
+                debridStreams = labelledStreams.Select(s => (object)new
                 {
                     name = s.Name,
                     title = s.Title,
@@ -694,8 +793,8 @@ namespace AnimeList.Controllers
                 .Select(l => new { site = l.Site, url = l.Url })
                 .ToList();
 
-            // Cross-service links + AniSkip + Wyzie subtitles all use the
-            // same anime id — fetch the source-links bundle once.
+            // Cross-service links + AniSkip both key off the same anime id —
+            // fetch the source-links bundle once.
             var sourceLinksForExtras = await _mappingService.BuildSourceLinksAsync(id);
 
             // AniSkip — same lookup chain StreamController.BuildSkipHintsAsync
@@ -774,9 +873,8 @@ namespace AnimeList.Controllers
             var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
             if (string.IsNullOrEmpty(sourceLinks.ImdbId))
             {
-                // Both providers are IMDb-keyed (Wyzie via /search?id=tt…,
-                // OpenSubtitles via the Stremio addon's series/tt:s:e
-                // shape). No IMDb mapping = nothing to ask either of.
+                // OpenSubtitles is IMDb-keyed via the Stremio addon's
+                // series/tt:s:e shape. No IMDb mapping = nothing to ask.
                 return Json(new { subtitles = Array.Empty<object>() });
             }
 
@@ -786,35 +884,11 @@ namespace AnimeList.Controllers
             // season of the IMDb listing otherwise.
             var effectiveSeason = sourceLinks.ImdbSeason ?? season;
 
-            // Fire both providers concurrently — the slower of the
-            // two sets the response latency rather than the sum.
-            var osTask = SafeOpenSubtitlesSearch(sourceLinks.ImdbId, effectiveSeason, episode, filename, id);
-            var wyzieTask = SafeWyzieSearch(sourceLinks.ImdbId, effectiveSeason, episode, id);
-
-            await Task.WhenAll(osTask, wyzieTask);
-
-            // Merge OpenSubtitles first, then Wyzie. Within a single
-            // language the user gets the OpenSubtitles variants at the
-            // top and Wyzie variants after — OpenSubtitles is still
-            // the primary, Wyzie fills the long tail with Subdl /
-            // Addic7ed uploads. Dedup by proxy URL — the URL embeds
-            // the upstream URL verbatim, so identical upstreams (same
-            // file surfaced through both routes) collapse to one menu
-            // entry.
-            var merged = new List<SubtitleTrack>(osTask.Result.Count + wyzieTask.Result.Count);
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var t in osTask.Result)
-            {
-                if (seen.Add(t.Url)) merged.Add(t);
-            }
-            foreach (var t in wyzieTask.Result)
-            {
-                if (seen.Add(t.Url)) merged.Add(t);
-            }
+            var tracks = await SafeOpenSubtitlesSearch(sourceLinks.ImdbId, effectiveSeason, episode, filename, id);
 
             return Json(new
             {
-                subtitles = merged.Select(t => (object)new
+                subtitles = tracks.Select(t => (object)new
                 {
                     lang = t.Lang,
                     label = t.Label,
@@ -822,12 +896,11 @@ namespace AnimeList.Controllers
                     source = t.Source,
                 }).ToList(),
                 // Per-provider counts so the UI can surface a
-                // "OpenSubtitles: X · Wyzie: Y" status chip without
-                // having to derive the breakdown from track labels.
+                // "Subs · OS: X" status chip without having to derive
+                // the breakdown from track labels.
                 providerCounts = new
                 {
-                    opensubtitles = osTask.Result.Count,
-                    wyzie = wyzieTask.Result.Count,
+                    opensubtitles = tracks.Count,
                 },
             });
         }
@@ -839,17 +912,6 @@ namespace AnimeList.Controllers
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "OpenSubtitles search failed for {Id} ep {Ep}.", id, episode);
-                return Array.Empty<SubtitleTrack>();
-            }
-        }
-
-        private async Task<IReadOnlyList<SubtitleTrack>> SafeWyzieSearch(
-            string imdbId, int? season, int episode, string id)
-        {
-            try { return await _wyzieSubtitleService.SearchAsync(imdbId, season, episode); }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Wyzie search failed for {Id} ep {Ep}.", id, episode);
                 return Array.Empty<SubtitleTrack>();
             }
         }
@@ -1207,14 +1269,7 @@ namespace AnimeList.Controllers
             }
             if (id.StartsWith(malPrefix) && service != AnimeService.MyAnimeList)
             {
-                var resolved = await _mappingService.GetIdByService(id, service);
-                if (string.IsNullOrEmpty(resolved)) return null;
-                return service switch
-                {
-                    AnimeService.Anilist => $"{anilistPrefix}{resolved}",
-                    AnimeService.Kitsu   => $"{kitsuPrefix}{resolved}",
-                    _                    => id,
-                };
+                return await _mappingService.GetIdWithPrefixAsync(id, service);
             }
             return id;
         }

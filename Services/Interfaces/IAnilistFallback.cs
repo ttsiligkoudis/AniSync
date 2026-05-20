@@ -75,7 +75,35 @@ namespace AnimeList.Services.Interfaces
         /// shelf rotates cleanly when the calendar day changes (rather than
         /// after a fixed 24-hour window from first fetch).
         /// </summary>
-        Task<List<Meta>> GetNewEpisodesTodayAsync(AnimeService translateTo = AnimeService.Anilist);
+        /// <summary>
+        /// Anime with at least one episode airing today, where "today" is
+        /// the calendar day in the viewer's timezone. <paramref name="tzOffsetMinutes"/>
+        /// follows the JS <c>Date.getTimezoneOffset()</c> convention —
+        /// minutes west of UTC, so UTC+3 sends -180 and UTC-5 sends 300.
+        /// Defaults to 0 (UTC) when the cookie that sources the offset
+        /// hasn't been set yet (e.g. a brand-new visitor's first request);
+        /// the layout's inline script seeds it for every subsequent
+        /// render. One row per anime (multi-cour drops collapse into a
+        /// single card). Slim <see cref="Meta"/> shape compatible with the
+        /// dashboard's scroll-row _PosterGrid. Cached for an hour per
+        /// (date, tz) bucket so the shelf rotates predictably without
+        /// per-render upstream calls.
+        /// </summary>
+        Task<List<Meta>> GetNewEpisodesTodayAsync(
+            AnimeService translateTo = AnimeService.Anilist,
+            int tzOffsetMinutes = 0);
+
+        /// <summary>
+        /// Episodes airing within an arbitrary [startUnix, endUnix] window
+        /// (Unix seconds, UTC). Used by the per-user notification dispatcher,
+        /// which runs every 5 minutes and needs a sliding "now-1h to now+24h"
+        /// window rather than the calendar-day shape
+        /// <see cref="GetNewEpisodesTodayAsync"/> returns. Not cached — the
+        /// caller's cron is the cadence. Stays in the anilist-prefixed id
+        /// space; translation to MAL/Kitsu happens downstream via the mapping
+        /// service.
+        /// </summary>
+        Task<List<UpcomingEpisode>> GetUpcomingEpisodesAsync(long startUnix, long endUnix);
 
         /// <summary>
         /// Prequels and sequels for an AniList anime id, sorted by air year
@@ -118,7 +146,7 @@ namespace AnimeList.Services.Interfaces
         /// service's id space so card clicks land on the user's primary's
         /// detail page rather than AniList's.
         /// </summary>
-        Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null);
+        Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null, bool hideAdult = false);
 
         /// <summary>
         /// Page-based variant of <see cref="GetByTagAsync"/> backing the
@@ -127,7 +155,7 @@ namespace AnimeList.Services.Interfaces
         /// handler can stop at the real end of the catalog. Page is
         /// 1-indexed (AniList's convention).
         /// </summary>
-        Task<(List<Meta> Items, bool HasNextPage)> GetByTagPageAsync(string tag, AnimeService translateTo, int page = 1);
+        Task<(List<Meta> Items, bool HasNextPage)> GetByTagPageAsync(string tag, AnimeService translateTo, int page = 1, bool hideAdult = false);
 
         /// <summary>
         /// Full tag catalog from AniList's MediaTagCollection — surfaced by
@@ -146,7 +174,7 @@ namespace AnimeList.Services.Interfaces
         /// render "Anime by Hayao Miyazaki" without an extra round-trip.
         /// Name is null when the staff id doesn't resolve.
         /// </summary>
-        Task<(string Name, List<Meta> Items)> GetStaffMediaAsync(int staffId, AnimeService translateTo, string skip = null);
+        Task<(string Name, List<Meta> Items)> GetStaffMediaAsync(int staffId, AnimeService translateTo, string skip = null, bool hideAdult = false);
 
         /// <summary>
         /// Browse a studio's catalog — every anime the studio produced,
@@ -159,7 +187,7 @@ namespace AnimeList.Services.Interfaces
         /// callers must consult HasNextPage, not list emptiness).
         /// Page is 1-indexed.
         /// </summary>
-        Task<(string Name, List<Meta> Items, bool HasNextPage)> GetStudioMediaAsync(int studioId, AnimeService translateTo, int page = 1);
+        Task<(string Name, List<Meta> Items, bool HasNextPage)> GetStudioMediaAsync(int studioId, AnimeService translateTo, int page = 1, bool hideAdult = false);
 
         /// <summary>
         /// One page of studios from AniList's Page.studios connection,

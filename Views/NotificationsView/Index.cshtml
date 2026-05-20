@@ -1,0 +1,67 @@
+@model AnimeList.Models.NotificationsPageViewModel
+@{
+    ViewData["ActiveNav"] = "notifications";
+    ViewData["Title"] = "Notifications";
+}
+
+<section class="page-header">
+    <div class="page-header-row">
+        <div class="page-header-titles">
+            <h1 class="page-title">Notifications</h1>
+            <p class="page-subtitle" data-notif-page-subtitle>
+                @* JS swaps this between "N notifications" and
+                   "N selected" so the header keeps its information
+                   density when the user enters multi-select mode. *@
+                @Model.Items.Count notification@(Model.Items.Count == 1 ? "" : "s")
+            </p>
+        </div>
+        <div class="notif-page-toolbar" data-notif-page-toolbar>
+            <button type="button" class="notif-page-action notif-page-action-quiet"
+                    data-notif-mark-all-read>Mark all read</button>
+            @* Bulk-action buttons — hidden until the user has at least
+               one row selected. JS reveals + disables them based on
+               selection state. *@
+            <button type="button" class="notif-page-action notif-page-action-quiet"
+                    data-notif-bulk-read hidden>Mark read</button>
+            <button type="button" class="notif-page-action notif-page-action-danger"
+                    data-notif-bulk-delete hidden>Delete</button>
+            <button type="button" class="notif-page-action notif-page-action-quiet"
+                    data-notif-bulk-cancel hidden>Cancel</button>
+        </div>
+    </div>
+    @* Web Push toggle — hidden by default; push-subscribe.js reveals
+       it once it confirms (a) the browser supports PushManager, (b)
+       the deployment has VAPID keys configured, and (c) discovers the
+       current subscription state. When unsupported / unconfigured the
+       row stays hidden entirely so users on Safari < 16.4 or on
+       self-hosted instances without push don't see a dead toggle. *@
+    <div class="notif-push-toggle" data-push-toggle hidden>
+        <span class="notif-push-toggle-label" data-push-toggle-label>Get notified when episodes drop</span>
+        <button type="button" class="notif-push-toggle-btn" data-push-toggle-btn hidden>Enable browser notifications</button>
+    </div>
+</section>
+
+@if (Model.Items.Count == 0)
+{
+    <p class="library-empty">No notifications yet. New episode releases will land here.</p>
+}
+else
+{
+    <div class="notif-page-list"
+         data-notif-page-paginator
+         data-skip="@Model.NextSkip"
+         data-page-size="@Model.PageSize">
+        @await Html.PartialAsync("_NotificationRows", Model.Items)
+
+        @if (Model.HasMore)
+        {
+            <div class="notif-page-sentinel" aria-hidden="true"></div>
+            <div class="notif-page-loader" hidden>Loading…</div>
+        }
+    </div>
+}
+
+@section Scripts {
+    <script src="~/js/notifications-page.js" asp-append-version="true" defer></script>
+    <script src="~/js/push-subscribe.js" asp-append-version="true" defer></script>
+}

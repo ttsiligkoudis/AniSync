@@ -6,7 +6,13 @@
     var isLoggedIn = tokenData != null;
     var anonymousUser = tokenData?.anonymousUser ?? false;
     var serviceLabel = tokenData?.anime_service.ToString();
-    var hasContinueWatching = Model.ContinueWatching?.Count > 0;
+    // Primary + every currently-working linked secondary, dot-separated,
+    // so the hero badge reads "✓ Synced with AniList · MAL · Kitsu"
+    // when the user has linked all three rather than hiding the fact
+    // that saves fan out to more than one tracker.
+    var allConnectedLabel = isLoggedIn && !anonymousUser
+        ? string.Join(" · ", new[] { serviceLabel }.Concat(Model.LinkedServices ?? []))
+        : serviceLabel;
 }
 
 @* Hero card — StreamD-style pill badge + two-tone heading + dual CTAs. Copy
@@ -17,7 +23,7 @@
 <section class="hero-card">
     @if (isLoggedIn && !anonymousUser)
     {
-        <span class="hero-badge">✓ Synced with @serviceLabel</span>
+        <span class="hero-badge">✓ Synced with @allConnectedLabel</span>
         <h2 class="hero-title">
             Continue your <span class="hero-title-accent">anime journey</span>
         </h2>
@@ -52,7 +58,7 @@
     <section class="dashboard-section">
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">This Season</h2>
-            <a class="dashboard-section-link" href="/discover?list=seasonal">
+            <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(CurrentSeasonLabel())">
                 <span>View all</span>
                 <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -180,7 +186,7 @@
    scores; v0 sticks to what's already in the existing list-catalog response. *@
 @if (isLoggedIn && !anonymousUser && Model.HasStats)
 {
-    <section class="dashboard-section stats-section">
+    <section class="dashboard-section stats-section" data-stats-section>
         @{
             // Stats come from AniList's User.statistics GraphQL regardless of
             // which provider the user picked as their primary — that's where
@@ -202,34 +208,47 @@
             <h2 class="dashboard-section-title">Your stats</h2>
             <span class="dashboard-section-actions">
                 <span class="dashboard-section-link-muted">@statsAttribution</span>
-                @* Force-refresh button: re-renders the dashboard with ?nocache=1
-                   which tells the controller to bypass the 10-minute per-user
-                   list cache and refetch directly from upstream. Use sparingly —
-                   most edits invalidate the cache automatically; this exists for
-                   when an out-of-band write (scrobble, edit on the provider's
-                   own website) made the stats look wrong. *@
-                <a class="dashboard-refresh-btn"
-                   href="@Url.Action("Index", "Home", new { nocache = true })"
-                   title="Refresh stats — bypass the 10 min cache"
-                   aria-label="Refresh stats">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <polyline points="23 4 23 10 17 10"></polyline>
-                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-                    </svg>
-                </a>
+                @* Info popover. AniList re-aggregates User.statistics on
+                   its own schedule (typically 24-48 h) and exposes no
+                   public mutation to force a recompute, so the popover
+                   tells users to click "Update Stats" on the AniList
+                   settings page and then come back and hit our "refresh
+                   your stats" link, which drops the localStorage cache
+                   and re-fetches /Home/AnilistStats. Click-only — no
+                   :hover trigger so touch and desktop both open the same
+                   way (mobile tap-then-tap-link became unreliable when
+                   :hover stuck the popover open on the first tap). *@
+                <span class="dashboard-stats-info">
+                    <button class="dashboard-stats-info-btn"
+                            type="button"
+                            aria-label="About these stats"
+                            aria-expanded="false"
+                            aria-controls="dashboardStatsInfoTooltip"
+                            data-stats-info-toggle>
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="16" x2="12" y2="12"></line>
+                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                        </svg>
+                    </button>
+                    <span id="dashboardStatsInfoTooltip" class="dashboard-stats-info-tooltip">
+                        AniList recomputes your stats on its own schedule
+                        (typically every 24-48 hours). To force an
+                        immediate refresh, click "Update Stats" on
+                        <a href="https://anilist.co/settings/lists" target="_blank" rel="noopener noreferrer">AniList's list settings</a>
+                        and then
+                        <a href="#" data-stats-refresh-link>refresh your stats</a>.
+                    </span>
+                </span>
             </span>
         </div>
-        @* 4-cell stats strip: Watching · Completed · Hours · Mean Score. Wraps
-           to 2x2 on narrow viewports via flex-wrap. Per-cell soft-coloured icon
-           tiles match the StreamD reference's Currently Airing / This Season /
-           Total stats row. Hours is computed from Completed × 24 min so it'll
-           be approximate for movie-heavy libraries; mean score is averaged
-           only over user-rated entries (unscored ones skip rather than zero). *@
-        @* data-stat hooks let manage-entry-modal.js adjust the visible numbers
-           after a save, so the stats panel stays in sync without a full page
-           reload. Watching / Completed / Hours adjust on filter transitions
-           (move to/from those buckets); Mean Score is too fiddly to recompute
-           client-side from a single edit and stays stale until next render. *@
+        @* 4-cell stats strip — values fill in from JS (localStorage cache
+           or /Home/AnilistStats fetch). Placeholders render as "—" so a
+           cold browser sees the layout immediately; manage-entry-modal.js
+           also writes through data-stat="watching" / -"completed" / -"hours"
+           after a save so the panel stays in sync without a reload. The
+           Hours / Mean cells start hidden — the fetch shows them when the
+           value comes back > 0 / non-null. *@
         <div class="stats-strip">
             <div class="stats-cell" data-stat="watching">
                 <span class="stats-icon stats-icon-blue">
@@ -238,7 +257,7 @@
                         <polyline points="17 2 12 7 7 2"></polyline>
                     </svg>
                 </span>
-                <div class="stats-number">@Model.WatchingTotal</div>
+                <div class="stats-number">—</div>
                 <div class="stats-label">Watching</div>
             </div>
             <div class="stats-cell" data-stat="completed">
@@ -248,50 +267,172 @@
                         <polyline points="22 4 12 14.01 9 11.01"></polyline>
                     </svg>
                 </span>
-                <div class="stats-number">@Model.CompletedTotal</div>
+                <div class="stats-number">—</div>
                 <div class="stats-label">Completed</div>
             </div>
-            @if (Model.TotalHoursWatched > 0)
-            {
-                <div class="stats-cell" data-stat="hours">
-                    <span class="stats-icon stats-icon-amber">
-                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <polyline points="12 6 12 12 16 14"></polyline>
-                        </svg>
-                    </span>
-                    <div class="stats-number">@Model.TotalHoursWatched.ToString("N0")</div>
-                    <div class="stats-label">Hours</div>
-                </div>
-            }
-            @if (Model.MeanScore.HasValue)
-            {
-                <div class="stats-cell" data-stat="mean">
-                    <span class="stats-icon stats-icon-purple">
-                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-                        </svg>
-                    </span>
-                    <div class="stats-number">@Model.MeanScore.Value.ToString("0.0")</div>
-                    <div class="stats-label">Mean</div>
-                </div>
-            }
+            <div class="stats-cell" data-stat="hours" hidden>
+                <span class="stats-icon stats-icon-amber">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                </span>
+                <div class="stats-number">—</div>
+                <div class="stats-label">Hours</div>
+            </div>
+            <div class="stats-cell" data-stat="mean" hidden>
+                <span class="stats-icon stats-icon-purple">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                    </svg>
+                </span>
+                <div class="stats-number">—</div>
+                <div class="stats-label">Mean</div>
+            </div>
         </div>
     </section>
+    @* Click-to-toggle behaviour for the stats info popover plus the
+       localStorage-cached stats fetch. Both kept tiny + inline since the
+       widget only mounts under the HasStats branch. *@
+    <script>
+        (function () {
+            var section = document.querySelector('[data-stats-section]');
+            if (!section) return;
+
+            // ── Popover open/close (click-only, both desktop + touch) ──
+            var wrap = section.querySelector('.dashboard-stats-info');
+            var btn = wrap && wrap.querySelector('[data-stats-info-toggle]');
+            function closePopover() {
+                if (!wrap) return;
+                wrap.classList.remove('is-open');
+                if (btn) btn.setAttribute('aria-expanded', 'false');
+            }
+            if (btn) {
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    var isOpen = wrap.classList.toggle('is-open');
+                    btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+                });
+            }
+            if (wrap) {
+                // Close on inner-link click so the popover doesn't
+                // linger across new-tab navigation / bfcache restores.
+                // The "refresh your stats" link is handled separately
+                // below (it preventDefault's, so this still fires).
+                wrap.addEventListener('click', function (e) {
+                    if (e.target.closest('a')) closePopover();
+                });
+            }
+            document.addEventListener('click', function (e) {
+                if (wrap && !wrap.contains(e.target)) closePopover();
+            });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && wrap && wrap.classList.contains('is-open')) {
+                    closePopover();
+                    if (btn) btn.focus();
+                }
+            });
+
+            // ── localStorage-cached stats fetch ──
+            // 24 h TTL mirrors the typical AniList recompute cadence;
+            // shorter than the previous 48 h server cache so a user who
+            // updates stats on AniList and forgets about us picks up the
+            // new numbers within a day. Cache lives in the browser, not
+            // our server — one fetch per user per day per device rather
+            // than per dashboard render.
+            var CACHE_KEY = 'anisync.anilistStats.v1';
+            var TTL_MS = 24 * 60 * 60 * 1000;
+            function readCache() {
+                try {
+                    var raw = localStorage.getItem(CACHE_KEY);
+                    if (!raw) return null;
+                    var obj = JSON.parse(raw);
+                    if (!obj || typeof obj.ts !== 'number' || (Date.now() - obj.ts) > TTL_MS) return null;
+                    return obj.data || null;
+                } catch (_) { return null; }
+            }
+            function writeCache(data) {
+                try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data: data })); }
+                catch (_) { /* quota / private mode — ignore */ }
+            }
+            function clearCache() {
+                try { localStorage.removeItem(CACHE_KEY); } catch (_) {}
+            }
+
+            function setCell(stat, value, formatter) {
+                var cell = section.querySelector('[data-stat="' + stat + '"]');
+                if (!cell) return;
+                var numEl = cell.querySelector('.stats-number');
+                var hasValue = value != null && value !== 0;
+                // Hours / Mean cells are hidden by default and only
+                // show when the value is actually positive — matches
+                // the old server-rendered conditional gates.
+                if (stat === 'hours' || stat === 'mean') {
+                    cell.hidden = !hasValue;
+                }
+                if (numEl) numEl.textContent = hasValue ? formatter(value) : '—';
+            }
+            function render(stats) {
+                if (!stats) {
+                    // Null payload (e.g. AniList token revoked) — keep
+                    // placeholders, don't write a junk cache entry.
+                    return;
+                }
+                // Property names are camelCase: System.Text.Json's default
+                // PropertyNamingPolicy is CamelCase under ASP.NET Core's
+                // AddControllersWithViews configuration.
+                setCell('watching', stats.watching, function (v) { return v.toLocaleString(); });
+                setCell('completed', stats.completed, function (v) { return v.toLocaleString(); });
+                setCell('hours', stats.totalHoursWatched, function (v) { return v.toLocaleString(); });
+                setCell('mean', stats.meanScore, function (v) { return Number(v).toFixed(1); });
+            }
+            async function fetchAndRender() {
+                try {
+                    var resp = await fetch('/Home/AnilistStats', {
+                        credentials: 'same-origin',
+                        skipLoader: true,
+                    });
+                    if (!resp.ok) return;
+                    var data = await resp.json();
+                    if (!data || !data.success) return;
+                    writeCache(data.stats);
+                    render(data.stats);
+                } catch (_) { /* network blip — placeholders stay */ }
+            }
+
+            var cached = readCache();
+            if (cached) {
+                render(cached);
+            } else {
+                fetchAndRender();
+            }
+
+            // "refresh your stats" link inside the popover — drop the
+            // localStorage entry and pull fresh numbers. Used after the
+            // user has clicked "Update Stats" on AniList itself.
+            var refreshLink = section.querySelector('[data-stats-refresh-link]');
+            if (refreshLink) {
+                refreshLink.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    clearCache();
+                    fetchAndRender();
+                });
+            }
+        })();
+    </script>
 }
 
-@* Continue Watching: a small slice of the user's Currently Watching list
-   surfaced on the dashboard so the front door does something useful for
-   returning users instead of just showing three nav tiles. Only renders for
-   logged-in non-anonymous users with at least one item; falls back to the
-   plain dashboard otherwise. The grid uses the existing _PosterGrid partial
-   for visual consistency with /library and /discover. *@
-@if (hasContinueWatching)
+@* Continue Watching: a small slice of the user's Currently Watching list,
+   fetched client-side from /Home/ContinueWatchingData (a rendered
+   _PosterGrid partial) and cached in localStorage for 10 minutes. The
+   section's outer skeleton always renders for logged-in non-anonymous
+   users and starts [hidden]; the JS un-hides it once the HTML loads. *@
+@if (isLoggedIn && !anonymousUser)
 {
-    <section class="dashboard-section">
+    <section class="dashboard-section" data-continue-watching-section hidden>
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">Continue watching</h2>
-            <a class="dashboard-section-link" href="/library">
+            <a class="dashboard-section-link" href="/library?list=current">
                 <span>View all</span>
                 <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -299,16 +440,75 @@
                 </svg>
             </a>
         </div>
-        @* Horizontal-scroll variant rather than the wrapping grid — matches the
-           StreamD "shelf" pattern where the dashboard surfaces multiple short
-           rows rather than a few full grids. *@
-        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
-        {
-            Items = Model.ContinueWatching,
-            ConfigUid = Model.ConfigUid,
-            Variant = "scroll",
-        })
+        <div data-continue-watching-container></div>
     </section>
+    <script>
+        (function () {
+            var section = document.querySelector('[data-continue-watching-section]');
+            if (!section) return;
+            var container = section.querySelector('[data-continue-watching-container]');
+            if (!container) return;
+
+            // 10-minute TTL mirrors the prior server-side UserListCache:
+            // long enough for a Home → Library → Home cycle to be free,
+            // short enough that cross-channel writes (scrobble webhook
+            // from another device, an edit on AniList's site directly)
+            // can't sit stale forever. In-app writes drop the key
+            // explicitly via invalidateContinueWatchingCache() in
+            // wwwroot/js/manage-entry-modal.js.
+            var KEY = 'anisync.continueWatching.v1';
+            var TTL_MS = 10 * 60 * 1000;
+
+            function readCache() {
+                try {
+                    var raw = localStorage.getItem(KEY);
+                    if (!raw) return null;
+                    var obj = JSON.parse(raw);
+                    if (!obj || typeof obj.ts !== 'number' || (Date.now() - obj.ts) > TTL_MS) return null;
+                    return obj.html;
+                } catch (_) { return null; }
+            }
+            function writeCache(html) {
+                try { localStorage.setItem(KEY, JSON.stringify({ ts: Date.now(), html: html })); }
+                catch (_) { /* quota / private mode — best-effort */ }
+            }
+
+            function paint(html) {
+                if (!html || !html.trim()) {
+                    container.replaceChildren();
+                    section.hidden = true;
+                    return;
+                }
+                // Server-rendered partial; Razor escapes all user-controlled
+                // text. innerHTML is safe here and lets the same markup the
+                // other shelves use (Views/Shared/_PosterGrid.cshtml) drop
+                // straight in without a parallel JS card builder to keep
+                // in sync.
+                container.innerHTML = html;
+                section.hidden = false;
+            }
+
+            async function fetchAndPaint() {
+                try {
+                    var resp = await fetch('/Home/ContinueWatchingData', {
+                        credentials: 'same-origin',
+                        skipLoader: true,
+                    });
+                    if (!resp.ok) return;
+                    var html = await resp.text();
+                    writeCache(html);
+                    paint(html);
+                } catch (_) { /* network blip — leave the section hidden */ }
+            }
+
+            var cached = readCache();
+            if (cached != null) {
+                paint(cached);
+            } else {
+                fetchAndPaint();
+            }
+        })();
+    </script>
 }
 
 @* Browse By: secondary discovery surfaces. Replaces the previous three nav

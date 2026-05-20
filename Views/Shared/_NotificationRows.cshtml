@@ -1,0 +1,55 @@
+@model List<AnimeList.Models.NotificationRecord>
+@{
+    // Same time-formatting as the bell dropdown's relativeTime() —
+    // duplicated server-side so the initial render isn't a flash of
+    // raw timestamps until the JS upgrades them.
+    string Relative(long unix)
+    {
+        var diff = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - unix;
+        if (diff < 60) return "just now";
+        if (diff < 3600) return $"{diff / 60}m ago";
+        if (diff < 86400) return $"{diff / 3600}h ago";
+        return $"{diff / 86400}d ago";
+    }
+}
+@foreach (var n in Model)
+{
+    var unread = n.ReadAt == null;
+    <a class="notif-page-item @(unread ? "notif-page-item-unread" : "")"
+       href="@n.LinkPath"
+       data-notif-id="@n.Id">
+        @* Checkbox is a real <input> so the browser's a11y stack picks
+           it up naturally. Wrapped in a span so the row click handler
+           can ignore clicks that land on the checkbox / label without
+           the inline event-target dance. *@
+        <span class="notif-page-checkbox" data-notif-page-checkbox>
+            <input type="checkbox"
+                   class="notif-page-checkbox-input"
+                   aria-label="Select notification: @n.AnimeTitle Episode @n.EpisodeNumber" />
+        </span>
+        @if (!string.IsNullOrEmpty(n.ThumbnailUrl))
+        {
+            <img class="notif-page-thumb" src="@n.ThumbnailUrl" alt="" loading="lazy" />
+        }
+        else
+        {
+            <div class="notif-page-thumb notif-page-thumb-placeholder" aria-hidden="true"></div>
+        }
+        <div class="notif-page-body">
+            <div class="notif-page-title">@n.AnimeTitle</div>
+            <div class="notif-page-meta">Episode @n.EpisodeNumber &middot; @Relative(n.CreatedAt)</div>
+        </div>
+        <button type="button"
+                class="notif-page-delete"
+                data-notif-page-delete
+                aria-label="Delete notification: @n.AnimeTitle Episode @n.EpisodeNumber">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+                <path d="M10 11v6"></path>
+                <path d="M14 11v6"></path>
+            </svg>
+        </button>
+    </a>
+}

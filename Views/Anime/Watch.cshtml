@@ -108,8 +108,12 @@
         <div class="watch-player-toolbar">
             @* Auto-skip preference lives in localStorage so it persists
                across episodes — click once, intros / outros get jumped
-               silently for every subsequent episode. *@
-            <button id="watchSkipAuto" class="watch-toggle" type="button" aria-pressed="false">
+               silently for every subsequent episode. Starts hidden;
+               the fetch handler below reveals it only when AniSkip
+               actually returned markers for this episode (no markers →
+               nothing for the toggle to act on, hiding it keeps the
+               toolbar uncluttered). *@
+            <button id="watchSkipAuto" class="watch-toggle" type="button" aria-pressed="false" hidden>
                 <span class="watch-toggle-dot" aria-hidden="true"></span>
                 <span>Auto-skip intro / outro</span>
             </button>
@@ -118,10 +122,10 @@
                pipeline is alive when nothing new appears in the
                Subtitles menu. Hidden until the pipeline kicks off. *@
             <span id="watchEmbeddedStatus" class="watch-embed-status" hidden></span>
-            @* Per-provider subtitle count chip. Populated after the
+            @* Subtitle count chip. Populated after the
                /anime/episode-subtitles fetch resolves so the user can
-               see at a glance whether OpenSubtitles, Wyzie, or both
-               returned anything. Hidden when no subtitles loaded. *@
+               see at a glance how many OpenSubtitles tracks loaded.
+               Hidden when no subtitles loaded. *@
             <span id="watchSubsProvider" class="watch-embed-status" hidden></span>
         </div>
         <div id="watchPlayerFallback" class="watch-player-fallback" hidden>
@@ -165,6 +169,86 @@
 </section>
 
 @section Scripts {
+    @* History-stack hygiene for the /watch flow:
+       - On page load, classify how we got here (from /anime, from another
+         /watch, or from elsewhere) and stash that on sessionStorage so the
+         back-link knows whether to step back or replace.
+       - Replace episode → episode navigations (prev/next buttons) with
+         location.replace so the back stack accumulates at most one /watch
+         entry no matter how many "next" clicks the user does. Without
+         this, three forward clicks left three /watch entries the browser
+         Back button would walk through one at a time.
+       - The "← {Anime title}" back-link always lands the user on the
+         anime detail page. When /anime/{id} is already right behind us
+         in history (fromAnime), a plain history.back() reuses it and
+         drops the /watch entry off the stack. Otherwise (notification
+         deep-link, fresh-tab, …), location.replace swaps /watch for
+         /anime/{id} in place so the user can still go Back to wherever
+         they were before clicking the notification.
+       Modifier-clicks (Ctrl / Cmd / Shift / middle button) on any of
+       these links fall through to the default <a> behaviour so opening
+       in a new tab still works. *@
+    <script>
+        (function () {
+            var ENTRY_KEY = 'aniSyncWatchEntry';
+
+            // Classify how we got here once on page load.
+            //
+            // Detail.cshtml writes ENTRY_KEY='fromAnime' just before
+            // navigating to /watch, so its presence here is a reliable
+            // signal that /anime/{id} is the previous history entry.
+            // No marker → reached via notification / dashboard / deep
+            // link / fresh tab; classify as fromOther so the back-link
+            // does location.replace and removes /watch from history.
+            //
+            // The site's <meta name="referrer" content="no-referrer">
+            // strips document.referrer on every same-origin navigation
+            // so referrer-sniffing is unusable; the explicit click
+            // marker is the only reliable detection.
+            try {
+                if (!sessionStorage.getItem(ENTRY_KEY)) {
+                    sessionStorage.setItem(ENTRY_KEY, 'fromOther');
+                }
+            } catch (e) { /* sessionStorage unavailable — best effort */ }
+
+            // Replace, don't push, when stepping between adjacent
+            // episodes. Keeps the back stack flat.
+            var navLinks = document.querySelectorAll('.watch-nav-prev, .watch-nav-next');
+            for (var i = 0; i < navLinks.length; i++) {
+                navLinks[i].addEventListener('click', function (e) {
+                    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                    e.preventDefault();
+                    window.location.replace(this.href);
+                });
+            }
+
+            // Back-link: always lands on /anime/{id}.
+            //   - fromAnime: /anime/{id} is right behind us, so step back
+            //     to reuse that entry. /watch becomes a forward entry; the
+            //     stack does NOT grow a duplicate /anime/{id}.
+            //   - otherwise: replace /watch with /anime/{id} in place so
+            //     the entry behind the original /watch (notification,
+            //     dashboard, fresh tab) stays as the only Back target.
+            var back = document.querySelector('.watch-back');
+            if (back) {
+                back.addEventListener('click', function (e) {
+                    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                    e.preventDefault();
+
+                    var entry;
+                    try { entry = sessionStorage.getItem(ENTRY_KEY); }
+                    catch (_) { entry = null; }
+                    try { sessionStorage.removeItem(ENTRY_KEY); } catch (_) {}
+
+                    if (entry === 'fromAnime' && window.history.length > 1) {
+                        window.history.back();
+                    } else {
+                        window.location.replace(back.href);
+                    }
+                });
+            }
+        })();
+    </script>
     <script src="https://unpkg.com/artplayer@5/dist/artplayer.js"></script>
     @* SSA / ASS embedded subtitle support. matroska-subtitles parses
        the MKV stream client-side; jassub (a libass WebAssembly port)
@@ -289,6 +373,24 @@
             var season  = @(Model.Current.season > 0 ? Model.Current.season : 1);
             var episode = @Model.Current.episode;
             var hasSeasons = @(hasSeasons ? "true" : "false");
+            // Tell the stream-fetch endpoint whether this is a movie so it
+            // emits the "movie" Stremio id shape (imdb / kitsu:N) instead
+            // of the series shape (imdb:S:E) — series-shape lookups return
+            // zero results from addons for a feature film.
+            var isMovie = @(a.type == MetaType.movie.ToString() ? "true" : "false");
+            // IMDb-absolute coordinates preserved by AnimeController's
+            // NormaliseCourEpisodeNumbering when the videos came from
+            // Cinemeta. The Watch URL + display use within-cour 1..N
+            // (so /watch/100 means "100th episode of this AniList entry"
+            // regardless of how IMDb sliced it), but the addon stream
+            // query has to use the IMDb coordinates Cinemeta returned —
+            // otherwise a long show like Naruto would ask Torrentio for
+            // tt0409591:1:100 (S1 only has ~40 eps) when the right query
+            // is tt0409591:3:28. null when no Cinemeta data was available
+            // (anime with no IMDb mapping) — the addon falls through to
+            // its kitsu:N path which ignores season anyway.
+            var streamSeason  = @(Model.Current.imdbSeason ?? (Model.Current.season > 0 ? Model.Current.season : 1));
+            var streamEpisode = @(Model.Current.imdbEpisode ?? Model.Current.episode);
 
             // One-shot guard so the 70 %-progress check, the external
             // launcher, and any future trigger don't double-fire the
@@ -529,7 +631,7 @@
                     // CORS/WebCodecs/local-font moving parts. The
                     // dialogue is readable, which is what users
                     // actually need from an embedded sub when
-                    // OpenSubtitles / Wyzie don't have a match.
+                    // OpenSubtitles don't have a match.
                     art.subtitle.show = false;
                     currentSubKind = 'ass';
                     currentSubKey = item.html || (item.label || 'Embedded') + ' SSA';
@@ -981,7 +1083,7 @@
                     // Worker would just hit Cloudflare's bot-block
                     // again, so skip extraction quietly: hide the
                     // pill, fire onComplete([]), let OpenSubtitles /
-                    // Wyzie carry the subtitle UX for this pick.
+                    // OpenSubtitles carries the subtitle UX for this pick.
                     if (abortCtl.signal.aborted) return;
                     console.info('embedded sub extraction skipped — resolve never returned a CDN URL:', err && err.message);
                     setEmbedStatus(null);
@@ -1012,7 +1114,7 @@
                 // lang=auto behaviour: mirror the cf-mkv-extractor
                 // Worker — collect cues only from the first English-
                 // tagged track. Anything else falls through to the
-                // OpenSubtitles / Wyzie path the same way an
+                // OpenSubtitles path the same way an
                 // English-less Worker response does. -1 means "we
                 // haven't decided yet", > 0 is a real EBML track
                 // number, 0 means "no English track found, drop
@@ -1105,7 +1207,7 @@
                     // auto-promote rule downstream would drop them
                     // anyway. 0 means "no English here"; in that
                     // case we abort the extract entirely and let
-                    // OpenSubtitles / Wyzie carry the UX, matching
+                    // OpenSubtitles carry the UX, matching
                     // what the Worker does when its lang=auto
                     // filter returns empty.
                     var english = null;
@@ -1632,7 +1734,6 @@
                             '[AniSync] subtitles loaded:',
                             subs.length, 'tracks',
                             'opensubtitles=' + (pc.opensubtitles || 0),
-                            'wyzie=' + (pc.wyzie || 0),
                             subs);
                     } catch (_) {}
                     renderSubsProviderChip(pc);
@@ -1675,7 +1776,7 @@
                 // otherwise leave at -1 so the "None" entry is selected.
                 // We deliberately don't fall back to the first non-
                 // English track — users with no English coverage from
-                // OpenSubtitles / Wyzie are better served by no subs
+                // OpenSubtitles are better served by no subs
                 // than by a surprise Spanish / Russian / etc. overlay
                 // they didn't ask for. They can still pick any track
                 // manually from the selector.
@@ -1711,7 +1812,7 @@
                     // Order: None → embedded SSA → external VTT.
                     // Embedded tracks come from the user's actual file
                     // so they're release-matched by definition and
-                    // beat OpenSubtitles / Wyzie on accuracy almost
+                    // beat OpenSubtitles on accuracy almost
                     // always. Surfacing them right after "None" puts
                     // the highest-quality options at the top of the
                     // menu where the user looks first.
@@ -2080,23 +2181,21 @@
             var embedStatusEl = document.getElementById('watchEmbeddedStatus');
             var subsProviderEl = document.getElementById('watchSubsProvider');
 
-            // Render a "OpenSubtitles: X · Wyzie: Y" chip after the
-            // subtitle fetch resolves. data-kind drives the colour so
-            // a totally empty result reads visually distinct from a
-            // partial one.
+            // Render a "Subs · OS: X" chip after the subtitle fetch
+            // resolves. data-kind drives the colour so a totally empty
+            // result reads visually distinct from a populated one.
             function renderSubsProviderChip(counts) {
                 if (!subsProviderEl) return;
                 var os = (counts && counts.opensubtitles) || 0;
-                var wy = (counts && counts.wyzie) || 0;
-                if (os + wy === 0) {
+                if (os === 0) {
                     subsProviderEl.hidden = false;
                     subsProviderEl.textContent = 'No remote subtitles';
                     subsProviderEl.setAttribute('data-kind', 'none');
                     return;
                 }
                 subsProviderEl.hidden = false;
-                subsProviderEl.textContent = 'Subs · OS: ' + os + ' · Wyzie: ' + wy;
-                subsProviderEl.setAttribute('data-kind', wy > 0 ? 'success' : 'loading');
+                subsProviderEl.textContent = 'Subs · OS: ' + os;
+                subsProviderEl.setAttribute('data-kind', 'success');
             }
 
             // Surface the embedded-subtitle pipeline state to the user.
@@ -2172,10 +2271,19 @@
                     }
                     skipButton.hidden = false;
                 });
-                skipButton.onclick = function () {
+                // stopPropagation: ArtPlayer's player surface has a
+                // global click handler that toggles play/pause. Without
+                // this, clicking Skip seeks AND immediately pauses (or
+                // un-pauses), so the user sees the seek "cancelled".
+                // preventDefault for completeness — the button has no
+                // form submit but is defensive against future markup
+                // changes.
+                skipButton.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    e.preventDefault();
                     var t = parseFloat(skipButton.dataset.seekTo || '0');
                     if (t > 0) art.seek = t;
-                };
+                });
             }
 
             // Paint a translucent fill over the OP / ED ranges on the
@@ -2202,6 +2310,24 @@
                     if (!host) host = (art.template && art.template.$player || document)
                         .querySelector('.art-control-progress');
                     if (!host) return false;
+                    // ArtPlayer doesn't center its progress bar inside the
+                    // hit-area wrapper — the played/loaded children sit at
+                    // a specific offset near the bottom. Read the played
+                    // bar's position relative to the host via
+                    // getBoundingClientRect (more robust than offsetTop,
+                    // which depends on the offsetParent chain and can land
+                    // in the wrong frame of reference if .art-control-progress
+                    // isn't itself positioned). Copy that position onto the
+                    // band so it sits exactly on top of the bar.
+                    var ref = host.querySelector('.art-progress-played')
+                        || host.querySelector('.art-progress-loaded');
+                    var refTop = null, refHeight = null;
+                    if (ref) {
+                        var hostRect = host.getBoundingClientRect();
+                        var refRect = ref.getBoundingClientRect();
+                        refTop = refRect.top - hostRect.top;
+                        refHeight = refRect.height;
+                    }
                     // Idempotent: nuke any prior fills before re-paint.
                     var prior = host.querySelectorAll('.watch-skip-range');
                     for (var i = 0; i < prior.length; i++) prior[i].remove();
@@ -2212,9 +2338,13 @@
                         var width = Math.max(0, endPct - startPct);
                         if (width <= 0) return;
                         var band = document.createElement('span');
-                        band.className = 'watch-skip-range watch-skip-range-' + kind;
+                        band.className = 'watch-skip-range';
                         band.style.left = startPct + '%';
                         band.style.width = width + '%';
+                        if (refTop != null) {
+                            band.style.top = refTop + 'px';
+                            band.style.height = refHeight + 'px';
+                        }
                         band.title = (kind === 'intro' ? 'Opening' : 'Ending')
                             + ' — ' + Math.round(range.start) + 's → ' + Math.round(range.end) + 's';
                         host.appendChild(band);
@@ -2655,8 +2785,9 @@
             }
 
             var qs = 'id=' + encodeURIComponent(animeId)
-                + '&episode=' + encodeURIComponent(episode)
-                + (hasSeasons ? '&season=' + encodeURIComponent(season) : '');
+                + '&episode=' + encodeURIComponent(streamEpisode)
+                + '&season=' + encodeURIComponent(streamSeason)
+                + (isMovie ? '&type=movie' : '');
             fetch('/anime/episode-streams?' + qs, {
                 credentials: 'same-origin',
                 headers: { 'Accept': 'application/json' },

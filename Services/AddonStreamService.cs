@@ -1,9 +1,6 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
-using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json.Linq;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace AnimeList.Services
@@ -23,16 +20,18 @@ namespace AnimeList.Services
     public class AddonStreamService : IAddonStreamService
     {
         private readonly IHttpClientFactory _clientFactory;
-        private readonly IMemoryCache _cache;
         private readonly ILogger<AddonStreamService> _logger;
 
-        private static readonly TimeSpan StreamsCacheTtl = TimeSpan.FromMinutes(10);
         private static readonly TimeSpan ManifestTimeout = TimeSpan.FromSeconds(8);
         private static readonly TimeSpan StreamsTimeout = TimeSpan.FromSeconds(12);
 
-        // Quality detection follows the de-facto Torrentio convention
-        // every well-known stream addon adopted: "1080p" / "4k" / "720p"
-        // tokens in the name or description.
+        // Quality detection follows the de-facto Torrentio convention every
+        // well-known stream addon adopted: "1080p" / "4k" / "720p" tokens
+        // in the name or description. Used as a DISPLAY label only —
+        // streams whose quality we can't detect still pass through with
+        // Quality = null so the source picker matches what the addon
+        // itself returned in Stremio (filtering belongs upstream, in the
+        // addon's own config URL).
         private static readonly (string Needle, string Quality)[] QualityNeedles =
         [
             ("2160p", "2160p"),
@@ -42,15 +41,6 @@ namespace AnimeList.Services
             ("720p",  "720p"),
             ("480p",  "480p"),
         ];
-
-        // Anything below 720p is dropped — anime users almost always
-        // want at least 720p, and surfacing 480p just dilutes the picker.
-        private static readonly string[] AllowedQualities = ["2160p", "1440p", "1080p", "720p"];
-        // Per-quality cap applies *per addon* (so a 3-addon setup with
-        // 5/quality each surfaces up to 60 entries across 4 buckets).
-        // The merge step in AnimeController re-applies the cap after
-        // dedupe so the rendered list stays manageable regardless.
-        private const int PerQualityCap = 5;
 
         private static readonly Regex SizeRegex = new(@"💾\s*([\d.,]+)\s*(GB|MB|KB|TB)",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -99,11 +89,9 @@ namespace AnimeList.Services
 
         public AddonStreamService(
             IHttpClientFactory clientFactory,
-            IMemoryCache cache,
             ILogger<AddonStreamService> logger)
         {
             _clientFactory = clientFactory;
-            _cache = cache;
             _logger = logger;
         }
 
@@ -198,6 +186,7 @@ namespace AnimeList.Services
             AnimeSourceLinks links,
             int? season,
             int? episode,
+            AnimeService primaryService,
             string clientIp = null,
             CancellationToken ct = default)
         {
@@ -209,28 +198,17 @@ namespace AnimeList.Services
             var addonRoot = ExtractAddonRoot(manifestUrl);
             if (addonRoot == null) return [];
 
-            var stremioId = BuildStremioId(links, season, episode);
+            var stremioId = BuildStremioId(links, season, episode, primaryService);
             if (stremioId == null) return [];
             var idType = stremioId.Value.Type;
             var idPath = stremioId.Value.Path;
 
-            // Fingerprint the manifest URL so addon-specific encrypted
-            // config segments don't leak into the in-process cache
-            // namespace (memory dumps stay sanitised). Bake the client
-            // IP into the cache key as well: addons like MediaFusion
-            // bind playback tokens to the requesting IP, so two users
-            // on different IPs hitting the same episode genuinely need
-            // different cached responses — sharing would hand user B
-            // a URL token-bound to user A's IP.
-            var keyFingerprint = ShortFingerprint(manifestUrl);
-            var ipKey = string.IsNullOrEmpty(clientIp) ? "anon" : ShortFingerprint(clientIp);
-            var cacheKey = $"addon:{keyFingerprint}:{ipKey}:{idPath}";
-
-            if (_cache.TryGetValue<IReadOnlyList<AddonStream>>(cacheKey, out var hit) && hit != null)
-            {
-                return hit;
-            }
-
+            // No server-side cache: stream URLs are token-bound to the
+            // requesting IP (MediaFusion / Real-Debrid signed paths) so
+            // a shared per-process cache would hand user B a URL minted
+            // for user A's IP. The watch page only re-hits this when the
+            // user navigates back to the episode, so the duplicate-fetch
+            // window is small in practice.
             var streamsUrl = $"{addonRoot}/stream/{idType}/{idPath}.json";
 
             try
@@ -270,10 +248,6 @@ namespace AnimeList.Services
                     parsed.Count, idPath, addonRoot,
                     string.IsNullOrEmpty(clientIp) ? "(none)" : clientIp);
 
-                _cache.Set(cacheKey, parsed, new MemoryCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = StreamsCacheTtl,
-                });
                 return parsed;
             }
             catch (OperationCanceledException)
@@ -311,11 +285,18 @@ namespace AnimeList.Services
         /// <summary>
         /// Builds the Stremio id segment for the addon's /stream path.
         /// Priority: IMDb (best coverage, Cinemeta-aligned) → Kitsu
-        /// (anime catalog variant). Returns null when neither id is
-        /// available, or when an episode lookup is requested without
-        /// season/episode info.
+        /// (anime catalog variant) → caller's primary-tracker id
+        /// (<c>mal:N</c> / <c>anilist:N</c>) as a last-resort fallback
+        /// for entries that have no IMDb / Kitsu mapping in our local
+        /// data (very new shows, anime with sparse cross-service rows).
+        /// Returns null when none of those resolve, or when an episode
+        /// lookup is requested without season/episode info.
         /// </summary>
-        private static (string Type, string Path)? BuildStremioId(AnimeSourceLinks links, int? season, int? episode)
+        private static (string Type, string Path)? BuildStremioId(
+            AnimeSourceLinks links,
+            int? season,
+            int? episode,
+            AnimeService primaryService)
         {
             if (episode.HasValue && episode.Value > 0)
             {
@@ -332,6 +313,11 @@ namespace AnimeList.Services
                 {
                     return ("series", $"kitsu:{links.KitsuId.Value}:{episode.Value}");
                 }
+                var primaryPath = BuildPrimaryServicePath(links, primaryService, episode.Value);
+                if (primaryPath != null)
+                {
+                    return ("series", primaryPath);
+                }
                 return null;
             }
 
@@ -343,7 +329,43 @@ namespace AnimeList.Services
             {
                 return ("movie", $"kitsu:{links.KitsuId.Value}");
             }
+            var primaryMoviePath = BuildPrimaryServicePath(links, primaryService, episode: null);
+            if (primaryMoviePath != null)
+            {
+                return ("movie", primaryMoviePath);
+            }
             return null;
+        }
+
+        /// <summary>
+        /// Builds the <c>{prefix}:{id}</c> (movie) or <c>{prefix}:{id}:{ep}</c>
+        /// (series) shape for the user's primary-tracker id-space when
+        /// neither IMDb nor Kitsu resolved. Kitsu is intentionally not
+        /// handled here — the caller already covered that branch with the
+        /// dedicated <c>kitsu:</c> fallback, so a Kitsu primary with a
+        /// missing KitsuId genuinely has no third id to try.
+        /// </summary>
+        private static string BuildPrimaryServicePath(AnimeSourceLinks links, AnimeService primaryService, int? episode)
+        {
+            int? id;
+            string prefix;
+            switch (primaryService)
+            {
+                case AnimeService.MyAnimeList:
+                    id = links.MalId;
+                    prefix = "mal";
+                    break;
+                case AnimeService.Anilist:
+                    id = links.AnilistId;
+                    prefix = "anilist";
+                    break;
+                default:
+                    return null;
+            }
+            if (!id.HasValue) return null;
+            return episode.HasValue
+                ? $"{prefix}:{id.Value}:{episode.Value}"
+                : $"{prefix}:{id.Value}";
         }
 
         private List<AddonStream> ParseStreams(string json, string addonRoot)
@@ -386,8 +408,6 @@ namespace AnimeList.Services
                 var combined = $"{name}\n{rawDescription}\n{rawTitle}";
 
                 var quality = DetectQuality(combined);
-                if (quality == null || Array.IndexOf(AllowedQualities, quality) < 0)
-                    continue;
 
                 var size = DetectSize(combined);
                 var seeders = DetectSeeders(combined);
@@ -438,46 +458,14 @@ namespace AnimeList.Services
                     IsHevc: isHevc));
             }
 
-            return RankAndCap(raw);
-        }
-
-        private static List<AddonStream> RankAndCap(List<AddonStream> raw)
-        {
-            var byQuality = raw
-                .GroupBy(s => s.Quality)
-                .ToDictionary(g => g.Key, g => g
-                    .OrderByDescending(s => s.Seeders)
-                    .ThenByDescending(s => ParseSizeBytes(s.Size))
-                    .Take(PerQualityCap)
-                    .ToList());
-
-            var ranked = new List<AddonStream>(AllowedQualities.Length * PerQualityCap);
-            foreach (var q in AllowedQualities)
-            {
-                if (byQuality.TryGetValue(q, out var bucket))
-                {
-                    ranked.AddRange(bucket);
-                }
-            }
-            return ranked;
-        }
-
-        private static long ParseSizeBytes(string size)
-        {
-            if (string.IsNullOrEmpty(size)) return 0;
-            var parts = size.Split(' ');
-            if (parts.Length != 2) return 0;
-            if (!double.TryParse(parts[0], System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var v))
-                return 0;
-            return parts[1].ToUpperInvariant() switch
-            {
-                "TB" => (long)(v * 1024L * 1024L * 1024L * 1024L),
-                "GB" => (long)(v * 1024L * 1024L * 1024L),
-                "MB" => (long)(v * 1024L * 1024L),
-                "KB" => (long)(v * 1024L),
-                _    => 0,
-            };
+            // Return in the addon's emit order — no re-sort, no cap. Each
+            // addon's config URL is where the user already expressed their
+            // filtering / ordering preferences (Torrentio's qualityfilter=,
+            // sort=, perpage=); second-guessing that here is what made
+            // MediaFusion's single-result responses for some episodes
+            // collapse to zero rows on AniSync vs. the same result
+            // appearing in Stremio.
+            return raw;
         }
 
         private static string DetectQuality(string haystack)
@@ -686,15 +674,6 @@ namespace AnimeList.Services
                 }
             }
             return string.Empty;
-        }
-
-        private static string ShortFingerprint(string s)
-        {
-            using var sha = SHA256.Create();
-            var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(s));
-            var sb = new StringBuilder(8);
-            for (int i = 0; i < 4; i++) sb.Append(hash[i].ToString("x2"));
-            return sb.ToString();
         }
     }
 }

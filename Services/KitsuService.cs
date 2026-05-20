@@ -32,7 +32,7 @@ namespace AnimeList.Services
             _logger = logger;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null, bool hideUnreleased = false)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null, bool hideUnreleased = false, bool hideAdult = false)
         {
             // Kitsu has no native airing-schedule endpoint; delegate to the AniList fallback
             // and translate ids back to Kitsu for downstream meta/manage flows. genre
@@ -64,7 +64,7 @@ namespace AnimeList.Services
             var firstPage = await FetchKitsuPageAsync(firstUrl, tokenData);
             if (firstPage == null) return [];
 
-            await ProcessKitsuPageAsync(firstPage, list, isUserList, genre, seenIds, groupSeasons, hideUnreleased);
+            await ProcessKitsuPageAsync(firstPage, list, isUserList, genre, seenIds, groupSeasons, hideUnreleased, hideAdult);
 
             if (fetchAll)
             {
@@ -89,7 +89,7 @@ namespace AnimeList.Services
                     foreach (var page in pages)
                     {
                         if (page == null) continue;
-                        await ProcessKitsuPageAsync(page, list, isUserList, genre, seenIds, groupSeasons, hideUnreleased);
+                        await ProcessKitsuPageAsync(page, list, isUserList, genre, seenIds, groupSeasons, hideUnreleased, hideAdult);
                     }
                 }
                 else if (!totalCount.HasValue && firstDataCount >= CatalogPageSize)
@@ -107,7 +107,7 @@ namespace AnimeList.Services
                         var dataCount = (page["data"] as JArray)?.Count ?? 0;
                         if (dataCount == 0) break;
 
-                        await ProcessKitsuPageAsync(page, list, isUserList, genre, seenIds, groupSeasons, hideUnreleased);
+                        await ProcessKitsuPageAsync(page, list, isUserList, genre, seenIds, groupSeasons, hideUnreleased, hideAdult);
                         if (dataCount < CatalogPageSize) break;
                         offset += CatalogPageSize;
                     }
@@ -147,7 +147,7 @@ namespace AnimeList.Services
         // Parses a single Kitsu list-style page and merges the entries into <paramref name="seenIds"/>.
         // Centralised so the parallel-fan-out path and the fallback serial path share the same
         // dedup, genre-filter, and mapping-resolution logic.
-        private async Task ProcessKitsuPageAsync(JObject json, ListType? list, bool isUserList, string genre, Dictionary<string, Meta> seenIds, bool groupSeasons, bool hideUnreleased)
+        private async Task ProcessKitsuPageAsync(JObject json, ListType? list, bool isUserList, string genre, Dictionary<string, Meta> seenIds, bool groupSeasons, bool hideUnreleased, bool hideAdult)
         {
             // Build O(1) lookups for `included` resources by id, separated by type
             var includedAnime = new Dictionary<string, JObject>();
@@ -195,6 +195,23 @@ namespace AnimeList.Services
 
                 var status = SafeGet<string>(anime, "attributes", "status");
                 if (hideUnreleased && list == ListType.Current && status is "tba" or "unreleased" or "upcoming") continue;
+
+                // 18+ gate — Kitsu surfaces two adult signals:
+                //   attributes.nsfw (bool)            — set true for hentai / erotica.
+                //   attributes.ageRating ("G"/"PG"/   — R18 is the explicit tier; R is
+                //     "R"/"R18")                       standard mature (kept).
+                // Both checked so a listing response that omits one (Kitsu's
+                // /anime?filter[season] endpoint has been observed serving
+                // entries without ageRating populated even when the detail
+                // endpoint reports R18) still gets filtered. Tier-equivalent
+                // to AniList isAdult / MAL nsfw=black; standard "R" stays
+                // visible.
+                if (hideAdult)
+                {
+                    var ageRating = SafeGet<string>(anime, "attributes", "ageRating");
+                    var nsfw = SafeGet<bool?>(anime, "attributes", "nsfw");
+                    if (string.Equals(ageRating, "R18", StringComparison.Ordinal) || nsfw == true) continue;
+                }
 
                 var animeKitsuId = (string)anime["id"];
 
@@ -374,6 +391,8 @@ namespace AnimeList.Services
                 // `source` enum on Kitsu so source stays null — the view's
                 // info row gracefully omits.
                 airStatus = NormalizeAirStatus(SafeGet<string>(entry, "attributes", "status")),
+                isAdult = string.Equals(SafeGet<string>(entry, "attributes", "ageRating"), "R18", StringComparison.Ordinal)
+                          || SafeGet<bool?>(entry, "attributes", "nsfw") == true,
             };
 
             var youtubeId = SafeGet<string>(entry, "attributes", "youtubeVideoId");

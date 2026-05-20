@@ -48,7 +48,9 @@ namespace AnimeList.Services
 
         // null on transport failure. Bearer auth is applied when tokenData carries
         // an access_token; reads with no token (e.g. anonymous summary lookups) pass
-        // null.
+        // null. HTTP-level failures (5xx, network, timeout) feed AnilistHealthMonitor
+        // so the layout banner can light up and Discover can fall back to Kitsu;
+        // auth / rate-limit / 4xx don't trip it because they're not "AniList is down".
         private async Task<dynamic> PostGraphQLAsync(string requestBody, TokenData tokenData = null)
         {
             var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
@@ -56,14 +58,30 @@ namespace AnimeList.Services
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
             };
             ApplyBearerAuth(request, tokenData);
-            var response = await _clientFactory.CreateClient().SendAsync(request);
-            if (!response.IsSuccessStatusCode) return null;
+            HttpResponseMessage response;
+            try
+            {
+                response = await _clientFactory.CreateClient().SendAsync(request);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                AnilistHealthMonitor.RecordFailure();
+                return null;
+            }
+            if (!response.IsSuccessStatusCode)
+            {
+                if ((int)response.StatusCode >= 500) AnilistHealthMonitor.RecordFailure();
+                return null;
+            }
+            AnilistHealthMonitor.RecordSuccess();
             var content = await response.Content.ReadAsStringAsync();
             return DeserializeObject<dynamic>(content)?.data;
         }
 
         // Posts a GraphQL mutation and surfaces non-success responses via
         // EnsureSuccessOrThrow so SyncService can flag NeedsReauth on a stale token.
+        // Same health-monitor wiring as PostGraphQLAsync: transport / 5xx feed the
+        // banner, 4xx (most importantly 401 reauth) doesn't.
         private async Task PostGraphQLMutationAsync(string requestBody, TokenData tokenData, string op)
         {
             var request = new HttpRequestMessage(HttpMethod.Post, _anilistApi)
@@ -71,12 +89,34 @@ namespace AnimeList.Services
                 Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
             };
             ApplyBearerAuth(request, tokenData);
-            var response = await _clientFactory.CreateClient().SendAsync(request);
+            HttpResponseMessage response;
+            try
+            {
+                response = await _clientFactory.CreateClient().SendAsync(request);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                AnilistHealthMonitor.RecordFailure();
+                throw;
+            }
+            if (!response.IsSuccessStatusCode && (int)response.StatusCode >= 500)
+            {
+                AnilistHealthMonitor.RecordFailure();
+            }
+            else if (response.IsSuccessStatusCode)
+            {
+                AnilistHealthMonitor.RecordSuccess();
+            }
             await EnsureSuccessOrThrow(response, "AniList", op);
         }
 
-        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null, string search = null, string sort = null, string season = null)
+        private string GetAnimeListQuery(TokenData tokenData, ListType? list, string skip = null, string resolvedAnimeId = null, string genre = null, string search = null, string sort = null, string season = null, bool hideAdult = false)
         {
+            // Inline filter argument appended to every media(...) clause when
+            // the caller asked to hide 18+ entries. AniList filters server-
+            // side via media(isAdult: false), so we don't have to post-process
+            // the response.
+            var adultArg = hideAdult ? ", isAdult: false" : string.Empty;
             var requestBody = string.Empty;
 
             if (list == ListType.Search)
@@ -124,7 +164,7 @@ namespace AnimeList.Services
                     query = $@"
                     query ($search: String, $page: Int, $perPage: Int{genreVarDecl}{seasonVarDecl}) {{
                         Page (page: $page, perPage: $perPage) {{
-                            media(search: $search, type: ANIME{genreArg}{seasonArg}) {{
+                            media(search: $search, type: ANIME{genreArg}{seasonArg}{adultArg}) {{
                                 id
                                 format
                                 episodes
@@ -166,6 +206,7 @@ namespace AnimeList.Services
                                     episodes
                                     averageScore
                                     seasonYear
+                                    isAdult
                                     title {{
                                         english
                                         romaji
@@ -202,6 +243,7 @@ namespace AnimeList.Services
                                             episodes
                                             averageScore
                                             seasonYear
+                                            isAdult
                                             title {{
                                                 english
                                                 romaji
@@ -248,7 +290,7 @@ namespace AnimeList.Services
                     query = $@"
                     query ($page: Int, $perPage: Int, $season: MediaSeason, $seasonYear: Int, $sort: [MediaSort]{genreVarDecl}) {{
                         Page (page: $page, perPage: $perPage) {{
-                            media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: $sort{genreArg}) {{
+                            media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: $sort{genreArg}{adultArg}) {{
                                 id
                                 format
                                 episodes
@@ -286,7 +328,7 @@ namespace AnimeList.Services
                     query = $@"
                     query ($sort: [MediaSort], $page: Int, $perPage: Int{genreVarDecl}) {{
                         Page (page: $page, perPage: $perPage) {{
-                            media(sort: $sort, type: ANIME{genreArg}) {{
+                            media(sort: $sort, type: ANIME{genreArg}{adultArg}) {{
                                 id
                                 format
                                 episodes
@@ -312,7 +354,7 @@ namespace AnimeList.Services
             return requestBody;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null, bool hideUnreleased = false)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null, bool hideUnreleased = false, bool hideAdult = false)
         {
             // Airing schedule is shared between services and lives in the cross-service helper.
             // genre threads through so the Discover page's "Airing + Action" filter swaps
@@ -321,7 +363,7 @@ namespace AnimeList.Services
                 return await _anilistFallback.GetAiringScheduleAsync(AnimeService.Anilist, skip, genre);
 
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
-            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, search, sort, season);
+            var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, search, sort, season, hideAdult);
 
             var data = await PostGraphQLAsync(requestBody, tokenData);
             if (data == null) return [];
@@ -368,6 +410,13 @@ namespace AnimeList.Services
                 }
 
                 if (hideUnreleased && list == ListType.Current && (string)media.status == "NOT_YET_RELEASED") continue;
+
+                // Catalog (Discover/Search/Seasonal/Trending) queries filter via
+                // media(isAdult: false, …) up at the GraphQL layer, so this
+                // post-check only really matters for user-list queries
+                // (MediaList / MediaListCollection) where the filter doesn't
+                // sit on the media selector. Cheap defensive check either way.
+                if (hideAdult && (bool?)media.isAdult == true) continue;
 
                 // Filter user list entries by genre when discover-only provides a genre selection
                 if (!string.IsNullOrEmpty(genre) && isUserList && media.genres != null)
@@ -451,6 +500,7 @@ namespace AnimeList.Services
                         duration
                         averageScore
                         seasonYear
+                        isAdult
                         title {
                             english
                             romaji
@@ -507,6 +557,10 @@ namespace AnimeList.Services
                             relationType
                             node {
                               id
+                              type
+                              format
+                              isAdult
+                              title { english romaji }
                             }
                           }
                         }
@@ -552,6 +606,7 @@ namespace AnimeList.Services
                 airStatus = NormalizeAirStatus((string)result.status),
                 source = NormalizeSource((string)result.source),
                 avgDuration = (int?)result.duration,
+                isAdult = (bool?)result.isAdult ?? false,
             };
 
             // Tags subselection is already fetched (rank + isAdult). Filter
@@ -687,6 +742,55 @@ namespace AnimeList.Services
                         episodes = (int?)rec.episodes,
                         year = (int?)rec.seasonYear,
                         format = NormalizeFormat((string)rec.format),
+                    });
+                }
+            }
+
+            // Relations → Stremio meta links.
+            //
+            // Filter: PREQUEL / SEQUEL only — matches the set
+            // AnilistFallback.GetRelatedAsync emits to the web app's
+            // /anime/{id} "Related" carousel. ANIME-only; manga
+            // relations would 404 on the meta route. Adult relations
+            // dropped (AnimeController's detail gate would 404 the
+            // click anyway).
+            //
+            // URL: https://web.stremio.com/#/detail/{type}/{id}.
+            // Stremio web's hash-routed SPA navigates on click.
+            // Native apps intercept web.stremio.com via Universal
+            // Links / App Links and open the meta in-app.
+            if (result.relations?.edges != null)
+            {
+                var relLabels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["PREQUEL"] = "Prequel",
+                    ["SEQUEL"]  = "Sequel",
+                };
+                foreach (var edge in result.relations.edges)
+                {
+                    var relType = (string)edge.relationType;
+                    if (relType == null || !relLabels.TryGetValue(relType, out var label)) continue;
+                    var node = edge.node;
+                    if (node == null) continue;
+                    var relId = (int?)node.id;
+                    if (!relId.HasValue) continue;
+                    if ((bool?)node.isAdult == true) continue;
+                    var nodeType = (string)node.type;
+                    if (!string.Equals(nodeType, "ANIME", StringComparison.OrdinalIgnoreCase)) continue;
+                    var name = string.IsNullOrEmpty((string)node.title?.english)
+                        ? (string)node.title?.romaji
+                        : (string)node.title?.english;
+                    if (string.IsNullOrEmpty(name)) continue;
+
+                    var isRelMovie = IsMovieFormat((string)node.format);
+                    var stremioType = isRelMovie ? MetaType.movie.ToString() : MetaType.series.ToString();
+                    var encodedId = Uri.EscapeDataString($"{anilistPrefix}{relId.Value}");
+                    anime.links.Add(new Link
+                    {
+                        name = name,
+                        category = label,
+                        url = $"https://web.stremio.com/#/detail/{stremioType}/{encodedId}",
+                        anilistId = relId.Value,
                     });
                 }
             }
@@ -1000,12 +1104,16 @@ namespace AnimeList.Services
                 return null;
             if (!int.TryParse(tokenData.user_id, out var userId)) return null;
 
+            // No server-side cache: the dashboard hits /Home/AnilistStats
+            // from JS at most once per 24 h per browser (localStorage TTL),
+            // so a per-process IMemoryCache would mostly cache nothing
+            // useful and double-up against the client cache. Per-page-load
+            // round-trip moved off the SSR critical path too.
+            //
             // Single GraphQL — no list pagination, no per-entry deserialisation.
             // statuses[] returns one row per MediaListStatus value the user has
             // any entries in (CURRENT, COMPLETED, PLANNING, …); we read the
-            // counts for the two the dashboard surfaces. genres[] is already
-            // server-side aggregated and pre-sorted by count desc, so the
-            // top-5 slice is just a Take(5).
+            // counts for the two the dashboard surfaces.
             var requestBody = SerializeObject(new
             {
                 query = @"

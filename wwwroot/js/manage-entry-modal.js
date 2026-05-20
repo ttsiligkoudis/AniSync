@@ -360,6 +360,17 @@
         }
     }
 
+    // Drop the dashboard's Continue-Watching localStorage cache so the
+    // next dashboard load re-fetches /Home/ContinueWatchingData. Any
+    // user-list write (modal save, +1 quick-action, delete) potentially
+    // shuffles the dashboard shelf — same content the server-side
+    // _listCache.Invalidate already does for the per-list cache. Key
+    // must match Views/Home/Index.cshtml's cache key.
+    function invalidateContinueWatchingCache() {
+        try { localStorage.removeItem('anisync.continueWatching.v1'); }
+        catch (e) { /* quota / private mode — best-effort */ }
+    }
+
     // Stat-cell adjustment — keeps the dashboard's Watching / Completed /
     // Hours numbers in sync with optimistic card removals/additions. No-ops
     // gracefully when the dashboard isn't on the current page (Library /
@@ -368,19 +379,24 @@
         var num = document.querySelector('.stats-cell[data-stat="' + name + '"] .stats-number');
         if (!num) return;
         // Strip locale separators (commas) before parsing so "1,234" → 1234.
-        var current = parseInt(num.textContent.replace(/[^\d-]/g, ''), 10) || 0;
+        // Skip when the cell still shows the "—" placeholder (stats fetch
+        // hasn't resolved yet) — applying delta to NaN would write a wrong
+        // optimistic value the user might see before the fetch corrects it.
+        var current = parseInt(num.textContent.replace(/[^\d-]/g, ''), 10);
+        if (isNaN(current)) return;
         var next = Math.max(0, current + delta);
         num.textContent = next.toLocaleString();
     }
 
     // Hours bucket adjusts in lockstep with Completed when the entry has a
     // known total-episodes count. Uses the same 24-min/episode assumption
-    // HomeController.Index applies server-side so the client-side delta
+    // the AniList stats fetch normalises against so the client-side delta
     // matches the next full render.
     function adjustHours(episodesDelta) {
         var num = document.querySelector('.stats-cell[data-stat="hours"] .stats-number');
         if (!num) return;
-        var current = parseInt(num.textContent.replace(/[^\d-]/g, ''), 10) || 0;
+        var current = parseInt(num.textContent.replace(/[^\d-]/g, ''), 10);
+        if (isNaN(current)) return; // see adjustStat — same placeholder guard
         var next = Math.max(0, current + Math.round(episodesDelta * 24 / 60));
         num.textContent = next.toLocaleString();
     }
@@ -458,6 +474,7 @@
                     // Persist on the card itself so subsequent clicks see the
                     // updated value (data attr is the source of truth here).
                     card.setAttribute('data-meta-progress', String(newProgress));
+                    invalidateContinueWatchingCache();
                 } else {
                     if (window.AniSyncToast) window.AniSyncToast.show('Save failed');
                 }
@@ -626,6 +643,7 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data && data.success) {
+                    invalidateContinueWatchingCache();
                     if (cardForUpdate) {
                         // Card-context delete: fade the card out and
                         // tick down the dashboard stats. Same path the
@@ -743,6 +761,7 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data && data.success) {
+                    invalidateContinueWatchingCache();
                     if (cardForUpdate) {
                         // Card-context save — optimistic in-place update +
                         // toast inline. Scroll position preserved.

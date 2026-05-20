@@ -26,7 +26,12 @@ body {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     margin: 0;
-    height: 100vh;
+    /* min-height (not height) so the body grows to contain its content
+       and the .site-header's sticky containing block extends the full
+       page. Fixed height: 100vh capped the containing block at one
+       viewport, which made the sticky bar un-stick as soon as the user
+       scrolled past the first screenful. */
+    min-height: 100vh;
     background-color: #0A0A0A;
     color: #e0e0e0;
 }
@@ -768,6 +773,20 @@ body.modal-open {
         transition-duration: 0.01ms !important;
         scroll-behavior: auto !important;
     }
+
+    /* Loaders are essential feedback (WCAG 2.1 SC 2.3.3 carve-out for
+       animations that are essential for understanding) — a frozen
+       spinner just looks like a stack of static circles and gives the
+       user no signal that work is in flight. Re-enable the spin for
+       loader elements specifically so the dashboard's Continue-Watching
+       fetch, infinite-scroll pagination, and the Manage Entry overlay
+       all surface a moving indicator even when the user has reduced
+       motion enabled at the OS level. */
+    .loader-spinner,
+    .paginator-loader-spinner {
+        animation-duration: 0.8s !important;
+        animation-iteration-count: infinite !important;
+    }
 }
 
 /* ── Logo ── */
@@ -790,15 +809,34 @@ body.modal-open {
 }
 
 /* ── Site header (used on the dashboard above the hero) ── */
-/* Compact wordmark + login state, replacing the centred big-logo block.
-   Phase 4 of the StreamD refactor adds a hamburger drawer trigger here. */
+/* Sticky site header — sits outside the page .container in _Layout.cshtml
+   so its dark background paints edge-to-edge on wide viewports while the
+   inner .site-header-inner re-applies the container's max-width to keep
+   the logo / nav / bell aligned with the rest of the page content.
+   z-index sits at the bottom-nav tier (50) — below the slide-in drawer
+   (100), notif panel (1050), and any modals; above ordinary page content. */
 .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    width: 100%;
+    background: #0A0A0A;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Flex row that holds the logo, nav, search, bell, install + auth CTA,
+   and the hamburger. Lives inside .site-header. .container also applied
+   in the markup so this row inherits the page's max-width + horizontal
+   padding at each breakpoint, keeping the bar's content aligned with
+   the rest of the page even though the bar itself is full-bleed. */
+.site-header-inner {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
     width: 100%;
-    margin-bottom: 0.5rem;
 }
 
 /* Site brand mark — wraps an <img> of /logo.png. Bootstrap 5's
@@ -2196,6 +2234,12 @@ body.modal-open {
     aspect-ratio: 16 / 9;
     background: #000;
     border-radius: 0.75rem;
+    /* The page background is near-black too, so the player frame was
+       reading as a hole in the page. A thin highlighted border + a
+       soft outer shadow gives the surface enough lift to register as
+       a distinct element without competing with the video content. */
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
     overflow: hidden;
     display: flex;
     align-items: center;
@@ -2379,7 +2423,13 @@ body.modal-open {
     position: absolute;
     bottom: 4.5rem;       /* clear ArtPlayer's bottom controls bar */
     right: 1rem;
-    z-index: 5;
+    /* ArtPlayer paints overlays at z-index 30 (.art-mask), 40
+       (.art-state), 60 (.art-controls); anything below 60 gets the
+       click swallowed by .art-mask before it reaches the button.
+       70 puts us above the mask + state but still below the
+       controls so the button can't accidentally cover ArtPlayer's
+       own toolbar. */
+    z-index: 70;
     padding: 0.55rem 1rem;
     background: rgba(0, 0, 0, 0.75);
     border: 1px solid rgba(255, 255, 255, 0.2);
@@ -2401,37 +2451,24 @@ body.modal-open {
     display: none;
 }
 
-/* AniSkip OP / ED range fill on the ArtPlayer progress bar. The host
-   `.art-control-progress` is position:relative and the `.art-progress-loaded`
-   / `.art-progress-played` children sit at z-index 0 — putting our band
-   above them with z-index 1 lets the user see the upcoming skip zone
-   without losing visibility of buffered / played state. Pointer-events
-   stay off so the band doesn't steal hover / click from ArtPlayer's own
-   seeker. Both colours are deliberately desaturated against the
-   player's purple accent so they read as "regions" rather than UI. */
+/* AniSkip OP / ED range fill on the ArtPlayer progress bar.
+   ArtPlayer's painted bar (.art-progress-played / .art-progress-loaded)
+   isn't centered inside .art-control-progress — it sits near the
+   bottom of the hit-area wrapper. JS reads the played-bar's live
+   offsetTop / offsetHeight and writes them onto the band as inline
+   styles, so the band lines up exactly with the rendered bar.
+   Pointer-events stay off so ArtPlayer's seeker keeps hover/click.
+   One flat light-yellow for both intro and outro — the tooltip +
+   skip-button text already distinguish OP from ED. */
 .watch-skip-range {
     position: absolute;
-    top: 0;
-    bottom: 0;
     z-index: 1;
     pointer-events: none;
-    border-radius: 2px;
-    opacity: 0.55;
-    transition: opacity 0.15s;
+    background: rgba(250, 204, 21, 0.55);
+    transition: background 0.15s;
 }
-.watch-skip-range-intro {
-    background: linear-gradient(180deg, rgba(124, 58, 237, 0.55), rgba(124, 58, 237, 0.35));
-    box-shadow: inset 0 0 0 1px rgba(196, 181, 253, 0.35);
-}
-.watch-skip-range-outro {
-    background: linear-gradient(180deg, rgba(244, 114, 182, 0.50), rgba(244, 114, 182, 0.30));
-    box-shadow: inset 0 0 0 1px rgba(251, 207, 232, 0.35);
-}
-/* ArtPlayer enlarges `.art-control-progress` to ~14px on hover; bump
-   the band's opacity in lockstep so it stays legible against the
-   thicker bar. */
 .art-control-progress:hover .watch-skip-range {
-    opacity: 0.75;
+    background: rgba(250, 204, 21, 0.7);
 }
 
 .watch-player-toolbar {
@@ -3444,13 +3481,21 @@ body.modal-open {
     gap: 0.55rem;
 }
 
-/* Force-refresh icon button — surfaces the ?nocache=1 escape hatch for users
-   whose stats look wrong after an out-of-band write. Kept small and muted
-   so it doesn't distract from the stats themselves; only the hover state
-   highlights it. */
-.dashboard-refresh-btn,
-.dashboard-refresh-btn:link,
-.dashboard-refresh-btn:visited {
+/* Stats-info icon + click/hover popover. The icon is a 26px circle next to
+   the "via AniList" attribution; the popover explains the 48h AniList
+   recompute cadence (and links to the only place a user can force a
+   refresh) since we can't trigger it via the public API ourselves. Desktop
+   shows the popover on :hover/:focus-within; touch shows it via a JS
+   .is-open class toggled by the click handler in Index.cshtml. Both paths
+   end up styled identically below. */
+.dashboard-stats-info {
+    position: relative;
+    display: inline-flex;
+}
+
+.dashboard-stats-info-btn,
+.dashboard-stats-info-btn:link,
+.dashboard-stats-info-btn:visited {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -3460,16 +3505,74 @@ body.modal-open {
     color: #777;
     background: transparent;
     border: 1px solid rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    padding: 0;
     text-decoration: none;
     transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 
-.dashboard-refresh-btn:hover,
-.dashboard-refresh-btn:focus {
+.dashboard-stats-info-btn:hover,
+.dashboard-stats-info-btn:focus {
     color: #fff;
     border-color: rgba(59, 130, 246, 0.4);
     background: rgba(59, 130, 246, 0.12);
+    outline: none;
     text-decoration: none;
+}
+
+.dashboard-stats-info-tooltip {
+    /* Hidden by default; shown via the :hover / :focus-within / .is-open
+       selectors below. visibility (not display) so the open transition can
+       interpolate opacity / transform. */
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 260px;
+    max-width: calc(100vw - 2rem);
+    padding: 0.65rem 0.75rem;
+    background: #181818;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    color: #ccc;
+    font-size: 0.78rem;
+    font-weight: 400;
+    line-height: 1.45;
+    text-align: left;
+    white-space: normal;
+    visibility: hidden;
+    opacity: 0;
+    transform: translateY(-4px);
+    pointer-events: none;
+    transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
+    z-index: 100;
+}
+
+/* Click-only popover — the .is-open class is the single trigger, toggled
+   by the JS click handler in Index.cshtml. No :hover / :focus-within
+   rules so touch and desktop both open the same way (an earlier
+   :hover trigger left the popover stuck open on iOS Safari's first
+   tap, racing the synthetic click event). */
+.dashboard-stats-info.is-open .dashboard-stats-info-tooltip {
+    visibility: visible;
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.dashboard-stats-info-tooltip a,
+.dashboard-stats-info-tooltip a:link,
+.dashboard-stats-info-tooltip a:visited {
+    display: inline-block;
+    margin-top: 0.35rem;
+    color: #6ea8fe;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.dashboard-stats-info-tooltip a:hover,
+.dashboard-stats-info-tooltip a:focus {
+    color: #fff;
 }
 
 /* Library variant sits inline inside the page-subtitle line; nudge it up a
@@ -4178,8 +4281,6 @@ a.stats-cell-link:hover {
         text-align: center;
     }
 
-    .anime-detail-meta .anime-detail-genres,
-    .anime-detail-meta .anime-detail-actions,
     .anime-detail-meta .anime-detail-user-state {
         justify-content: center;
     }
@@ -4282,61 +4383,6 @@ a.stats-cell-link:hover {
 @keyframes airing-pulse {
     0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5); }
     50%      { opacity: 0.6; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0); }
-}
-
-.anime-detail-genres {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
-    margin-top: 0.2rem;
-}
-
-/* Themes strip below genres — smaller / lighter than the genre chips so
-   the visual hierarchy stays "broad genres first, themes second". */
-.anime-detail-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
-    margin-top: 0.05rem;
-}
-
-.anime-detail-tag {
-    padding: 0.15rem 0.55rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 999px;
-    color: #999;
-    font-size: 0.72rem;
-    font-weight: 500;
-}
-
-/* "By: KyoAni, MAPPA" production credit line. Linked studio names get a
-   subtle underline-on-hover so they read as clickable without the heavy
-   blue "Streaming" pill treatment used in the bottom link list. */
-.anime-detail-studios {
-    font-size: 0.85rem;
-    color: #aaa;
-    margin-top: 0.1rem;
-}
-
-.anime-detail-studio-link {
-    color: #d0d0d0;
-    text-decoration: none;
-    border-bottom: 1px dotted rgba(255, 255, 255, 0.25);
-    transition: color 0.15s, border-color 0.15s;
-}
-
-.anime-detail-studio-link:hover {
-    color: #fff;
-    border-bottom-color: rgba(255, 255, 255, 0.6);
-    text-decoration: none;
-}
-
-.anime-detail-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
 }
 
 /* ── External source chips (AniList / MAL / Kitsu / IMDb) ── */
@@ -4538,9 +4584,80 @@ button.anime-detail-user-state:hover {
     color: #93c5fd;
 }
 
+/* "Continue · Ep N" / "Watch Ep N" jump-to-next-unseen CTA. Lives on
+   its own centered row beneath the badges so it reads as the page's
+   primary action without competing with the cobalt-tinted user-state
+   pill to its left. Solid cobalt fill + play-triangle icon make the
+   intent obvious; the size is bumped up a notch vs the user-state
+   pill since this one's the page's main affordance. */
+.anime-detail-watch-next-wrap {
+    display: flex;
+    justify-content: center;
+    margin: 0.75rem 0 0.25rem;
+}
+
+.anime-detail-watch-next,
+.anime-detail-watch-next:link,
+.anime-detail-watch-next:visited {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 1.4rem;
+    background: #3B82F6;
+    color: #fff;
+    border-radius: 999px;
+    font-size: 0.92rem;
+    font-weight: 600;
+    line-height: 1.2;
+    text-decoration: none;
+    transition: background 0.15s;
+}
+
+.anime-detail-watch-next:hover,
+.anime-detail-watch-next:focus {
+    background: #2563eb;
+    color: #fff;
+    text-decoration: none;
+}
+
 .anime-detail-section {
     width: 100%;
     margin-top: 0.5rem;
+}
+
+/* Movie-only CTA. Replaces the episodes list for movie-typed entries
+   (which have no per-episode list) — a single big button that takes the
+   user to /anime/{id}/watch/1. Dark-grey neutral chrome (not cobalt) so
+   it doesn't compete with the hero's user-state CTAs, centred so it
+   reads as the primary affordance on the page. */
+.anime-detail-movie-cta-wrap {
+    display: flex;
+    justify-content: center;
+}
+
+.anime-detail-movie-cta,
+.anime-detail-movie-cta:link,
+.anime-detail-movie-cta:visited {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.75rem 1.4rem;
+    border-radius: 0.6rem;
+    background: #2a2a2a;
+    color: #f0f0f0;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.anime-detail-movie-cta:hover,
+.anime-detail-movie-cta:focus {
+    background: #353535;
+    border-color: rgba(255, 255, 255, 0.16);
+    color: #fff;
+    text-decoration: none;
 }
 
 .anime-detail-section-title {
@@ -4773,6 +4890,350 @@ button.anime-detail-user-state:hover {
 /* Tab-driven hide. JS toggles this class as the user switches seasons. */
 .anime-detail-episode-hidden {
     display: none;
+}
+
+/* Filter-input-driven hide. Kept separate from -hidden so the season
+   tabs and the filter input can coexist on franchises that have both
+   (the union of both classes hides the row; clearing either alone
+   doesn't re-show a row the other is still excluding). */
+.anime-detail-episode-filtered {
+    display: none;
+}
+
+/* Live filter input in the episodes header. Sits between the section
+   title and the collapse toggle; flexes to fill the available space
+   on desktop and shrinks gracefully on mobile via min-width: 0. */
+.anime-detail-episodes-filter {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 280px;
+    padding: 0.4rem 0.75rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 0.5rem;
+    color: #e0e0e0;
+    font-size: 0.85rem;
+    font-family: inherit;
+    transition: border-color 0.15s, background 0.15s;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.anime-detail-episodes-filter::placeholder {
+    color: #777;
+}
+
+.anime-detail-episodes-filter:focus {
+    outline: none;
+    border-color: rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+/* Strip the browser's default search-input "x" decoration. The Escape
+   keydown handler covers the clear interaction without browser chrome
+   that varies per platform. */
+.anime-detail-episodes-filter::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+}
+
+/* ── /notifications page ─────────────────────────────────────────── */
+/* Mirrors the bell-dropdown row chrome (notif-thumb, notif-title,
+   notif-meta) but lives at page scale with checkboxes + per-row
+   delete + a sticky-feeling header that swaps between default and
+   "N selected" modes. */
+
+/* Two-column header — left-aligned titles, toolbar on the right.
+   Wraps to two rows on narrow viewports so the toolbar drops below
+   the title block cleanly. */
+.notif-page-list ~ .page-header,
+.page-header-row {
+    /* Selector before "," is harmless on this controller's view —
+       included only so this block doesn't get accidentally pruned by
+       a future global .page-header refactor. */
+    display: block;
+}
+
+.page-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+
+.page-header-titles {
+    text-align: left;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.page-header-titles .page-title,
+.page-header-titles .page-subtitle {
+    text-align: left;
+}
+
+.notif-page-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.notif-page-action {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #cfcfcf;
+    padding: 0.4rem 0.85rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.notif-page-action:hover:not(:disabled),
+.notif-page-action:focus:not(:disabled) {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.22);
+    color: #fff;
+    outline: none;
+}
+
+.notif-page-action:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.notif-page-action-danger,
+.notif-page-action-danger:link,
+.notif-page-action-danger:visited {
+    background: rgba(239, 68, 68, 0.10);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+}
+
+.notif-page-action-danger:hover:not(:disabled),
+.notif-page-action-danger:focus:not(:disabled) {
+    background: rgba(239, 68, 68, 0.18);
+    border-color: rgba(239, 68, 68, 0.55);
+    color: #fecaca;
+}
+
+.notif-page-list {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.65rem;
+    overflow: hidden;
+    background: #141414;
+}
+
+.notif-page-item,
+.notif-page-item:link,
+.notif-page-item:visited {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.65rem 0.9rem;
+    color: #e0e0e0;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.notif-page-item:last-child {
+    border-bottom: 0;
+}
+
+.notif-page-item:hover,
+.notif-page-item:focus {
+    background: rgba(255, 255, 255, 0.04);
+    color: #fff;
+    text-decoration: none;
+}
+
+.notif-page-item-unread {
+    background: rgba(59, 130, 246, 0.06);
+}
+
+.notif-page-item-unread .notif-page-title {
+    color: #fff;
+}
+
+.notif-page-item-selected {
+    background: rgba(59, 130, 246, 0.14);
+}
+
+.notif-page-item-selected.notif-page-item-unread {
+    background: rgba(59, 130, 246, 0.20);
+}
+
+.notif-page-checkbox {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+}
+
+.notif-page-checkbox-input {
+    width: 16px;
+    height: 16px;
+    accent-color: #3B82F6;
+    cursor: pointer;
+    margin: 0;
+}
+
+.notif-page-thumb {
+    width: 48px;
+    height: 68px;
+    flex-shrink: 0;
+    object-fit: cover;
+    border-radius: 0.3rem;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.notif-page-thumb-placeholder {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.notif-page-body {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.notif-page-title {
+    font-size: 0.95rem;
+    font-weight: 500;
+    line-height: 1.3;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.notif-page-meta {
+    margin-top: 0.2rem;
+    font-size: 0.82rem;
+    color: #8a8a8a;
+}
+
+.notif-page-delete {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0.4rem;
+    color: #888;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.notif-page-delete:hover:not(:disabled),
+.notif-page-delete:focus:not(:disabled) {
+    background: rgba(239, 68, 68, 0.12);
+    color: #fca5a5;
+    outline: none;
+}
+
+.notif-page-delete:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.notif-page-sentinel {
+    height: 1px;
+}
+
+.notif-page-loader {
+    padding: 0.75rem 0.9rem;
+    color: #888;
+    font-size: 0.82rem;
+    text-align: center;
+}
+
+/* Push-notification subscribe toggle on the notifications page.
+   Hidden by default — JS reveals it once it confirms browser support
+   + server VAPID config. When enabled the row picks up the cobalt-
+   tinted "active" pill, mirroring the user-state badge on the anime
+   detail page. */
+.notif-push-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin: 0.4rem 0 0.6rem;
+    padding: 0.55rem 0.85rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.55rem;
+    background: rgba(255, 255, 255, 0.02);
+    color: #cfcfcf;
+    font-size: 0.85rem;
+}
+
+.notif-push-toggle-disable {
+    border-color: rgba(59, 130, 246, 0.32);
+    background: rgba(59, 130, 246, 0.08);
+}
+
+.notif-push-toggle-disable .notif-push-toggle-label {
+    color: #93c5fd;
+    font-weight: 600;
+}
+
+.notif-push-toggle-denied {
+    border-color: rgba(239, 68, 68, 0.28);
+    background: rgba(239, 68, 68, 0.06);
+    color: #fca5a5;
+}
+
+.notif-push-toggle-label {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.notif-push-toggle-btn {
+    flex-shrink: 0;
+    background: #3B82F6;
+    color: #fff;
+    border: 0;
+    padding: 0.4rem 0.95rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.notif-push-toggle-btn:hover:not(:disabled),
+.notif-push-toggle-btn:focus:not(:disabled) {
+    background: #2563eb;
+    outline: none;
+}
+
+.notif-push-toggle-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.notif-push-toggle-disable .notif-push-toggle-btn {
+    background: transparent;
+    color: #cfcfcf;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.notif-push-toggle-disable .notif-push-toggle-btn:hover:not(:disabled),
+.notif-push-toggle-disable .notif-push-toggle-btn:focus:not(:disabled) {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.3);
 }
 
 /* Thumbnail wrapper — the play-diamond and watched-eye glyphs absolute-
@@ -5101,4 +5562,224 @@ ol.anime-detail-episodes-busy {
     color: #e0e0e0;
     line-height: 1.3;
     min-height: 2.5em;
+}
+/* ── Episode notifications bell (in .site-header, right of .site-search) ── */
+/* The bell + dropdown is rendered for every logged-in user via _Layout.cshtml.
+   Sizing mirrors .pwa-install-btn so the right cluster keeps its
+   visual rhythm; positioning is `relative` on the wrapper so the panel
+   can absolutely-position underneath without a fixed-overlay layer. */
+.notif-bell {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.notif-bell-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.04);
+    color: #ccc;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.notif-bell-btn:hover,
+.notif-bell-btn:focus,
+.notif-bell-open .notif-bell-btn {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.22);
+    outline: none;
+}
+
+.notif-bell-badge {
+    /* Anchored to the bell button's top-right corner with a tight inset
+       so the badge sits over the bell rather than spilling onto the
+       neighbouring header chrome (the Install pill / hamburger). The
+       element is a perfect circle for one or two digit counts
+       (min-width and height are equal; border-box keeps padding/border
+       from inflating the outer size). 3-char "99+" stretches to a pill
+       — border-radius:999px keeps the ends rounded in that case. */
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 2px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 0.62rem;
+    font-weight: 700;
+    line-height: 14px;
+    text-align: center;
+    border-radius: 999px;
+    border: 2px solid #0A0A0A;
+    box-sizing: border-box;
+    pointer-events: none;
+}
+
+.notif-panel {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    width: 360px;
+    max-height: 70vh;
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.65rem;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+    z-index: 1050;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+@media (max-width: 600px) {
+    /* On narrow viewports pin the panel near-full-width so it doesn't
+       clip the screen edge — the header cluster sits flush right so a
+       360px panel would overshoot the viewport without this. */
+    .notif-panel {
+        position: fixed;
+        top: 56px;
+        right: 8px;
+        left: 8px;
+        width: auto;
+        max-height: calc(100vh - 72px);
+    }
+}
+
+.notif-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.7rem 0.9rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.notif-panel-title {
+    font-weight: 600;
+    color: #fff;
+    font-size: 0.95rem;
+}
+
+.notif-read-all {
+    background: none;
+    border: none;
+    color: #93c5fd;
+    font-size: 0.78rem;
+    padding: 0.15rem 0.3rem;
+    cursor: pointer;
+}
+
+.notif-read-all:hover,
+.notif-read-all:focus {
+    color: #bfdbfe;
+    text-decoration: underline;
+}
+
+.notif-panel-body {
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 60px;
+}
+
+.notif-empty {
+    padding: 1.25rem 1rem;
+    color: #8a8a8a;
+    font-size: 0.88rem;
+    text-align: center;
+}
+
+.notif-item,
+.notif-item:link,
+.notif-item:visited {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.7rem;
+    padding: 0.65rem 0.9rem;
+    color: #e0e0e0;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.notif-item:hover,
+.notif-item:focus {
+    background: rgba(255, 255, 255, 0.04);
+    color: #fff;
+    text-decoration: none;
+}
+
+.notif-item-unread {
+    background: rgba(59, 130, 246, 0.06);
+}
+
+.notif-item-unread .notif-title {
+    color: #fff;
+}
+
+.notif-thumb {
+    width: 40px;
+    height: 56px;
+    flex-shrink: 0;
+    object-fit: cover;
+    border-radius: 0.3rem;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.notif-thumb-placeholder {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.notif-body {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.notif-title {
+    font-size: 0.9rem;
+    font-weight: 500;
+    line-height: 1.3;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.notif-meta {
+    margin-top: 0.2rem;
+    font-size: 0.78rem;
+    color: #8a8a8a;
+}
+
+/* "View all" link at the bottom of the bell dropdown. Goes to the
+   /notifications page where the user can scroll the full history and
+   multi-select / bulk-act. Sticky-style separator at the top so it
+   reads as a footer rather than a list row. */
+.notif-panel-footer,
+.notif-panel-footer:link,
+.notif-panel-footer:visited {
+    display: block;
+    padding: 0.6rem 0.9rem;
+    text-align: center;
+    text-decoration: none;
+    color: #93c5fd;
+    font-size: 0.84rem;
+    font-weight: 600;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.02);
+    transition: background 0.15s, color 0.15s;
+}
+
+.notif-panel-footer:hover,
+.notif-panel-footer:focus {
+    background: rgba(255, 255, 255, 0.04);
+    color: #bfdbfe;
+    text-decoration: none;
 }

@@ -18,16 +18,16 @@
     var form = document.querySelector('form.filter-bar');
     if (!form) return;
 
-    // Per-page config: which pane to swap, which endpoint to call, which
-    // pagination JS file to re-load after a non-search swap (so the
-    // infinite-scroll observer rebinds against the freshly-rendered
-    // wrapper).
+    // Per-page config: which pane to swap, which endpoint to call, and —
+    // for pages that paginate (just /discover today; /library renders the
+    // user's full list in one go) — which pagination script to re-load
+    // after a swap so the infinite-scroll observer rebinds against the
+    // freshly-rendered wrapper. /library's paginationScript / paginatorSelector
+    // are absent because there is no pagination on that page.
     var configs = {
         '/library': {
             paneId: 'library-results-pane',
             pageEndpoint: '/library/page',
-            paginationScript: '/js/library-pagination.js',
-            paginatorSelector: '.library-paginator',
             indexPath: '/library',
         },
         '/discover': {

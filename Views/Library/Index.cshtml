@@ -88,11 +88,6 @@
                     ? $"No {Model.Genre.ToLower()} anime in your {activeLabel} list."
                     : $"Nothing in your {activeLabel} list on {Model.AnimeService}.",
         },
-        ShowPaginator = Model.Paginated,
-        ListSlug = activeListSlug,
-        Search = Model.Search,
-        Genre = Model.Genre,
-        Skip = Model.Items.Count,
     };
 }
 
@@ -104,9 +99,5 @@
 </div>
 
 @section Scripts {
-    @if (Model.Paginated)
-    {
-        <script src="~/js/library-pagination.js" asp-append-version="true" defer></script>
-    }
     <script src="~/js/filter-search.js" asp-append-version="true" defer></script>
 }

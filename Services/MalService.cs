@@ -40,7 +40,7 @@ namespace AnimeList.Services
         // list-style endpoints. Picked to match what Kitsu/AniList already surface.
         // MAL's `fields` parameter is flat — anime fields come back inside each entry's
         // `node` object automatically, no `node{...}` wrapper.
-        private const string NodeFields = "id,title,main_picture,media_type,status,num_episodes,mean,start_season,genres,synopsis,alternative_titles";
+        private const string NodeFields = "id,title,main_picture,media_type,status,num_episodes,mean,start_season,genres,synopsis,alternative_titles,nsfw";
         // /users/@me/animelist returns the user's list metadata in `list_status`.
         private const string UserListStatusFields = "list_status{status,score,num_episodes_watched,is_rewatching,num_times_rewatched,start_date,finish_date,comments}";
         // /anime/{id} returns the same data in `my_list_status` when authenticated.
@@ -59,7 +59,7 @@ namespace AnimeList.Services
             _logger = logger;
         }
 
-        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null, bool hideUnreleased = false)
+        public async Task<List<Meta>> GetAnimeListAsync(TokenData tokenData, ListType? list = null, string skip = null, string animeId = null, string genre = null, string search = null, string sort = null, bool groupSeasons = true, string season = null, bool hideUnreleased = false, bool hideAdult = false)
         {
             // MAL has no airing schedule endpoint, so use the AniList fallback like Kitsu does.
             // genre passes through so Airing-by-genre swaps to the RELEASING+genre query.
@@ -127,6 +127,16 @@ namespace AnimeList.Services
                     // Rewatching catalogs so they match the parity behaviour of the other services.
                     var status = (string)node["status"];
                     if (hideUnreleased && (list == ListType.Current || list == ListType.Repeating) && status == "not_yet_aired")
+                        continue;
+
+                    // 18+ gate — MAL classifies entries via the `nsfw` field
+                    // (white / gray / black). "black" is explicit hentai;
+                    // "gray" is borderline (suggestive but not explicit). We
+                    // only filter the explicit bucket so the toggle's
+                    // "family-safe by default" semantics match the AniList
+                    // isAdult flag, which similarly maps to the explicit
+                    // tier rather than every PG-13+ entry.
+                    if (hideAdult && (string)node["nsfw"] == "black")
                         continue;
 
                     // Genre post-filter — MAL's list/ranking endpoints have no server-side genre
@@ -199,7 +209,7 @@ namespace AnimeList.Services
             // as the trailer and fall back to AniList through the mapping otherwise.
             const string fields =
                 "id,title,alternative_titles,main_picture,pictures,synopsis,mean,media_type,status," +
-                "num_episodes,start_season,broadcast,source,genres,studios,recommendations,related_anime,videos";
+                "num_episodes,start_season,broadcast,source,genres,studios,recommendations,related_anime,videos,nsfw";
 
             var json = await GetJsonAsync($"{MalApi}/anime/{resolvedAnimeId}?fields={fields}", tokenData);
             if (json == null) return null;
@@ -247,6 +257,7 @@ namespace AnimeList.Services
                 format = NormalizeFormat(mediaType),
                 airStatus = NormalizeAirStatus((string)json["status"]),
                 source = NormalizeSource((string)json["source"]),
+                isAdult = string.Equals((string)json["nsfw"], "black", StringComparison.Ordinal),
             };
 
             // Trailer: try MAL's own `videos` first (rare but present on some titles), then

@@ -76,8 +76,11 @@
        config (Real-Debrid keys, indexer toggles, language filters) all
        live inside that URL, so AniSync stays out of the per-provider
        business. Hidden for anonymous installs entirely (no uid to
-       persist against). *@
-    @if (!Model.AnonymousUser && !string.IsNullOrEmpty(Model.ConfigUid))
+       persist against), and hidden on /stremio (isStremio=true) so the
+       Stremio settings page stays focused on what the addon manifest
+       exposes — stream-addon plumbing is a server-side concern that
+       lives on /advanced. *@
+    @if (!isStremio && !Model.AnonymousUser && !string.IsNullOrEmpty(Model.ConfigUid))
     {
         <p class="manifest-url-label" style="margin-top: 1.5rem;">Stream addons</p>
         <ul id="streamAddonList" class="stream-addon-list">

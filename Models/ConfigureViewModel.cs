@@ -84,6 +84,7 @@ namespace AnimeList.Models
         public bool AutoTrackProgress => !Configuration.disableAutoTrack;
         public bool GroupSeasons => Configuration.enableSeasonGrouping;
         public bool HideUnreleasedWatching => Configuration.hideUnreleasedFromWatching;
+        public bool ShowAdultContent => Configuration.showAdultContent;
 
         public Dictionary<AnimeService, LinkedToken> LinkedByService =>
             LinkedTokens.ToDictionary(t => t.Service, t => t);

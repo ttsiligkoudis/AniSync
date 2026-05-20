@@ -25,7 +25,7 @@ namespace AnimeList.Models
         public string id { get; set; }
         public string name { get; set; }
         public string poster { get; set; }
-        public string description { get; }
+        public string description { get; set; }
 
         // Surfaced by the per-service catalog queries for the StreamD-style card
         // chrome — the score badge overlay on the poster and the "format · eps ·
@@ -38,6 +38,13 @@ namespace AnimeList.Models
         public int? episodes { get; set; }
         public int? year { get; set; }
         public string format { get; set; }
+
+        // 18+ tier flag (hentai / R18 / nsfw=black). Populated on detail-fetch
+        // by per-service GetAnimeByIdAsync so AnimeController.Detail can gate
+        // the page behind the user's showAdultContent preference; null/false
+        // on catalog responses where every adult entry is already filtered
+        // upstream via the same toggle.
+        public bool isAdult { get; set; }
 
         // Display-ready airing status ("Airing" / "Finished" / "Hiatus" /
         // "Cancelled" / "Not Yet Released") and source-material label
@@ -184,6 +191,18 @@ namespace AnimeList.Models
         public string description { get; set; }
         public string name { get; set; }
         public string firstAired{ get; set; }
+
+        // Original IMDb (Cinemeta) coordinates, preserved when the
+        // AnimeController-side NormaliseCourEpisodeNumbering collapses
+        // the cour to within-cour 1..N for display + routing. The stream
+        // lookup needs the IMDb-absolute values to query addons against
+        // the right episode of the right IMDb season (e.g. a Naruto-style
+        // 220-episode show split across 5 IMDb seasons would otherwise
+        // collapse to "S1 E100" which addons can't resolve). Null when
+        // the video didn't come from Cinemeta — falls back to using
+        // <see cref="season"/> / <see cref="episode"/> at the call site.
+        public int? imdbSeason { get; set; }
+        public int? imdbEpisode { get; set; }
     }
 
     public class Edge

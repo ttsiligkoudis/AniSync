@@ -1,4 +1,5 @@
 using AnimeList.Models;
+using AnimeList.Services;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -90,6 +91,9 @@ namespace AnimeList.Controllers
             // ListType.Current discover-only tab; harmless on every other list.
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
+            // 18+ gate — default-zero installs and anonymous viewers get
+            // family-safe results; users opt in via /configure Preferences.
+            var hideAdult = configuration?.showAdultContent != true;
 
             // Discover is always ungrouped — the enableSeasonGrouping pref now
             // only governs Stremio's catalog endpoints. The site renders every
@@ -103,18 +107,51 @@ namespace AnimeList.Controllers
             // AnilistFallback's anonymous browse regardless of the viewer's
             // primary service. Cards still translate ids into the user's
             // primary's space so Manage Entry / detail-page hand-offs work.
+            //
+            // Kitsu's /anime?filter[season] endpoint silently ignores
+            // page[offset] — every "next" page returns the same 20 entries.
+            // Re-route Kitsu users' seasonal browse through AniList's
+            // anonymous query (seasonal data is a global catalog, not
+            // user-scoped) and translate the anilist:N ids back into
+            // kitsu:M for click-through so Manage Entry still lands on
+            // Kitsu's detail page.
+            var routeSeasonalViaAnilist = listForCall == ListType.Seasonal
+                && tokenData.anime_service == AnimeService.Kitsu;
+            // Discover lists are all catalog reads (no user state), so when
+            // AniList — the primary — is down we can serve them from Kitsu
+            // anonymously. The cards will link to kitsu:N for the duration of
+            // the outage; click-through still works because /anime/{id} dispatches
+            // on the prefix. Tag routing already goes through AniList unconditionally;
+            // skip the fallback there because Kitsu doesn't expose the same tag taxonomy.
+            var fallbackToKitsu = tokenData.anime_service == AnimeService.Anilist
+                && AnilistHealthMonitor.IsDown
+                && !hasTag
+                && !routeSeasonalViaAnilist;
+            var catalogService = fallbackToKitsu ? AnimeService.Kitsu : tokenData.anime_service;
+            var catalogToken = fallbackToKitsu
+                ? new TokenData { anime_service = AnimeService.Kitsu }
+                : tokenData;
             List<Meta> metas;
             if (hasTag)
             {
-                metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service);
+                metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service, hideAdult: hideAdult);
+            }
+            else if (routeSeasonalViaAnilist)
+            {
+                metas = await _anilistService.GetAnimeListAsync(
+                    tokenData: null, listForCall,
+                    search: search, genre: genre,
+                    groupSeasons: groupSeasonsForCall, season: season,
+                    hideUnreleased: hideUnreleased, hideAdult: hideAdult);
+                metas = await _anilistFallback.TranslateMetaIdsAsync(metas, AnimeService.Kitsu);
             }
             else
             {
-                metas = tokenData.anime_service switch
+                metas = catalogService switch
                 {
-                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
-                    _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
+                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(catalogToken, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(catalogToken, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    _                        => await _kitsuService.GetAnimeListAsync(catalogToken, listForCall, search: search, genre: genre, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
                 };
             }
 
@@ -169,7 +206,7 @@ namespace AnimeList.Controllers
         /// list, so the scroll handler simply doesn't fire on search pages.
         /// </summary>
         [Route("/discover/page")]
-        public async Task<IActionResult> Page(string list, string genre = null, string skip = null, string season = null, string search = null, string tag = null, bool fullPane = false)
+        public async Task<IActionResult> Page(string list, string genre = null, int page = 1, string season = null, string search = null, string tag = null, bool fullPane = false)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync()
                 ?? new TokenData { anime_service = AnimeService.Kitsu };
@@ -186,6 +223,8 @@ namespace AnimeList.Controllers
 
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
+            // Same gate as Index — see comment there.
+            var hideAdult = configuration?.showAdultContent != true;
 
             // Search runs as ListType.Search across the full anime database;
             // matches the addon-side branch. Pagination scroll calls don't
@@ -193,20 +232,62 @@ namespace AnimeList.Controllers
             var listForCall = hasSearch ? ListType.Search : activeList;
             const bool groupSeasonsForCall = false;
             var hasTag = !string.IsNullOrWhiteSpace(tag);
+
+            // Kitsu's /anime?filter[season] endpoint silently ignores
+            // page[offset] — every "next" page returns the same 20 entries
+            // — so route Kitsu users' seasonal scrolls through AniList's
+            // anonymous browse instead. The skip math below uses AniList's
+            // 50-item page size in that case so the offset maps to AniList
+            // pages cleanly. See the matching branch in Index() for the
+            // initial render.
+            var routeSeasonalViaAnilist = listForCall == ListType.Seasonal
+                && tokenData.anime_service == AnimeService.Kitsu;
+            // Same fallback gate as Index() — when AniList is the primary and
+            // the upstream is down, swap to Kitsu for the duration of the outage.
+            var fallbackToKitsu = tokenData.anime_service == AnimeService.Anilist
+                && AnilistHealthMonitor.IsDown
+                && !hasTag
+                && !routeSeasonalViaAnilist;
+            var catalogService = fallbackToKitsu ? AnimeService.Kitsu : tokenData.anime_service;
+            var catalogToken = fallbackToKitsu
+                ? new TokenData { anime_service = AnimeService.Kitsu }
+                : tokenData;
+
+            // Per-service translation. The services internally accept an
+            // item-count skip (matching the Stremio addon's catalog-extras
+            // semantics, which CatalogController shares this path with),
+            // so we convert the 1-indexed page → item offset using the
+            // active service's catalog page size. Hardcoding 20 / 50 here
+            // duplicates a constant that lives on each service, but the
+            // alternative is exposing CatalogPageSize through every
+            // service interface for one consumer.
+            var pageSize = (catalogService == AnimeService.Kitsu && !routeSeasonalViaAnilist) ? 20 : 50;
+            var skip = page <= 1 ? null : ((page - 1) * pageSize).ToString();
+            if (page < 1) page = 1;
+
             List<Meta> metas;
             if (hasTag)
             {
                 // Mirror Index's tag-routing: tag filtering goes through the
                 // AniList anonymous browse regardless of primary.
-                metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service, skip);
+                metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service, skip, hideAdult: hideAdult);
+            }
+            else if (routeSeasonalViaAnilist)
+            {
+                metas = await _anilistService.GetAnimeListAsync(
+                    tokenData: null, listForCall,
+                    skip: skip, genre: genre, search: search,
+                    groupSeasons: groupSeasonsForCall, season: season,
+                    hideUnreleased: hideUnreleased, hideAdult: hideAdult);
+                metas = await _anilistFallback.TranslateMetaIdsAsync(metas, AnimeService.Kitsu);
             }
             else
             {
-                metas = tokenData.anime_service switch
+                metas = catalogService switch
                 {
-                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
-                    _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased),
+                    AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(catalogToken, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(catalogToken, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    _                        => await _kitsuService.GetAnimeListAsync(catalogToken, listForCall, skip: skip, genre: genre, search: search, groupSeasons: groupSeasonsForCall, season: season, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
                 };
             }
 
@@ -299,7 +380,9 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
-            var (name, items, _) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service);
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var hideAdult = configuration?.showAdultContent != true;
+            var (name, items, _) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service, hideAdult: hideAdult);
             return View("StudioDetail", new StudioDetailViewModel
             {
                 Id = id,
@@ -322,7 +405,9 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
-            var (_, items, hasNext) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service, page);
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var hideAdult = configuration?.showAdultContent != true;
+            var (_, items, hasNext) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service, page, hideAdult: hideAdult);
             Response.Headers["X-Has-Next-Page"] = hasNext ? "true" : "false";
             return PartialView("_PosterGrid", new PosterGridViewModel
             {
@@ -351,7 +436,9 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
-            var (name, items) = await _anilistFallback.GetStaffMediaAsync(id, tokenData.anime_service);
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var hideAdult = configuration?.showAdultContent != true;
+            var (name, items) = await _anilistFallback.GetStaffMediaAsync(id, tokenData.anime_service, hideAdult: hideAdult);
 
             return View("StaffDetail", new StaffDetailViewModel
             {
@@ -395,7 +482,9 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
-            var (items, _) = await _anilistFallback.GetByTagPageAsync(tagStr, tokenData.anime_service, page: 1);
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var hideAdult = configuration?.showAdultContent != true;
+            var (items, _) = await _anilistFallback.GetByTagPageAsync(tagStr, tokenData.anime_service, page: 1, hideAdult: hideAdult);
             return View("TagDetail", new TagDetailViewModel
             {
                 Tag = tagStr,
@@ -417,7 +506,9 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
-            var (items, hasNext) = await _anilistFallback.GetByTagPageAsync(tagStr, tokenData.anime_service, page);
+            var configuration = await GetConfigByUidAsync(uid, _configStore);
+            var hideAdult = configuration?.showAdultContent != true;
+            var (items, hasNext) = await _anilistFallback.GetByTagPageAsync(tagStr, tokenData.anime_service, page, hideAdult: hideAdult);
             Response.Headers["X-Has-Next-Page"] = hasNext ? "true" : "false";
             return PartialView("_PosterGrid", new PosterGridViewModel
             {
