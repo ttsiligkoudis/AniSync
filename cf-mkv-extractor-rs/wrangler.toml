@@ -10,19 +10,11 @@ workers_dev = true
 # Rust → WASM build via worker-build. INSTALL worker-build YOURSELF
 # once globally before the first deploy:
 #
-#   cargo install worker-build --version 0.1.7 --locked
+#   cargo install worker-build
 #
-# (Pinned to 0.1.7 because the worker crate this project targets
-# is 0.4 — worker-build 0.2+ requires worker@0.8+ and would force
-# a non-trivial API rewrite. When the worker crate itself is bumped,
-# drop the version pin and reinstall worker-build to whatever's
-# current.)
-#
-# We install OUTSIDE wrangler.toml because PowerShell / cmd treat
-# `^` and other version-spec characters as shell metacharacters
-# and mangle them before cargo sees them. Running cargo install
-# manually side-steps all of that — and it's a one-time cost
-# anyway since cargo install is idempotent.
+# No --version pin needed — the current worker-build line matches
+# the current worker crate (both expect each other's modern APIs).
+# To upgrade later, run the same command again with --force.
 [build]
 command = "worker-build --release"
 
