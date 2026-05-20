@@ -148,7 +148,7 @@ namespace AnimeList.Services
                 // ── 3. SeekHead ──
                 var seekHead = EbmlReader.FindChild(head, segmentDataStart, head.Length, EbmlIds.SeekHead)
                     ?? throw new InvalidDataException("no SeekHead — file lacks an index");
-                var seekOffsets = ParseSeekHead(head, seekHead.Value.DataOffset, (int)seekHead.Value.Size);
+                var seekOffsets = ParseSeekHead(head, seekHead.DataOffset, (int)seekHead.Size);
 
                 // SegmentInfo for TimecodeScale (ns per timecode unit, default 1e6 = ms)
                 ulong timecodeScale = 1_000_000;
