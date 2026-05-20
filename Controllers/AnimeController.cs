@@ -226,6 +226,18 @@ namespace AnimeList.Controllers
             // is the correct degradation for entries outside the curated dataset.
             var sourceLinks = await BuildSourceLinksAsync(anime.id);
 
+            // Overlay AniList's per-episode airing schedule onto the Cinemeta-
+            // sourced videos. Cinemeta's `released` field occasionally lags
+            // the real broadcast by 1–2 days for shows whose IMDb/TheTVDB
+            // entries get the next-week placeholder set before the real airing
+            // is logged; that staleness made already-aired episodes look
+            // future-dated on the click gate even after the notification
+            // system (which already uses the AniList schedule) pinged users.
+            // Doing the overlay here means /anime/{id}'s isFuture check and
+            // displayed date track the same source of truth the notifier
+            // dispatcher does — see AnilistFallback.GetAiringScheduleByAnilistIdAsync.
+            await OverlayAniListAiringScheduleAsync(anime, sourceLinks?.AnilistId);
+
             // Related + recommendations + supplementary chip rows (Tag / Studio /
             // director / writer / Composer / Artist / Producer / Staff) are now
             // fetched client-side after page render via /anime/{id}/extras — see
@@ -413,6 +425,15 @@ namespace AnimeList.Controllers
             {
                 NormaliseCourEpisodeNumbering(anime);
             }
+
+            // Same airing-schedule overlay Detail() does — keeps the Watch
+            // page's prev/next nav in sync with the Detail page's click gate
+            // so a click via notification can navigate forwards/backwards
+            // without the Cinemeta-stale released-date logic skipping over
+            // episodes that have actually aired (see Detail() for the full
+            // rationale).
+            var watchSourceLinks = await BuildSourceLinksAsync(anime.id);
+            await OverlayAniListAiringScheduleAsync(anime, watchSourceLinks?.AnilistId);
 
             // Match on episode + season — season null means "any cour", which
             // covers the common single-cour case where the videos all carry
@@ -614,7 +635,6 @@ namespace AnimeList.Controllers
         /// </summary>
         private static (Video Prev, Video Next) ComputePrevNext(List<Video> videos, Video current)
         {
-            var today = DateTime.UtcNow.Date;
             var ordered = videos
                 .OrderBy(v => v.season > 0 ? v.season : 1)
                 .ThenBy(v => v.episode)
@@ -629,16 +649,73 @@ namespace AnimeList.Controllers
             for (int i = idx + 1; i < ordered.Count; i++)
             {
                 var v = ordered[i];
-                if (!string.IsNullOrEmpty(v.released) && v.released.Length >= 10
-                    && DateTime.TryParse(v.released[..10], out var d)
-                    && d.Date > today)
-                {
-                    continue; // unaired — skip when picking "next"
-                }
+                if (IsFutureEpisode(v)) continue; // unaired — skip when picking "next"
                 next = v;
                 break;
             }
             return (prev, next);
+        }
+
+        /// <summary>
+        /// Shared "has this episode aired yet?" check used by the prev/next
+        /// nav on the Watch page and (via the same overlay-populated airingAt
+        /// field) the click gate on the Detail page. Prefers AniList's
+        /// airingSchedule timestamp when present (community-maintained,
+        /// tracks the real-world broadcast) and falls back to the Cinemeta
+        /// `released` ISO date when AniList has no schedule for the anime —
+        /// older finished shows often don't.
+        /// </summary>
+        private static bool IsFutureEpisode(Video v)
+        {
+            if (v == null) return false;
+            if (v.airingAt.HasValue)
+            {
+                return v.airingAt.Value > DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            }
+            if (!string.IsNullOrEmpty(v.released) && v.released.Length >= 10
+                && DateTime.TryParse(v.released[..10], out var d))
+            {
+                return d.Date > DateTime.UtcNow.Date;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Best-effort overlay of AniList's <c>Media.airingSchedule</c> onto
+        /// <paramref name="anime"/>'s video list. After
+        /// <see cref="NormaliseCourEpisodeNumbering"/> has renumbered each
+        /// video to within-cour 1..N, AniList's airing-schedule episode
+        /// ordinals line up directly, so a per-episode lookup populates
+        /// <see cref="Video.airingAt"/>. Silently no-ops when there's no
+        /// cross-service AniList id or AniList has no schedule for the anime
+        /// — both are normal for older / catalog-only entries and shouldn't
+        /// downgrade the page from "render fine on Cinemeta-only data".
+        /// </summary>
+        private async Task OverlayAniListAiringScheduleAsync(Meta anime, int? anilistId)
+        {
+            if (anime?.videos == null || anime.videos.Count == 0) return;
+            if (!anilistId.HasValue || anilistId.Value <= 0) return;
+
+            Dictionary<int, long> schedule;
+            try
+            {
+                schedule = await _anilistFallback.GetAiringScheduleByAnilistIdAsync(anilistId.Value);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AnimeController.OverlayAniListAiringScheduleAsync failed for anilist {Id}", anilistId);
+                return;
+            }
+            if (schedule == null || schedule.Count == 0) return;
+
+            foreach (var v in anime.videos)
+            {
+                if (v.episode <= 0) continue;
+                if (schedule.TryGetValue(v.episode, out var airingAt))
+                {
+                    v.airingAt = airingAt;
+                }
+            }
         }
 
         /// <summary>

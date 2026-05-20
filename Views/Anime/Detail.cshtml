@@ -215,16 +215,26 @@
                 // matching the URL semantics) and consult its release
                 // date — if it's a future-aired episode, the click target
                 // is inert and the CTA shouldn't promise something we
-                // can't actually play.
+                // can't actually play. airingAt (AniList-overlaid in the
+                // controller) wins over the Cinemeta `released` string when
+                // present, so a notification ping unlocks the CTA without
+                // waiting for Cinemeta to catch up to the real broadcast.
                 var todayHero = DateTime.UtcNow.Date;
+                var nowUnixHero = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 var targetVideo = a.videos?.FirstOrDefault(v => v.episode == nextEp);
                 var targetIsFuture = false;
-                if (targetVideo != null
-                    && !string.IsNullOrEmpty(targetVideo.released)
-                    && targetVideo.released.Length >= 10
-                    && DateTime.TryParse(targetVideo.released[..10], out var nextReleaseDate))
+                if (targetVideo != null)
                 {
-                    targetIsFuture = nextReleaseDate.Date > todayHero;
+                    if (targetVideo.airingAt.HasValue)
+                    {
+                        targetIsFuture = targetVideo.airingAt.Value > nowUnixHero;
+                    }
+                    else if (!string.IsNullOrEmpty(targetVideo.released)
+                        && targetVideo.released.Length >= 10
+                        && DateTime.TryParse(targetVideo.released[..10], out var nextReleaseDate))
+                    {
+                        targetIsFuture = nextReleaseDate.Date > todayHero;
+                    }
                 }
 
                 var showWatchCta = a.type != MetaType.movie.ToString()
@@ -432,8 +442,12 @@
     }
 
     // Treat each row's air date relative to today so we can amber-tint
-    // future dates and skip the watched check on unaired episodes.
+    // future dates and skip the watched check on unaired episodes. nowUnix
+    // backs the AniList-overlaid airingAt comparison (which wins over the
+    // Cinemeta-sourced released string when present — see AnimeController's
+    // OverlayAniListAiringScheduleAsync for why).
     var today = DateTime.UtcNow.Date;
+    var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     @* Episodes section. Wrapped in .anime-detail-episodes-wrap so the
        collapse / expand JS can toggle a single class on it and the inner
        body's height + season tabs respond together.
@@ -502,10 +516,26 @@
             {
                 var watched = currentProgress > 0 && v.episode <= currentProgress;
                 bool isFuture = false;
-                if (!string.IsNullOrEmpty(v.released) && v.released.Length >= 10
+                // AniList's overlaid airingAt is the source of truth when
+                // present — Cinemeta's `released` string is the fallback for
+                // entries the AniList overlay couldn't populate (mapping
+                // miss, older finished shows without a schedule, etc).
+                string displayDate = null;
+                if (v.airingAt.HasValue)
+                {
+                    isFuture = v.airingAt.Value > nowUnix;
+                    displayDate = DateTimeOffset.FromUnixTimeSeconds(v.airingAt.Value)
+                        .UtcDateTime.ToString("yyyy-MM-dd");
+                }
+                else if (!string.IsNullOrEmpty(v.released) && v.released.Length >= 10
                     && DateTime.TryParse(v.released[..10], out var releaseDate))
                 {
                     isFuture = releaseDate.Date > today;
+                    displayDate = v.released[..Math.Min(10, v.released.Length)];
+                }
+                else if (!string.IsNullOrEmpty(v.released))
+                {
+                    displayDate = v.released[..Math.Min(10, v.released.Length)];
                 }
 
                 var classes = new List<string> { "anime-detail-episode" };
@@ -582,10 +612,10 @@
                             <span class="anime-detail-episode-title">
                                 @v.episode. @episodeTitle
                             </span>
-                            @if (!string.IsNullOrEmpty(v.released))
+                            @if (!string.IsNullOrEmpty(displayDate))
                             {
                                 <span class="anime-detail-episode-date @(isFuture ? "anime-detail-episode-date-future" : "")">
-                                    @v.released[..Math.Min(10, v.released.Length)]
+                                    @displayDate
                                 </span>
                             }
                         </div>

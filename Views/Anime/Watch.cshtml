@@ -59,7 +59,22 @@
         <span>@a.name</span>
     </a>
     <h1 class="watch-title">@episodeLabel</h1>
-    <p class="watch-meta">@seasonLabel @if (!string.IsNullOrEmpty(ep.released) && ep.released.Length >= 10) { <span class="watch-meta-dot">·</span> <span>@ep.released[..10]</span> }</p>
+    @{
+        // Prefer AniList's overlaid airingAt (more accurate than Cinemeta's
+        // `released` for in-season shows — same source of truth used by the
+        // Detail-page click gate and the notification dispatcher).
+        string watchDisplayDate = null;
+        if (ep.airingAt.HasValue)
+        {
+            watchDisplayDate = DateTimeOffset.FromUnixTimeSeconds(ep.airingAt.Value)
+                .UtcDateTime.ToString("yyyy-MM-dd");
+        }
+        else if (!string.IsNullOrEmpty(ep.released) && ep.released.Length >= 10)
+        {
+            watchDisplayDate = ep.released[..10];
+        }
+    }
+    <p class="watch-meta">@seasonLabel @if (!string.IsNullOrEmpty(watchDisplayDate)) { <span class="watch-meta-dot">·</span> <span>@watchDisplayDate</span> }</p>
 </section>
 
 @* Only mount the inline player when the user actually has a way to
