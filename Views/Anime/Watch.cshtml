@@ -774,21 +774,21 @@
             // Shard count is computed dynamically from the cluster
             // count the worker reports in its truncated response.
             // Free tier's 10 ms CPU budget per invocation lands at
-            // ~20 clusters of subtitle parsing once you add critical-
-            // read + cluster-fetch overhead. We aim for that target
-            // per shard; minimum 4 (small files don't need more);
-            // maximum 16 (caps RD bandwidth + Worker invocations
-            // per file — beyond this the file is realistically only
-            // extractable via streaming fallback or a paid plan).
+            // ~12-15 clusters of subtitle parsing once you add
+            // critical-read + cluster-fetch overhead. Real-world
+            // testing of the Rust port on a 339-cluster file at
+            // 16 shards (≈22 clusters per shard) saw 14 of 16
+            // shards CPU-fail; tightening to ~13 per shard +
+            // raising the cap fits both workers without
+            // changing the per-worker code.
             //
-            // 339-cluster files in real-world testing land at
-            // ~17 shards, just over the floor. For very long
-            // movies / multi-disc rips with >320 subtitle-bearing
-            // clusters the 16-shard cap will leave each shard
-            // over budget and the extract will fail loud.
-            var MKV_EXTRACT_TARGET_PER_SHARD = 20;
+            // For very long movies / multi-disc rips with >310
+            // subtitle-bearing clusters the 24-shard cap will
+            // leave each shard over budget and the extract will
+            // fail loud.
+            var MKV_EXTRACT_TARGET_PER_SHARD = 13;
             var MKV_EXTRACT_MIN_SHARDS = 4;
-            var MKV_EXTRACT_MAX_SHARDS = 16;
+            var MKV_EXTRACT_MAX_SHARDS = 24;
             var MKV_EXTRACT_RETRIES = 4;
 
             function computeShardCount(clustersTotal) {
