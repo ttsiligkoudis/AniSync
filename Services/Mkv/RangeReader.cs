@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Headers;
 
 namespace AnimeList.Services.Mkv
@@ -86,6 +87,12 @@ namespace AnimeList.Services.Mkv
             req.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
             req.Headers.Accept.Clear();
             req.Headers.TryAddWithoutValidation("Accept", "*/*");
+            // Try HTTP/2 with HTTP/1.1 fallback. RD's CDN supports
+            // HTTP/2; multiplexing many Range requests on one
+            // connection halves per-request overhead vs the
+            // HttpClient default (HTTP/1.1 keep-alive).
+            req.Version = HttpVersion.Version20;
+            req.VersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
 
             using var res = await _client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
             if (res.StatusCode != HttpStatusCode.PartialContent && res.StatusCode != HttpStatusCode.OK)
