@@ -652,7 +652,10 @@
             // since picked a different sub manually.
             var _handoverHandler = null;
             function setupEmbeddedToOsHandover(embeddedTrack, osSubtitles, onSwitched) {
-                if (!art || !embeddedTrack) return;
+                if (!art || !embeddedTrack) {
+                    console.info('[AniSync] handover skipped: no art / no embeddedTrack');
+                    return;
+                }
                 if (_handoverHandler) {
                     art.off('video:timeupdate', _handoverHandler);
                     _handoverHandler = null;
@@ -664,7 +667,10 @@
                     var endMs = (cues[i].time || 0) + (cues[i].duration || 0);
                     if (endMs > lastCueEndMs) lastCueEndMs = endMs;
                 }
-                if (lastCueEndMs === 0) return;
+                if (lastCueEndMs === 0) {
+                    console.info('[AniSync] handover skipped: embedded track has no cues');
+                    return;
+                }
 
                 // Embedded language is ISO-639-2/B (3-letter "eng")
                 // when tagged, OS uses ISO-639-1 (2-letter "en") —
@@ -672,15 +678,16 @@
                 // all resolve together. When language is "und" or
                 // missing — common on fansub releases that leave the
                 // tag blank — fall back to a name-based English check
-                // (same logic the auto-promote earlier uses). Without
-                // this, every untagged SSA track skipped handover even
-                // though we already KNEW it was English from the name.
+                // (same logic the auto-promote earlier uses).
                 var embLang2 = (embeddedTrack.language || '').toLowerCase().slice(0, 2);
                 if (!embLang2 || embLang2 === 'un') {
                     var name = (embeddedTrack.name || '').toLowerCase();
                     if (/\benglish\b/.test(name) || /\beng\b/.test(name)) {
                         embLang2 = 'en';
                     } else {
+                        console.info(
+                            '[AniSync] handover skipped: embedded language unknown ' +
+                            '(tag="' + (embeddedTrack.language || '') + '", name="' + (embeddedTrack.name || '') + '")');
                         return;
                     }
                 }
@@ -691,7 +698,19 @@
                     var ol = (osList[j].lang || '').toLowerCase().slice(0, 2);
                     if (ol === embLang2) { matchingOs = osList[j]; break; }
                 }
-                if (!matchingOs) return;
+                if (!matchingOs) {
+                    console.info(
+                        '[AniSync] handover skipped: no matching OS track for lang=' + embLang2 +
+                        ' (have ' + osList.length + ' OS tracks: ' +
+                        osList.map(function (s) { return s.lang || '?'; }).join(',') + ')');
+                    return;
+                }
+
+                console.info(
+                    '[AniSync] handover armed: embedded ends at',
+                    Math.round(lastCueEndMs / 1000) + 's,',
+                    'lang=' + embLang2 + ',',
+                    'OS target=' + (matchingOs.label || matchingOs.lang || matchingOs.url));
 
                 var handoverDone = false;
                 _handoverHandler = function () {
@@ -2189,6 +2208,12 @@
                                 html: (englishTrack.label || 'Embedded') + ' SSA',
                                 trackData: englishTrack.data,
                             });
+                            try {
+                                console.info(
+                                    '[AniSync] embedded auto-promoted — ' +
+                                    (englishTrack.cues || []).length + ' cues, ' +
+                                    'OS pool size=' + (subtitles || []).length);
+                            } catch (_) {}
                             // Auto-handover from embedded SSA to a same-
                             // language OS track at the end of the embedded
                             // cue range. The streaming extractor's
@@ -2203,6 +2228,12 @@
                             setupEmbeddedToOsHandover(englishTrack, subtitles, function () {
                                 refreshSubtitleSelector(buildSubtitleSelector);
                             });
+                        } else {
+                            try {
+                                console.info(
+                                    '[AniSync] no English embedded track to auto-promote (full=' +
+                                    full.length + ')');
+                            } catch (_) {}
                         }
                         // Rebuild AFTER applySubtitle so the menu's
                         // "default" markers reflect the new active
