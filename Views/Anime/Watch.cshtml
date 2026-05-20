@@ -695,6 +695,22 @@
             // that would otherwise be CORS-blocked.
             var CORS_PROXY_URL    = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(corsProxyUrl));
             var CORS_PROXY_SECRET = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(corsProxySecret));
+
+            // Wraps a debrid-CDN URL in the cf-cors-proxy URL the worker
+            // exposes. Returns null when no proxy is configured so the
+            // caller's `||` fallback chain can decide what to do.
+            // Mirrors viaCorsProxy in the legacy extractor flow — was
+            // accidentally deleted during the cf-mkv-extractor cleanup
+            // and brought back here so the streaming-subtitles fallback
+            // has its CORS-safe URL builder again.
+            function viaCorsProxy(url) {
+                if (!CORS_PROXY_URL || !url) return null;
+                var u = CORS_PROXY_URL.replace(/\/$/, '')
+                    + '/?url=' + encodeURIComponent(url);
+                if (CORS_PROXY_SECRET) u += '&secret=' + encodeURIComponent(CORS_PROXY_SECRET);
+                return u;
+            }
+
             function isCorsBlockedHost(url) {
                 try {
                     var h = new URL(url, window.location.href).hostname;
