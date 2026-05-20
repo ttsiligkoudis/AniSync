@@ -933,6 +933,46 @@
                 console.log('[AniSync] HEVC marked risky for this browser:', HEVC_RISKY);
             } catch (_) {}
 
+            // Decide whether to attempt the streaming embedded-subtitle
+            // extraction at all. Pulling the MKV through cf-cors-proxy
+            // can be 700 MB-1.5 GB of bandwidth on the user's network;
+            // worth skipping when:
+            //
+            //   * Data Saver is on — user explicitly asked to conserve
+            //     bandwidth.
+            //   * Connection type is cellular — even on fast 5G the
+            //     user's plan is typically metered, and we have no way
+            //     to know if they're on unlimited.
+            //   * effectiveType is 2g / slow-2g / 3g — pulling that
+            //     much data would take minutes and probably stall
+            //     playback. (4g is fine bandwidth-wise; cellular check
+            //     above already filters mobile 4g.)
+            //   * downlink reports < 1.5 Mbps — sub-1.5 Mbps is below
+            //     1080p streaming bitrate, definitely not enough
+            //     headroom for parallel ~10 Mbps MKV download.
+            //
+            // Returns null when extraction should proceed, or a reason
+            // string when it should be skipped. Network Information API
+            // is missing on Firefox / Safari — we treat absence as
+            // "proceed" (preserves the prior always-extract behaviour
+            // for those browsers).
+            function networkSkipReason() {
+                try {
+                    var c = navigator.connection
+                        || navigator.mozConnection
+                        || navigator.webkitConnection;
+                    if (!c) return null;
+                    if (c.saveData) return 'data-saver';
+                    if (c.type === 'cellular') return 'cellular';
+                    var et = c.effectiveType;
+                    if (et === 'slow-2g' || et === '2g' || et === '3g') return 'slow-connection';
+                    if (typeof c.downlink === 'number' && c.downlink > 0 && c.downlink < 1.5) {
+                        return 'low-bandwidth';
+                    }
+                } catch (_) {}
+                return null;
+            }
+
             function resolveStreamUrl(originalUrl, signal) {
                 return new Promise(function (resolve, reject) {
                     var TIMEOUT_MS = 25000;     // total budget incl. retries
@@ -1045,6 +1085,29 @@
             // (onComplete) fires once cue accumulation is done.
             function extractEmbeddedSubs(url, onTracks, onComplete) {
                 var abortCtl = new AbortController();
+
+                // Bandwidth-aware short-circuit. If the browser tells
+                // us we're on cellular / Data Saver / slow connection,
+                // don't pull the MKV through cf-cors-proxy — it can
+                // be 700 MB-1.5 GB of the user's bandwidth and almost
+                // certainly not what they want. OpenSubtitles still
+                // populates the menu via its own JSON-sized fetch,
+                // so users get something usable either way.
+                var skipReason = networkSkipReason();
+                if (skipReason) {
+                    var label = {
+                        'data-saver': 'Data Saver on',
+                        'cellular': 'cellular connection',
+                        'slow-connection': 'slow connection',
+                        'low-bandwidth': 'low bandwidth',
+                    }[skipReason] || skipReason;
+                    try {
+                        console.info('[AniSync] embedded extraction skipped:', skipReason);
+                    } catch (_) {}
+                    setEmbedStatus('Skipped — ' + label, 'none');
+                    onComplete([]);
+                    return abortCtl;
+                }
 
                 // Resolve the URL we'll actually fetch from. Three
                 // outcomes for CORS-blocked hosts (debrid CDNs +
