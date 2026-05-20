@@ -666,11 +666,24 @@
                 }
                 if (lastCueEndMs === 0) return;
 
-                // Embedded uses ISO-639-2/B (3-letter "eng"), OS uses
-                // ISO-639-1 (2-letter "en") — match on the 2-letter
-                // prefix so "eng" / "en-US" / "en" all resolve together.
+                // Embedded language is ISO-639-2/B (3-letter "eng")
+                // when tagged, OS uses ISO-639-1 (2-letter "en") —
+                // match on the 2-letter prefix so "eng" / "en-US" / "en"
+                // all resolve together. When language is "und" or
+                // missing — common on fansub releases that leave the
+                // tag blank — fall back to a name-based English check
+                // (same logic the auto-promote earlier uses). Without
+                // this, every untagged SSA track skipped handover even
+                // though we already KNEW it was English from the name.
                 var embLang2 = (embeddedTrack.language || '').toLowerCase().slice(0, 2);
-                if (!embLang2 || embLang2 === 'un') return;
+                if (!embLang2 || embLang2 === 'un') {
+                    var name = (embeddedTrack.name || '').toLowerCase();
+                    if (/\benglish\b/.test(name) || /\beng\b/.test(name)) {
+                        embLang2 = 'en';
+                    } else {
+                        return;
+                    }
+                }
 
                 var matchingOs = null;
                 var osList = osSubtitles || [];
