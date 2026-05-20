@@ -938,42 +938,54 @@
             // can be 700 MB-1.5 GB of bandwidth on the user's network;
             // worth skipping when:
             //
-            //   * The UA is a mobile device — privacy-hardened browsers
-            //     (Brave in particular) farble navigator.connection so
-            //     even on real cellular it reports effectiveType:'4g',
-            //     downlink~10, type hidden. We can't trust the network
-            //     API, but the UA still gives away Mobile/Android/iOS.
-            //     Phones also have battery / heat / metered-wifi reasons
-            //     to skip the 1 GB pull even when the link is fast.
             //   * Data Saver is on — user explicitly asked to conserve
             //     bandwidth.
-            //   * Connection type is cellular — desktop UAs occasionally
-            //     hit this (tethered laptop on a mobile dongle).
+            //   * connection.type is 'cellular' — Chrome Android reports
+            //     this accurately.
             //   * effectiveType is 2g / slow-2g / 3g — pulling that
             //     much data would take minutes and probably stall
             //     playback.
-            //   * downlink reports < 1.5 Mbps — sub-1.5 Mbps is below
-            //     1080p streaming bitrate, definitely not enough
-            //     headroom for parallel ~10 Mbps MKV download.
+            //   * downlink reports < 1.5 Mbps — below 1080p streaming
+            //     bitrate, no headroom for a parallel ~10 Mbps pull.
+            //   * UA looks mobile AND we can't positively confirm
+            //     wifi/ethernet via connection.type. Mobile + wifi is
+            //     fine; the issue is privacy-hardened browsers (Brave
+            //     in particular) farble connection.type so wifi vs
+            //     cellular is indistinguishable — defaulting to skip
+            //     on unknown is the safer of the two errors on mobile.
+            //     Safari iOS has no API at all and lands here too,
+            //     which is fine because Safari can't play MKV natively.
             //
             // Returns null when extraction should proceed, or a reason
             // string when it should be skipped.
             function networkSkipReason() {
                 try {
                     var ua = navigator.userAgent || '';
-                    if (/Mobi|Mobile|Android|iPhone|iPad|iPod/i.test(ua)) {
-                        return 'mobile-device';
-                    }
+                    var isMobile = /Mobi|Mobile|Android|iPhone|iPad|iPod/i.test(ua);
+
                     var c = navigator.connection
                         || navigator.mozConnection
                         || navigator.webkitConnection;
-                    if (!c) return null;
-                    if (c.saveData) return 'data-saver';
-                    if (c.type === 'cellular') return 'cellular';
-                    var et = c.effectiveType;
-                    if (et === 'slow-2g' || et === '2g' || et === '3g') return 'slow-connection';
-                    if (typeof c.downlink === 'number' && c.downlink > 0 && c.downlink < 1.5) {
-                        return 'low-bandwidth';
+
+                    if (c) {
+                        if (c.saveData) return 'data-saver';
+                        if (c.type === 'cellular') return 'cellular';
+                        var et = c.effectiveType;
+                        if (et === 'slow-2g' || et === '2g' || et === '3g') return 'slow-connection';
+                        if (typeof c.downlink === 'number' && c.downlink > 0 && c.downlink < 1.5) {
+                            return 'low-bandwidth';
+                        }
+                        // Mobile UA: require positive wifi/ethernet from
+                        // connection.type. type is a mobile-only field
+                        // (Chrome Android sets it correctly; desktop
+                        // Chrome doesn't expose it at all) — its absence
+                        // on a mobile UA means we're on a farbled browser.
+                        if (isMobile && c.type !== 'wifi' && c.type !== 'ethernet') {
+                            return 'mobile-unknown-network';
+                        }
+                    } else if (isMobile) {
+                        // No Network Information API at all (Safari iOS).
+                        return 'mobile-unknown-network';
                     }
                 } catch (_) {}
                 return null;
@@ -1102,11 +1114,11 @@
                 var skipReason = networkSkipReason();
                 if (skipReason) {
                     var label = {
-                        'mobile-device': 'mobile device',
                         'data-saver': 'Data Saver on',
                         'cellular': 'cellular connection',
                         'slow-connection': 'slow connection',
                         'low-bandwidth': 'low bandwidth',
+                        'mobile-unknown-network': "couldn't confirm wifi on mobile",
                     }[skipReason] || skipReason;
                     try {
                         console.info('[AniSync] embedded extraction skipped:', skipReason);
