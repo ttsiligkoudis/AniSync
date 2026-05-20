@@ -7,17 +7,24 @@ compatibility_date = "2024-12-30"
 # in AniSync's config without setting up a custom domain.
 workers_dev = true
 
-# Rust → WASM build via worker-build. The command below installs
-# the matching worker-build version on demand if missing, then
-# builds the crate to WASM + shim.mjs that wrangler uploads.
+# Rust → WASM build via worker-build. INSTALL worker-build YOURSELF
+# once globally before the first deploy:
 #
-# Pinned to worker-build 0.1.x because the worker crate version
-# this project targets (0.4) was last supported by that line —
-# worker-build 0.2+ requires worker@0.8+ and would force a non-
-# trivial rewrite against the post-0.5 API. If we ever bump worker
-# itself, drop the @^0.1 pin so the latest toolchain is used.
+#   cargo install worker-build --version 0.1.7 --locked
+#
+# (Pinned to 0.1.7 because the worker crate this project targets
+# is 0.4 — worker-build 0.2+ requires worker@0.8+ and would force
+# a non-trivial API rewrite. When the worker crate itself is bumped,
+# drop the version pin and reinstall worker-build to whatever's
+# current.)
+#
+# We install OUTSIDE wrangler.toml because PowerShell / cmd treat
+# `^` and other version-spec characters as shell metacharacters
+# and mangle them before cargo sees them. Running cargo install
+# manually side-steps all of that — and it's a one-time cost
+# anyway since cargo install is idempotent.
 [build]
-command = "cargo install -q worker-build@^0.1 && worker-build --release"
+command = "worker-build --release"
 
 # Optional shared secret. Set with:
 #   npx wrangler secret put PROXY_SECRET
