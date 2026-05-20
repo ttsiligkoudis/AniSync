@@ -18,7 +18,12 @@ url = "2"
 console_error_panic_hook = "0.1"
 
 [profile.release]
-opt-level = "s"
+# opt-level "3" not "s". "s" optimizes for binary size, which
+# for hot per-byte loops (read_element / read_vint hitting tens
+# of thousands of times in the cluster walk) is 3-10× slower
+# than fully speed-optimised output. Binary size goes up a bit
+# but stays well under CF's 1 MB free-tier limit.
+opt-level = 3
 lto = true
 strip = true
 codegen-units = 1

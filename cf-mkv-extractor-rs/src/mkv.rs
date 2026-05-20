@@ -36,10 +36,13 @@ const MAX_CLUSTER_BATCHES: usize = 30;
 const MAX_TOTAL_FETCH: u64 = 50 * 1024 * 1024;
 const BATCH_PACING_MS: u64 = 100;
 
-// Single-shot CPU-budget escape hatch. Rust is ~5-10× faster than
-// JS at the cluster walk so this could potentially be much higher;
-// keep it modest until we have real-world data.
-const SINGLE_SHOT_CLUSTER_CEILING: usize = 80;
+// Single-shot CPU-budget escape hatch. Initially I set this at 80
+// on the bet that Rust would be 4× faster than JS at the cluster
+// walk. Real-world testing on CF Free shows wasm-bindgen's per-
+// fetch JS-bridge overhead eats most of that advantage — we're
+// barely faster than JS per cluster, not 4× faster. Match the JS
+// worker's 20-cluster ceiling so the same files trigger sharding.
+const SINGLE_SHOT_CLUSTER_CEILING: usize = 20;
 
 #[derive(Serialize, Clone)]
 pub struct TrackOutput {
