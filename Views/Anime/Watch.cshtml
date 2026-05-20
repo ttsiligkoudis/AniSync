@@ -938,26 +938,32 @@
             // can be 700 MB-1.5 GB of bandwidth on the user's network;
             // worth skipping when:
             //
+            //   * The UA is a mobile device — privacy-hardened browsers
+            //     (Brave in particular) farble navigator.connection so
+            //     even on real cellular it reports effectiveType:'4g',
+            //     downlink~10, type hidden. We can't trust the network
+            //     API, but the UA still gives away Mobile/Android/iOS.
+            //     Phones also have battery / heat / metered-wifi reasons
+            //     to skip the 1 GB pull even when the link is fast.
             //   * Data Saver is on — user explicitly asked to conserve
             //     bandwidth.
-            //   * Connection type is cellular — even on fast 5G the
-            //     user's plan is typically metered, and we have no way
-            //     to know if they're on unlimited.
+            //   * Connection type is cellular — desktop UAs occasionally
+            //     hit this (tethered laptop on a mobile dongle).
             //   * effectiveType is 2g / slow-2g / 3g — pulling that
             //     much data would take minutes and probably stall
-            //     playback. (4g is fine bandwidth-wise; cellular check
-            //     above already filters mobile 4g.)
+            //     playback.
             //   * downlink reports < 1.5 Mbps — sub-1.5 Mbps is below
             //     1080p streaming bitrate, definitely not enough
             //     headroom for parallel ~10 Mbps MKV download.
             //
             // Returns null when extraction should proceed, or a reason
-            // string when it should be skipped. Network Information API
-            // is missing on Firefox / Safari — we treat absence as
-            // "proceed" (preserves the prior always-extract behaviour
-            // for those browsers).
+            // string when it should be skipped.
             function networkSkipReason() {
                 try {
+                    var ua = navigator.userAgent || '';
+                    if (/Mobi|Mobile|Android|iPhone|iPad|iPod/i.test(ua)) {
+                        return 'mobile-device';
+                    }
                     var c = navigator.connection
                         || navigator.mozConnection
                         || navigator.webkitConnection;
@@ -1096,6 +1102,7 @@
                 var skipReason = networkSkipReason();
                 if (skipReason) {
                     var label = {
+                        'mobile-device': 'mobile device',
                         'data-saver': 'Data Saver on',
                         'cellular': 'cellular connection',
                         'slow-connection': 'slow connection',
