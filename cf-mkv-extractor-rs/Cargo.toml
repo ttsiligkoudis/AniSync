@@ -20,3 +20,23 @@ opt-level = "s"
 lto = true
 strip = true
 codegen-units = 1
+
+# Skip the wasm-opt post-processing step. worker-build 0.1.x bundles
+# a 2022-era binaryen wasm-opt that fails validation on bulk-memory
+# instructions (memory.copy / memory.fill), which Rust 1.82+ emits
+# unconditionally for memcpy-shaped patterns regardless of any
+# `-C target-feature=-bulk-memory` flag. We tried target-cpu=mvp
+# and explicit feature disables — both confirmed via `cargo build -v`
+# to reach rustc, neither stops LLVM emitting memory.copy.
+#
+# Cloudflare's runtime accepts modern WASM (bulk-memory and friends
+# have been universal in browser/edge WASM runtimes for years), so
+# the wasm-opt step is only a size optimisation, not a correctness
+# requirement. Skipping it makes the worker binary ~2× larger
+# (under 1 MB total — well inside CF's 1 MB free-tier cap and the
+# 10 MB paid cap), but unblocks the deploy.
+#
+# Drop this when bumping to worker 0.8+ / worker-build 0.2+, which
+# ship a current wasm-opt that handles modern features.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
