@@ -118,14 +118,15 @@
                 <span>Auto-skip intro / outro</span>
             </button>
             @* Mobile embedded-subs opt-in. By default the extraction is
-               skipped on mobile UAs whose network type can't be positively
-               confirmed as wifi (privacy-hardened browsers like Brave
-               farble navigator.connection, Safari iOS has no API at all).
-               Flipping this on tells the player to attempt the ~1 GB pull
-               anyway — useful for users on wifi who know they aren't on
-               metered data. Toggle stays hidden on any UA / network where
-               the skip wouldn't have triggered (desktop, Chrome Android,
-               etc.) — wiring below reveals it only in the relevant case. *@
+               skipped on cellular and on mobile UAs whose network type
+               can't be positively confirmed as wifi (privacy-hardened
+               browsers like Brave farble navigator.connection, Safari
+               iOS has no API at all). Flipping this on tells the player
+               to attempt the ~1 GB pull anyway — for users who know
+               their plan is unlimited or accept the data cost. Toggle
+               stays hidden when the network classification wouldn't
+               have skipped extraction (desktop, Chrome Android on wifi)
+               — wiring below reveals it only in the relevant case. *@
             <button id="watchEmbedMobileOptIn" class="watch-toggle" type="button" aria-pressed="false" hidden>
                 <span class="watch-toggle-dot" aria-hidden="true"></span>
                 <span>Try embedded subs on mobile</span>
@@ -1013,9 +1014,17 @@
                 return null;
             }
 
+            // Reasons that the toolbar toggle can override. saveData /
+            // slow-connection / low-bandwidth stay hard-skips even when
+            // the opt-in is on — Data Saver is an explicit user
+            // preference we shouldn't second-guess, and the bandwidth
+            // floors are about whether the extraction can actually
+            // succeed, not whether the user is willing to pay for it.
+            var OPTIN_OVERRIDES = { 'cellular': 1, 'mobile-unknown-network': 1 };
+
             function networkSkipReason() {
                 var reason = classifyNetwork();
-                if (reason === 'mobile-unknown-network') {
+                if (reason && OPTIN_OVERRIDES[reason]) {
                     try {
                         if (localStorage.getItem(EMBED_MOBILE_OPTIN_KEY) === '1') {
                             return null;
@@ -2429,16 +2438,18 @@
                 });
             }
 
-            // Mobile-unknown opt-in toggle. classifyNetwork() (not
+            // Mobile opt-in toggle. classifyNetwork() (not
             // networkSkipReason — we want the raw signal) tells us
-            // whether the user is in a state where their wifi-vs-cell
-            // status is ambiguous. The toggle is only meaningful in
-            // that state, so it stays hidden on every other UA / network
-            // combination to keep the toolbar uncluttered. The pref is
-            // read on extraction; flipping it here applies on the next
-            // source-pick (or page reload).
+            // whether the user is in a state we'd normally skip:
+            // confirmed cellular (Chrome Android) or wifi-vs-cell
+            // ambiguity (Brave Android / Safari iOS). The toggle is
+            // only meaningful in those states, so it stays hidden on
+            // every other UA / network combination to keep the toolbar
+            // uncluttered. The pref is read on extraction; flipping it
+            // here applies on the next source-pick (or page reload).
             var embedMobileBtn = document.getElementById('watchEmbedMobileOptIn');
-            if (embedMobileBtn && classifyNetwork() === 'mobile-unknown-network') {
+            var rawNet = classifyNetwork();
+            if (embedMobileBtn && OPTIN_OVERRIDES[rawNet]) {
                 var embedMobileOptIn = localStorage.getItem(EMBED_MOBILE_OPTIN_KEY) === '1';
                 embedMobileBtn.hidden = false;
                 embedMobileBtn.setAttribute('aria-pressed', embedMobileOptIn ? 'true' : 'false');
