@@ -695,107 +695,6 @@
             // that would otherwise be CORS-blocked.
             var CORS_PROXY_URL    = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(corsProxyUrl));
             var CORS_PROXY_SECRET = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(corsProxySecret));
-            // Indexed-extractor endpoint hosted by AniSync itself
-            // (see Controllers/AnimeController.cs → EpisodeEmbeddedSubtitles).
-            // Replaces the cf-mkv-extractor Cloudflare Worker — moving
-            // the work in-process side-steps CF's per-invocation memory
-            // and CPU caps. The endpoint accepts ?url=<CDN URL>&lang=auto
-            // and returns the same JSON shape the worker did, so the
-            // delivery path below stays unchanged.
-            var MKV_EXTRACTOR_PATH = '/anime/episode-embedded-subtitles';
-
-            // Single fetch to the in-process extractor. Returns the
-            // extract body on success, or null when the file lacks an
-            // index / RD wasn't reachable / parsing failed (the same
-            // fall-through signal the cf-mkv-extractor flow used). All
-            // the per-shard / parallel-retry / merge complexity is
-            // gone — the server handles concurrency and caching via
-            // SemaphoreSlim + IMemoryCache, and Fly.io's runtime has
-            // no per-invocation cap to escape from.
-            function tryMkvExtractor(directUrl, signal) {
-                return new Promise(function (resolve) {
-                    var u = MKV_EXTRACTOR_PATH
-                        + '?url=' + encodeURIComponent(directUrl)
-                        + '&lang=auto';
-                    fetch(u, { signal: signal, skipLoader: true })
-                        .then(function (r) {
-                            if (!r.ok) {
-                                console.info('[AniSync] mkv-extractor HTTP ' + r.status + '; falling back to streaming.');
-                                resolve(null);
-                                return null;
-                            }
-                            return r.json();
-                        })
-                        .then(function (body) {
-                            if (!body) { return; }
-                            if (body.extracted === false) {
-                                console.info(
-                                    '[AniSync] mkv-extractor fell through (reason=' + body.reason + ')' +
-                                    (body.error ? ': ' + body.error : '') +
-                                    '; falling back to streaming.');
-                                resolve(null);
-                                return;
-                            }
-                            try {
-                                console.log(
-                                    '[AniSync] mkv-extractor:',
-                                    (body.tracks || []).length, 'tracks',
-                                    '(file=' + (body.stats && body.stats.fileSize) + 'B)',
-                                    (body.tracks || []).map(function (t) {
-                                        return { num: t.number, lang: t.language, name: t.name, cues: (t.cues || []).length };
-                                    })
-                                );
-                            } catch (_) {}
-                            resolve(body);
-                        })
-                        .catch(function (e) {
-                            if (e && e.name === 'AbortError') { resolve(null); return; }
-                            console.info('[AniSync] mkv-extractor request failed:', e && e.message);
-                            resolve(null);
-                        });
-                });
-            }
-
-            // Builds trackMeta / full-track objects from the
-            // extractor's JSON response and dispatches them through
-            // the same onTracks / onComplete callbacks the streaming
-            // path uses. Keeps the rest of the watch page oblivious
-            // to which extraction backend ran.
-            function deliverExtractorResult(extracted, onTracks, onComplete) {
-                var trackMeta = (extracted.tracks || []).map(function (t) {
-                    return {
-                        number: t.number,
-                        language: t.language || 'und',
-                        name: t.name || '',
-                        codecID: t.codecID || '',
-                        header: t.header || '',
-                        label: t.name || prettyLanguage(t.language),
-                    };
-                });
-                try {
-                    console.log('[AniSync] embedded tracks (via extractor):', trackMeta.map(function (t) {
-                        return { number: t.number, language: t.language, codecID: t.codecID, headerLength: (t.header || '').length, hasStyles: (t.header || '').indexOf('[V4+ Styles]') >= 0 };
-                    }));
-                } catch (_) {}
-
-                if (trackMeta.length === 0) {
-                    setEmbedStatus('No embedded subtitles in this file', 'none');
-                    onComplete([]);
-                    return;
-                }
-
-                setEmbedStatus(
-                    trackMeta.length + ' embedded track' + (trackMeta.length === 1 ? '' : 's') + ' ready',
-                    'success');
-                onTracks(trackMeta);
-
-                var full = extracted.tracks.map(function (t, i) {
-                    return Object.assign({}, trackMeta[i], {
-                        data: buildAssDocument(t.header || '', t.cues || []),
-                    });
-                });
-                onComplete(full);
-            }
             function isCorsBlockedHost(url) {
                 try {
                     var h = new URL(url, window.location.href).hostname;
@@ -1044,37 +943,33 @@
                 urlPromise.then(function (urls) {
                     if (abortCtl.signal.aborted) return;
 
-                    // Indexed extractor first — AniSync walks the MKV's
-                    // EBML index server-side and Range-fetches only the
-                    // subtitle clusters (~10-30 MB instead of the
-                    // ~700 MB-1.5 GB the streaming fallback would pull
-                    // through the user's browser). On any failure it
-                    // returns null and we fall through to streaming.
+                    // Streaming extraction via matroska-subtitles +
+                    // cf-cors-proxy. Pulls the MKV through the user's
+                    // browser and parses subs as bytes arrive. Slower
+                    // than indexed Range fetching could be in theory,
+                    // but the only path that worked reliably across
+                    // every variant of indexed extractor we tried
+                    // (cf-mkv-extractor JS, the Rust port, and the
+                    // in-process C# port were all defeated by RD's
+                    // edges throttling deep-offset Range requests
+                    // from non-residential IPs). See the lang=auto
+                    // English filter + tail-gated early-exit inside
+                    // runExtraction for the bandwidth-saving bits.
                     setEmbedStatus('Looking for embedded subtitles…', 'loading');
-                    var extractorPromise = tryMkvExtractor(urls.direct, abortCtl.signal);
-
-                    extractorPromise.then(function (extracted) {
+                    url = urls.stream;
+                    var readyPromise = window.subtitleLibsReady
+                        || Promise.resolve({ matroska: false, jassub: false });
+                    readyPromise.then(function (status) {
                         if (abortCtl.signal.aborted) return;
-                        if (extracted) {
-                            deliverExtractorResult(extracted, onTracks, onComplete);
+                        if (!status.matroska || typeof MatroskaSubtitles === 'undefined' || !MatroskaSubtitles.SubtitleParser) {
+                            setEmbedStatus('Embedded-subtitle support unavailable', 'error');
+                            onComplete([]);
                             return;
                         }
-                        // Streaming fallback.
-                        url = urls.stream;
-                        var readyPromise = window.subtitleLibsReady
-                            || Promise.resolve({ matroska: false, jassub: false });
-                        readyPromise.then(function (status) {
-                            if (abortCtl.signal.aborted) return;
-                            if (!status.matroska || typeof MatroskaSubtitles === 'undefined' || !MatroskaSubtitles.SubtitleParser) {
-                                setEmbedStatus('Embedded-subtitle support unavailable', 'error');
-                                onComplete([]);
-                                return;
-                            }
-                            runExtraction();
-                        }).catch(function (e) {
-                            console.warn('embedded sub readiness chain failed:', e);
-                            onComplete([]);
-                        });
+                        runExtraction();
+                    }).catch(function (e) {
+                        console.warn('embedded sub readiness chain failed:', e);
+                        onComplete([]);
                     });
                 }, function (err) {
                     // Stream-URL resolve rejected — typically means
