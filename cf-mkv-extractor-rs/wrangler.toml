@@ -7,10 +7,17 @@ compatibility_date = "2024-12-30"
 # in AniSync's config without setting up a custom domain.
 workers_dev = true
 
-# Rust → WASM build via worker-build. Run `cargo install -q worker-build`
-# once globally, then `npx wrangler deploy` from this directory.
+# Rust → WASM build via worker-build. The command below installs
+# the matching worker-build version on demand if missing, then
+# builds the crate to WASM + shim.mjs that wrangler uploads.
+#
+# Pinned to worker-build 0.1.x because the worker crate version
+# this project targets (0.4) was last supported by that line —
+# worker-build 0.2+ requires worker@0.8+ and would force a non-
+# trivial rewrite against the post-0.5 API. If we ever bump worker
+# itself, drop the @^0.1 pin so the latest toolchain is used.
 [build]
-command = "cargo install -q worker-build && worker-build --release"
+command = "cargo install -q worker-build@^0.1 && worker-build --release"
 
 # Optional shared secret. Set with:
 #   npx wrangler secret put PROXY_SECRET
