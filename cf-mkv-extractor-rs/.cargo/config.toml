@@ -1,0 +1,24 @@
+# Target the MVP (1.0) WASM feature set when compiling the worker.
+#
+# Rust 1.82 changed the default wasm32-unknown-unknown target to
+# enable bulk-memory + sign-ext + nontrapping-fptoint + a few other
+# post-MVP features. The wasm-opt that worker-build 0.1.x bundles is
+# from an older binaryen release that fails validation on those
+# instructions:
+#
+#   [wasm-validator error] unexpected false: Bulk memory operations
+#   require bulk memory [--enable-bulk-memory]
+#
+# `target-cpu=mvp` makes rustc emit only the original 1.0 instruction
+# set, which the older wasm-opt validates cleanly. We pay a tiny
+# code-size + perf cost on operations that would otherwise compile to
+# memory.copy / memory.fill, but for this worker's workload it's
+# undetectable — the cluster-walk hot path is dominated by EBML VINT
+# decoding, not memcpy-style bulk moves.
+#
+# Drop this file (or set target-cpu back to "generic") when we bump
+# to worker 0.8+ + worker-build 0.2+; those bundle a current wasm-opt
+# that handles the modern feature set fine.
+
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-cpu=mvp"]
