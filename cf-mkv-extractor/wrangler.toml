@@ -10,3 +10,8 @@ compatibility_date = "2025-04-01"
 # Optional shared secret — same model as cf-cors-proxy. Set with:
 #   npx wrangler secret put PROXY_SECRET
 # Then set MKV_EXTRACTOR_SECRET on the AniSync side to the same value.
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+

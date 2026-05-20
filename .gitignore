@@ -372,3 +372,11 @@ FodyWeavers.xsd
 /cf-cors-proxy/package-lock.json
 /cf-cors-proxy/package.json
 /cf-episode-notifier/package-lock.json
+/cf-mkv-extractor-rs/.wrangler/cache/wrangler-account.json
+/cf-mkv-extractor-rs/Cargo.lock
+/cf-mkv-extractor-rs/package-lock.json
+/cf-mkv-extractor-rs/target
+/cf-mkv-extractor-rs/target/.rustc_info.json
+/cf-mkv-extractor-rs/target/CACHEDIR.TAG
+/cf-mkv-extractor-rs/target/wasm32-unknown-unknown
+/cf-mkv-extractor-rs/target/wasm32-unknown-unknown/CACHEDIR.TAG

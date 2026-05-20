@@ -23,3 +23,7 @@ command = "worker-build --release"
 # Mirrors the JS worker so the client's MKV_EXTRACTOR_SECRET
 # config works against either implementation.
 # [vars] left empty intentionally.
+
+[observability.logs]
+enabled = true
+invocation_logs = true
