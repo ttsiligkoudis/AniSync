@@ -640,6 +640,101 @@
                 }
             }
 
+            // Auto-handover hook: when the embedded SSA track ends
+            // before the episode does (the streaming extractor's
+            // early-exit typically cuts off at the start of the credit
+            // roll), seamlessly switch to a same-language OpenSubtitles
+            // VTT so any post-credit dialogue still shows. Set up once
+            // by the extraction-complete callback after it auto-promotes
+            // an English embedded track. Bails cleanly on cases where
+            // the handover isn't useful: no matching OS track, embedded
+            // covers the whole episode within ~5 s, or the user has
+            // since picked a different sub manually.
+            var _handoverHandler = null;
+            function setupEmbeddedToOsHandover(embeddedTrack, osSubtitles, onSwitched) {
+                if (!art || !embeddedTrack) return;
+                if (_handoverHandler) {
+                    art.off('video:timeupdate', _handoverHandler);
+                    _handoverHandler = null;
+                }
+
+                var lastCueEndMs = 0;
+                var cues = (embeddedTrack.cues) || [];
+                for (var i = 0; i < cues.length; i++) {
+                    var endMs = (cues[i].time || 0) + (cues[i].duration || 0);
+                    if (endMs > lastCueEndMs) lastCueEndMs = endMs;
+                }
+                if (lastCueEndMs === 0) return;
+
+                // Embedded uses ISO-639-2/B (3-letter "eng"), OS uses
+                // ISO-639-1 (2-letter "en") — match on the 2-letter
+                // prefix so "eng" / "en-US" / "en" all resolve together.
+                var embLang2 = (embeddedTrack.language || '').toLowerCase().slice(0, 2);
+                if (!embLang2 || embLang2 === 'un') return;
+
+                var matchingOs = null;
+                var osList = osSubtitles || [];
+                for (var j = 0; j < osList.length; j++) {
+                    var ol = (osList[j].lang || '').toLowerCase().slice(0, 2);
+                    if (ol === embLang2) { matchingOs = osList[j]; break; }
+                }
+                if (!matchingOs) return;
+
+                var handoverDone = false;
+                _handoverHandler = function () {
+                    if (handoverDone) return;
+                    // If the user picked something other than the
+                    // embedded SSA, abandon the handover — they made
+                    // their choice and we shouldn't override.
+                    if (currentSubKind !== 'ass') {
+                        art.off('video:timeupdate', _handoverHandler);
+                        _handoverHandler = null;
+                        return;
+                    }
+                    var v = art && art.video;
+                    if (!v) return;
+                    if (!isFinite(v.duration) || v.duration <= 0) return;
+
+                    // If the embedded track covers the whole episode
+                    // (within 5 s of end), no handover needed — bail.
+                    var videoDurationMs = v.duration * 1000;
+                    if (videoDurationMs - lastCueEndMs < 5000) {
+                        art.off('video:timeupdate', _handoverHandler);
+                        _handoverHandler = null;
+                        return;
+                    }
+
+                    var nowMs = (v.currentTime || 0) * 1000;
+                    // Switch slightly BEFORE the last embedded cue ends
+                    // so the OS track is already attached when the gap
+                    // begins — no visible "missing subs" interval.
+                    if (nowMs >= lastCueEndMs - 500) {
+                        handoverDone = true;
+                        try {
+                            console.log(
+                                '[AniSync] embedded → OS handover at',
+                                Math.round(nowMs / 1000) + 's',
+                                '(embedded ended at',
+                                Math.round(lastCueEndMs / 1000) + 's of',
+                                Math.round(v.duration) + 's)');
+                        } catch (_) {}
+                        applySubtitle({
+                            kind: 'vtt',
+                            url: matchingOs.url,
+                            html: matchingOs.label || matchingOs.lang || 'OpenSubtitles',
+                        });
+                        // Refresh menu so the "active" checkmark moves
+                        // off the embedded entry onto the OS track.
+                        if (typeof onSwitched === 'function') {
+                            try { onSwitched(); } catch (_) {}
+                        }
+                        art.off('video:timeupdate', _handoverHandler);
+                        _handoverHandler = null;
+                    }
+                };
+                art.on('video:timeupdate', _handoverHandler);
+            }
+
             // Rebuild the subtitles selector inside ArtPlayer's
             // settings menu — called after the MKV extraction
             // surfaces new embedded tracks. ArtPlayer's settings
@@ -2080,6 +2175,20 @@
                                 kind: 'ass',
                                 html: (englishTrack.label || 'Embedded') + ' SSA',
                                 trackData: englishTrack.data,
+                            });
+                            // Auto-handover from embedded SSA to a same-
+                            // language OS track at the end of the embedded
+                            // cue range. The streaming extractor's
+                            // tail-gated early-exit means embedded cues
+                            // typically stop at the start of the credit
+                            // roll — any post-credit dialogue (stinger
+                            // scene, preview narration) would otherwise
+                            // play unsubtitled. Switching to a matching
+                            // OS track at that boundary preserves
+                            // coverage without giving up the embedded
+                            // styling for the main episode body.
+                            setupEmbeddedToOsHandover(englishTrack, subtitles, function () {
+                                refreshSubtitleSelector(buildSubtitleSelector);
                             });
                         }
                         // Rebuild AFTER applySubtitle so the menu's
