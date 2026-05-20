@@ -2,6 +2,7 @@ using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using AnimeList.Services.Mkv;
 using Microsoft.Extensions.Caching.Memory;
+using System.Diagnostics;
 using System.Text;
 
 namespace AnimeList.Services
@@ -268,6 +269,13 @@ namespace AnimeList.Services
                     batches.Add((off, newEnd));
                 }
 
+                var loopSw = Stopwatch.StartNew();
+                int batchesOk = 0;
+                int batchesFailed = 0;
+                long slowestBatchMs = 0;
+                _logger.LogInformation("[mkv-extract] starting batch loop: {BatchCount} batches, {TotalBytes}MB total",
+                    batches.Count, batches.Sum(b => b.end - b.start) / (1024 * 1024));
+
                 foreach (var batch in batches)
                 {
                     int len = (int)(batch.end - batch.start);
@@ -277,13 +285,27 @@ namespace AnimeList.Services
                         break;
                     }
 
+                    var batchSw = Stopwatch.StartNew();
                     try { await reader.ReadAsync(batch.start, len, ct); }
                     catch (Exception e)
                     {
-                        _logger.LogInformation("[mkv-extract] batch fetch failed, skipping: {Msg}", e.Message);
+                        batchesFailed++;
+                        _logger.LogInformation(
+                            "[mkv-extract] batch fetch failed after {Elapsed}ms ({Len}B at {Off}): {Msg}",
+                            batchSw.ElapsedMilliseconds, len, batch.start, e.Message);
                         continue;
                     }
+                    batchSw.Stop();
+                    if (batchSw.ElapsedMilliseconds > slowestBatchMs)
+                        slowestBatchMs = batchSw.ElapsedMilliseconds;
+                    if (batchSw.ElapsedMilliseconds > 2000)
+                    {
+                        _logger.LogInformation(
+                            "[mkv-extract] slow batch fetch: {Elapsed}ms for {Len}B at {Off}",
+                            batchSw.ElapsedMilliseconds, len, batch.start);
+                    }
                     totalFetched += len;
+                    batchesOk++;
 
                     var clustersInBatch = clusterAbsOffsets
                         .Where(o => o >= batch.start && o + ClusterFetch <= batch.end)
@@ -341,7 +363,7 @@ namespace AnimeList.Services
                                         {
                                             Time = ((double)clusterTimecode + sb.Value.Timecode) * (timecodeScale / 1e6),
                                             Duration = 4000,
-                                            Text = DecodeSubtitle(clusterBuf, sb.Value.PayloadOffset, sb.Value.PayloadSize),
+                                            Text = DecodeSubtitle(clusterBuf, sb.Value.PayloadOffset, sb.Value.PayloadSize, track.CodecId),
                                         });
                                     }
                                 }
@@ -361,6 +383,10 @@ namespace AnimeList.Services
 
                     reader.Evict(batch.start, batch.end);
                 }
+                loopSw.Stop();
+                _logger.LogInformation(
+                    "[mkv-extract] batch loop done in {Elapsed}ms: {Ok}/{Total} ok, {Failed} failed, slowest={Slow}ms",
+                    loopSw.ElapsedMilliseconds, batchesOk, batches.Count, batchesFailed, slowestBatchMs);
 
                 var output = subtitleTracks.Select(t => new MkvExtractTrack
                 {
@@ -647,19 +673,44 @@ namespace AnimeList.Services
                 double durationMs = durationRaw.HasValue
                     ? durationRaw.Value * (timecodeScale / 1e6)
                     : 4000;
+                var track = subtitleTracks.First(t => t.Number == block.Value.TrackNumber);
                 cuesByTrack[block.Value.TrackNumber].Add(new MkvExtractCue
                 {
                     Time = ((double)clusterTimecode + block.Value.Timecode) * (timecodeScale / 1e6),
                     Duration = durationMs,
-                    Text = DecodeSubtitle(buf, block.Value.PayloadOffset, block.Value.PayloadSize),
+                    Text = DecodeSubtitle(buf, block.Value.PayloadOffset, block.Value.PayloadSize, track.CodecId),
                 });
             }
         }
 
-        private static string DecodeSubtitle(byte[] buf, int off, int size)
+        private static string DecodeSubtitle(byte[] buf, int off, int size, string? codecId)
         {
             int end = Math.Min(off + size, buf.Length);
-            return Encoding.UTF8.GetString(buf, off, end - off);
+            string raw = Encoding.UTF8.GetString(buf, off, end - off);
+
+            // For SSA/ASS tracks the Block payload is the dialogue line
+            // formatted as `ReadOrder,Layer,Style,Name,MarginL,MarginR,
+            // MarginV,Effect,Text` (8 metadata fields then the text)
+            // per the Matroska codec spec. The client's buildAssDocument
+            // wraps the cue in its own Dialogue line with timing fields
+            // from the Block timecode, so it expects JUST the Text
+            // portion — leaving the metadata in renders as literal
+            // "194,0,main,Shaula,0,0,0,," noise in the subtitle.
+            // Same trim the matroska-subtitles npm library does
+            // (`values.slice(8).join(",")`).
+            if (codecId == "S_TEXT/ASS" || codecId == "S_TEXT/SSA")
+            {
+                int commas = 0;
+                for (int i = 0; i < raw.Length; i++)
+                {
+                    if (raw[i] == ',')
+                    {
+                        commas++;
+                        if (commas == 8) return raw.Substring(i + 1);
+                    }
+                }
+            }
+            return raw;
         }
 
         private static string DecodeHeader(byte[]? codecPrivate, string codecId)
