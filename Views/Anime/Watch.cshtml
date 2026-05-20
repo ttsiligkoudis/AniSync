@@ -117,6 +117,19 @@
                 <span class="watch-toggle-dot" aria-hidden="true"></span>
                 <span>Auto-skip intro / outro</span>
             </button>
+            @* Mobile embedded-subs opt-in. By default the extraction is
+               skipped on mobile UAs whose network type can't be positively
+               confirmed as wifi (privacy-hardened browsers like Brave
+               farble navigator.connection, Safari iOS has no API at all).
+               Flipping this on tells the player to attempt the ~1 GB pull
+               anyway — useful for users on wifi who know they aren't on
+               metered data. Toggle stays hidden on any UA / network where
+               the skip wouldn't have triggered (desktop, Chrome Android,
+               etc.) — wiring below reveals it only in the relevant case. *@
+            <button id="watchEmbedMobileOptIn" class="watch-toggle" type="button" aria-pressed="false" hidden>
+                <span class="watch-toggle-dot" aria-hidden="true"></span>
+                <span>Try embedded subs on mobile</span>
+            </button>
             @* Embedded-subtitle status pill — surfaces the SSA / ASS
                extraction progress so the user can tell whether the
                pipeline is alive when nothing new appears in the
@@ -933,6 +946,13 @@
                 console.log('[AniSync] HEVC marked risky for this browser:', HEVC_RISKY);
             } catch (_) {}
 
+            // localStorage key for the user opt-in on mobile-unknown
+            // networks. When set to '1', networkSkipReason() suppresses
+            // the 'mobile-unknown-network' skip — the user has told us
+            // they're on wifi and accepts the data tradeoff. Default
+            // (missing key) is conservative: skip on unknown.
+            var EMBED_MOBILE_OPTIN_KEY = 'anisync.embed.tryOnMobile';
+
             // Decide whether to attempt the streaming embedded-subtitle
             // extraction at all. Pulling the MKV through cf-cors-proxy
             // can be 700 MB-1.5 GB of bandwidth on the user's network;
@@ -956,9 +976,11 @@
             //     Safari iOS has no API at all and lands here too,
             //     which is fine because Safari can't play MKV natively.
             //
-            // Returns null when extraction should proceed, or a reason
-            // string when it should be skipped.
-            function networkSkipReason() {
+            // Returns null (proceed) or a reason string (skip). Split
+            // into a raw classifier + an opt-in-aware wrapper so the
+            // toolbar toggle can render based on the raw signal while
+            // the extractor consults the user's persisted preference.
+            function classifyNetwork() {
                 try {
                     var ua = navigator.userAgent || '';
                     var isMobile = /Mobi|Mobile|Android|iPhone|iPad|iPod/i.test(ua);
@@ -989,6 +1011,18 @@
                     }
                 } catch (_) {}
                 return null;
+            }
+
+            function networkSkipReason() {
+                var reason = classifyNetwork();
+                if (reason === 'mobile-unknown-network') {
+                    try {
+                        if (localStorage.getItem(EMBED_MOBILE_OPTIN_KEY) === '1') {
+                            return null;
+                        }
+                    } catch (_) {}
+                }
+                return reason;
             }
 
             function resolveStreamUrl(originalUrl, signal) {
@@ -2392,6 +2426,28 @@
                     localStorage.setItem('anisync.autoSkip', autoSkip ? '1' : '0');
                     skipAutoBtn.setAttribute('aria-pressed', autoSkip ? 'true' : 'false');
                     skipAutoBtn.classList.toggle('is-active', autoSkip);
+                });
+            }
+
+            // Mobile-unknown opt-in toggle. classifyNetwork() (not
+            // networkSkipReason — we want the raw signal) tells us
+            // whether the user is in a state where their wifi-vs-cell
+            // status is ambiguous. The toggle is only meaningful in
+            // that state, so it stays hidden on every other UA / network
+            // combination to keep the toolbar uncluttered. The pref is
+            // read on extraction; flipping it here applies on the next
+            // source-pick (or page reload).
+            var embedMobileBtn = document.getElementById('watchEmbedMobileOptIn');
+            if (embedMobileBtn && classifyNetwork() === 'mobile-unknown-network') {
+                var embedMobileOptIn = localStorage.getItem(EMBED_MOBILE_OPTIN_KEY) === '1';
+                embedMobileBtn.hidden = false;
+                embedMobileBtn.setAttribute('aria-pressed', embedMobileOptIn ? 'true' : 'false');
+                embedMobileBtn.classList.toggle('is-active', embedMobileOptIn);
+                embedMobileBtn.addEventListener('click', function () {
+                    embedMobileOptIn = !embedMobileOptIn;
+                    localStorage.setItem(EMBED_MOBILE_OPTIN_KEY, embedMobileOptIn ? '1' : '0');
+                    embedMobileBtn.setAttribute('aria-pressed', embedMobileOptIn ? 'true' : 'false');
+                    embedMobileBtn.classList.toggle('is-active', embedMobileOptIn);
                 });
             }
 
