@@ -814,7 +814,9 @@ body.modal-open {
    inner .site-header-inner re-applies the container's max-width to keep
    the logo / nav / bell aligned with the rest of the page content.
    z-index sits at the bottom-nav tier (50) — below the slide-in drawer
-   (100), notif panel (1050), and any modals; above ordinary page content. */
+   (100) and any modals; above ordinary page content. The notif panel is
+   position:fixed (see .notif-panel) so it isn't bound by this stacking
+   context — it floats globally at z-index 1200 above the player. */
 .site-header {
     position: sticky;
     top: 0;
@@ -5626,16 +5628,24 @@ ol.anime-detail-episodes-busy {
 }
 
 .notif-panel {
-    position: absolute;
-    top: calc(100% + 0.5rem);
-    right: 0;
+    /* Fixed (not absolute under .notif-bell) so the panel escapes the
+       .site-header stacking context (z-index:50). With absolute the panel's
+       z-index was capped by the header and the watch-page video element —
+       which paints in its own compositing layer — drew on top of it.
+       JS in notifications.js sets top/right on open to anchor the panel
+       directly below the bell button; the values below are an off-screen-safe
+       default until that runs. The mobile media query overrides both. */
+    position: fixed;
+    top: 56px;
+    right: 16px;
     width: 360px;
     max-height: 70vh;
     background: #141414;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 0.65rem;
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
-    z-index: 1050;
+    /* Above the iOS install hint (1100), below the global loader (9999). */
+    z-index: 1200;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -5646,7 +5656,6 @@ ol.anime-detail-episodes-busy {
        clip the screen edge — the header cluster sits flush right so a
        360px panel would overshoot the viewport without this. */
     .notif-panel {
-        position: fixed;
         top: 56px;
         right: 8px;
         left: 8px;
