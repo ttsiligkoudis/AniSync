@@ -1305,8 +1305,17 @@
                 });
                 parser.on('finish', function () {
                     var output = trackMeta.map(function (t) {
+                        var cues = trackCues[t.number] || [];
                         return Object.assign({}, t, {
-                            data: buildAssDocument(t.header, trackCues[t.number] || []),
+                            data: buildAssDocument(t.header, cues),
+                            // Surface the raw cue array on the track too —
+                            // setupEmbeddedToOsHandover needs to know
+                            // where the cue stream ends in playback time
+                            // so it can wire the embedded→OS swap to the
+                            // right moment, and the timing only lives
+                            // here (the .data ASS document has the times
+                            // formatted as text inside Dialogue lines).
+                            cues: cues,
                         });
                     });
                     try {
