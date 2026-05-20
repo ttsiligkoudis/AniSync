@@ -14,17 +14,6 @@
     var corsProxySecret = (Configuration["CORS_PROXY_SECRET"]
         ?? Environment.GetEnvironmentVariable("CORS_PROXY_SECRET")
         ?? string.Empty).Trim();
-    // Optional second worker that does indexed extraction — Range-fetches
-    // ~10-30 MB of an MKV's EBML index and returns the embedded subtitles
-    // as JSON. See cf-mkv-extractor/ for the worker source. When set,
-    // the client tries this first; on 404 indexless / 502 parse-error it
-    // falls back to the cf-cors-proxy streaming path above.
-    var mkvExtractorUrl = (Configuration["MKV_EXTRACTOR_URL"]
-        ?? Environment.GetEnvironmentVariable("MKV_EXTRACTOR_URL")
-        ?? string.Empty).Trim();
-    var mkvExtractorSecret = (Configuration["MKV_EXTRACTOR_SECRET"]
-        ?? Environment.GetEnvironmentVariable("MKV_EXTRACTOR_SECRET")
-        ?? string.Empty).Trim();
     var episodeLabel = !string.IsNullOrEmpty(ep.name) ? ep.name
         : !string.IsNullOrEmpty(ep.title) ? ep.title
         : $"Episode {ep.episode}";
@@ -706,365 +695,64 @@
             // that would otherwise be CORS-blocked.
             var CORS_PROXY_URL    = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(corsProxyUrl));
             var CORS_PROXY_SECRET = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(corsProxySecret));
-            var MKV_EXTRACTOR_URL    = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(mkvExtractorUrl));
-            var MKV_EXTRACTOR_SECRET = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(mkvExtractorSecret));
+            // Indexed-extractor endpoint hosted by AniSync itself
+            // (see Controllers/AnimeController.cs → EpisodeEmbeddedSubtitles).
+            // Replaces the cf-mkv-extractor Cloudflare Worker — moving
+            // the work in-process side-steps CF's per-invocation memory
+            // and CPU caps. The endpoint accepts ?url=<CDN URL>&lang=auto
+            // and returns the same JSON shape the worker did, so the
+            // delivery path below stays unchanged.
+            var MKV_EXTRACTOR_PATH = '/anime/episode-embedded-subtitles';
 
-            // Build the indexed-extractor request URL (or null when
-            // the worker isn't configured / the host isn't supported).
-            // shardOpts is optional: { shards: N, shard: X } switches
-            // the Worker into split-extraction mode, where it
-            // processes only its 1/N slice of the Cluster offset
-            // list. See tryMkvExtractor for the escalation flow.
-            function viaMkvExtractor(cdnUrl, shardOpts) {
-                if (!MKV_EXTRACTOR_URL) return null;
-                // lang=auto tells the Worker to return ONLY the first
-                // English subtitle track (matching language=en* OR
-                // name=english/eng). The client's existing
-                // auto-promote rule would discard the other tracks
-                // anyway and skipping them server-side saves Worker
-                // memory + JSON size + sometimes Cluster fetches.
-                var u = MKV_EXTRACTOR_URL.replace(/\/$/, '')
-                    + '/?url=' + encodeURIComponent(cdnUrl)
-                    + '&lang=auto';
-                if (shardOpts && shardOpts.shards > 1) {
-                    u += '&shards=' + shardOpts.shards + '&shard=' + shardOpts.shard;
-                }
-                if (MKV_EXTRACTOR_SECRET) u += '&secret=' + encodeURIComponent(MKV_EXTRACTOR_SECRET);
-                return u;
-            }
-
-            // Hosts that consistently block cross-origin `fetch()` on
-            // the media URL. Media elements (`<video>`) play these
-            // fine because they don't enforce CORS, but the
-            // matroska-subtitles pipeline needs raw bytes via fetch.
-            // Listed here so we can skip the extract attempt — or
-            // route through CORS_PROXY_URL when configured.
-            var CORS_BLOCKED_HOST_RE = /(?:^|\.)(?:real-debrid\.com|alldebrid\.com|debrid-link\.com|premiumize\.me|torbox\.app|offcloud\.com|strem\.fun)$/i;
-
-            function viaCorsProxy(url) {
-                if (!CORS_PROXY_URL) return null;
-                var u = CORS_PROXY_URL.replace(/\/$/, '') + '/?url=' + encodeURIComponent(url);
-                if (CORS_PROXY_SECRET) u += '&secret=' + encodeURIComponent(CORS_PROXY_SECRET);
-                return u;
-            }
-
-            // Two escalation paths. They run on statistically
-            // different failure modes:
-            //
-            //   * Sharded extract — fired when single-shot returned
-            //     truncated:true (the worker hit either MAX_TOTAL_FETCH
-            //     or its CPU-budget cluster ceiling). N shards each
-            //     fetch a 1/N contiguous slice of the cluster offset
-            //     list, merge in the browser. ALL must succeed;
-            //     this is "split the work" so any single failure
-            //     means the merge is incomplete. N is computed
-            //     dynamically — see computeShardCount below.
-            //
-            //   * Parallel retries — fired when single-shot returned
-            //     a transient failure (reason=network from an RD
-            //     edge drop / worker_error / browser-side fetch
-            //     error). MKV_EXTRACT_RETRIES identical single-shot
-            //     retries race against each other; we take whichever
-            //     succeeds first. RD's drops are per-TCP-connection,
-            //     so even if one attempt dies the others on fresh
-            //     sockets almost always include a survivor. Sharding
-            //     does NOT help this case — every shard still has
-            //     to do its own RD critical reads and would face the
-            //     same drop probability, AND'd across N attempts.
-            // Shard count is computed dynamically from the cluster
-            // count the worker reports in its truncated response.
-            // Free tier's 10 ms CPU budget per invocation lands at
-            // ~12-15 clusters of subtitle parsing once you add
-            // critical-read + cluster-fetch overhead. Real-world
-            // testing of the Rust port on a 339-cluster file at
-            // 16 shards (≈22 clusters per shard) saw 14 of 16
-            // shards CPU-fail; tightening to ~13 per shard +
-            // raising the cap fits both workers without
-            // changing the per-worker code.
-            //
-            // For very long movies / multi-disc rips with >310
-            // subtitle-bearing clusters the 24-shard cap will
-            // leave each shard over budget and the extract will
-            // fail loud.
-            var MKV_EXTRACT_TARGET_PER_SHARD = 13;
-            var MKV_EXTRACT_MIN_SHARDS = 4;
-            var MKV_EXTRACT_MAX_SHARDS = 24;
-            var MKV_EXTRACT_RETRIES = 4;
-
-            function computeShardCount(clustersTotal) {
-                if (!clustersTotal || clustersTotal <= 0) return MKV_EXTRACT_MIN_SHARDS;
-                var n = Math.ceil(clustersTotal / MKV_EXTRACT_TARGET_PER_SHARD);
-                if (n < MKV_EXTRACT_MIN_SHARDS) return MKV_EXTRACT_MIN_SHARDS;
-                if (n > MKV_EXTRACT_MAX_SHARDS) return MKV_EXTRACT_MAX_SHARDS;
-                return n;
-            }
-
-            // Single Worker invocation. Returns a rich result shape
-            //   { ok: true,  body: <extract body> }
-            //   { ok: false, transient: bool, reason: string, error?: string, body?: <body if any> }
-            // so the caller can pick between fall-through (permanent
-            // failure → streaming fallback) and parallel retry
-            // (transient failure → re-fire on fresh sockets). Used
-            // both for single-shot first attempts and for per-shard
-            // calls inside the sharded escalation.
-            function callMkvExtractor(directUrl, signal, shardOpts) {
+            // Single fetch to the in-process extractor. Returns the
+            // extract body on success, or null when the file lacks an
+            // index / RD wasn't reachable / parsing failed (the same
+            // fall-through signal the cf-mkv-extractor flow used). All
+            // the per-shard / parallel-retry / merge complexity is
+            // gone — the server handles concurrency and caching via
+            // SemaphoreSlim + IMemoryCache, and Fly.io's runtime has
+            // no per-invocation cap to escape from.
+            function tryMkvExtractor(directUrl, signal) {
                 return new Promise(function (resolve) {
-                    var u = viaMkvExtractor(directUrl, shardOpts);
-                    if (!u) { resolve({ ok: false, transient: false, reason: 'no-worker' }); return; }
+                    var u = MKV_EXTRACTOR_PATH
+                        + '?url=' + encodeURIComponent(directUrl)
+                        + '&lang=auto';
                     fetch(u, { signal: signal, skipLoader: true })
                         .then(function (r) {
-                            // The Worker returns 200 with
-                            // { extracted: false, reason } when the
-                            // file is indexless / had a network drop
-                            // / a parse error — same downstream
-                            // behaviour as a 5xx, but a 200 keeps
-                            // the Worker out of Cloudflare's
-                            // failure-rate guard rail. 4xx still
-                            // means a real structural problem.
-                            return r.json().then(function (j) {
-                                return { status: r.status, body: j };
-                            }).catch(function () {
-                                return { status: r.status, body: null };
-                            });
+                            if (!r.ok) {
+                                console.info('[AniSync] mkv-extractor HTTP ' + r.status + '; falling back to streaming.');
+                                resolve(null);
+                                return null;
+                            }
+                            return r.json();
                         })
-                        .then(function (result) {
-                            var body = result.body;
-                            if (result.status !== 200 || !body) {
-                                resolve({
-                                    ok: false,
-                                    transient: false,
-                                    reason: 'http-' + result.status,
-                                });
-                                return;
-                            }
+                        .then(function (body) {
+                            if (!body) { return; }
                             if (body.extracted === false) {
-                                var failReason = body.reason || 'fell-through';
-                                // network / worker_error are
-                                // transient and worth re-firing.
-                                // indexless / parse are properties
-                                // of the file itself — retries
-                                // can't help.
-                                var transient =
-                                    failReason === 'network' ||
-                                    failReason === 'worker_error';
-                                resolve({
-                                    ok: false,
-                                    transient: transient,
-                                    reason: failReason,
-                                    error: body.error,
-                                    body: body,
-                                });
+                                console.info(
+                                    '[AniSync] mkv-extractor fell through (reason=' + body.reason + ')' +
+                                    (body.error ? ': ' + body.error : '') +
+                                    '; falling back to streaming.');
+                                resolve(null);
                                 return;
                             }
-                            if (!body.tracks) {
-                                resolve({ ok: false, transient: true, reason: 'no-tracks' });
-                                return;
-                            }
-                            resolve({ ok: true, body: body });
+                            try {
+                                console.log(
+                                    '[AniSync] mkv-extractor:',
+                                    (body.tracks || []).length, 'tracks',
+                                    '(file=' + (body.stats && body.stats.fileSize) + 'B)',
+                                    (body.tracks || []).map(function (t) {
+                                        return { num: t.number, lang: t.language, name: t.name, cues: (t.cues || []).length };
+                                    })
+                                );
+                            } catch (_) {}
+                            resolve(body);
                         })
                         .catch(function (e) {
-                            resolve({
-                                ok: false,
-                                transient: true,
-                                reason: 'fetch-error',
-                                error: (e && e.message) || String(e),
-                            });
+                            if (e && e.name === 'AbortError') { resolve(null); return; }
+                            console.info('[AniSync] mkv-extractor request failed:', e && e.message);
+                            resolve(null);
                         });
-                });
-            }
-
-            // Merge N shard responses into one track list. Each shard
-            // produces cues for its slice of the file's cluster
-            // offsets; we concatenate per track number and sort by
-            // time so the final cue stream is monotonically
-            // ordered (JASSUB expects that).
-            function mergeShardedExtractorResults(results) {
-                var trackByNumber = {};
-                for (var ri = 0; ri < results.length; ri++) {
-                    var tracks = (results[ri] && results[ri].tracks) || [];
-                    for (var ti = 0; ti < tracks.length; ti++) {
-                        var t = tracks[ti];
-                        if (!trackByNumber[t.number]) {
-                            // Shallow clone + empty cues bucket. The
-                            // header / codecID / etc. come from
-                            // whichever shard sees the track first;
-                            // they're identical across shards because
-                            // every shard re-parses the Tracks
-                            // element at file head.
-                            trackByNumber[t.number] = {
-                                number: t.number,
-                                language: t.language,
-                                name: t.name,
-                                codecID: t.codecID,
-                                header: t.header,
-                                cues: [],
-                            };
-                        }
-                        var bucket = trackByNumber[t.number].cues;
-                        var srcCues = t.cues || [];
-                        for (var ci = 0; ci < srcCues.length; ci++) bucket.push(srcCues[ci]);
-                    }
-                }
-                var merged = [];
-                for (var num in trackByNumber) {
-                    if (!Object.prototype.hasOwnProperty.call(trackByNumber, num)) continue;
-                    var tr = trackByNumber[num];
-                    tr.cues.sort(function (a, b) { return a.time - b.time; });
-                    merged.push(tr);
-                }
-                return { tracks: merged, extracted: true, truncated: false };
-            }
-
-            // Sharded re-fire — single-shot saw truncated:true so
-            // the file's cluster offset list doesn't fit one
-            // invocation's MAX_TOTAL_FETCH. Each shard fetches its
-            // 1/N slice, all must succeed, browser merges. Fail
-            // loud on ANY shard failure — a silently-incomplete
-            // merged track is worse than no embedded subs.
-            function shardedExtract(directUrl, signal, firstAttempt) {
-                var clustersTotal = firstAttempt.clustersTotal || 0;
-                var shards = computeShardCount(clustersTotal);
-                console.info(
-                    '[AniSync] mkv-extractor truncated single-shot ' +
-                    '(' + clustersTotal + ' clusters); escalating to ' +
-                    shards + ' shards (~' + Math.ceil(clustersTotal / shards) +
-                    ' clusters each).');
-                setEmbedStatus(
-                    'Big file — extracting across ' + shards + ' workers…',
-                    'loading');
-
-                var promises = [];
-                for (var i = 0; i < shards; i++) {
-                    promises.push(callMkvExtractor(directUrl, signal,
-                        { shards: shards, shard: i }));
-                }
-                return Promise.all(promises).then(function (results) {
-                    var failures = [];
-                    for (var i = 0; i < results.length; i++) {
-                        var r = results[i];
-                        if (!r.ok) {
-                            failures.push('shard ' + i + ': ' + r.reason +
-                                (r.error ? ' (' + r.error + ')' : ''));
-                        } else if (r.body.truncated) {
-                            failures.push('shard ' + i + ': still truncated at ' +
-                                shards + '-way split');
-                        }
-                    }
-                    if (failures.length > 0) {
-                        console.warn('[AniSync] sharded extract failed:', failures);
-                        setEmbedStatus(
-                            'Embedded extraction failed: ' + failures[0],
-                            'error');
-                        return { _giveUp: true };
-                    }
-                    var merged = mergeShardedExtractorResults(
-                        results.map(function (r) { return r.body; }));
-                    try {
-                        console.log(
-                            '[AniSync] mkv-extractor merged from ' + shards + ' shards:',
-                            merged.tracks.map(function (t) {
-                                return { num: t.number, lang: t.language, cues: t.cues.length };
-                            })
-                        );
-                    } catch (_) {}
-                    return merged;
-                });
-            }
-
-            // Parallel-retry re-fire — single-shot hit a transient
-            // failure (RD edge drop on critical reads, browser-side
-            // fetch error, worker-internal error). Fire N identical
-            // single-shot calls in parallel; each one opens a fresh
-            // worker invocation against a fresh socket to RD. We
-            // only need ONE to succeed because each retry attempts
-            // the full job, so this is the right tool for per-
-            // connection flakiness (vs. sharding which AND's failure
-            // probabilities). Cache key is identical across retries
-            // so the second successful one's cache write loses the
-            // race harmlessly.
-            function parallelRetryExtract(directUrl, signal, firstAttempt) {
-                console.info(
-                    '[AniSync] mkv-extractor transient failure ' +
-                    '(' + firstAttempt.reason + (firstAttempt.error ? ': ' + firstAttempt.error : '') + '); ' +
-                    'firing ' + MKV_EXTRACT_RETRIES + ' parallel retries.');
-                setEmbedStatus(
-                    'Retrying extraction across ' + MKV_EXTRACT_RETRIES + ' workers…',
-                    'loading');
-
-                var promises = [];
-                for (var i = 0; i < MKV_EXTRACT_RETRIES; i++) {
-                    promises.push(callMkvExtractor(directUrl, signal, null));
-                }
-                return Promise.all(promises).then(function (results) {
-                    // First clean success wins.
-                    for (var i = 0; i < results.length; i++) {
-                        if (results[i].ok && !results[i].body.truncated) {
-                            console.log('[AniSync] parallel retry: worker ' + i + ' succeeded.');
-                            return results[i].body;
-                        }
-                    }
-                    // No clean success — if any retry came back
-                    // truncated, escalate that into the sharded
-                    // path. The transient failure recovered but
-                    // the file is also memory-bound.
-                    for (var j = 0; j < results.length; j++) {
-                        if (results[j].ok && results[j].body.truncated) {
-                            console.info('[AniSync] parallel retry got truncated success, escalating to shards.');
-                            return shardedExtract(directUrl, signal, results[j].body);
-                        }
-                    }
-                    // All retries failed too. Let the caller fall
-                    // through to the streaming proxy as a last
-                    // resort — at this point the worker path is
-                    // definitively unreliable for this file.
-                    console.warn(
-                        '[AniSync] all ' + MKV_EXTRACT_RETRIES + ' parallel retries failed; ' +
-                        'reasons:',
-                        results.map(function (r) { return r.reason; }));
-                    return null;
-                });
-            }
-
-            // Single-shot extract with two distinct escalation paths
-            // depending on the failure shape:
-            //   * truncated → split-the-work sharded re-fire
-            //   * transient network/worker error → race-the-same-work
-            //                                      parallel retries
-            //   * permanent error (indexless / parse / 4xx) → null,
-            //                                                 streaming fallback
-            // Return contract:
-            //   * full extractor body  — handed to deliverExtractorResult
-            //   * null                  — fall through to streaming
-            //   * { _giveUp: true }     — sharded extract failed
-            //                             definitively; caller skips
-            //                             streaming and goes straight
-            //                             to OpenSubtitles.
-            function tryMkvExtractor(directUrl, signal) {
-                return callMkvExtractor(directUrl, signal, null).then(function (r) {
-                    if (r.ok && !r.body.truncated) {
-                        try {
-                            console.log(
-                                '[AniSync] mkv-extractor:',
-                                r.body.tracks.length, 'tracks',
-                                '(file=' + (r.body.stats && r.body.stats.fileSize) + 'B)',
-                                r.body.tracks.map(function (t) {
-                                    return { num: t.number, lang: t.language, name: t.name, cues: (t.cues || []).length };
-                                })
-                            );
-                        } catch (_) {}
-                        return r.body;
-                    }
-                    if (r.ok && r.body.truncated) {
-                        return shardedExtract(directUrl, signal, r.body);
-                    }
-                    if (r.transient) {
-                        return parallelRetryExtract(directUrl, signal, r);
-                    }
-                    console.info(
-                        '[AniSync] mkv-extractor permanent failure (' + r.reason + ')' +
-                        (r.error ? ': ' + r.error : '') +
-                        '; falling back to streaming.');
-                    return null;
                 });
             }
 
@@ -1331,7 +1019,12 @@
                 //             hanging).
                 var urlPromise;
                 if (isCorsBlockedHost(url)) {
-                    if (!CORS_PROXY_URL && !MKV_EXTRACTOR_URL) {
+                    // The in-process indexed extractor doesn't need a
+                    // CORS proxy — it fetches RD bytes server-side.
+                    // Only bail when both are unavailable, which now
+                    // just means "no cors-proxy configured" since the
+                    // in-process extractor is always present.
+                    if (!CORS_PROXY_URL) {
                         setEmbedStatus(null);
                         onComplete([]);
                         return abortCtl;
@@ -1351,30 +1044,17 @@
                 urlPromise.then(function (urls) {
                     if (abortCtl.signal.aborted) return;
 
-                    // Indexed extractor first when configured. Worker
-                    // walks the MKV's EBML index and Range-fetches
-                    // only the subtitle clusters (~10-30 MB instead
-                    // of ~700 MB streamed through cf-cors-proxy).
-                    // On any non-200 / parse failure it returns null
-                    // and we fall through to the streaming path.
+                    // Indexed extractor first — AniSync walks the MKV's
+                    // EBML index server-side and Range-fetches only the
+                    // subtitle clusters (~10-30 MB instead of the
+                    // ~700 MB-1.5 GB the streaming fallback would pull
+                    // through the user's browser). On any failure it
+                    // returns null and we fall through to streaming.
                     setEmbedStatus('Looking for embedded subtitles…', 'loading');
-                    var extractorPromise = MKV_EXTRACTOR_URL
-                        ? tryMkvExtractor(urls.direct, abortCtl.signal)
-                        : Promise.resolve(null);
+                    var extractorPromise = tryMkvExtractor(urls.direct, abortCtl.signal);
 
                     extractorPromise.then(function (extracted) {
                         if (abortCtl.signal.aborted) return;
-                        if (extracted && extracted._giveUp) {
-                            // Sharded extract failed loudly — the pill
-                            // already says why. Skip the streaming
-                            // fallback because it would hit the same
-                            // memory pressure on the browser side
-                            // (worse, actually — it reads sequentially
-                            // and can't shard). Let OpenSubtitles /
-                            // OpenSubtitles carries the sub UX from here.
-                            onComplete([]);
-                            return;
-                        }
                         if (extracted) {
                             deliverExtractorResult(extracted, onTracks, onComplete);
                             return;
