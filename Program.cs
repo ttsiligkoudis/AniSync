@@ -224,13 +224,6 @@ builder.Services.AddScoped<IAnilistFallback, AnilistFallback>();
 // per-addon config lives inside each manifest URL the user pastes on the
 // Configure page.
 builder.Services.AddSingleton<IAddonStreamService, AddonStreamService>();
-// Indexed Matroska subtitle extractor. Singleton because it holds
-// the SemaphoreSlim that throttles concurrent extractions + an
-// IMemoryCache reference that backs the 2h result cache. Behind
-// the IMkvExtractorService interface so the implementation can be
-// swapped (e.g. for a RemoteMkvExtractorService over HTTP) without
-// touching callers, if we ever split extraction into its own app.
-builder.Services.AddSingleton<IMkvExtractorService, MkvExtractorService>();
 // Singleton so the (imdb, season, episode) → tracks cache + VTT body
 // cache outlive individual requests — anime episodes are watched
 // repeatedly and the same /watch view re-fetches on every visit.
