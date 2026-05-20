@@ -280,10 +280,17 @@ pub async fn extract_subtitles(reader: &mut RangeReader, opts: &ExtractOptions) 
     }
 
     // Shard slicing: contiguous 1/N slice of the cluster offsets.
+    // Important corner case: when `shards * ceil(N/shards) > N`
+    // (e.g. 24 shards × ceil(339/24)=15 = 360 > 339), the trailing
+    // shard's `start` index lands past the end of the array. Clamp
+    // both start and end to `len` so that shard returns an empty
+    // slice rather than panicking — clients fan out a fixed shard
+    // count and we don't get to renegotiate it from the worker.
     let active_offsets: Vec<u64> = if shards > 1 {
-        let slice_size = (cluster_abs_offsets.len() + shards as usize - 1) / shards as usize;
-        let start = (shard_idx as usize) * slice_size;
-        let end = (start + slice_size).min(cluster_abs_offsets.len());
+        let total = cluster_abs_offsets.len();
+        let slice_size = (total + shards as usize - 1) / shards as usize;
+        let start = ((shard_idx as usize) * slice_size).min(total);
+        let end = (start + slice_size).min(total);
         cluster_abs_offsets[start..end].to_vec()
     } else {
         cluster_abs_offsets.clone()
