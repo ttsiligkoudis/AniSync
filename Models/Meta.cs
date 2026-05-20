@@ -192,6 +192,18 @@ namespace AnimeList.Models
         public string name { get; set; }
         public string firstAired{ get; set; }
 
+        // AniList-sourced airing timestamp (Unix seconds, UTC). Populated by
+        // AnimeController overlaying Media.airingSchedule onto the Cinemeta
+        // video list so the Detail page's "is this episode aired yet?" gate
+        // tracks AniList's community-maintained schedule rather than
+        // Cinemeta's `released` field — which lags 1–2 days behind real-world
+        // airings for some shows and made already-aired episodes look
+        // unreleased to the click handler even after the notification system
+        // (which uses the same AniList schedule) had pinged the user. Null
+        // when the cross-service mapping has no AniList id or AniList has
+        // no schedule for the episode.
+        public long? airingAt { get; set; }
+
         // Original IMDb (Cinemeta) coordinates, preserved when the
         // AnimeController-side NormaliseCourEpisodeNumbering collapses
         // the cour to within-cour 1..N for display + routing. The stream

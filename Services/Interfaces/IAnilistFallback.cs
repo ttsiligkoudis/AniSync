@@ -106,6 +106,20 @@ namespace AnimeList.Services.Interfaces
         Task<List<UpcomingEpisode>> GetUpcomingEpisodesAsync(long startUnix, long endUnix);
 
         /// <summary>
+        /// Per-episode airing timestamps for an AniList anime id. AniList's
+        /// <c>airingSchedule</c> is community-maintained and tracks the actual
+        /// broadcast date faster than Cinemeta's <c>released</c> field, which
+        /// occasionally lags 1–2 days behind a real-world release. Returns a
+        /// dictionary keyed by episode number with Unix-seconds timestamps so
+        /// the caller can overlay airing dates onto a video list matched by
+        /// episode ordinal. Cached for 1h per anilist id to keep the detail-
+        /// page render fast on repeat hits without staleness ever exceeding
+        /// the cron-driven notification cadence. Empty when AniList has no
+        /// schedule for the anime (older finished shows often don't).
+        /// </summary>
+        Task<Dictionary<int, long>> GetAiringScheduleByAnilistIdAsync(int anilistId);
+
+        /// <summary>
         /// Prequels and sequels for an AniList anime id, sorted by air year
         /// ascending so the carousel reads chronologically (story-order
         /// approximation — for the rare case where a prequel airs after its

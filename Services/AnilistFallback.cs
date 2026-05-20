@@ -916,6 +916,75 @@ namespace AnimeList.Services
             }
         }
 
+        // 1h TTL is the same horizon the notification scheduler treats as
+        // fresh enough to act on — beyond that, the daily refresh + per-
+        // minute tick combo will have re-pulled the global schedule anyway.
+        // Caching per anime keeps a hot detail page from hammering AniList
+        // on repeated reloads (e.g. an anime in active discussion on a forum
+        // funnels traffic at one id) without ever drifting past the window
+        // the notifier already considers actionable.
+        private static readonly TimeSpan AiringScheduleCacheDuration = TimeSpan.FromHours(1);
+
+        public async Task<Dictionary<int, long>> GetAiringScheduleByAnilistIdAsync(int anilistId)
+        {
+            if (anilistId <= 0) return [];
+
+            var cacheKey = $"anilist:airingSchedule:{anilistId}";
+            if (_cache.TryGetValue<Dictionary<int, long>>(cacheKey, out var cached) && cached != null)
+                return cached;
+
+            // Single Media.airingSchedule fetch with a generous perPage so a
+            // standard 12/24-episode cour resolves in one round-trip. AniList
+            // caps perPage at 50; the rare long-form continuous run (Naruto-
+            // style) would need pagination, but those are vanishingly few in
+            // the Cinemeta-mapped catalog we hit this for.
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($id: Int) {
+                        Media(id: $id, type: ANIME) {
+                            airingSchedule(perPage: 50) {
+                                nodes { episode airingAt }
+                            }
+                        }
+                    }",
+                variables = new { id = anilistId }
+            });
+
+            try
+            {
+                var data = await PostJsonAsync(requestBody);
+                var nodes = data?.Media?.airingSchedule?.nodes;
+                var result = new Dictionary<int, long>();
+                if (nodes != null)
+                {
+                    foreach (var node in nodes)
+                    {
+                        var episode = (int?)node.episode;
+                        var airingAt = (long?)node.airingAt;
+                        if (!episode.HasValue || !airingAt.HasValue) continue;
+                        // Earliest wins when AniList returns duplicate rows
+                        // for the same episode (split-cour shows occasionally
+                        // do this around airing-day shifts) so the click gate
+                        // unlocks at the first real airing, not a re-air.
+                        if (result.TryGetValue(episode.Value, out var existing) && existing <= airingAt.Value)
+                            continue;
+                        result[episode.Value] = airingAt.Value;
+                    }
+                }
+                _cache.Set(cacheKey, result, new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = AiringScheduleCacheDuration,
+                });
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[AnilistFallback] GetAiringScheduleByAnilistIdAsync failed: {ex.Message}");
+                return [];
+            }
+        }
+
         public async Task<List<Meta>> GetRelatedAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist)
             => await TranslateMetaIdsAsync(
                 CloneMetas((await FetchSidedataAsync(anilistId)).Related),
