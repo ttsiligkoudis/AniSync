@@ -711,6 +711,16 @@
                 return u;
             }
 
+            // Hosts whose cross-origin fetch() responses ship without
+            // Access-Control-Allow-Origin and must be routed through
+            // cf-cors-proxy. Same allowlist the proxy itself enforces
+            // server-side — kept in sync so the client only attempts
+            // to proxy hosts the proxy will actually serve. Was
+            // accidentally deleted in the cf-mkv-extractor cleanup,
+            // restored so isCorsBlockedHost can classify RD URLs
+            // correctly again.
+            var CORS_BLOCKED_HOST_RE = /(?:^|\.)(?:real-debrid\.com|alldebrid\.com|debrid-link\.com|premiumize\.me|torbox\.app|offcloud\.com|strem\.fun)$/i;
+
             function isCorsBlockedHost(url) {
                 try {
                     var h = new URL(url, window.location.href).hostname;
