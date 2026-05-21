@@ -627,17 +627,23 @@
             function applySubtitle(item) {
                 tearDownJassub();
                 if (!art) return;
+                // ArtPlayer's native subtitle overlay renders every cue
+                // in one centred stack regardless of the WebVTT cue
+                // settings — so positioned sign translations / song
+                // lyric overlays all collapse on top of each other.
+                // Disabled across every branch; the browser's native
+                // <track> rendering (managed by setActiveSubtitleTrack
+                // below) honours line / position / align so the layout
+                // matches what libass produces in Stremio.
+                art.subtitle.show = false;
                 if (item.kind === 'none') {
-                    art.subtitle.show = false;
-                    syncCastSubtitleTrack(null, null, null);
+                    setActiveSubtitleTrack(null, null, null);
                     currentSubKind = 'none';
                     currentSubKey = null;
                     return;
                 }
                 if (item.kind === 'vtt') {
-                    art.subtitle.show = true;
-                    art.subtitle.switch(item.url, { name: item.html });
-                    syncCastSubtitleTrack(item.url, item.html, item.lang);
+                    setActiveSubtitleTrack(item.url, item.html, item.lang);
                     currentSubKind = 'vtt';
                     currentSubKey = item.url;
                     return;
@@ -652,25 +658,10 @@
                     // from tainted sources` because the WebCodecs
                     // render path samples pixels from a cross-origin
                     // <video> (no CORS = tainted = no VideoFrame).
-                    // The constructor returns "successfully" so our
-                    // canvas-sized watchdog doesn't catch it, and
-                    // libass-wasm spams fontselect failures on top.
-                    //
-                    // VTT loses styling (font / colour / position /
-                    // karaoke effects) but ArtPlayer's native pipeline
-                    // renders it on every browser without any
-                    // CORS/WebCodecs/local-font moving parts. The
-                    // dialogue is readable, which is what users
-                    // actually need from an embedded sub when
-                    // OpenSubtitles don't have a match.
-                    art.subtitle.show = false;
-                    // Embedded SSA → VTT lands on a blob: URL local to
-                    // the browser, which the cast receiver can't fetch
-                    // cross-process. Clear the cast track so the TV
-                    // doesn't stall waiting on a URL it can't resolve;
-                    // local playback still gets the SSA via ArtPlayer's
-                    // own pipeline below.
-                    syncCastSubtitleTrack(null, null, null);
+                    // VTT loses styling (font / colour / karaoke
+                    // effects) but the converter preserves positioning
+                    // (\an, \pos, \move) as cue settings, so sign /
+                    // lyric overlays still land in the right spots.
                     currentSubKind = 'ass';
                     currentSubKey = item.html || (item.label || 'Embedded') + ' SSA';
                     renderAssAsVtt(item);
@@ -678,46 +669,48 @@
                 }
             }
 
-            // Keeps a single <track> element on the underlying <video>
-            // pointed at whatever OpenSubtitles VTT the user has active.
-            // ArtPlayer renders subs locally via its own div overlay
-            // (art.subtitle.switch), so this track stays mode='hidden'
-            // for the browser tab — the only consumer is the Cast SDK,
-            // which picks up <track> children when the user hits the
-            // native cast button and forwards them to the Chromecast
-            // Default Media Receiver as a captions track. Without
-            // this the TV plays the raw video with no subs while the
-            // phone shows them via the canvas-style overlay (which
-            // never makes it across the cast bridge).
+            // Single source of truth for the active subtitle track —
+            // appends a <track data-active-subtitle> child onto
+            // art.video pointed at the current cue source (a VTT URL
+            // for OpenSubtitles, a blob: URL for the SSA→VTT
+            // conversion). Set to mode='showing' so the browser's
+            // native caption renderer takes over from ArtPlayer's
+            // overlay; native rendering honours WebVTT cue settings
+            // (line / position / align), so cues land at the spots the
+            // ASS / VTT source intended instead of being centre-stacked.
+            // Doubles as the cast track — Chromecast Default Media
+            // Receiver picks up <track> children automatically, so the
+            // TV gets the same captions the browser shows.
             //
-            // Skipped for the 'ass' branch (blob: URL the receiver
-            // can't fetch) and the 'none' branch (just clears).
-            function syncCastSubtitleTrack(url, label, lang) {
+            // Skipped for 'none' (just clears).
+            function setActiveSubtitleTrack(url, label, lang) {
                 if (!art || !art.video) return;
                 var video = art.video;
-                var track = video.querySelector('track[data-cast-subtitle]');
+                var track = video.querySelector('track[data-active-subtitle]');
                 if (!url) {
                     if (track) track.parentNode.removeChild(track);
                     return;
                 }
                 if (!track) {
                     track = document.createElement('track');
-                    track.setAttribute('data-cast-subtitle', '1');
+                    track.setAttribute('data-active-subtitle', '1');
                     track.kind = 'subtitles';
                     track.default = true;
                     video.appendChild(track);
                 }
-                // Absolutise the URL — Cast receivers can't resolve
-                // path-relative refs against the sender tab's location;
-                // they'd try to fetch against gstatic.com and 404.
+                // Absolutise URLs — cast receivers can't resolve path-
+                // relative refs against the sender tab's location, so
+                // both the local browser fetch and any cast session
+                // need a fully-qualified URL.
                 try { track.src = new URL(url, location.href).href; }
                 catch (_) { track.src = url; }
                 if (lang) track.srclang = lang;
                 if (label) track.label = label;
-                // hidden so the browser doesn't dual-render with
-                // ArtPlayer's overlay; the Cast SDK still picks up the
-                // track regardless of mode.
-                try { if (track.track) track.track.mode = 'hidden'; }
+                // 'showing' draws the cues via the browser's native
+                // caption renderer (the only renderer in the loop that
+                // respects cue settings — ArtPlayer's overlay ignores
+                // them, libass/JASSUB can't run on tainted video).
+                try { if (track.track) track.track.mode = 'showing'; }
                 catch (_) { /* IE-style track shape — ignore */ }
             }
 
@@ -1898,12 +1891,7 @@
                     url = URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
                     _vttBlobCache[cacheKey] = url;
                 }
-                try {
-                    art.subtitle.show = true;
-                    art.subtitle.switch(url, { name: (item.html || 'Embedded') + ' (VTT)', type: 'vtt' });
-                } catch (e) {
-                    console.warn('VTT fallback failed:', e);
-                }
+                setActiveSubtitleTrack(url, (item.html || 'Embedded') + ' (VTT)', item.lang);
             }
 
             function showFallback(stream, reason) {
@@ -2277,17 +2265,15 @@
                         // MB of speculative fetch for fewer stalls.
                         preload: 'auto',
                     },
-                    subtitle: defaultSubIdx >= 0 ? {
-                        url: subtitles[defaultSubIdx].url,
-                        type: 'vtt',
-                        encoding: 'utf-8',
-                        // escape: true keeps ArtPlayer HTML-escaping
-                        // subtitle text — OpenSubtitles content is
-                        // third-party and we don't want stray <script>
-                        // / <img> tags landing in the captions overlay.
-                        escape: true,
-                        name: subtitles[defaultSubIdx].label || subtitles[defaultSubIdx].lang,
-                    } : {},
+                    // Subtitle rendering is driven by setActiveSubtitleTrack
+                    // (browser-native <track>) instead of ArtPlayer's
+                    // overlay, because the native renderer honours WebVTT
+                    // cue settings (line / position / align) and the
+                    // overlay doesn't. Pass an empty subtitle config so
+                    // ArtPlayer doesn't auto-load the default sub into
+                    // its own overlay and double-render alongside the
+                    // native <track>.
+                    subtitle: {},
                     settings: settings,
                     highlight: highlight,
                     controls: [
@@ -2322,17 +2308,16 @@
                     ],
                 });
 
-                // Initial cast-track sync — ArtPlayer's own
-                // `subtitle:` config above only wires its internal
-                // overlay; applySubtitle doesn't fire on the auto-load
-                // path, so the native <track> we expose to the Cast
-                // SDK starts empty and a viewer who hits the cast
-                // button before touching the picker gets a TV with no
-                // captions. Mirrors the defaultSubIdx pick into the
-                // <track> element once art.video exists.
+                // Initial subtitle-track activation. ArtPlayer's
+                // built-in overlay is disabled (subtitle: {} above) so
+                // sub rendering lives entirely on the <track> we
+                // attach here — applySubtitle handles all later
+                // changes, but the very first cue source has to be
+                // primed manually because the player wasn't built with
+                // a subtitle URL of its own to load.
                 if (defaultSubIdx >= 0) {
                     var defaultSub = subtitles[defaultSubIdx];
-                    syncCastSubtitleTrack(
+                    setActiveSubtitleTrack(
                         defaultSub.url,
                         defaultSub.label || defaultSub.lang,
                         defaultSub.lang);
