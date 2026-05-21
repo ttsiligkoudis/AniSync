@@ -66,7 +66,18 @@ namespace AnimeList.Controllers
                 // JSON untouched.
                 if (id.StartsWith(imdbPrefix) && result is string serializedResult)
                 {
-                    result = await EnrichSerializedWithAnilistSidedataAsync(serializedResult, id);
+                    // groupSeasons=true on this path: we're already serving
+                    // the franchise umbrella (the catalog emitted the tt id
+                    // because grouping is on), so the Similar / Sequel /
+                    // Prequel chip URLs should resolve to whichever tt /
+                    // tmdb / native id the user's catalog handles for that
+                    // recommendation. translateTo is the user's primary so
+                    // recs without an imdb mapping fall back to the right
+                    // per-service id (kitsu:/mal:/anilist:N).
+                    result = await EnrichSerializedWithAnilistSidedataAsync(
+                        serializedResult, id,
+                        tokenData?.anime_service ?? AnimeService.Anilist,
+                        groupSeasons: true);
                 }
                 if (deserialize) result = DeserializeObject<dynamic>((string)result).meta;
                 return (result, !deserialize);
@@ -286,7 +297,7 @@ namespace AnimeList.Controllers
         /// parser / network blow-up never breaks the regular meta
         /// response.
         /// </summary>
-        private async Task<string> EnrichSerializedWithAnilistSidedataAsync(string json, string imdbId)
+        private async Task<string> EnrichSerializedWithAnilistSidedataAsync(string json, string imdbId, AnimeService translateTo, bool groupSeasons)
         {
             if (string.IsNullOrEmpty(json) || string.IsNullOrEmpty(imdbId)) return json;
 
@@ -316,10 +327,10 @@ namespace AnimeList.Controllers
             try { supplementary = await _anilistFallback.GetSupplementaryLinksAsync(anilistId.Value) ?? []; }
             catch (Exception ex) { _logger.LogWarning(ex, "MetaController GetSupplementaryLinksAsync failed for anilist {Id}", anilistId); }
 
-            try { relatedLinks = await _anilistFallback.GetRelatedLinksAsync(anilistId.Value) ?? []; }
+            try { relatedLinks = await _anilistFallback.GetRelatedLinksAsync(anilistId.Value, translateTo, groupSeasons) ?? []; }
             catch (Exception ex) { _logger.LogWarning(ex, "MetaController GetRelatedLinksAsync failed for anilist {Id}", anilistId); }
 
-            try { recommendationLinks = await _anilistFallback.GetRecommendationsAsync(anilistId.Value, AnimeService.Anilist) ?? []; }
+            try { recommendationLinks = await _anilistFallback.GetRecommendationsAsync(anilistId.Value, translateTo, groupSeasons) ?? []; }
             catch (Exception ex) { _logger.LogWarning(ex, "MetaController GetRecommendationsAsync failed for anilist {Id}", anilistId); }
 
             if (supplementary.Count == 0 && relatedLinks.Count == 0 && recommendationLinks.Count == 0)

@@ -727,7 +727,17 @@ namespace AnimeList.Services
                     //      from the extended GraphQL subselection.
                     var recIsMovie = IsMovieFormat((string)rec.format);
                     var recStremioType = recIsMovie ? MetaType.movie.ToString() : MetaType.series.ToString();
-                    var recEncodedId = Uri.EscapeDataString($"{anilistPrefix}{recId.Value}");
+                    // Resolve to whichever id-space the user's Stremio
+                    // catalogs (tt / tmdb / kitsu: / mal: / anilist:N)
+                    // so a chip tap on "Similar" hands the recommendation
+                    // off to the user's installed addon instead of always
+                    // anilist:N. Falls back to anilist:N when the
+                    // mapping table has no matching cross-service entry.
+                    var recResolvedId = await _anilistFallback.ResolveStremioIdAsync(
+                        recId.Value,
+                        tokenData?.anime_service ?? AnimeService.Anilist,
+                        groupSeasons) ?? $"{anilistPrefix}{recId.Value}";
+                    var recEncodedId = Uri.EscapeDataString(recResolvedId);
                     anime.links.Add(new Link
                     {
                         name = name,
@@ -792,7 +802,17 @@ namespace AnimeList.Services
 
                     var isRelMovie = IsMovieFormat((string)node.format);
                     var stremioType = isRelMovie ? MetaType.movie.ToString() : MetaType.series.ToString();
-                    var encodedId = Uri.EscapeDataString($"{anilistPrefix}{relId.Value}");
+                    // Same per-user id resolution as the Similar chips
+                    // above — anilist:N is just one of the possible
+                    // catalog ids, so resolve to whichever id-space the
+                    // user's Stremio is configured for (tt / tmdb /
+                    // kitsu: / mal: / anilist:N) and fall back to
+                    // anilist:N if no cross-service mapping exists.
+                    var relResolvedId = await _anilistFallback.ResolveStremioIdAsync(
+                        relId.Value,
+                        tokenData?.anime_service ?? AnimeService.Anilist,
+                        groupSeasons) ?? $"{anilistPrefix}{relId.Value}";
+                    var encodedId = Uri.EscapeDataString(relResolvedId);
                     anime.links.Add(new Link
                     {
                         name = name,

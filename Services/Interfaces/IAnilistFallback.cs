@@ -26,11 +26,14 @@ namespace AnimeList.Services.Interfaces
 
         /// <summary>
         /// Fetches up to 25 recommendations for an AniList anime id. Each recommendation is
-        /// returned as a <see cref="Link"/> with category "Similar" and a url pointing at the
-        /// AniList page (clients can follow / share). Ids are translated to the requested
-        /// service for use in cross-service rendering.
+        /// returned as a <see cref="Link"/> with category "Similar" and a
+        /// web.stremio.com deep-link URL whose id is resolved per-caller
+        /// (translateTo + groupSeasons) — same per-user id-space mapping the
+        /// Sequel / Prequel chips use so a chip tap stays inside whichever
+        /// addon catalog the user's Stremio is configured for instead of
+        /// always pointing at anilist:N.
         /// </summary>
-        Task<List<Link>> GetRecommendationsAsync(int anilistId, AnimeService translateTo);
+        Task<List<Link>> GetRecommendationsAsync(int anilistId, AnimeService translateTo, bool groupSeasons);
 
         /// <summary>
         /// Returns slim <see cref="Meta"/> entries (id + name + poster +
@@ -140,8 +143,23 @@ namespace AnimeList.Services.Interfaces
         /// Backs MetaController's imdb-grouped enrichment, which has to
         /// inject these into the raw Cinemeta JSON because the imdb path
         /// never goes through AnilistService's inline relation builder.
+        /// The id in each Link's url is resolved per-caller (translateTo +
+        /// groupSeasons) so a chip tap lands on whichever catalog the
+        /// user's Stremio is configured for instead of always anilist:N.
         /// </summary>
-        Task<List<Link>> GetRelatedLinksAsync(int anilistId);
+        Task<List<Link>> GetRelatedLinksAsync(int anilistId, AnimeService translateTo, bool groupSeasons);
+
+        /// <summary>
+        /// Resolves an AniList id into the Stremio meta id the user's
+        /// catalog uses — tt... / tmdb:... when groupSeasons is on and a
+        /// cross-service mapping exists, otherwise the user's primary's
+        /// native id (kitsu:N / mal:N / anilist:N). Used to stamp the
+        /// "Similar" + Sequel / Prequel Stremio chip URLs so taps stay
+        /// inside the user's installed addon catalog instead of always
+        /// resolving to anilist:N. Wraps the same external/native pair
+        /// the meta-translation path uses internally.
+        /// </summary>
+        Task<string> ResolveStremioIdAsync(int anilistId, AnimeService translateTo, bool groupSeasons);
 
         /// <summary>
         /// Walks a list of Meta and replaces every anilist:N id with the

@@ -494,7 +494,7 @@ namespace AnimeList.Services
             {
                 try
                 {
-                    var similar = await _anilistFallback.GetRecommendationsAsync(mapping.AnilistId.Value, AnimeService.Kitsu);
+                    var similar = await _anilistFallback.GetRecommendationsAsync(mapping.AnilistId.Value, AnimeService.Kitsu, groupSeasons);
                     anime.links.AddRange(similar);
                     // Parallel call for the detail-page carousel — same upstream,
                     // richer per-rec shape. Kept separate from the Link-flavoured
