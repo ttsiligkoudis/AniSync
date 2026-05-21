@@ -2578,6 +2578,12 @@ body.modal-open {
 ::cue {
     background-color: transparent;
     color: #fff;
+    /* Slightly bolder than browser default — caption text reads
+       better at typical video viewing distances when it's heavier
+       than the surrounding ASS / Cinemeta UI text, and the heavier
+       weight also helps the text-shadow outline hold up against
+       busy backgrounds. */
+    font-weight: 600;
     text-shadow:
         1px 1px 1px rgba(0, 0, 0, 0.95),
         -1px -1px 1px rgba(0, 0, 0, 0.95),
