@@ -53,6 +53,21 @@ namespace AnimeList.Controllers
 
             if (result != null)
             {
+                // Cinemeta's meta payload has none of the AniList-sourced
+                // chip strip — tag / studio / staff / sequel / prequel /
+                // similar are all empty there. groupSeasons users open
+                // every franchise umbrella through this path (the
+                // catalog emits tt ids when grouping is on), so without
+                // this enrichment they'd see a bare meta page with no
+                // links at all. Pulls the same Sidedata bucket the
+                // per-service paths and web-app Extras endpoint already
+                // use, keyed off the head-cour anilist id from the imdb
+                // mapping. Best-effort: any failure leaves the cinemeta
+                // JSON untouched.
+                if (id.StartsWith(imdbPrefix) && result is string serializedResult)
+                {
+                    result = await EnrichSerializedWithAnilistSidedataAsync(serializedResult, id);
+                }
                 if (deserialize) result = DeserializeObject<dynamic>((string)result).meta;
                 return (result, !deserialize);
             }
@@ -255,6 +270,110 @@ namespace AnimeList.Controllers
                 if (link == null || string.IsNullOrEmpty(link.category)) continue;
                 var rewritten = BuildDiscoverUrlForCategory(origin, link);
                 if (!string.IsNullOrEmpty(rewritten)) link.url = rewritten;
+            }
+        }
+
+        /// <summary>
+        /// Mirrors <see cref="EnrichWithAnilistSupplementaryLinksAsync"/> +
+        /// <see cref="RewriteSupplementaryLinkUrls"/> for the imdb-grouped
+        /// path, where the meta comes back from Cinemeta as a raw JSON
+        /// string instead of a per-service <see cref="Meta"/> object.
+        /// Resolves the imdb id to a head-cour AniList id via the mapping
+        /// table, pulls supplementary + sequel / prequel + similar links
+        /// from <see cref="IAnilistFallback"/>'s cached sidedata, then
+        /// JObject-parses the cinemeta JSON to append them onto
+        /// meta.links. Returns the input unchanged on any failure so a
+        /// parser / network blow-up never breaks the regular meta
+        /// response.
+        /// </summary>
+        private async Task<string> EnrichSerializedWithAnilistSidedataAsync(string json, string imdbId)
+        {
+            if (string.IsNullOrEmpty(json) || string.IsNullOrEmpty(imdbId)) return json;
+
+            int? anilistId = null;
+            try
+            {
+                var mappings = await _mappingService.GetImdbMapping(imdbId);
+                // Head cour first — tags / studios / staff are shared
+                // across cours of the same franchise, so the lowest-
+                // season entry gives us the most representative source
+                // for the franchise umbrella the user is looking at.
+                anilistId = mappings?
+                    .Where(m => m.AnilistId.HasValue)
+                    .OrderBy(m => m.ImdbSeason ?? int.MaxValue)
+                    .FirstOrDefault()?.AnilistId;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "MetaController imdb→anilist mapping lookup failed for {Id}", imdbId);
+            }
+            if (!anilistId.HasValue) return json;
+
+            List<Link> supplementary = [];
+            List<Link> relatedLinks = [];
+            List<Link> recommendationLinks = [];
+
+            try { supplementary = await _anilistFallback.GetSupplementaryLinksAsync(anilistId.Value) ?? []; }
+            catch (Exception ex) { _logger.LogWarning(ex, "MetaController GetSupplementaryLinksAsync failed for anilist {Id}", anilistId); }
+
+            try { relatedLinks = await _anilistFallback.GetRelatedLinksAsync(anilistId.Value) ?? []; }
+            catch (Exception ex) { _logger.LogWarning(ex, "MetaController GetRelatedLinksAsync failed for anilist {Id}", anilistId); }
+
+            try { recommendationLinks = await _anilistFallback.GetRecommendationsAsync(anilistId.Value, AnimeService.Anilist) ?? []; }
+            catch (Exception ex) { _logger.LogWarning(ex, "MetaController GetRecommendationsAsync failed for anilist {Id}", anilistId); }
+
+            if (supplementary.Count == 0 && relatedLinks.Count == 0 && recommendationLinks.Count == 0)
+                return json;
+
+            try
+            {
+                var obj = JObject.Parse(json);
+                var metaJ = obj["meta"] as JObject;
+                if (metaJ == null) return json;
+
+                var links = metaJ["links"] as JArray;
+                if (links == null) { links = []; metaJ["links"] = links; }
+
+                var origin = $"{Request.Scheme}://{Request.Host}";
+
+                foreach (var link in supplementary)
+                {
+                    if (link == null) continue;
+                    var rewritten = BuildDiscoverUrlForCategory(origin, link);
+                    links.Add(JObject.FromObject(new
+                    {
+                        name = link.name,
+                        category = link.category,
+                        url = !string.IsNullOrEmpty(rewritten) ? rewritten : link.url,
+                    }));
+                }
+                foreach (var link in relatedLinks)
+                {
+                    if (link == null) continue;
+                    links.Add(JObject.FromObject(new
+                    {
+                        name = link.name,
+                        category = link.category,
+                        url = link.url,
+                    }));
+                }
+                foreach (var link in recommendationLinks)
+                {
+                    if (link == null) continue;
+                    links.Add(JObject.FromObject(new
+                    {
+                        name = link.name,
+                        category = link.category,
+                        url = link.url,
+                    }));
+                }
+
+                return obj.ToString(Newtonsoft.Json.Formatting.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "MetaController imdb meta enrichment serialization failed for {Id}", imdbId);
+                return json;
             }
         }
 
