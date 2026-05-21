@@ -1311,13 +1311,20 @@ else
     // protocol first, fall back to the web app when no handler claims it.
     //
     // The pattern is the same one Slack / Discord / Spotify use for their
-    // "open in app" deep links: pre-open a placeholder tab synchronously
-    // with the click (so popup blockers permit it — we're still inside
-    // the user-gesture window), fire the protocol URL, then watch for the
-    // page losing visibility / focus. If the OS hands off to a registered
-    // Stremio handler within ~1.5s, the visibilitychange / blur / pagehide
-    // event fires and we close the placeholder; otherwise we promote it
-    // to the web Stremio URL so the user still lands somewhere useful.
+    // "open in app" deep links: fire the protocol URL on the current tab,
+    // watch the page for visibilitychange / blur / pagehide. If the OS
+    // hands off to a registered Stremio handler within ~1.5s the page
+    // loses focus and we leave it alone — when the user comes back from
+    // the app they're still on the same anime detail page they clicked
+    // from. If nothing claims the protocol in time we navigate the
+    // current tab to the web Stremio URL so the click isn't a no-op
+    // (browser back restores the detail page on return).
+    //
+    // We deliberately don't pre-open a placeholder tab here: window.open
+    // for a foreground _blank target fires blur / visibilitychange on
+    // the source tab itself, which is indistinguishable from the OS
+    // handing off to a native handler. The earlier placeholder version
+    // tripped on that — every click looked like a successful app launch.
     //
     // The anchor's href stays pointed at the web fallback so right-click
     // "open in new tab", middle-click, copy-link, and no-JS scrapers all
@@ -1335,27 +1342,22 @@ else
 
                 e.preventDefault();
 
-                // Pre-open a placeholder tab while we're still in the
-                // user-gesture context. Without this, the post-timeout
-                // window.open below is blocked by every modern popup
-                // blocker. Falls back to current-tab navigation if the
-                // user has popups blocked entirely.
-                var fallbackTab = null;
-                try { fallbackTab = window.open('about:blank', '_blank'); } catch (_) { }
-
                 var appClaimed = false;
                 var claim = function () { appClaimed = true; };
                 document.addEventListener('visibilitychange', claim, { once: true });
                 window.addEventListener('blur', claim, { once: true });
                 window.addEventListener('pagehide', claim, { once: true });
 
-                // Trigger the stremio:// scheme. On mobile with the app
-                // installed the OS switches focus to Stremio; on desktop
-                // with a registered handler the browser shows its native
-                // "Open Stremio?" prompt. On systems without a handler
-                // modern browsers silently no-op (older iOS sometimes
-                // shows "address is invalid", which is acceptable
-                // degradation for the no-app case).
+                // Trigger the stremio:// scheme on the current tab. On
+                // mobile with the app installed the OS switches focus
+                // to Stremio (no current-tab navigation happens). On
+                // desktop with a registered handler the browser shows
+                // its built-in "Open Stremio?" prompt without leaving
+                // the page. On systems without a handler modern
+                // browsers either silently no-op (mobile, modern
+                // desktops) or briefly attempt navigation and stay on
+                // a protocol-error page — we paper over that case via
+                // the timeout fallback below.
                 try { window.location.href = appUrl; } catch (_) { }
 
                 setTimeout(function () {
@@ -1363,22 +1365,17 @@ else
                     window.removeEventListener('blur', claim);
                     window.removeEventListener('pagehide', claim);
 
-                    if (appClaimed) {
-                        // App took focus — discard the placeholder so the
-                        // user isn't left with a stray blank tab.
-                        if (fallbackTab) {
-                            try { fallbackTab.close(); } catch (_) { }
-                        }
-                    } else if (fallbackTab) {
-                        // No handler claimed the deep link in time —
-                        // promote the placeholder to the web fallback.
-                        try { fallbackTab.location.href = webUrl; } catch (_) { }
-                    } else {
-                        // Popup blocker nuked the placeholder; navigate
-                        // the current tab as the last-resort fallback so
-                        // the click isn't a no-op.
-                        window.location.href = webUrl;
-                    }
+                    if (appClaimed || document.hidden) return;
+
+                    // No handler claimed the deep link in time —
+                    // navigate the current tab to the web Stremio URL
+                    // so the click isn't a no-op. window.open from a
+                    // setTimeout sits outside the original user-
+                    // gesture window and gets blocked by every modern
+                    // popup blocker, which is why we navigate in-place
+                    // rather than spawning a new tab. Browser back
+                    // restores the detail page.
+                    window.location.href = webUrl;
                 }, 1500);
             });
         });
