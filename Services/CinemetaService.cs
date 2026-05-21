@@ -76,6 +76,87 @@ namespace AnimeList.Services
             }
         }
 
+        public async Task<Meta> GetMetaAsync(string imdbId)
+        {
+            if (string.IsNullOrEmpty(imdbId)) return null;
+            var content = await GetAnimeByIdAsync(null, imdbId);
+            if (string.IsNullOrEmpty(content)) return null;
+
+            try
+            {
+                // DateParseHandling.None keeps the `released` ISO strings on
+                // Video as-is — Newtonsoft would otherwise coerce them to
+                // local-time DateTime and the downstream airing-overlay /
+                // future-check logic expects the raw ISO prefix.
+                var result = JObject.Load(new JsonTextReader(new StringReader(content))
+                {
+                    DateParseHandling = DateParseHandling.None,
+                });
+                var m = result["meta"] as JObject;
+                if (m == null) return null;
+
+                var description = (string)m["description"] ?? string.Empty;
+                var meta = new Meta(description)
+                {
+                    id = (string)m["id"] ?? imdbId,
+                    name = (string)m["name"],
+                    poster = (string)m["poster"],
+                    background = (string)m["background"],
+                    type = (string)m["type"] ?? MetaType.series.ToString(),
+                };
+
+                // Cinemeta hands imdbRating back as a string ("8.4"). 0/empty
+                // means "no rating" — surface null in that case so the card's
+                // score badge renders cleanly instead of "★ 0.0".
+                var ratingRaw = (string)m["imdbRating"];
+                if (!string.IsNullOrEmpty(ratingRaw)
+                    && double.TryParse(ratingRaw, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var rating)
+                    && rating > 0)
+                {
+                    meta.score = Math.Round(rating, 1);
+                }
+
+                // releaseInfo shapes: "2020", "2020-", "2020-2024". The four-
+                // digit prefix is always the start year (Cinemeta's own
+                // convention) so a leading int parse gives us the right thing
+                // without splitting on the dash.
+                var releaseInfo = (string)m["releaseInfo"];
+                if (!string.IsNullOrEmpty(releaseInfo) && releaseInfo.Length >= 4
+                    && int.TryParse(releaseInfo[..4], out var year))
+                {
+                    meta.year = year;
+                }
+
+                // Runtime is "24 min" / "24" / null — parse the leading int so
+                // the info row's "· 24 min" suffix renders when known.
+                var runtime = (string)m["runtime"];
+                if (!string.IsNullOrEmpty(runtime))
+                {
+                    var digits = new string(runtime.TakeWhile(char.IsDigit).ToArray());
+                    if (int.TryParse(digits, out var mins) && mins > 0) meta.avgDuration = mins;
+                }
+
+                if (m["genres"] is JArray genres)
+                {
+                    meta.genres = genres.Select(t => (string)t)
+                        .Where(s => !string.IsNullOrEmpty(s))
+                        .ToList();
+                }
+
+                if (m["videos"] is JArray)
+                {
+                    meta.videos = SafeGet<List<Video>>(result, "meta", "videos") ?? [];
+                }
+
+                return meta;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         public async Task<List<Video>> GetEpisodesAsync(string imdbId, int? cinemetaSeason)
         {
             try
