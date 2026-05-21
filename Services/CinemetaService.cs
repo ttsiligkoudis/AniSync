@@ -242,8 +242,28 @@ namespace AnimeList.Services
                 var bySeason = allVideos.Where(v => v.season == cinemetaSeason.Value).ToList();
                 if (bySeason.Count > 0)
                 {
-                    _logger.LogInformation("GetCourEpisodes: imdb={Imdb} season-filter matched {Count} videos for season={Season}.",
-                        imdbId, bySeason.Count, cinemetaSeason);
+                    // Cap to AniList's claimed episode count when known.
+                    // Cinemeta's season buckets occasionally carry
+                    // trailing entries past the cour's real run — IMDb
+                    // pre-populates placeholders for announced-but-
+                    // unaired episodes, and a handful of franchises
+                    // have extra special / movie entries filed under
+                    // the same season number — which would inflate the
+                    // detail page's episode list past what AniList
+                    // reports. The cumulative-index branch below
+                    // already takes only currentEpisodeCount entries;
+                    // this matches that behaviour here.
+                    if (currentEpisodeCount > 0 && bySeason.Count > currentEpisodeCount)
+                    {
+                        _logger.LogInformation("GetCourEpisodes: imdb={Imdb} season-filter matched {Count} videos for season={Season}, capping to {Cap} per AniList episode count.",
+                            imdbId, bySeason.Count, cinemetaSeason, currentEpisodeCount);
+                        bySeason = bySeason.Take(currentEpisodeCount).ToList();
+                    }
+                    else
+                    {
+                        _logger.LogInformation("GetCourEpisodes: imdb={Imdb} season-filter matched {Count} videos for season={Season}.",
+                            imdbId, bySeason.Count, cinemetaSeason);
+                    }
                     return bySeason;
                 }
             }
