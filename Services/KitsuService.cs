@@ -480,6 +480,18 @@ namespace AnimeList.Services
                     }
                 }
 
+                // AniList streamingEpisodes fallback — Kitsu's episode
+                // include can be empty for newer / niche anime, so
+                // reach across to AniList (via the cross-service
+                // mapping) for one more source of per-episode data
+                // before leaving the detail page with a blank list.
+                // Best-effort: any failure leaves anime.videos empty.
+                if (anime.videos.Count == 0 && mapping?.AnilistId != null)
+                {
+                    try { anime.videos = await _anilistFallback.GetEpisodeVideosAsync(mapping.AnilistId.Value) ?? []; }
+                    catch { anime.videos = []; }
+                }
+
                 // Stremio rejects (renders blank) when video.id doesn't share a prefix with
                 // meta.id, so make sure every video lives in the calling service's id space
                 // regardless of whether the loop above ran or Cinemeta filled them in.
