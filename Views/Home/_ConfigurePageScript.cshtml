@@ -522,6 +522,12 @@
     async function saveFlags() {
         if (!configUid) return;
         var f = readFlags();
+        // 0x20 = enableSeasonGrouping bit on flags3. Captured before
+        // the POST so we can compare against the last-saved baseline
+        // (initialFlags3) and invalidate the dashboard's Continue
+        // Watching cache when the toggle flipped — see the wipe block
+        // below the save.
+        var groupSeasonsChanged = (f.flags3 & 0x20) !== (initialFlags3 & 0x20);
         var resp = await fetch('/Home/SaveConfig', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -533,6 +539,22 @@
             configRevision = data.revision;
             refreshUrls();
         }
+        if (groupSeasonsChanged) {
+            // The Continue Watching cache is keyed only by client
+            // storage — flipping Group anime seasons changes which id
+            // space the cards link to (per-cour anilist: / mal: /
+            // kitsu: when off, tt umbrellas when on), so stale entries
+            // would route to the wrong detail page until the cache
+            // TTL elapsed. Wipe so the next dashboard render fetches
+            // a fresh list against the new grouping.
+            try { localStorage.removeItem('anisync.continueWatching.v1'); }
+            catch (_) { /* quota / private mode — best-effort */ }
+        }
+        // Re-baseline so a subsequent toggle-and-save in the same
+        // session compares against the just-saved state (toggle on,
+        // save, toggle off, save: the second save should also see a
+        // change and wipe again).
+        initialFlags3 = f.flags3;
     }
 
     // Both install buttons trigger a save first so the new URL reflects the latest flags.
