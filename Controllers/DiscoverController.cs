@@ -95,13 +95,16 @@ namespace AnimeList.Controllers
             // family-safe results; users opt in via /configure Preferences.
             var hideAdult = configuration?.showAdultContent != true;
 
-            // Discover is always ungrouped — the enableSeasonGrouping pref now
-            // only governs Stremio's catalog endpoints. The site renders every
-            // cour as its own card so users can land directly on the season
-            // they're interested in rather than navigating through a grouped
-            // umbrella entry.
+            // enableSeasonGrouping is now a general pref (not addon-only) and
+            // Discover mirrors the same gating CatalogController uses for the
+            // Stremio side: Search always runs ungrouped because the per-
+            // service dedup would otherwise rewrite a movie's name to the
+            // shortest among entries sharing an IMDb id; every other catalog
+            // honors the user's toggle so a grouped install collapses
+            // franchises consistently across web + addon.
             var listForCall = hasSearch ? ListType.Search : activeList;
-            const bool groupSeasonsForCall = false;
+            var groupSeasons = configuration?.enableSeasonGrouping == true;
+            var groupSeasonsForCall = listForCall == ListType.Search ? false : groupSeasons;
             // Tag is an AniList-native filter — MAL/Kitsu don't expose an
             // equivalent — so when a tag is requested we route through
             // AnilistFallback's anonymous browse regardless of the viewer's
@@ -229,8 +232,12 @@ namespace AnimeList.Controllers
             // Search runs as ListType.Search across the full anime database;
             // matches the addon-side branch. Pagination scroll calls don't
             // pass a search term so this stays the existing per-tab dispatch.
+            // Same enableSeasonGrouping branching as Index above — Search is
+            // pinned to ungrouped to avoid dedup name-flattening; every other
+            // list reflects the user's toggle.
             var listForCall = hasSearch ? ListType.Search : activeList;
-            const bool groupSeasonsForCall = false;
+            var groupSeasons = configuration?.enableSeasonGrouping == true;
+            var groupSeasonsForCall = listForCall == ListType.Search ? false : groupSeasons;
             var hasTag = !string.IsNullOrWhiteSpace(tag);
 
             // Kitsu's /anime?filter[season] endpoint silently ignores
