@@ -153,12 +153,14 @@
 
     </section>
 
-    @* Preferences card. Group-anime-seasons moved out of the Catalogs section
-       above so the shared partial owns every site/addon-wide toggle; hide-
-       unaired joins it on this page for non-anonymous users (anonymous users
-       get the groupSeasons toggle alone — they still have a v3 manifest
-       whose URL encodes the bit, but no library to filter unaired entries
-       against). *@
+    @* Preferences card. hide-unaired stays here for non-anonymous users since
+       it's a per-list-view toggle that's most visible alongside the addon
+       catalog controls. Group-anime-seasons used to live here too but has
+       moved to /configure's Preferences card — it's no longer addon-only
+       (the web app honors it now), so it belongs on the general settings
+       page. Anonymous users have no per-list preferences left to surface on
+       this page, so the card collapses to empty (the partial omits it when
+       the list is empty). *@
     var stremioPrefs = new List<(string Id, string Label, string Description, bool Checked)>();
     if (!Model.AnonymousUser)
     {
@@ -168,11 +170,6 @@
             "When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.",
             Model.HideUnreleasedWatching));
     }
-    stremioPrefs.Add((
-        "groupSeasons",
-        "Group anime seasons",
-        "Collapse multi-cour franchises into a single catalog card. Off shows every cour separately.",
-        Model.GroupSeasons));
     @await Html.PartialAsync("_PreferencesSection", (IReadOnlyList<(string, string, string, bool)>)stremioPrefs)
 
     <!-- ─── STREAMS ─────────────────────────────────────────────────── -->

@@ -532,12 +532,14 @@ public class HomeController : Controller
             return Unauthorized();
         }
 
-        // Match Index() exactly: dashboard always uses groupSeasons=false
-        // (each cour is its own card on the shelf) and honors the
-        // hideUnreleased site pref so post-finale episodes the user
-        // hasn't checked off don't sit at the front of the shelf.
-        const bool groupSeasons = false;
+        // Honor the user's general grouping pref the same way Library and
+        // Discover do — when on, multi-cour franchises collapse into a single
+        // IMDb-id card on the Continue Watching shelf, matching what the
+        // user sees on the Stremio addon's Currently Watching catalog.
+        // hideUnreleased keeps post-finale entries the user hasn't checked
+        // off from sitting at the front of the shelf.
         var dashboardConfig = await GetConfigByUidAsync(uid, _configStore);
+        var groupSeasons = dashboardConfig?.enableSeasonGrouping == true;
         var hideUnreleased = dashboardConfig?.hideUnreleasedFromWatching == true;
         var hideAdult = dashboardConfig?.showAdultContent != true;
 

@@ -95,7 +95,11 @@ namespace AnimeList.Controllers
             // dispatch always uses activeList (Watching/Completed/etc.); the
             // search term is applied as an in-memory post-filter below.
             var listForCall = activeList;
-            const bool groupSeasonsForCall = false;
+            // enableSeasonGrouping is the same general pref Stremio's catalog
+            // honors; the web library used to hardcode false here but the
+            // toggle is no longer addon-only — when on, multi-cour franchises
+            // collapse to a single IMDb-id card across every list surface.
+            var groupSeasonsForCall = configuration?.enableSeasonGrouping == true;
 
             // No caching on the library path — each load reflects live state
             // off the upstream service. Each per-service call returns the
@@ -192,7 +196,10 @@ namespace AnimeList.Controllers
             var hideAdult = configuration?.showAdultContent != true;
 
             var listForCall = activeList;
-            const bool groupSeasonsForCall = false;
+            // Same enableSeasonGrouping pref Index() reads above — the inline
+            // partial-refresh path needs to honor it too or the grouping would
+            // flip whenever the user used the filter/search input.
+            var groupSeasonsForCall = configuration?.enableSeasonGrouping == true;
 
             var metas = tokenData.anime_service switch
             {
