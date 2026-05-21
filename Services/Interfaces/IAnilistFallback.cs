@@ -162,6 +162,23 @@ namespace AnimeList.Services.Interfaces
         Task<string> ResolveStremioIdAsync(int anilistId, AnimeService translateTo, bool groupSeasons);
 
         /// <summary>
+        /// Last-resort episode list for entries with no IMDb mapping —
+        /// pulls AniList's per-episode <c>streamingEpisodes</c> data
+        /// (Crunchyroll / Funimation thumbnails + titles when AniList
+        /// has it) and falls back to a synthetic <c>Episode N</c> list
+        /// keyed off AniList's <c>episodes</c> count when
+        /// streamingEpisodes is empty. Wires the same id-to-AniList
+        /// conversion every primary already does via the mapping
+        /// table, so Kitsu / MAL primaries (whose native episode
+        /// endpoints can be sparse for newer or niche anime) still
+        /// get a populated episode list instead of a blank detail page.
+        /// Videos come back stamped with season=1; callers should
+        /// apply NormalizeVideoIds + any franchise-side season
+        /// restoration themselves.
+        /// </summary>
+        Task<List<Video>> GetEpisodeVideosAsync(int anilistId);
+
+        /// <summary>
         /// Walks a list of Meta and replaces every anilist:N id with the
         /// equivalent kitsu:N / mal:N native id when the mapping table has
         /// one for the requested service. Anime without a matching mapping

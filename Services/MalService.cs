@@ -354,6 +354,20 @@ namespace AnimeList.Services
                     anime.videos = fallback?.videos ?? [];
                 }
 
+                // AniList streamingEpisodes fallback — MAL has no per-
+                // episode endpoint and Kitsu's episode include can be
+                // empty for newer / niche anime, so reach across to
+                // AniList for the third source of per-episode data
+                // (titles + Crunchyroll-style thumbnails) before
+                // falling back to a fully synthetic list. Best-effort:
+                // any failure leaves anime.videos empty so the
+                // synthetic-list branch below still kicks in.
+                if (anime.videos.Count == 0 && mapping?.AnilistId != null)
+                {
+                    try { anime.videos = await _anilistFallback.GetEpisodeVideosAsync(mapping.AnilistId.Value) ?? []; }
+                    catch { anime.videos = []; }
+                }
+
                 if (anime.videos.Count == 0)
                 {
                     var episodeCount = (int?)json["num_episodes"] ?? 0;

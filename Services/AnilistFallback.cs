@@ -621,6 +621,72 @@ namespace AnimeList.Services
                 ? await ResolveExternalIdAsync(anilistId, translateTo)
                 : await ResolveNativeIdAsync(anilistId, translateTo);
 
+        public async Task<List<Video>> GetEpisodeVideosAsync(int anilistId)
+        {
+            if (anilistId <= 0) return [];
+
+            var requestBody = SerializeObject(new
+            {
+                query = @"
+                    query ($id: Int) {
+                        Media(id: $id, type: ANIME) {
+                            episodes
+                            streamingEpisodes { title thumbnail }
+                        }
+                    }",
+                variables = new { id = anilistId }
+            });
+
+            dynamic data;
+            try { data = await PostJsonAsync(requestBody); }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[AnilistFallback] GetEpisodeVideosAsync failed for {anilistId}: {ex.Message}");
+                return [];
+            }
+
+            var media = data?.Media;
+            if (media == null) return [];
+
+            // Prefer streamingEpisodes — AniList carries real per-episode
+            // titles + thumbnails for shows with a streaming-partner
+            // listing (Crunchyroll / Funimation / etc.). When it's
+            // empty, synthesise an "Episode N" list off the announced
+            // episode count so the detail page still has rows to render.
+            var result = new List<Video>();
+            var streamingEps = media.streamingEpisodes as Newtonsoft.Json.Linq.JArray;
+            if (streamingEps != null && streamingEps.Count > 0)
+            {
+                int i = 1;
+                foreach (var ep in streamingEps)
+                {
+                    var title = (string)ep["title"];
+                    var thumbnail = (string)ep["thumbnail"];
+                    result.Add(new Video
+                    {
+                        title = string.IsNullOrEmpty(title) ? $"Episode {i}" : title,
+                        thumbnail = thumbnail,
+                        season = 1,
+                        episode = i,
+                    });
+                    i++;
+                }
+                return result;
+            }
+
+            var totalEpisodes = (int?)media.episodes ?? 0;
+            for (int i = 1; i <= totalEpisodes; i++)
+            {
+                result.Add(new Video
+                {
+                    title = $"Episode {i}",
+                    season = 1,
+                    episode = i,
+                });
+            }
+            return result;
+        }
+
         /// <summary>
         /// Browse-flavour id resolution — prefers the primary's NATIVE id
         /// (kitsu:N / mal:N / anilist:N) over the cross-service imdb/tmdb
