@@ -74,6 +74,26 @@ namespace AnimeList.Controllers
             var anime = loadResult.Anime;
             if (anime == null) return null;
 
+            // Restore the franchise-side season number for Stremio's UI
+            // on per-cour entries. The loader's NormaliseCourEpisodeNumbering
+            // collapses every video to season=1 so the web app's
+            // /watch/{ep} routing and single-tab episode UI work, but
+            // Stremio renders meta.videos[].season directly in its season
+            // selector — leaving it at 1 makes a Re:Zero S4 page show as
+            // "Season 1". The cour's franchise season lives on
+            // sourceLinks.ImdbSeason (from the cross-service mapping
+            // table); apply it back to each video so Stremio's selector
+            // matches the page title. Grouped-imdb renders already keep
+            // the original season numbers intact (NormaliseCour is
+            // skipped for them), so this only runs on the per-cour path.
+            if (!loadResult.RenderedAsGrouped && loadResult.SourceLinks?.ImdbSeason is int franchiseSeason && franchiseSeason > 0)
+            {
+                foreach (var v in anime.videos ?? [])
+                {
+                    if (v != null) v.season = franchiseSeason;
+                }
+            }
+
             // Sync extras-equivalent: pull supplementary + related links
             // + recommendation links from the same Sidedata cache the
             // web app's /extras endpoint uses, merge into anime.links so
