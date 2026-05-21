@@ -8,6 +8,18 @@ namespace AnimeList.Services.Interfaces
         Task<string> GetAnimeByIdAsync(string config, string id, HttpRequest request = null);
 
         /// <summary>
+        /// Parses Cinemeta's meta JSON into an in-app <see cref="Meta"/> with
+        /// every cour's episodes attached (season numbers preserved). Used
+        /// by the imdb-grouped detail-page render: instead of fetching one
+        /// cour's data from AniList/MAL/Kitsu and stitching the franchise
+        /// video list on top, we treat Cinemeta as the source of truth for
+        /// title/synopsis/poster/episodes — mirrors how Stremio renders an
+        /// imdb-grouped catalog entry on its own. Returns null when
+        /// Cinemeta has no entry for the id.
+        /// </summary>
+        Task<Meta> GetMetaAsync(string imdbId);
+
+        /// <summary>
         /// Fetches Cinemeta's per-episode metadata (titles, thumbnails, synopses, air
         /// dates) for an IMDb-mapped show, optionally sliced to one cour. Used by the
         /// per-service GetAnimeByIdAsync paths so groupSeasons=false catalogs still get

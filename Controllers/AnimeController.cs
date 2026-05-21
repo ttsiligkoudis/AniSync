@@ -1381,90 +1381,49 @@ namespace AnimeList.Controllers
             => _mappingService.BuildSourceLinksAsync(animeId);
 
         /// <summary>
-        /// Builds a "franchise umbrella" Meta for an imdb-id deep-link —
-        /// hero metadata from the first cour mapped in the user's primary
-        /// service, with the full Cinemeta episode list (every cour's
-        /// videos, season numbers preserved) stitched in so the Detail
-        /// page's multi-season tab UI lights up across the whole franchise.
-        /// Returns null when there's no mapping for the imdb id; the
-        /// caller then falls back to whatever resolution path it has for
-        /// unknown deep-links (typically NotFound).
+        /// Builds a "franchise umbrella" Meta for an imdb-id deep-link
+        /// straight from Cinemeta — title, synopsis, poster, score, year,
+        /// runtime, genres, and the full multi-cour video list all come
+        /// from a single Cinemeta meta fetch. Mirrors Stremio's own catalog
+        /// rendering for a grouped imdb entry (Cinemeta IS Stremio's meta
+        /// provider) and skips the per-service round-trip — the imdb URL
+        /// already collapses every cour, so a single-cour's AniList/MAL/
+        /// Kitsu metadata wouldn't honestly describe the franchise anyway.
+        ///
+        /// Returns the head cour's season + anilist id alongside the
+        /// franchise Meta so the airing-schedule overlay can scope to the
+        /// right cour (first cour by default, matching the Cinemeta hero).
+        /// HeadSeason / HeadAnilistId are null when no AniList mapping
+        /// exists — the overlay then no-ops and the page falls back to
+        /// Cinemeta's <c>released</c> strings for the click gate.
         /// </summary>
         private async Task<(Meta Anime, int? HeadSeason, int? HeadAnilistId)> BuildGroupedImdbAnimeAsync(string imdbId, AnimeService animeService, TokenData tokenData)
         {
             if (string.IsNullOrEmpty(imdbId) || !imdbId.StartsWith(imdbPrefix)) return (null, null, null);
 
-            var mappings = await _mappingService.GetImdbMapping(imdbId);
-            if (mappings == null || mappings.Count == 0) return (null, null, null);
+            var anime = await _cinemetaService.GetMetaAsync(imdbId);
+            if (anime == null || anime.videos == null || anime.videos.Count == 0) return (null, null, null);
 
-            // Pick the head cour for hero metadata: earliest season first so
-            // the page reads as the franchise umbrella ("Re:ZERO" rather than
-            // "Re:ZERO Season 4"). Mirrors Stremio's catalog-side rendering
-            // for an imdb-grouped entry — Cinemeta describes the franchise
-            // by its first-season metadata, with every cour's episodes
-            // attached on the same row. Falls back through the service
-            // chain so a kitsu-only or anilist-only franchise still renders
-            // for a MAL user (the page just won't surface Manage Entry).
-            var ordered = mappings
-                .OrderBy(m => m.Season ?? int.MaxValue)
+            anime.videos = anime.videos
+                .OrderBy(v => v.season > 0 ? v.season : 1)
+                .ThenBy(v => v.episode)
                 .ToList();
-            string headId = null;
-            AnimeService headService = animeService;
-            AnimeIdMapping headMapping = null;
-            var serviceFallbackChain = new[]
-            {
-                animeService,
-                AnimeService.Anilist,
-                AnimeService.MyAnimeList,
-                AnimeService.Kitsu,
-            };
-            foreach (var svc in serviceFallbackChain)
-            {
-                foreach (var m in ordered)
-                {
-                    var candidate = BuildServiceId(m, svc);
-                    if (!string.IsNullOrEmpty(candidate))
-                    {
-                        headId = candidate;
-                        headService = svc;
-                        headMapping = m;
-                        break;
-                    }
-                }
-                if (!string.IsNullOrEmpty(headId)) break;
-            }
-            if (string.IsNullOrEmpty(headId)) return (null, null, null);
-
-            var anime = await LoadAnimeForWatchAsync(headId, headService, tokenData, false);
-            if (anime == null) return (null, null, null);
-
-            // Override the per-cour videos with Cinemeta's full franchise
-            // list. The per-service GetCourEpisodesAsync slices by mapping.
-            // Season — we want every cour's episodes to show up so the
-            // season tab UI in Detail.cshtml renders them.
-            try
-            {
-                var fullVideos = await _cinemetaService.GetEpisodesAsync(imdbId, null);
-                if (fullVideos != null && fullVideos.Count > 0)
-                {
-                    anime.videos = fullVideos
-                        .OrderBy(v => v.season > 0 ? v.season : 1)
-                        .ThenBy(v => v.episode)
-                        .ToList();
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "BuildGroupedImdbAnimeAsync: cinemeta full-list fetch failed for {Imdb}", imdbId);
-            }
-
-            // Total episode count reflects the franchise, not the head cour.
-            anime.episodes = anime.videos?.Count ?? anime.episodes;
-            // Stamp the meta id with the imdb prefix so view-side hrefs
-            // (Watch CTA, Manage Entry deep-links, prev/next) keep the
-            // franchise umbrella id in their routes.
+            anime.episodes = anime.videos.Count;
+            // Belt-and-braces: Cinemeta should already stamp meta.id with the
+            // imdb tt-id, but force-set in case the upstream payload changes
+            // shape — the view-side hrefs depend on this carrying the
+            // franchise umbrella id.
             anime.id = imdbId;
-            return (anime, headMapping?.Season, headMapping?.AnilistId);
+
+            // First-cour anchors the airing-schedule overlay. The mapping
+            // lookup is optional — when there's no AniList row for the
+            // imdb id (catalog-only franchise) we skip the overlay and the
+            // Cinemeta released strings drive the click gate.
+            var mappings = await _mappingService.GetImdbMapping(imdbId);
+            var head = mappings?
+                .OrderBy(m => m.Season ?? int.MaxValue)
+                .FirstOrDefault();
+            return (anime, head?.Season, head?.AnilistId);
         }
 
         // For imdb: ids, look up the cross-service mapping and translate to a
