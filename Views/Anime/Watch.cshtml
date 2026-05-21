@@ -1871,16 +1871,16 @@
                     if (!text) continue;
                     var settings = buildVttCueSettings(overrideText, playRes);
                     // Default bottom dialogue (no explicit line: in
-                    // the settings) gets a `line:90%` margin from the
+                    // the settings) gets a `line:80%` margin from the
                     // bottom edge. Browser-native cues default to
                     // line:auto which renders flush against the
                     // video's bottom edge — that collides with
                     // ArtPlayer's controls bar when visible and reads
                     // cramped against the player frame when it's not.
-                    // 10% lift keeps dialogue clear of both without
+                    // 20% lift keeps dialogue clear of both without
                     // pushing it into the picture. \pos / \an cues
                     // that already declared a line stay untouched.
-                    if (!/(^|\s)line:/.test(settings)) settings += ' line:90%';
+                    if (!/(^|\s)line:/.test(settings)) settings += ' line:80%';
                     out.push(vttTimestamp(start) + ' --> ' + vttTimestamp(end) + settings);
                     out.push(text);
                     out.push('');

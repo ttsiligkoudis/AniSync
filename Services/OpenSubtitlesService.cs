@@ -192,7 +192,7 @@ namespace AnimeList.Services
                 // with ArtPlayer's controls bar / sit flush against
                 // the video frame. Provider VTTs almost never set a
                 // line position, so they all render at line:auto (~the
-                // bottom). 10% margin reads as a normal subtitle gap;
+                // bottom). 20% margin reads as a normal subtitle gap;
                 // cues that already declared a line stay untouched
                 // (a provider that took the trouble to position their
                 // captions knows where it wants them).
@@ -406,9 +406,9 @@ namespace AnimeList.Services
             RegexOptions.Compiled | RegexOptions.Multiline);
 
         /// <summary>
-        /// Appends <c>line:90%</c> to every VTT cue header that doesn't
+        /// Appends <c>line:80%</c> to every VTT cue header that doesn't
         /// already carry a <c>line:</c> setting, lifting bottom-default
-        /// cues off the video edge by ~10%. The browser's native
+        /// cues off the video edge by ~20%. The browser's native
         /// caption renderer hugs the frame at <c>line:auto</c>, which
         /// collides with ArtPlayer's controls bar when visible and reads
         /// cramped when it's not; provider VTTs almost never set a line
@@ -424,7 +424,7 @@ namespace AnimeList.Services
                 var settings = m.Groups[2].Value;
                 // Already positioned by the source — leave it alone.
                 if (settings.IndexOf("line:", StringComparison.Ordinal) >= 0) return m.Value;
-                return m.Groups[1].Value + settings + " line:90%";
+                return m.Groups[1].Value + settings + " line:80%";
             });
         }
     }
