@@ -11,252 +11,200 @@ namespace AnimeList.Controllers
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
-        private readonly ITmdbService _tmdbService;
-        private readonly ICinemetaService _cinemetaService;
         private readonly IAnimeMappingService _mappingService;
         private readonly ISyncService _syncService;
-        private readonly IFillerListService _fillerListService;
         private readonly IConfigStore _configStore;
         private readonly IUserListCache _listCache;
         private readonly IAnilistFallback _anilistFallback;
+        private readonly IAnimeMetaLoader _animeMetaLoader;
         private readonly ILogger<MetaController> _logger;
 
-        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService, ISyncService syncService, IFillerListService fillerListService, IConfigStore configStore, IUserListCache listCache, IAnilistFallback anilistFallback, ILogger<MetaController> logger)
+        public MetaController(
+            ITokenService tokenService,
+            IAnilistService anilistService,
+            IKitsuService kitsuService,
+            IMalService malService,
+            IAnimeMappingService mappingService,
+            ISyncService syncService,
+            IConfigStore configStore,
+            IUserListCache listCache,
+            IAnilistFallback anilistFallback,
+            IAnimeMetaLoader animeMetaLoader,
+            ILogger<MetaController> logger)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
-            _tmdbService = tmdbService;
-            _cinemetaService = cinemetaService;
             _mappingService = mappingService;
             _syncService = syncService;
-            _fillerListService = fillerListService;
             _configStore = configStore;
             _listCache = listCache;
             _anilistFallback = anilistFallback;
+            _animeMetaLoader = animeMetaLoader;
             _logger = logger;
         }
 
-        private async Task<(dynamic?, bool)> GetByIDInternal(string config, string id, bool deserialize = false)
+        /// <summary>
+        /// Loads + fully enriches a Meta for the Stremio addon's meta
+        /// endpoint. Pipeline:
+        ///   1. <see cref="IAnimeMetaLoader.LoadAsync"/> — shared with the
+        ///      web app's detail page (per-service dispatch, cross-service
+        ///      fallback, imdb-grouped Cinemeta synthesis, tmdb dispatch,
+        ///      adult gate, cour renumbering, filler labels, source-link
+        ///      map, AniList airing-schedule overlay).
+        ///   2. Synchronous extras enrichment — same Sidedata buckets the
+        ///      web app's /extras endpoint serves to the client async, but
+        ///      Stremio meta is one-shot so we merge them in here.
+        ///   3. Surface-specific decoration — supplementary-link URL
+        ///      rewrites to /discover routes + Manage Entry link for
+        ///      authenticated viewers.
+        /// </summary>
+        private async Task<Meta> GetByIDInternal(string config, string id)
         {
             var tokenData = await _tokenService.GetAccessTokenAsync(config);
-            // Mirror CatalogController so meta.id stays in the same id space the
-            // catalog emitted — clicking through to a card opens the matching detail.
+            // Mirror CatalogController so meta.id stays in the same id
+            // space the catalog emitted — clicking through to a card
+            // opens the matching detail.
             var configuration = await ResolveConfigAsync(config, _configStore);
             var groupSeasons = configuration?.enableSeasonGrouping == true;
+            var showAdultContent = configuration?.showAdultContent == true;
 
-            dynamic result = null;
+            var loadResult = await _animeMetaLoader.LoadAsync(id, tokenData, groupSeasons, showAdultContent);
+            var anime = loadResult.Anime;
+            if (anime == null) return null;
 
-            if (id.StartsWith(imdbPrefix))
-                result = await _cinemetaService.GetAnimeByIdAsync(config, id, Request);
+            // Sync extras-equivalent: pull supplementary + related links
+            // + recommendation links from the same Sidedata cache the
+            // web app's /extras endpoint uses, merge into anime.links so
+            // Stremio's chip strip surfaces them. Stremio meta is one-
+            // shot (the client can't defer like the web app's JS does),
+            // so it has to happen here in the same request.
+            await EnrichWithExtrasAsync(
+                anime,
+                loadResult.SourceLinks,
+                tokenData?.anime_service ?? AnimeService.Anilist,
+                groupSeasons);
 
-            if (result != null)
+            // Rewrite the AniList-sourced Tag / Studio / Staff URLs to
+            // point at AniSync's own /discover routes — same destination
+            // the web app's chip clicks land on via InternalHrefFor — so
+            // a tap in Stremio opens the franchise's tag / studio / staff
+            // catalog on this site instead of bouncing to anilist.co.
+            RewriteSupplementaryLinkUrls(anime);
+
+            // Manage Entry: authenticated viewers get a chip routed
+            // through the addon's path-config so list operations
+            // (status / progress / score) can be done from the Stremio
+            // detail page without leaving Stremio.
+            if (!string.IsNullOrWhiteSpace(tokenData?.access_token) && !tokenData.anonymousUser)
             {
-                // Cinemeta's meta payload has none of the AniList-sourced
-                // chip strip — tag / studio / staff / sequel / prequel /
-                // similar are all empty there. groupSeasons users open
-                // every franchise umbrella through this path (the
-                // catalog emits tt ids when grouping is on), so without
-                // this enrichment they'd see a bare meta page with no
-                // links at all. Pulls the same Sidedata bucket the
-                // per-service paths and web-app Extras endpoint already
-                // use, keyed off the head-cour anilist id from the imdb
-                // mapping. Best-effort: any failure leaves the cinemeta
-                // JSON untouched.
-                if (id.StartsWith(imdbPrefix) && result is string serializedResult)
-                {
-                    // groupSeasons=true on this path: we're already serving
-                    // the franchise umbrella (the catalog emitted the tt id
-                    // because grouping is on), so the Similar / Sequel /
-                    // Prequel chip URLs should resolve to whichever tt /
-                    // tmdb / native id the user's catalog handles for that
-                    // recommendation. translateTo is the user's primary so
-                    // recs without an imdb mapping fall back to the right
-                    // per-service id (kitsu:/mal:/anilist:N).
-                    result = await EnrichSerializedWithAnilistSidedataAsync(
-                        serializedResult, id,
-                        tokenData?.anime_service ?? AnimeService.Anilist,
-                        groupSeasons: true);
-                }
-                if (deserialize) result = DeserializeObject<dynamic>((string)result).meta;
-                return (result, !deserialize);
+                var manageUrl = $"{Request.Scheme}://{Request.Host}/{config}/Meta/ManageEntry/{anime.id}";
+                anime.links ??= [];
+                anime.links.Add(new Link { name = "Manage Entry", category = "Manage", url = manageUrl });
             }
 
-            // Translate cross-service ids that the user's chosen service can handle natively.
-            // For mal: ids we always need to translate (no MalService for non-MAL users); for
-            // anilist:/kitsu: ids we leave them alone — the dispatch below picks the right
-            // service per-prefix and the cross-service fallback inside MetaController handles
-            // mismatches.
-            if (id.StartsWith(malPrefix))
-            {
-                var service = tokenData?.anime_service ?? AnimeService.Kitsu;
-                if (service != AnimeService.MyAnimeList)
-                {
-                    var resolved = await _mappingService.GetIdByService(id, service);
-                    if (string.IsNullOrEmpty(resolved)) return (null, false);
-                    id = (service == AnimeService.Anilist ? anilistPrefix : kitsuPrefix) + resolved;
-                }
-            }
-
-            if (id.StartsWith(tmdbPrefix))
-                result = await _tmdbService.GetAnimeByIdAsync(id, tokenData);
-            else if (id.StartsWith(kitsuPrefix))
-            {
-                result = await _kitsuService.GetAnimeByIdAsync(id, tokenData, groupSeasons);
-
-                // Cross-service fallback: Kitsu can return null for entries that exist in
-                // Stremio's catalogs but are missing / age-restricted / wrong-id on Kitsu's
-                // API. If we have an AniList equivalent in the mapping, render meta from
-                // there instead of bouncing the user to "No metadata was found".
-                if (result == null)
-                {
-                    var mapping = await _mappingService.GetKitsuMapping(id);
-                    if (mapping?.AnilistId != null)
-                        result = await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData, groupSeasons);
-                }
-            }
-            else if (id.StartsWith(anilistPrefix))
-            {
-                result = await _anilistService.GetAnimeByIdAsync(id, tokenData, groupSeasons);
-
-                // Symmetric fallback for AniList primary failures.
-                if (result == null)
-                {
-                    var mapping = await _mappingService.GetAnilistMapping(id);
-                    if (mapping?.KitsuId != null)
-                        result = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData, groupSeasons);
-                }
-            }
-            else if (id.StartsWith(malPrefix))
-            {
-                result = await _malService.GetAnimeByIdAsync(id, tokenData, groupSeasons);
-
-                // Same fallback shape as Kitsu/AniList — if MAL has nothing for the id,
-                // try whichever sister service has a mapping so the page still renders.
-                if (result == null)
-                {
-                    var mapping = await _mappingService.GetMalMapping(id);
-                    if (mapping?.AnilistId != null)
-                        result = await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData, groupSeasons);
-                    else if (mapping?.KitsuId != null)
-                        result = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData, groupSeasons);
-                }
-            }
-
-            // Cross-service supplementary links: AniList's tag/studio/staff
-            // metadata is richer than MAL or Kitsu's, so non-AniList primaries
-            // used to ship Stremio meta with only the per-service Studio link
-            // (or none at all). When the cross-service mapping has an AniList
-            // id, fetch the same Tag / Studio / director / Staff / writer /
-            // Artist / Composer / Producer links AnilistService produces
-            // natively and merge them in — same data the web app's Extras
-            // endpoint serves, just plumbed through to the addon meta path.
-            if (result is Meta metaObj)
-            {
-                await EnrichWithAnilistSupplementaryLinksAsync(metaObj, id, tokenData?.anime_service);
-
-                // Rewrite the AniList-sourced Tag / Studio / Staff URLs to
-                // point at AniSync's own /discover routes — same destination
-                // the web app's chip clicks land on — so a tap in Stremio
-                // opens the franchise's tag/studio/staff browse on this
-                // site instead of bouncing to anilist.co.
-                RewriteSupplementaryLinkUrls(metaObj);
-            }
-
-            if (result != null && !string.IsNullOrWhiteSpace(tokenData?.access_token) && !tokenData.anonymousUser)
-            {
-                var manageUrl = $"{Request.Scheme}://{Request.Host}/{config}/Meta/ManageEntry/{id}";
-                result.links.Add(new Link { name = "Manage Entry", category = "Manage", url = manageUrl });
-            }
-
-            return (result, false);
+            return anime;
         }
 
         /// <summary>
-        /// Appends the AniList-sourced supplementary links (tag, studio, staff
-        /// roles) to <paramref name="meta"/> when the user's primary service
-        /// is not AniList — the per-service GetAnimeByIdAsync paths for MAL
-        /// and Kitsu emit only the per-service Studio link (mal:...) or none
-        /// at all, so without this enrichment those primaries never see the
-        /// rich category strip the addon ships for AniList primaries. No-op
-        /// when there's no AniList mapping for the meta or the user is
-        /// already an AniList primary (those links are inline from
-        /// AnilistService.GetAnimeByIdAsync).
+        /// Stremio mirror of the web app's <c>/anime/{id}/extras</c>
+        /// endpoint — pulls the same Sidedata buckets
+        /// (<see cref="IAnilistFallback.GetSupplementaryLinksAsync"/>,
+        /// <see cref="IAnilistFallback.GetRelatedLinksAsync"/>,
+        /// <see cref="IAnilistFallback.GetRecommendationsAsync"/>) and
+        /// merges them into <c>anime.links</c>. The web app fires these
+        /// async after page render (separate JSON call to /extras and
+        /// the client renders carousels / chip rows); Stremio gets one
+        /// meta response so we have to inline it. Dedups by category +
+        /// anilistId so per-service builders that already added the
+        /// same chips (AnilistService inline emits the full strip
+        /// natively, KitsuService also fetches Similar) don't duplicate
+        /// after the merge.
         /// </summary>
-        private async Task EnrichWithAnilistSupplementaryLinksAsync(Meta meta, string id, AnimeService? primary)
+        private async Task EnrichWithExtrasAsync(Meta anime, AnimeSourceLinks sourceLinks, AnimeService translateTo, bool groupSeasons)
         {
-            if (meta == null || string.IsNullOrEmpty(id)) return;
-            if (primary == AnimeService.Anilist) return;
+            if (anime == null || sourceLinks?.AnilistId is not int anilistId) return;
 
-            // Cross-service fallback path (kitsu user, mapping fell back to
-            // AnilistService.GetAnimeByIdAsync) — the meta already has
-            // AniList-sourced Tag entries inline. Skip the extra GraphQL
-            // round-trip in that case.
-            if (meta.links != null && meta.links.Any(l =>
-                l != null && string.Equals(l.category, "Tag", StringComparison.OrdinalIgnoreCase)))
-            {
-                return;
-            }
+            List<Link> supplementary = [];
+            List<Link> relatedLinks = [];
+            List<Link> recommendationLinks = [];
 
-            int? anilistId = null;
-            try
+            // Same skip-related-when-grouped rule the web app's /extras
+            // applies — a grouped franchise umbrella already collapses
+            // prequel / sequel cours, so the chip strip would just point
+            // back to cours included in the umbrella the user is
+            // already looking at.
+            var supplementaryTask = SafelyFetchAsync(
+                () => _anilistFallback.GetSupplementaryLinksAsync(anilistId),
+                "GetSupplementaryLinksAsync", anilistId);
+            var relatedTask = groupSeasons
+                ? Task.FromResult<List<Link>>([])
+                : SafelyFetchAsync(
+                    () => _anilistFallback.GetRelatedLinksAsync(anilistId, translateTo, groupSeasons),
+                    "GetRelatedLinksAsync", anilistId);
+            var recommendationsTask = SafelyFetchAsync(
+                () => _anilistFallback.GetRecommendationsAsync(anilistId, translateTo, groupSeasons),
+                "GetRecommendationsAsync", anilistId);
+
+            await Task.WhenAll(supplementaryTask, relatedTask, recommendationsTask);
+            supplementary = await supplementaryTask;
+            relatedLinks = await relatedTask;
+            recommendationLinks = await recommendationsTask;
+
+            anime.links ??= [];
+
+            // Supplementary categories (Tag / Studio / Staff /
+            // director / writer / Artist / Composer / Producer): drop
+            // any per-service entries in the same categories so
+            // AniList's richer chip strip wins. We only touch these
+            // categories — movie credits / recommendations / relations
+            // are handled below.
+            if (supplementary.Count > 0)
             {
-                AnimeIdMapping mapping = null;
-                if (id.StartsWith(anilistPrefix))
+                var ownedCategories = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 {
-                    if (int.TryParse(id[anilistPrefix.Length..], out var aId)) anilistId = aId;
-                }
-                else if (id.StartsWith(malPrefix))
-                {
-                    mapping = await _mappingService.GetMalMapping(id);
-                    anilistId = mapping?.AnilistId;
-                }
-                else if (id.StartsWith(kitsuPrefix))
-                {
-                    mapping = await _mappingService.GetKitsuMapping(id);
-                    anilistId = mapping?.AnilistId;
-                }
+                    "Tag", "Studio", "Staff", "director", "writer", "Artist", "Composer", "Producer",
+                };
+                anime.links = anime.links
+                    .Where(l => l != null && !(l.category != null && ownedCategories.Contains(l.category)))
+                    .ToList();
+                anime.links.AddRange(supplementary.Where(l => l != null));
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "MetaController supplementary-link mapping lookup failed for {Id}", id);
-            }
-            if (!anilistId.HasValue || anilistId.Value <= 0) return;
 
-            List<Link> supplementary;
-            try
-            {
-                supplementary = await _anilistFallback.GetSupplementaryLinksAsync(anilistId.Value);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "MetaController GetSupplementaryLinksAsync failed for anilist {Id}", anilistId);
-                return;
-            }
-            if (supplementary == null || supplementary.Count == 0) return;
-
-            meta.links ??= [];
-
-            // Per-service builders may have added their own (lower-quality)
-            // entries in the same categories — drop them so the AniList
-            // strip wins. We only touch the categories we're about to
-            // populate; recommendations / relations / movie credits stay
-            // intact.
-            var ownedCategories = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "Tag", "Studio", "Staff", "director", "writer", "Artist", "Composer", "Producer",
-            };
-            meta.links = meta.links
-                .Where(l => l != null && !(l.category != null && ownedCategories.Contains(l.category)))
-                .ToList();
-
-            foreach (var link in supplementary)
+            // Sequel / Prequel / Similar: dedup by (category, anilistId)
+            // so the AnilistService / KitsuService inline paths' entries
+            // don't get duplicated when we refetch from the shared
+            // sidedata cache.
+            var existingRelKeys = new HashSet<string>(
+                anime.links
+                    .Where(l => l != null && IsRelationCategory(l.category))
+                    .Select(l => $"{l.category}:{l.anilistId}"));
+            foreach (var link in relatedLinks.Concat(recommendationLinks))
             {
                 if (link == null) continue;
-                meta.links.Add(link);
+                var key = $"{link.category}:{link.anilistId}";
+                if (existingRelKeys.Add(key)) anime.links.Add(link);
             }
         }
+
+        private async Task<List<Link>> SafelyFetchAsync(Func<Task<List<Link>>> fetch, string label, int anilistId)
+        {
+            try
+            {
+                return await fetch() ?? [];
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "MetaController {Label} failed for anilist {Id}", label, anilistId);
+                return [];
+            }
+        }
+
+        private static bool IsRelationCategory(string category) =>
+            string.Equals(category, "Sequel", StringComparison.Ordinal)
+            || string.Equals(category, "Prequel", StringComparison.Ordinal)
+            || string.Equals(category, "Similar", StringComparison.Ordinal);
 
         /// <summary>
         /// Rewrites the URL on every supplementary Link (Tag / Studio /
@@ -264,12 +212,12 @@ namespace AnimeList.Controllers
         /// point at AniSync's own /discover/{tag|studio|staff} pages
         /// instead of the upstream anilist.co URLs. Same browse routes
         /// the web app's chip clicks resolve to via InternalHrefFor so
-        /// a tap in Stremio opens the franchise's tag/studio/staff
+        /// a tap in Stremio opens the franchise's tag / studio / staff
         /// catalog on this site rather than bouncing to anilist.co.
         /// Entries that don't carry an AniList id (e.g. a Studio link
         /// from KitsuService that predates the AniList enrichment, or a
-        /// Tag whose mapping lookup failed) keep their stored URL so
-        /// the chip still has somewhere to go.
+        /// Tag whose mapping lookup failed) keep their stored URL so the
+        /// chip still has somewhere to go.
         /// </summary>
         private void RewriteSupplementaryLinkUrls(Meta meta)
         {
@@ -281,110 +229,6 @@ namespace AnimeList.Controllers
                 if (link == null || string.IsNullOrEmpty(link.category)) continue;
                 var rewritten = BuildDiscoverUrlForCategory(origin, link);
                 if (!string.IsNullOrEmpty(rewritten)) link.url = rewritten;
-            }
-        }
-
-        /// <summary>
-        /// Mirrors <see cref="EnrichWithAnilistSupplementaryLinksAsync"/> +
-        /// <see cref="RewriteSupplementaryLinkUrls"/> for the imdb-grouped
-        /// path, where the meta comes back from Cinemeta as a raw JSON
-        /// string instead of a per-service <see cref="Meta"/> object.
-        /// Resolves the imdb id to a head-cour AniList id via the mapping
-        /// table, pulls supplementary + sequel / prequel + similar links
-        /// from <see cref="IAnilistFallback"/>'s cached sidedata, then
-        /// JObject-parses the cinemeta JSON to append them onto
-        /// meta.links. Returns the input unchanged on any failure so a
-        /// parser / network blow-up never breaks the regular meta
-        /// response.
-        /// </summary>
-        private async Task<string> EnrichSerializedWithAnilistSidedataAsync(string json, string imdbId, AnimeService translateTo, bool groupSeasons)
-        {
-            if (string.IsNullOrEmpty(json) || string.IsNullOrEmpty(imdbId)) return json;
-
-            int? anilistId = null;
-            try
-            {
-                var mappings = await _mappingService.GetImdbMapping(imdbId);
-                // Head cour first — tags / studios / staff are shared
-                // across cours of the same franchise, so the lowest-
-                // season entry gives us the most representative source
-                // for the franchise umbrella the user is looking at.
-                anilistId = mappings?
-                    .Where(m => m.AnilistId.HasValue)
-                    .OrderBy(m => m.Season ?? int.MaxValue)
-                    .FirstOrDefault()?.AnilistId;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "MetaController imdb→anilist mapping lookup failed for {Id}", imdbId);
-            }
-            if (!anilistId.HasValue) return json;
-
-            List<Link> supplementary = [];
-            List<Link> relatedLinks = [];
-            List<Link> recommendationLinks = [];
-
-            try { supplementary = await _anilistFallback.GetSupplementaryLinksAsync(anilistId.Value) ?? []; }
-            catch (Exception ex) { _logger.LogWarning(ex, "MetaController GetSupplementaryLinksAsync failed for anilist {Id}", anilistId); }
-
-            try { relatedLinks = await _anilistFallback.GetRelatedLinksAsync(anilistId.Value, translateTo, groupSeasons) ?? []; }
-            catch (Exception ex) { _logger.LogWarning(ex, "MetaController GetRelatedLinksAsync failed for anilist {Id}", anilistId); }
-
-            try { recommendationLinks = await _anilistFallback.GetRecommendationsAsync(anilistId.Value, translateTo, groupSeasons) ?? []; }
-            catch (Exception ex) { _logger.LogWarning(ex, "MetaController GetRecommendationsAsync failed for anilist {Id}", anilistId); }
-
-            if (supplementary.Count == 0 && relatedLinks.Count == 0 && recommendationLinks.Count == 0)
-                return json;
-
-            try
-            {
-                var obj = JObject.Parse(json);
-                var metaJ = obj["meta"] as JObject;
-                if (metaJ == null) return json;
-
-                var links = metaJ["links"] as JArray;
-                if (links == null) { links = []; metaJ["links"] = links; }
-
-                var origin = $"{Request.Scheme}://{Request.Host}";
-
-                foreach (var link in supplementary)
-                {
-                    if (link == null) continue;
-                    var rewritten = BuildDiscoverUrlForCategory(origin, link);
-                    links.Add(JObject.FromObject(new
-                    {
-                        name = link.name,
-                        category = link.category,
-                        url = !string.IsNullOrEmpty(rewritten) ? rewritten : link.url,
-                    }));
-                }
-                foreach (var link in relatedLinks)
-                {
-                    if (link == null) continue;
-                    links.Add(JObject.FromObject(new
-                    {
-                        name = link.name,
-                        category = link.category,
-                        url = link.url,
-                    }));
-                }
-                foreach (var link in recommendationLinks)
-                {
-                    if (link == null) continue;
-                    links.Add(JObject.FromObject(new
-                    {
-                        name = link.name,
-                        category = link.category,
-                        url = link.url,
-                    }));
-                }
-
-                return obj.ToString(Newtonsoft.Json.Formatting.None);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "MetaController imdb meta enrichment serialization failed for {Id}", imdbId);
-                return json;
             }
         }
 
@@ -419,100 +263,18 @@ namespace AnimeList.Controllers
         {
             try
             {
-                (var anime, var serialized) = await GetByIDInternal(config, id);
-
-                // Enrich the response's videos[] with filler/canon labels from
-                // AnimeFillerList. The two render paths take slightly different shapes —
-                // cinemeta hands us a serialised JSON string (so we round-trip parse →
-                // mutate → re-serialise), per-service paths hand us a Meta we can mutate
-                // in place. Both ultimately call the same FillerListService.
-                if (anime != null)
-                {
-                    if (serialized)
-                        anime = await EnrichSerializedWithFillerAsync((string)anime);
-                    else
-                        await EnrichMetaWithFillerAsync((Meta)anime);
-                }
-
-                return serialized ? Content(anime, "application/json") : new JsonResult(new { meta = anime });
+                var anime = await GetByIDInternal(config, id);
+                return new JsonResult(new { meta = anime });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Meta GetByID failed (id={Id}, type={MetaType}).", id, metaType);
-                // Stremio interprets {meta:null} as "no metadata"; the detail page falls back
-                // to the catalog entry's poster + title and stops asking on the same id.
+                // Stremio interprets {meta:null} as "no metadata"; the
+                // detail page falls back to the catalog entry's poster +
+                // title and stops asking on the same id.
                 return new JsonResult(new { meta = (object)null });
             }
         }
-
-        /// <summary>
-        /// Mutates a Meta in place: looks up filler categories for each episode and
-        /// prefixes the video's title with a coloured emoji. Best-effort — silently
-        /// no-ops when the show isn't on AnimeFillerList or the lookup fails.
-        /// </summary>
-        private async Task EnrichMetaWithFillerAsync(Meta meta)
-        {
-            if (meta == null || string.IsNullOrEmpty(meta.name) || meta.videos == null || meta.videos.Count == 0)
-                return;
-
-            var categories = await _fillerListService.GetEpisodeCategoriesAsync(meta.name);
-            if (categories.Count == 0) return;
-
-            foreach (var video in meta.videos)
-            {
-                if (!categories.TryGetValue(video.episode, out var category)) continue;
-                var prefix = FillerPrefix(category);
-                if (!string.IsNullOrEmpty(prefix))
-                    video.title = prefix + (video.title ?? string.Empty);
-            }
-        }
-
-        /// <summary>
-        /// Same enrichment but operating on the raw cinemeta JSON string. Parses to
-        /// JObject, mutates videos[].title, returns the re-serialised JSON. Returns
-        /// the input unchanged on any error so a parser blow-up never breaks the
-        /// regular meta response.
-        /// </summary>
-        private async Task<string> EnrichSerializedWithFillerAsync(string json)
-        {
-            if (string.IsNullOrEmpty(json)) return json;
-            try
-            {
-                var obj = JObject.Parse(json);
-                var meta = obj["meta"] as JObject;
-                var name = (string)meta?["name"];
-                var videos = meta?["videos"] as JArray;
-                if (string.IsNullOrEmpty(name) || videos == null || videos.Count == 0) return json;
-
-                var categories = await _fillerListService.GetEpisodeCategoriesAsync(name);
-                if (categories.Count == 0) return json;
-
-                foreach (var v in videos.OfType<JObject>())
-                {
-                    var episode = (int?)v["episode"];
-                    if (!episode.HasValue) continue;
-                    if (!categories.TryGetValue(episode.Value, out var category)) continue;
-                    var prefix = FillerPrefix(category);
-                    if (string.IsNullOrEmpty(prefix)) continue;
-                    var existing = (string)v["title"] ?? string.Empty;
-                    v["title"] = prefix + existing;
-                }
-
-                return obj.ToString(Newtonsoft.Json.Formatting.None);
-            }
-            catch
-            {
-                return json;
-            }
-        }
-
-        private static string FillerPrefix(string category) => category switch
-        {
-            "canon" => "🟦 ",
-            "filler" => "🟨 ",
-            "mixed" => "🟧 ",
-            _ => string.Empty,
-        };
 
         [HttpGet("{config}/[controller]/ManageEntry/{*id}")]
         public async Task<IActionResult> ManageEntry(string config, string id, int? season = null, int? episode = null)
@@ -539,16 +301,8 @@ namespace AnimeList.Controllers
 
             var animeService = tokenData.anime_service;
 
-            (dynamic anime, _) = await GetByIDInternal(config, id, true);
-            // Cast .type out of dynamic so isSeries is statically `bool` — otherwise the
-            // dynamic flows into BuildSeasonsAsync below and the compiler can't deconstruct
-            // its return tuple (CS8133: cannot deconstruct dynamic objects).
-            var typeStr = (string)anime?.type;
-            var isSeries = typeStr == MetaType.series.ToString();
-
-            // Cast .videos through `object` once so subsequent pattern-matching is statically
-            // typed (the `dynamic` from anime would otherwise leak into every is-pattern and
-            // break C# type inference, e.g. on the deconstruction below).
+            var anime = await GetByIDInternal(config, id);
+            var isSeries = anime?.type == MetaType.series.ToString();
             object videosObj = anime?.videos;
 
             // Build the per-entry season list. For anilist:/kitsu: ids the list is empty
