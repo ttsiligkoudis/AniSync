@@ -216,6 +216,7 @@ builder.Services.AddScoped<IMalService, MalService>();
 builder.Services.AddScoped<ITmdbService, TmdbService>();
 builder.Services.AddScoped<ICinemetaService, CinemetaService>();
 builder.Services.AddScoped<IAnilistFallback, AnilistFallback>();
+builder.Services.AddScoped<IAnimeMetaLoader, AnimeMetaLoader>();
 // Singleton so the (manifestUrl-fingerprint, stremio-id) → streams cache
 // outlives individual requests — addon responses are stable enough that a
 // 10-min cache slashes the upstream call rate when a user paginates through
