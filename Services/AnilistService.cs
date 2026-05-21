@@ -716,16 +716,24 @@ namespace AnimeList.Services
                     // Two outputs per recommendation:
                     //   1. The Stremio-side "Similar" Link (kept for the addon's
                     //      meta JSON consumers — Stremio uses these for "More
-                    //      like this" navigation in the addon flow).
+                    //      like this" navigation in the addon flow). The url
+                    //      is a web.stremio.com deep-link so a chip tap opens
+                    //      the recommended anime inside Stremio (or the
+                    //      native app via Universal Links / App Links)
+                    //      rather than bouncing to anilist.co in a browser.
                     //   2. A slim Meta in anime.recommendations for the web
                     //      app's detail-page carousel. Same id / name with
                     //      poster + score + format + year + episodes pulled
                     //      from the extended GraphQL subselection.
+                    var recIsMovie = IsMovieFormat((string)rec.format);
+                    var recStremioType = recIsMovie ? MetaType.movie.ToString() : MetaType.series.ToString();
+                    var recEncodedId = Uri.EscapeDataString($"{anilistPrefix}{recId.Value}");
                     anime.links.Add(new Link
                     {
                         name = name,
                         category = "Similar",
-                        url = $"https://anilist.co/anime/{recId.Value}",
+                        url = $"https://web.stremio.com/#/detail/{recStremioType}/{recEncodedId}",
+                        anilistId = recId.Value,
                     });
 
                     anime.recommendations.Add(new Meta
@@ -733,7 +741,7 @@ namespace AnimeList.Services
                         id = $"{anilistPrefix}{recId.Value}",
                         name = name,
                         poster = (string)rec.coverImage?.large,
-                        type = IsMovieFormat((string)rec.format)
+                        type = recIsMovie
                             ? MetaType.movie.ToString()
                             : MetaType.series.ToString(),
                         score = rec.averageScore != null
