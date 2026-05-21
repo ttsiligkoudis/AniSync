@@ -408,11 +408,21 @@
                                 || stremioId.StartsWith(Utils.kitsuPrefix)
                                 || stremioId.StartsWith(Utils.imdbPrefix));
                         var stremioType = a.type == MetaType.movie.ToString() ? "movie" : "series";
+                        var stremioPath = $"detail/{stremioType}/{Uri.EscapeDataString(stremioId ?? string.Empty)}";
                     }
                     @if (stremioIdSupported)
                     {
+                        @* href is the web fallback so right-click / middle-
+                           click / copy-link / no-JS users all land on a
+                           working URL. data-stremio-app-url is the native
+                           protocol handler the click script tries first,
+                           with a visibility-change heuristic that promotes
+                           a pre-opened placeholder tab to the web URL when
+                           the OS doesn't switch focus to a registered
+                           Stremio handler within ~1.5s. *@
                         <a class="source-chip source-chip-stremio"
-                           href="@($"https://web.stremio.com/#/detail/{stremioType}/{Uri.EscapeDataString(stremioId)}")"
+                           href="@($"https://web.stremio.com/#/{stremioPath}")"
+                           data-stremio-app-url="@($"stremio:///{stremioPath}")"
                            target="_blank" rel="noreferrer noopener"
                            aria-label="Open on Stremio">
                             <span class="source-chip-mark" aria-hidden="true">S</span>
@@ -1293,6 +1303,84 @@ else
             if (!li) return;
             e.preventDefault();
             handleEpisodeActivate(li);
+        });
+    })();
+</script>
+<script>
+    // Stremio source chip — try the native app via the stremio:// custom
+    // protocol first, fall back to the web app when no handler claims it.
+    //
+    // The pattern is the same one Slack / Discord / Spotify use for their
+    // "open in app" deep links: pre-open a placeholder tab synchronously
+    // with the click (so popup blockers permit it — we're still inside
+    // the user-gesture window), fire the protocol URL, then watch for the
+    // page losing visibility / focus. If the OS hands off to a registered
+    // Stremio handler within ~1.5s, the visibilitychange / blur / pagehide
+    // event fires and we close the placeholder; otherwise we promote it
+    // to the web Stremio URL so the user still lands somewhere useful.
+    //
+    // The anchor's href stays pointed at the web fallback so right-click
+    // "open in new tab", middle-click, copy-link, and no-JS scrapers all
+    // resolve to a working URL without going through this handler.
+    (function () {
+        document.querySelectorAll('.source-chip-stremio[data-stremio-app-url]').forEach(function (chip) {
+            chip.addEventListener('click', function (e) {
+                var appUrl = this.dataset.stremioAppUrl;
+                var webUrl = this.href;
+                if (!appUrl) return;
+                // Defer to default behaviour for modifier-click /
+                // middle-click — those are explicit "open in new tab"
+                // gestures and shouldn't be swallowed.
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1) return;
+
+                e.preventDefault();
+
+                // Pre-open a placeholder tab while we're still in the
+                // user-gesture context. Without this, the post-timeout
+                // window.open below is blocked by every modern popup
+                // blocker. Falls back to current-tab navigation if the
+                // user has popups blocked entirely.
+                var fallbackTab = null;
+                try { fallbackTab = window.open('about:blank', '_blank'); } catch (_) { }
+
+                var appClaimed = false;
+                var claim = function () { appClaimed = true; };
+                document.addEventListener('visibilitychange', claim, { once: true });
+                window.addEventListener('blur', claim, { once: true });
+                window.addEventListener('pagehide', claim, { once: true });
+
+                // Trigger the stremio:// scheme. On mobile with the app
+                // installed the OS switches focus to Stremio; on desktop
+                // with a registered handler the browser shows its native
+                // "Open Stremio?" prompt. On systems without a handler
+                // modern browsers silently no-op (older iOS sometimes
+                // shows "address is invalid", which is acceptable
+                // degradation for the no-app case).
+                try { window.location.href = appUrl; } catch (_) { }
+
+                setTimeout(function () {
+                    document.removeEventListener('visibilitychange', claim);
+                    window.removeEventListener('blur', claim);
+                    window.removeEventListener('pagehide', claim);
+
+                    if (appClaimed) {
+                        // App took focus — discard the placeholder so the
+                        // user isn't left with a stray blank tab.
+                        if (fallbackTab) {
+                            try { fallbackTab.close(); } catch (_) { }
+                        }
+                    } else if (fallbackTab) {
+                        // No handler claimed the deep link in time —
+                        // promote the placeholder to the web fallback.
+                        try { fallbackTab.location.href = webUrl; } catch (_) { }
+                    } else {
+                        // Popup blocker nuked the placeholder; navigate
+                        // the current tab as the last-resort fallback so
+                        // the click isn't a no-op.
+                        window.location.href = webUrl;
+                    }
+                }, 1500);
+            });
         });
     })();
 </script>
