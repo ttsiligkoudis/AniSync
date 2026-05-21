@@ -163,7 +163,7 @@ namespace AnimeList.Services
             return result;
         }
 
-        public async Task<List<Link>> GetRecommendationsAsync(int anilistId, AnimeService translateTo)
+        public async Task<List<Link>> GetRecommendationsAsync(int anilistId, AnimeService translateTo, bool groupSeasons)
         {
             var requestBody = SerializeObject(new
             {
@@ -206,18 +206,20 @@ namespace AnimeList.Services
                     : (string)rec.title?.english;
                 if (string.IsNullOrEmpty(name)) continue;
 
-                var externalId = await ResolveExternalIdAsync(recId.Value, translateTo);
-
                 // Stremio-side "Similar" chip — points at web.stremio.com
                 // so a chip tap opens the recommended anime inside Stremio
                 // (or the native app via Universal / App Links) instead of
-                // bouncing to anilist.co in a browser. The id format
-                // mirrors the Sequel / Prequel relation chips: anilist:N
-                // resolved by whichever Stremio addon catalogs anilist
-                // ids on the user's side.
+                // bouncing to anilist.co in a browser. The id is resolved
+                // per-user (translateTo + groupSeasons): groupSeasons=true
+                // hands back the franchise's imdb / tmdb id; otherwise
+                // the user's primary's native kitsu: / mal: / anilist: id.
+                // Falls back to anilist:N when the mapping table has no
+                // matching cross-service entry.
+                var resolvedId = await ResolveStremioIdAsync(recId.Value, translateTo, groupSeasons)
+                    ?? $"{anilistPrefix}{recId.Value}";
                 var recIsMovie = IsMovieFormat((string)rec.format);
                 var recStremioType = recIsMovie ? MetaType.movie.ToString() : MetaType.series.ToString();
-                var encodedId = Uri.EscapeDataString($"{anilistPrefix}{recId.Value}");
+                var encodedId = Uri.EscapeDataString(resolvedId);
                 result.Add(new Link
                 {
                     name = name,
@@ -603,6 +605,21 @@ namespace AnimeList.Services
 
             return $"{anilistPrefix}{anilistId}";
         }
+
+        /// <summary>
+        /// Per-user Stremio meta id for an AniList anime id — picks the
+        /// external/native form based on the caller's groupSeasons pref so
+        /// a chip-built URL like web.stremio.com/#/detail/{type}/{id}
+        /// resolves to whichever catalog the user's Stremio is configured
+        /// for. groupSeasons=true prefers imdb / tmdb (franchise umbrella);
+        /// false picks the primary's per-cour native id (kitsu:/mal:/
+        /// anilist:). Falls back to anilist:N in either branch when the
+        /// mapping row has no matching id.
+        /// </summary>
+        public async Task<string> ResolveStremioIdAsync(int anilistId, AnimeService translateTo, bool groupSeasons)
+            => groupSeasons
+                ? await ResolveExternalIdAsync(anilistId, translateTo)
+                : await ResolveNativeIdAsync(anilistId, translateTo);
 
         /// <summary>
         /// Browse-flavour id resolution — prefers the primary's NATIVE id
@@ -1058,8 +1075,52 @@ namespace AnimeList.Services
                 CloneMetas((await FetchSidedataAsync(anilistId)).Related),
                 translateTo, groupSeasons);
 
-        public async Task<List<Link>> GetRelatedLinksAsync(int anilistId)
-            => (await FetchSidedataAsync(anilistId)).RelatedLinks;
+        public async Task<List<Link>> GetRelatedLinksAsync(int anilistId, AnimeService translateTo, bool groupSeasons)
+        {
+            var cached = (await FetchSidedataAsync(anilistId)).RelatedLinks;
+            if (cached == null || cached.Count == 0) return [];
+
+            // Sidedata is cached per AniList id only, so the URL the
+            // ParseRelatedLinks builder stamps in carries the anilist:N
+            // id. Translate per-user here so the cache stays sharable
+            // across primaries while each caller still gets a Stremio
+            // deep-link tagged with the id-space their addon catalogs.
+            await _mappingService.EnsureLoadedAsync();
+            var result = new List<Link>(cached.Count);
+            foreach (var link in cached)
+            {
+                if (link == null) continue;
+                result.Add(await RewriteLinkForPrimaryAsync(link, translateTo, groupSeasons));
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Clone of a Sidedata-cached relation / recommendation Link with
+        /// its web.stremio.com URL re-stamped for the caller's catalog id
+        /// space. Detects movie vs series by peeking the cached URL's
+        /// /detail/{type}/ segment — same shape ParseRelatedLinks /
+        /// GetRecommendationsAsync builds, kept stable so we don't have to
+        /// carry a parallel format buffer through the cached record.
+        /// </summary>
+        private async Task<Link> RewriteLinkForPrimaryAsync(Link source, AnimeService translateTo, bool groupSeasons)
+        {
+            var clone = new Link
+            {
+                name = source.name,
+                category = source.category,
+                url = source.url,
+                anilistId = source.anilistId,
+            };
+            if (!source.anilistId.HasValue) return clone;
+
+            var isMovie = source.url != null && source.url.Contains("/detail/movie/", StringComparison.Ordinal);
+            var stremioType = isMovie ? MetaType.movie.ToString() : MetaType.series.ToString();
+            var resolvedId = await ResolveStremioIdAsync((int)source.anilistId.Value, translateTo, groupSeasons)
+                ?? $"{anilistPrefix}{source.anilistId.Value}";
+            clone.url = $"https://web.stremio.com/#/detail/{stremioType}/{Uri.EscapeDataString(resolvedId)}";
+            return clone;
+        }
 
         // Sidedata is cached in-memory; we Clone the metas before
         // translation so the per-call native-id translation doesn't mutate

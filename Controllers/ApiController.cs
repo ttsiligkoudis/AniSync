@@ -184,7 +184,10 @@ namespace AnimeList.Controllers
                 if (!int.TryParse(anilistRaw, out var anilistId))
                     return NotFound(new ApiError("no anilist mapping for id"));
 
-                var links = await _anilistFallback.GetRecommendationsAsync(anilistId, service);
+                // groupSeasons=false: the /anime/{id}/similar API is the
+                // raw per-service shape — callers that want imdb-grouped
+                // ids do their own ApplyGroupingToMetasAsync pass.
+                var links = await _anilistFallback.GetRecommendationsAsync(anilistId, service, groupSeasons: false);
                 return new JsonResult(new SimilarResponse(links));
             }
             catch (Exception ex)
