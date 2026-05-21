@@ -144,7 +144,26 @@
                         wouldn't open and there's no "you" to talk about).
                    data-open-modal is the global hook intercepted by
                    manage-entry-modal.js. *@
-                @if (Model.Entry != null)
+                @if (Model.IsMultiSeasonGroup && canEdit)
+                {
+                    @* Multi-cour grouped (id is imdb:tt..., franchise spans
+                       more than one season) → the user's per-cour entry can't
+                       honestly speak for the franchise as a whole, so we
+                       render a generic "Manage Entry" button instead of the
+                       per-cour status text. data-meta-id stays as the imdb
+                       id so the modal can route any save through the
+                       franchise-umbrella resolver. *@
+                    <button type="button" class="anime-detail-user-state"
+                            data-open-modal data-meta-id="@a.id" data-meta-name="@a.name">
+                        <span>Manage Entry</span>
+                        <svg class="anime-detail-user-state-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
+                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M12 20h9"></path>
+                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                        </svg>
+                    </button>
+                }
+                else if (Model.Entry != null)
                 {
                     var statusLabel = PrettyStatus(Model.AnimeService, Model.Entry.Status);
                     var userBits = new List<string>();
@@ -505,13 +524,17 @@
             </button>
         </div>
 
-        <div class="anime-detail-episodes-body" id="anime-detail-episodes-body">
         @if (hasMultipleSeasons)
         {
             @* Horizontally-scrollable season tab strip. Each tab carries a
                data-season-num the JS uses to toggle which <li>s are visible
                in the single shared episode list below. Active tab gets the
-               cobalt fill. *@
+               cobalt fill. Rendered OUTSIDE the .anime-detail-episodes-body
+               (which is the max-height scroll container) so the tabs stay
+               anchored above the scrolling list — a multi-cour franchise
+               with 150+ episodes would otherwise scroll the season switcher
+               off the top of the viewport before the user can pick another
+               cour. *@
             <nav class="season-tabs" role="tablist" aria-label="Seasons">
                 @foreach (var g in seasonGroups)
                 {
@@ -527,6 +550,7 @@
             </nav>
         }
 
+        <div class="anime-detail-episodes-body" id="anime-detail-episodes-body">
         <ol class="anime-detail-episodes" reversed="false"
             data-active-season="@defaultSeason"
             @(canQuickMark ? $"data-can-edit=\"true\" data-meta-id=\"{a.id}\" data-current-progress=\"{currentProgress}\" data-current-status=\"{Model.Entry.Status}\"" : "")>

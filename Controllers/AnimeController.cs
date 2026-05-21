@@ -202,6 +202,15 @@ namespace AnimeList.Controllers
             // so the multi-season tab UI in Detail.cshtml can pivot on them.
             if (!renderedAsGrouped) NormaliseCourEpisodeNumbering(anime);
 
+            // Multi-cour grouped = >1 distinct season in the franchise's
+            // Cinemeta video list. Drives the hero's entry-pill rendering
+            // (generic Manage Entry instead of head-cour-specific status)
+            // and skips the per-cour entry fetch below. Single-cour
+            // grouped (mappings.Count == 1) reads as the regular per-cour
+            // page so the existing entry behaviour applies.
+            bool isMultiSeasonGroup = renderedAsGrouped
+                && (anime.videos?.Select(v => v.season > 0 ? v.season : 1).Distinct().Count() ?? 0) > 1;
+
             // Filler / canon enrichment — same pattern as MetaController's
             // EnrichMetaWithFillerAsync used by the Stremio addon path.
             // Episodes get a coloured emoji prefix (🟦 canon, 🟨 filler,
@@ -213,8 +222,12 @@ namespace AnimeList.Controllers
 
             // uid was already resolved at the top of the action (alongside
             // the configuration load); reuse it here for the entry fetch.
+            // Skipped on multi-cour grouped renders — the user's per-cour
+            // entry can't represent the franchise as a whole, so the hero
+            // shows a generic "Manage Entry" pill instead (driven by the
+            // IsMultiSeasonGroup view-model flag below).
             EntryViewState entry = null;
-            if (!tokenData.anonymousUser)
+            if (!tokenData.anonymousUser && !isMultiSeasonGroup)
             {
                 // Fetch the user's entry against the resolved per-service id so
                 // the hero can surface "You're watching · Ep 5/12 · Your score:
@@ -318,6 +331,7 @@ namespace AnimeList.Controllers
                 SourceLinks = sourceLinks,
                 DeferredSupplementaryLinks = deferredSupplementaryLinks,
                 HasStreamSources = hasAddons || externalEnabled,
+                IsMultiSeasonGroup = isMultiSeasonGroup,
             });
         }
 
@@ -1383,17 +1397,16 @@ namespace AnimeList.Controllers
             var mappings = await _mappingService.GetImdbMapping(imdbId);
             if (mappings == null || mappings.Count == 0) return (null, null, null);
 
-            // Pick the head cour for hero metadata: latest-season first so a
-            // currently-airing 4-cour franchise lands on the cour that's
-            // actually airing right now (its score / status / airing-day
-            // copy is the row the user came to look at). The airing-
-            // schedule overlay scopes to this cour's season too, so users
-            // visiting an airing franchise see live release dates on the
-            // tab that matters. Falls back through the service chain so a
-            // kitsu-only or anilist-only franchise still renders for a
-            // MAL user (the page just won't surface Manage Entry).
+            // Pick the head cour for hero metadata: earliest season first so
+            // the page reads as the franchise umbrella ("Re:ZERO" rather than
+            // "Re:ZERO Season 4"). Mirrors Stremio's catalog-side rendering
+            // for an imdb-grouped entry — Cinemeta describes the franchise
+            // by its first-season metadata, with every cour's episodes
+            // attached on the same row. Falls back through the service
+            // chain so a kitsu-only or anilist-only franchise still renders
+            // for a MAL user (the page just won't surface Manage Entry).
             var ordered = mappings
-                .OrderByDescending(m => m.Season ?? int.MinValue)
+                .OrderBy(m => m.Season ?? int.MaxValue)
                 .ToList();
             string headId = null;
             AnimeService headService = animeService;
@@ -1555,6 +1568,15 @@ namespace AnimeList.Controllers
         // to render, which is a dead end, so we render the rows as inert
         // and skip the cursor/keyboard affordances.
         public bool HasStreamSources { get; set; }
+
+        // True when the page is rendering an imdb-grouped franchise that
+        // spans more than one cour. The user's tracker entry is per-cour
+        // so the hero can't honestly say "Completed · Ep 25/25" — that
+        // number would only describe one of several seasons. Drives the
+        // view to render a generic "Manage Entry" pill instead of the
+        // per-cour status text. Single-cour grouped renders (one
+        // mapping) stay on the specific-message path.
+        public bool IsMultiSeasonGroup { get; set; }
     }
 
     /// <summary>
