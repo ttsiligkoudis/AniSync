@@ -137,7 +137,7 @@ namespace AnimeList.Controllers
             List<Meta> metas;
             if (hasTag)
             {
-                metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service, hideAdult: hideAdult);
+                metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service, hideAdult: hideAdult, groupSeasons: groupSeasons);
             }
             else if (routeSeasonalViaAnilist)
             {
@@ -146,7 +146,7 @@ namespace AnimeList.Controllers
                     search: search, genre: genre,
                     groupSeasons: groupSeasonsForCall, season: season,
                     hideUnreleased: hideUnreleased, hideAdult: hideAdult);
-                metas = await _anilistFallback.TranslateMetaIdsAsync(metas, AnimeService.Kitsu);
+                metas = await _anilistFallback.TranslateMetaIdsAsync(metas, AnimeService.Kitsu, groupSeasons);
             }
             else
             {
@@ -170,6 +170,21 @@ namespace AnimeList.Controllers
                     .OrderByDescending(x => x.score)
                     .Select(x => x.meta)
                     .ToList();
+
+                // Search runs ungrouped at the service layer to avoid the
+                // dedup name-flatten that would mangle movie titles sharing
+                // an IMDb id with a series. Post-rank, fold cours of the
+                // same franchise into one card when the user has grouping
+                // on — keeps the result list short and consistent with what
+                // every other surface shows.
+                if (groupSeasons)
+                {
+                    metas = await _anilistFallback.ApplyGroupingToMetasAsync(metas, groupSeasons: true);
+                    metas = metas
+                        .GroupBy(m => m.id, StringComparer.Ordinal)
+                        .Select(g => g.First())
+                        .ToList();
+                }
             }
 
             // Season dropdown drives only the Seasonal list type. Default is
@@ -277,7 +292,7 @@ namespace AnimeList.Controllers
             {
                 // Mirror Index's tag-routing: tag filtering goes through the
                 // AniList anonymous browse regardless of primary.
-                metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service, skip, hideAdult: hideAdult);
+                metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service, skip, hideAdult: hideAdult, groupSeasons: groupSeasons);
             }
             else if (routeSeasonalViaAnilist)
             {
@@ -286,7 +301,7 @@ namespace AnimeList.Controllers
                     skip: skip, genre: genre, search: search,
                     groupSeasons: groupSeasonsForCall, season: season,
                     hideUnreleased: hideUnreleased, hideAdult: hideAdult);
-                metas = await _anilistFallback.TranslateMetaIdsAsync(metas, AnimeService.Kitsu);
+                metas = await _anilistFallback.TranslateMetaIdsAsync(metas, AnimeService.Kitsu, groupSeasons);
             }
             else
             {
@@ -308,6 +323,17 @@ namespace AnimeList.Controllers
                     .OrderByDescending(x => x.score)
                     .Select(x => x.meta)
                     .ToList();
+
+                // Same post-rank grouping pass Index() runs — fold cours
+                // with a shared IMDb id when the user has grouping on.
+                if (groupSeasons)
+                {
+                    metas = await _anilistFallback.ApplyGroupingToMetasAsync(metas, groupSeasons: true);
+                    metas = metas
+                        .GroupBy(m => m.id, StringComparer.Ordinal)
+                        .Select(g => g.First())
+                        .ToList();
+                }
             }
 
             var labels = new Dictionary<ListType, string>
@@ -389,7 +415,8 @@ namespace AnimeList.Controllers
 
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideAdult = configuration?.showAdultContent != true;
-            var (name, items, _) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service, hideAdult: hideAdult);
+            var groupSeasons = configuration?.enableSeasonGrouping == true;
+            var (name, items, _) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service, hideAdult: hideAdult, groupSeasons: groupSeasons);
             return View("StudioDetail", new StudioDetailViewModel
             {
                 Id = id,
@@ -414,7 +441,8 @@ namespace AnimeList.Controllers
 
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideAdult = configuration?.showAdultContent != true;
-            var (_, items, hasNext) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service, page, hideAdult: hideAdult);
+            var groupSeasons = configuration?.enableSeasonGrouping == true;
+            var (_, items, hasNext) = await _anilistFallback.GetStudioMediaAsync(id, tokenData.anime_service, page, hideAdult: hideAdult, groupSeasons: groupSeasons);
             Response.Headers["X-Has-Next-Page"] = hasNext ? "true" : "false";
             return PartialView("_PosterGrid", new PosterGridViewModel
             {
@@ -445,7 +473,8 @@ namespace AnimeList.Controllers
 
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideAdult = configuration?.showAdultContent != true;
-            var (name, items) = await _anilistFallback.GetStaffMediaAsync(id, tokenData.anime_service, hideAdult: hideAdult);
+            var groupSeasons = configuration?.enableSeasonGrouping == true;
+            var (name, items) = await _anilistFallback.GetStaffMediaAsync(id, tokenData.anime_service, hideAdult: hideAdult, groupSeasons: groupSeasons);
 
             return View("StaffDetail", new StaffDetailViewModel
             {
@@ -491,7 +520,8 @@ namespace AnimeList.Controllers
 
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideAdult = configuration?.showAdultContent != true;
-            var (items, _) = await _anilistFallback.GetByTagPageAsync(tagStr, tokenData.anime_service, page: 1, hideAdult: hideAdult);
+            var groupSeasons = configuration?.enableSeasonGrouping == true;
+            var (items, _) = await _anilistFallback.GetByTagPageAsync(tagStr, tokenData.anime_service, page: 1, hideAdult: hideAdult, groupSeasons: groupSeasons);
             return View("TagDetail", new TagDetailViewModel
             {
                 Tag = tagStr,
@@ -515,7 +545,8 @@ namespace AnimeList.Controllers
 
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideAdult = configuration?.showAdultContent != true;
-            var (items, hasNext) = await _anilistFallback.GetByTagPageAsync(tagStr, tokenData.anime_service, page, hideAdult: hideAdult);
+            var groupSeasons = configuration?.enableSeasonGrouping == true;
+            var (items, hasNext) = await _anilistFallback.GetByTagPageAsync(tagStr, tokenData.anime_service, page, hideAdult: hideAdult, groupSeasons: groupSeasons);
             Response.Headers["X-Has-Next-Page"] = hasNext ? "true" : "false";
             return PartialView("_PosterGrid", new PosterGridViewModel
             {

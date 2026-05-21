@@ -27,13 +27,54 @@ namespace AnimeList.Services.Extensions
         public static async Task RewriteLinksToServiceAsync(
             this IAnimeMappingService mapping,
             IReadOnlyCollection<NotificationRecord> records,
-            AnimeService targetService)
+            AnimeService targetService,
+            bool groupSeasons = false)
         {
             if (records == null || records.Count == 0) return;
             var targetPrefix = GetServicePrefix(targetService);
             foreach (var r in records)
             {
                 if (string.IsNullOrEmpty(r?.AnimeId)) continue;
+
+                // Group-seasons branch first — when on, every notification
+                // should resolve to the imdb-grouped franchise umbrella,
+                // even when the stored AnimeId already matches the user's
+                // primary service. Falls back to the per-service rewrite
+                // below when no imdb mapping exists (older / catalog-only
+                // entries).
+                if (groupSeasons)
+                {
+                    AnimeIdMapping rowMapping = null;
+                    try
+                    {
+                        if (r.AnimeId.StartsWith(anilistPrefix, StringComparison.Ordinal))
+                            rowMapping = await mapping.GetAnilistMapping(r.AnimeId);
+                        else if (r.AnimeId.StartsWith(malPrefix, StringComparison.Ordinal))
+                            rowMapping = await mapping.GetMalMapping(r.AnimeId);
+                        else if (r.AnimeId.StartsWith(kitsuPrefix, StringComparison.Ordinal))
+                            rowMapping = await mapping.GetKitsuMapping(r.AnimeId);
+                    }
+                    catch { rowMapping = null; }
+
+                    if (rowMapping != null
+                        && !string.IsNullOrEmpty(rowMapping.ImdbId)
+                        && rowMapping.ImdbId.StartsWith("tt"))
+                    {
+                        // Embed the cour's IMDb season number when known so
+                        // the multi-season Watch route lands on the right
+                        // cour's episode. Falls back to the bare episode
+                        // route for single-cour franchises (mapping.Season
+                        // is null or 1).
+                        var watchEp = r.EpisodeNumber;
+                        var season = rowMapping.Season;
+                        r.LinkPath = (season.HasValue && season.Value > 0)
+                            ? $"/anime/{rowMapping.ImdbId}/watch/{season.Value}/{watchEp}"
+                            : $"/anime/{rowMapping.ImdbId}/watch/{watchEp}";
+                        r.AnimeId = rowMapping.ImdbId;
+                        continue;
+                    }
+                }
+
                 if (r.AnimeId.StartsWith(targetPrefix, StringComparison.Ordinal)) continue;
 
                 // GetIdWithPrefixAsync returns null when the row's source

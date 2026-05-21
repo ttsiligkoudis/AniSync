@@ -41,7 +41,7 @@ namespace AnimeList.Services.Interfaces
         /// space (anilist:N); the detail page's controller resolves
         /// cross-service via the mapping when the user clicks a card.
         /// </summary>
-        Task<List<Meta>> GetRecommendationMetasAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist);
+        Task<List<Meta>> GetRecommendationMetasAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist, bool groupSeasons = false);
 
         /// <summary>
         /// Fetches the legal-streaming destinations (Crunchyroll, Netflix, …) for an AniList
@@ -91,7 +91,8 @@ namespace AnimeList.Services.Interfaces
         /// </summary>
         Task<List<Meta>> GetNewEpisodesTodayAsync(
             AnimeService translateTo = AnimeService.Anilist,
-            int tzOffsetMinutes = 0);
+            int tzOffsetMinutes = 0,
+            bool groupSeasons = false);
 
         /// <summary>
         /// Episodes airing within an arbitrary [startUnix, endUnix] window
@@ -128,7 +129,7 @@ namespace AnimeList.Services.Interfaces
         /// _PosterGrid scroll variant. Cached 24h per anilist id since
         /// relations are essentially static metadata.
         /// </summary>
-        Task<List<Meta>> GetRelatedAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist);
+        Task<List<Meta>> GetRelatedAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist, bool groupSeasons = false);
 
         /// <summary>
         /// Walks a list of Meta and replaces every anilist:N id with the
@@ -139,8 +140,27 @@ namespace AnimeList.Services.Interfaces
         /// Used to translate results from <see cref="IAnilistService"/>
         /// calls that don't natively know the user's primary service
         /// (HomeController's popular-by-season shelves).
+        ///
+        /// When <paramref name="groupSeasons"/> is true the per-user pref
+        /// flips the resolver to IMDb-first (with TMDB / service-native
+        /// fallback), matching what the Stremio addon catalog returns when
+        /// the same toggle is on — so cards render with imdb:tt... ids and
+        /// click-throughs land on the franchise umbrella page regardless of
+        /// which service is the user's primary.
         /// </summary>
-        Task<List<Meta>> TranslateMetaIdsAsync(List<Meta> metas, AnimeService translateTo);
+        Task<List<Meta>> TranslateMetaIdsAsync(List<Meta> metas, AnimeService translateTo, bool groupSeasons = false);
+
+        /// <summary>
+        /// Per-user id rewrite for metas that already carry a service-native
+        /// id (per-service GetAnimeByIdAsync recommendations,
+        /// MetaController search results, etc. — anything that didn't pass
+        /// through <see cref="TranslateMetaIdsAsync"/>). When
+        /// <paramref name="groupSeasons"/> is true each mappable id is
+        /// rewritten to its imdb tt-id; entries the mapping table can't
+        /// resolve stay unchanged (the card still links somewhere
+        /// reasonable). No-op when groupSeasons is false.
+        /// </summary>
+        Task<List<Meta>> ApplyGroupingToMetasAsync(List<Meta> metas, bool groupSeasons);
 
         /// <summary>
         /// AniList-sourced supplementary <see cref="Link"/> entries (Tag,
@@ -160,7 +180,7 @@ namespace AnimeList.Services.Interfaces
         /// service's id space so card clicks land on the user's primary's
         /// detail page rather than AniList's.
         /// </summary>
-        Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null, bool hideAdult = false);
+        Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null, bool hideAdult = false, bool groupSeasons = false);
 
         /// <summary>
         /// Page-based variant of <see cref="GetByTagAsync"/> backing the
@@ -169,7 +189,7 @@ namespace AnimeList.Services.Interfaces
         /// handler can stop at the real end of the catalog. Page is
         /// 1-indexed (AniList's convention).
         /// </summary>
-        Task<(List<Meta> Items, bool HasNextPage)> GetByTagPageAsync(string tag, AnimeService translateTo, int page = 1, bool hideAdult = false);
+        Task<(List<Meta> Items, bool HasNextPage)> GetByTagPageAsync(string tag, AnimeService translateTo, int page = 1, bool hideAdult = false, bool groupSeasons = false);
 
         /// <summary>
         /// Full tag catalog from AniList's MediaTagCollection — surfaced by
@@ -188,7 +208,7 @@ namespace AnimeList.Services.Interfaces
         /// render "Anime by Hayao Miyazaki" without an extra round-trip.
         /// Name is null when the staff id doesn't resolve.
         /// </summary>
-        Task<(string Name, List<Meta> Items)> GetStaffMediaAsync(int staffId, AnimeService translateTo, string skip = null, bool hideAdult = false);
+        Task<(string Name, List<Meta> Items)> GetStaffMediaAsync(int staffId, AnimeService translateTo, string skip = null, bool hideAdult = false, bool groupSeasons = false);
 
         /// <summary>
         /// Browse a studio's catalog — every anime the studio produced,
@@ -201,7 +221,7 @@ namespace AnimeList.Services.Interfaces
         /// callers must consult HasNextPage, not list emptiness).
         /// Page is 1-indexed.
         /// </summary>
-        Task<(string Name, List<Meta> Items, bool HasNextPage)> GetStudioMediaAsync(int studioId, AnimeService translateTo, int page = 1, bool hideAdult = false);
+        Task<(string Name, List<Meta> Items, bool HasNextPage)> GetStudioMediaAsync(int studioId, AnimeService translateTo, int page = 1, bool hideAdult = false, bool groupSeasons = false);
 
         /// <summary>
         /// One page of studios from AniList's Page.studios connection,

@@ -174,8 +174,19 @@ public class HomeController : Controller
         // bouncing through a cross-service id resolve. Anonymous and
         // AniList-primary viewers get an effective no-op translation.
         var primaryService = tokenData?.anime_service ?? AnimeService.Anilist;
-        var popularThisSeasonTask = GetPopularBySeasonAsync(SeasonCurrent, primaryService);
-        var mostAnticipatedTask = GetPopularBySeasonAsync(SeasonNext, primaryService);
+        // Per-user grouping pref — read once and threaded through every
+        // dashboard shelf's translate step. The shelf data itself stays
+        // globally cached (anilist:N ids); the per-request transform picks
+        // between native-id and imdb-id resolvers so each viewer sees the
+        // ids their toggle expects without per-user cache fanout.
+        var dashboardGroupSeasons = false;
+        if (!string.IsNullOrEmpty(uid))
+        {
+            var dashboardConfig = await GetConfigByUidAsync(uid, _configStore);
+            dashboardGroupSeasons = dashboardConfig?.enableSeasonGrouping == true;
+        }
+        var popularThisSeasonTask = GetPopularBySeasonAsync(SeasonCurrent, primaryService, dashboardGroupSeasons);
+        var mostAnticipatedTask = GetPopularBySeasonAsync(SeasonNext, primaryService, dashboardGroupSeasons);
         // Read the timezone-offset cookie stamped by the layout's inline
         // script. Defaults to 0 (UTC) when the cookie isn't present yet
         // (brand-new visitor's first request — the cookie is set during
@@ -189,7 +200,7 @@ public class HomeController : Controller
             // make the cache key absurd.
             tzOffsetMinutes = Math.Clamp(parsed, -840, 720);
         }
-        var newEpisodesTodayTask = _anilistFallback.GetNewEpisodesTodayAsync(primaryService, tzOffsetMinutes);
+        var newEpisodesTodayTask = _anilistFallback.GetNewEpisodesTodayAsync(primaryService, tzOffsetMinutes, dashboardGroupSeasons);
         await Task.WhenAll(seasonStatsTask, popularThisSeasonTask, mostAnticipatedTask, newEpisodesTodayTask);
 
         var (seasonAiring, seasonNew, seasonTotal) = await seasonStatsTask;
@@ -247,7 +258,7 @@ public class HomeController : Controller
     // (season, year) tuple so the entry naturally rotates when AniList moves
     // to the next quarterly season; non-empty results only so a transient
     // upstream blip doesn't lock in an empty shelf for 24h.
-    private async Task<List<Meta>> GetPopularBySeasonAsync(string seasonOption, AnimeService translateTo = AnimeService.Anilist)
+    private async Task<List<Meta>> GetPopularBySeasonAsync(string seasonOption, AnimeService translateTo = AnimeService.Anilist, bool groupSeasons = false)
     {
         var (season, year) = GetSeasonAndYear(seasonOption);
         var cacheKey = $"dashboard:popular-by-season:{season}:{year}";
@@ -291,14 +302,15 @@ public class HomeController : Controller
         }
 
         // Cache stores the anilist:N-keyed list, shared across every viewer.
-        // Translate ids per-call so a MAL / Kitsu primary's clicks land on
-        // their service-native detail page. Anonymous + AniList primaries
-        // skip the lookup inside TranslateMetaIdsAsync.
+        // Per-call translation picks the id space — native (mal/kitsu/anilist)
+        // for ungrouped users, imdb-first for grouped users — so the global
+        // cache stays a single entry while each viewer's cards still land
+        // on the id their /configure pref expects.
         return await _anilistFallback.TranslateMetaIdsAsync(top.Select(m => new Meta
         {
             id = m.id, name = m.name, poster = m.poster, type = m.type,
             score = m.score, episodes = m.episodes, year = m.year, format = m.format,
-        }).ToList(), translateTo);
+        }).ToList(), translateTo, groupSeasons);
     }
 
     // Wraps FetchListAsync in a try/catch so a single provider rate-limiting
