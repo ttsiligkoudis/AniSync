@@ -80,17 +80,26 @@ namespace AnimeList.Controllers
             // /watch/{ep} routing and single-tab episode UI work, but
             // Stremio renders meta.videos[].season directly in its season
             // selector — leaving it at 1 makes a Re:Zero S4 page show as
-            // "Season 1". The cour's franchise season lives on
-            // sourceLinks.ImdbSeason (from the cross-service mapping
-            // table); apply it back to each video so Stremio's selector
-            // matches the page title. Grouped-imdb renders already keep
-            // the original season numbers intact (NormaliseCour is
-            // skipped for them), so this only runs on the per-cour path.
-            if (!loadResult.RenderedAsGrouped && loadResult.SourceLinks?.ImdbSeason is int franchiseSeason && franchiseSeason > 0)
+            // "Season 1". NormaliseCour preserves the original season on
+            // v.imdbSeason, so each video knows its franchise season
+            // even when the cross-service mapping row's Season column
+            // happens to be missing (sourceLinks.ImdbSeason can be null
+            // for entries the mapping author didn't populate; v.imdbSeason
+            // is fed directly from Cinemeta's per-cour data). Falls back
+            // to sourceLinks.ImdbSeason for any video whose imdbSeason
+            // didn't land (streamingEpisodes-fallback path, where
+            // imdbEpisode was already non-null and NormaliseCour skipped
+            // the imdbSeason copy). Grouped-imdb renders are untouched —
+            // NormaliseCour skips them, so their original season numbers
+            // are still in v.season.
+            if (!loadResult.RenderedAsGrouped)
             {
+                var franchiseSeasonFallback = loadResult.SourceLinks?.ImdbSeason;
                 foreach (var v in anime.videos ?? [])
                 {
-                    if (v != null) v.season = franchiseSeason;
+                    if (v == null) continue;
+                    var franchiseSeason = v.imdbSeason ?? franchiseSeasonFallback;
+                    if (franchiseSeason is int s && s > 0) v.season = s;
                 }
             }
 
