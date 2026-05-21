@@ -386,6 +386,39 @@
                             <span class="source-chip-mark" aria-hidden="true">IMDb</span>
                         </a>
                     }
+                    @{
+                        @* Stremio web detail deep-link. The id format Stremio
+                           expects is the same prefixed catalog id we already
+                           carry on anime.id — kitsu:N, mal:N, anilist:N, or
+                           ttNNNNNNN — so a plain url-encode is all we need.
+                           For the imdb-grouped franchise render anime.id is
+                           the tt umbrella (BuildGroupedImdbAnimeAsync stamps
+                           it that way) which routes Stremio to the Cinemeta
+                           entry that aggregates every cour; otherwise it's
+                           the user's primary's id, matching the catalog the
+                           user actually subscribed to in their Stremio. The
+                           tmdb / anidb / tvdb prefixes are skipped — there's
+                           no public Stremio addon that catalogs anime under
+                           those ids, so the link would land on a blank
+                           detail page. *@
+                        var stremioId = a.id;
+                        var stremioIdSupported = !string.IsNullOrEmpty(stremioId)
+                            && (stremioId.StartsWith(Utils.anilistPrefix)
+                                || stremioId.StartsWith(Utils.malPrefix)
+                                || stremioId.StartsWith(Utils.kitsuPrefix)
+                                || stremioId.StartsWith(Utils.imdbPrefix));
+                        var stremioType = a.type == MetaType.movie.ToString() ? "movie" : "series";
+                    }
+                    @if (stremioIdSupported)
+                    {
+                        <a class="source-chip source-chip-stremio"
+                           href="@($"https://web.stremio.com/#/detail/{stremioType}/{Uri.EscapeDataString(stremioId)}")"
+                           target="_blank" rel="noreferrer noopener"
+                           aria-label="Open on Stremio">
+                            <span class="source-chip-mark" aria-hidden="true">S</span>
+                            <span class="source-chip-label">Stremio</span>
+                        </a>
+                    }
                 </div>
             }
         </div>

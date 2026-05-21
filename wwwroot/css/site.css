@@ -4513,6 +4513,16 @@ a.stats-cell-link:hover {
     color: #1a1a1a;
 }
 
+/* Stremio — official brand purple (matches the play button on web.stremio.com
+   and the Stremio app's primary action colour). Light text on the saturated
+   purple reads as the Stremio header itself. */
+.source-chip-stremio,
+.source-chip-stremio:link,
+.source-chip-stremio:visited {
+    background: #7B5BF5;
+    color: #fff;
+}
+
 .source-chip-imdb .source-chip-mark {
     background: rgba(0, 0, 0, 0.18);
     color: #1a1a1a;
