@@ -400,22 +400,24 @@ namespace AnimeList.Services
             string.IsNullOrEmpty(vtt) ? vtt : FontTag.Replace(vtt, string.Empty);
 
         // Cue-header lines look like "00:00:01.500 --> 00:00:04.000"
-        // optionally followed by space-separated cue settings. The
-        // regex matches the timing pair and captures any existing
-        // settings tail so we can decide whether to append our default.
+        // optionally followed by space-separated cue settings. WebVTT
+        // also allows the short form "MM:SS.mmm --> MM:SS.mmm" when no
+        // timestamp crosses an hour — many OpenSubtitles tracks use
+        // that form for short episodes, so the hours half is optional.
+        // Captures any existing settings tail so we can decide whether
+        // to append our default.
         private static readonly Regex CueHeader = new(
-            @"^(\d\d:\d\d:\d\d\.\d{3}\s+-->\s+\d\d:\d\d:\d\d\.\d{3})([^\r\n]*)$",
+            @"^((?:\d{2}:)?\d{2}:\d{2}\.\d{3}\s+-->\s+(?:\d{2}:)?\d{2}:\d{2}\.\d{3})([^\r\n]*)$",
             RegexOptions.Compiled | RegexOptions.Multiline);
 
         /// <summary>
-        /// Appends <c>line:-3</c> (snap-to-lines, third row from
+        /// Appends <c>line:-2</c> (snap-to-lines, second row from
         /// bottom) to every VTT cue header that doesn't already carry
-        /// a <c>line:</c> setting. Lifts the cue's bottom edge two
-        /// text-line heights up from the video's bottom edge — the
-        /// browser's native caption renderer hugs the frame at
-        /// <c>line:auto</c>, which collides with ArtPlayer's controls
-        /// bar when visible and reads cramped when it's not. Uses the
-        /// integer snap-to-lines mode rather than a percentage because
+        /// a <c>line:</c> setting. Lifts the cue's bottom edge one
+        /// text-line height up from the video's bottom edge — small
+        /// breathing room so dialogue doesn't sit flush against the
+        /// player frame / ArtPlayer controls bar. Uses the integer
+        /// snap-to-lines mode rather than a percentage because
         /// Chromium browsers appear to ignore percentage line offsets
         /// for bottom-anchored default cues — the integer form is
         /// honoured uniformly across browsers. Cues that did set a
@@ -430,7 +432,7 @@ namespace AnimeList.Services
                 var settings = m.Groups[2].Value;
                 // Already positioned by the source — leave it alone.
                 if (settings.IndexOf("line:", StringComparison.Ordinal) >= 0) return m.Value;
-                return m.Groups[1].Value + settings + " line:-3";
+                return m.Groups[1].Value + settings + " line:-2";
             });
         }
     }
