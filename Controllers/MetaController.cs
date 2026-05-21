@@ -300,7 +300,7 @@ namespace AnimeList.Controllers
                 // for the franchise umbrella the user is looking at.
                 anilistId = mappings?
                     .Where(m => m.AnilistId.HasValue)
-                    .OrderBy(m => m.ImdbSeason ?? int.MaxValue)
+                    .OrderBy(m => m.Season ?? int.MaxValue)
                     .FirstOrDefault()?.AnilistId;
             }
             catch (Exception ex)
