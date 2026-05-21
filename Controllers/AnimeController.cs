@@ -854,6 +854,12 @@ namespace AnimeList.Controllers
             }
             // 1-hour client cache so re-seeks / re-renders don't refetch.
             Response.Headers["Cache-Control"] = "public, max-age=3600";
+            // Allow cross-origin reads so Chromecast's Default Media
+            // Receiver (running on a separate gstatic.com origin) can
+            // fetch the VTT when the user casts the video. The same
+            // header is harmless for the local <video> fetch and for
+            // VLC sidecars — both already work without CORS.
+            Response.Headers["Access-Control-Allow-Origin"] = "*";
             // Suggest a sensible filename for external players that
             // sniff Content-Disposition (VLC does this when the URL
             // path itself doesn't end in a known subtitle extension).

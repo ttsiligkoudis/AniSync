@@ -629,6 +629,7 @@
                 if (!art) return;
                 if (item.kind === 'none') {
                     art.subtitle.show = false;
+                    syncCastSubtitleTrack(null, null, null);
                     currentSubKind = 'none';
                     currentSubKey = null;
                     return;
@@ -636,6 +637,7 @@
                 if (item.kind === 'vtt') {
                     art.subtitle.show = true;
                     art.subtitle.switch(item.url, { name: item.html });
+                    syncCastSubtitleTrack(item.url, item.html, item.lang);
                     currentSubKind = 'vtt';
                     currentSubKey = item.url;
                     return;
@@ -662,11 +664,61 @@
                     // actually need from an embedded sub when
                     // OpenSubtitles don't have a match.
                     art.subtitle.show = false;
+                    // Embedded SSA → VTT lands on a blob: URL local to
+                    // the browser, which the cast receiver can't fetch
+                    // cross-process. Clear the cast track so the TV
+                    // doesn't stall waiting on a URL it can't resolve;
+                    // local playback still gets the SSA via ArtPlayer's
+                    // own pipeline below.
+                    syncCastSubtitleTrack(null, null, null);
                     currentSubKind = 'ass';
                     currentSubKey = item.html || (item.label || 'Embedded') + ' SSA';
                     renderAssAsVtt(item);
                     return;
                 }
+            }
+
+            // Keeps a single <track> element on the underlying <video>
+            // pointed at whatever OpenSubtitles VTT the user has active.
+            // ArtPlayer renders subs locally via its own div overlay
+            // (art.subtitle.switch), so this track stays mode='hidden'
+            // for the browser tab — the only consumer is the Cast SDK,
+            // which picks up <track> children when the user hits the
+            // native cast button and forwards them to the Chromecast
+            // Default Media Receiver as a captions track. Without
+            // this the TV plays the raw video with no subs while the
+            // phone shows them via the canvas-style overlay (which
+            // never makes it across the cast bridge).
+            //
+            // Skipped for the 'ass' branch (blob: URL the receiver
+            // can't fetch) and the 'none' branch (just clears).
+            function syncCastSubtitleTrack(url, label, lang) {
+                if (!art || !art.video) return;
+                var video = art.video;
+                var track = video.querySelector('track[data-cast-subtitle]');
+                if (!url) {
+                    if (track) track.parentNode.removeChild(track);
+                    return;
+                }
+                if (!track) {
+                    track = document.createElement('track');
+                    track.setAttribute('data-cast-subtitle', '1');
+                    track.kind = 'subtitles';
+                    track.default = true;
+                    video.appendChild(track);
+                }
+                // Absolutise the URL — Cast receivers can't resolve
+                // path-relative refs against the sender tab's location;
+                // they'd try to fetch against gstatic.com and 404.
+                try { track.src = new URL(url, location.href).href; }
+                catch (_) { track.src = url; }
+                if (lang) track.srclang = lang;
+                if (label) track.label = label;
+                // hidden so the browser doesn't dual-render with
+                // ArtPlayer's overlay; the Cast SDK still picks up the
+                // track regardless of mode.
+                try { if (track.track) track.track.mode = 'hidden'; }
+                catch (_) { /* IE-style track shape — ignore */ }
             }
 
             // Auto-handover hook: when the embedded SSA track ends
@@ -2167,6 +2219,22 @@
                         },
                     ],
                 });
+
+                // Initial cast-track sync — ArtPlayer's own
+                // `subtitle:` config above only wires its internal
+                // overlay; applySubtitle doesn't fire on the auto-load
+                // path, so the native <track> we expose to the Cast
+                // SDK starts empty and a viewer who hits the cast
+                // button before touching the picker gets a TV with no
+                // captions. Mirrors the defaultSubIdx pick into the
+                // <track> element once art.video exists.
+                if (defaultSubIdx >= 0) {
+                    var defaultSub = subtitles[defaultSubIdx];
+                    syncCastSubtitleTrack(
+                        defaultSub.url,
+                        defaultSub.label || defaultSub.lang,
+                        defaultSub.lang);
+                }
 
                 // ArtPlayer normalises the native HTMLVideoElement
                 // through art.video; the "video:error" custom event
