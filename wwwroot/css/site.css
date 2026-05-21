@@ -4857,6 +4857,14 @@ button.anime-detail-user-state:hover {
     padding-right: 0;
 }
 
+/* Hide the season-tab strip too when the user collapses the episode
+   list — the tabs sit outside .anime-detail-episodes-body so the cour
+   switcher stays anchored above the scroll on multi-cour franchises,
+   but they have no list to switch when the section is collapsed. */
+.anime-detail-episodes-wrap[data-collapsed="true"] .season-tabs {
+    display: none;
+}
+
 /* ── Episode list (Stremio-shaped) ── */
 .anime-detail-episodes {
     list-style: none;
