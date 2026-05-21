@@ -2565,6 +2565,27 @@ body.modal-open {
     border-color: rgba(239, 68, 68, 0.5);
 }
 
+/* Browser-native caption (::cue) styling — applies to every <track
+   kind="subtitles"> child the watch page attaches to its <video>.
+   Chromium / Safari default to white-on-translucent-black blocks
+   which makes positioned cues (sign translations, song-lyric
+   overlays from ASS \pos / \an tags) read like floating black
+   labels stamped over the art. Drop the background and use a
+   layered text-shadow instead — same outline-on-transparent look
+   libass / Stremio render so the cues sit on the artwork without
+   the boxed-text appearance. Pure-text outlines (no -webkit-text-
+   stroke) so the legibility holds on Firefox + Safari too. */
+::cue {
+    background-color: transparent;
+    color: #fff;
+    text-shadow:
+        1px 1px 1px rgba(0, 0, 0, 0.95),
+        -1px -1px 1px rgba(0, 0, 0, 0.95),
+        1px -1px 1px rgba(0, 0, 0, 0.95),
+        -1px 1px 1px rgba(0, 0, 0, 0.95),
+        0 0 4px rgba(0, 0, 0, 0.85);
+}
+
 /* ─── Mobile (≤640px) ─────────────────────────────────────────────── */
 @media (max-width: 640px) {
     .watch-page {
