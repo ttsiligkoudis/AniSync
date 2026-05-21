@@ -18,9 +18,10 @@ namespace AnimeList.Controllers
         private readonly IFillerListService _fillerListService;
         private readonly IConfigStore _configStore;
         private readonly IUserListCache _listCache;
+        private readonly IAnilistFallback _anilistFallback;
         private readonly ILogger<MetaController> _logger;
 
-        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService, ISyncService syncService, IFillerListService fillerListService, IConfigStore configStore, IUserListCache listCache, ILogger<MetaController> logger)
+        public MetaController(ITokenService tokenService, IAnilistService anilistService, IKitsuService kitsuService, IMalService malService, ITmdbService tmdbService, ICinemetaService cinemetaService, IAnimeMappingService mappingService, ISyncService syncService, IFillerListService fillerListService, IConfigStore configStore, IUserListCache listCache, IAnilistFallback anilistFallback, ILogger<MetaController> logger)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
@@ -33,6 +34,7 @@ namespace AnimeList.Controllers
             _fillerListService = fillerListService;
             _configStore = configStore;
             _listCache = listCache;
+            _anilistFallback = anilistFallback;
             _logger = logger;
         }
 
@@ -116,6 +118,26 @@ namespace AnimeList.Controllers
                 }
             }
 
+            // Cross-service supplementary links: AniList's tag/studio/staff
+            // metadata is richer than MAL or Kitsu's, so non-AniList primaries
+            // used to ship Stremio meta with only the per-service Studio link
+            // (or none at all). When the cross-service mapping has an AniList
+            // id, fetch the same Tag / Studio / director / Staff / writer /
+            // Artist / Composer / Producer links AnilistService produces
+            // natively and merge them in — same data the web app's Extras
+            // endpoint serves, just plumbed through to the addon meta path.
+            if (result is Meta metaObj)
+            {
+                await EnrichWithAnilistSupplementaryLinksAsync(metaObj, id, tokenData?.anime_service);
+
+                // Rewrite the AniList-sourced Tag / Studio / Staff URLs to
+                // point at AniSync's own /discover routes — same destination
+                // the web app's chip clicks land on — so a tap in Stremio
+                // opens the franchise's tag/studio/staff browse on this
+                // site instead of bouncing to anilist.co.
+                RewriteSupplementaryLinkUrls(metaObj);
+            }
+
             if (result != null && !string.IsNullOrWhiteSpace(tokenData?.access_token) && !tokenData.anonymousUser)
             {
                 var manageUrl = $"{Request.Scheme}://{Request.Host}/{config}/Meta/ManageEntry/{id}";
@@ -123,6 +145,143 @@ namespace AnimeList.Controllers
             }
 
             return (result, false);
+        }
+
+        /// <summary>
+        /// Appends the AniList-sourced supplementary links (tag, studio, staff
+        /// roles) to <paramref name="meta"/> when the user's primary service
+        /// is not AniList — the per-service GetAnimeByIdAsync paths for MAL
+        /// and Kitsu emit only the per-service Studio link (mal:...) or none
+        /// at all, so without this enrichment those primaries never see the
+        /// rich category strip the addon ships for AniList primaries. No-op
+        /// when there's no AniList mapping for the meta or the user is
+        /// already an AniList primary (those links are inline from
+        /// AnilistService.GetAnimeByIdAsync).
+        /// </summary>
+        private async Task EnrichWithAnilistSupplementaryLinksAsync(Meta meta, string id, AnimeService? primary)
+        {
+            if (meta == null || string.IsNullOrEmpty(id)) return;
+            if (primary == AnimeService.Anilist) return;
+
+            // Cross-service fallback path (kitsu user, mapping fell back to
+            // AnilistService.GetAnimeByIdAsync) — the meta already has
+            // AniList-sourced Tag entries inline. Skip the extra GraphQL
+            // round-trip in that case.
+            if (meta.links != null && meta.links.Any(l =>
+                l != null && string.Equals(l.category, "Tag", StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            int? anilistId = null;
+            try
+            {
+                AnimeIdMapping mapping = null;
+                if (id.StartsWith(anilistPrefix))
+                {
+                    if (int.TryParse(id[anilistPrefix.Length..], out var aId)) anilistId = aId;
+                }
+                else if (id.StartsWith(malPrefix))
+                {
+                    mapping = await _mappingService.GetMalMapping(id);
+                    anilistId = mapping?.AnilistId;
+                }
+                else if (id.StartsWith(kitsuPrefix))
+                {
+                    mapping = await _mappingService.GetKitsuMapping(id);
+                    anilistId = mapping?.AnilistId;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "MetaController supplementary-link mapping lookup failed for {Id}", id);
+            }
+            if (!anilistId.HasValue || anilistId.Value <= 0) return;
+
+            List<Link> supplementary;
+            try
+            {
+                supplementary = await _anilistFallback.GetSupplementaryLinksAsync(anilistId.Value);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "MetaController GetSupplementaryLinksAsync failed for anilist {Id}", anilistId);
+                return;
+            }
+            if (supplementary == null || supplementary.Count == 0) return;
+
+            meta.links ??= [];
+
+            // Per-service builders may have added their own (lower-quality)
+            // entries in the same categories — drop them so the AniList
+            // strip wins. We only touch the categories we're about to
+            // populate; recommendations / relations / movie credits stay
+            // intact.
+            var ownedCategories = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Tag", "Studio", "Staff", "director", "writer", "Artist", "Composer", "Producer",
+            };
+            meta.links = meta.links
+                .Where(l => l != null && !(l.category != null && ownedCategories.Contains(l.category)))
+                .ToList();
+
+            foreach (var link in supplementary)
+            {
+                if (link == null) continue;
+                meta.links.Add(link);
+            }
+        }
+
+        /// <summary>
+        /// Rewrites the URL on every supplementary Link (Tag / Studio /
+        /// Staff / director / writer / Artist / Composer / Producer) to
+        /// point at AniSync's own /discover/{tag|studio|staff} pages
+        /// instead of the upstream anilist.co URLs. Same browse routes
+        /// the web app's chip clicks resolve to via InternalHrefFor so
+        /// a tap in Stremio opens the franchise's tag/studio/staff
+        /// catalog on this site rather than bouncing to anilist.co.
+        /// Entries that don't carry an AniList id (e.g. a Studio link
+        /// from KitsuService that predates the AniList enrichment, or a
+        /// Tag whose mapping lookup failed) keep their stored URL so
+        /// the chip still has somewhere to go.
+        /// </summary>
+        private void RewriteSupplementaryLinkUrls(Meta meta)
+        {
+            if (meta?.links == null || meta.links.Count == 0) return;
+
+            var origin = $"{Request.Scheme}://{Request.Host}";
+            foreach (var link in meta.links)
+            {
+                if (link == null || string.IsNullOrEmpty(link.category)) continue;
+                var rewritten = BuildDiscoverUrlForCategory(origin, link);
+                if (!string.IsNullOrEmpty(rewritten)) link.url = rewritten;
+            }
+        }
+
+        private static string BuildDiscoverUrlForCategory(string origin, Link link)
+        {
+            if (link == null) return null;
+            switch (link.category)
+            {
+                case "Tag":
+                    if (string.IsNullOrEmpty(link.name)) return null;
+                    return $"{origin}/discover/tag/{Uri.EscapeDataString(link.name)}";
+                case "Studio":
+                    return link.anilistId.HasValue
+                        ? $"{origin}/discover/studio/{link.anilistId.Value}"
+                        : null;
+                case "Staff":
+                case "director":
+                case "writer":
+                case "Artist":
+                case "Composer":
+                case "Producer":
+                    return link.anilistId.HasValue
+                        ? $"{origin}/discover/staff/{link.anilistId.Value}"
+                        : null;
+                default:
+                    return null;
+            }
         }
 
         [HttpGet("{config}/[controller]/{metaType}/{id}.json")]
