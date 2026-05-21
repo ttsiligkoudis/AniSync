@@ -272,7 +272,14 @@
                     && totalEps > 0
                     && nextEp <= totalEps
                     && !isCompleted
-                    && !targetIsFuture;
+                    && !targetIsFuture
+                    // Hide the CTA on multi-cour grouped renders — same
+                    // rationale as the "Manage Entry" pill above: a single
+                    // ep number can't honestly point at "the next episode"
+                    // when the franchise spans multiple cours with their own
+                    // numbering. Users navigate to a specific episode via
+                    // the season-tabbed list below instead.
+                    && !Model.IsMultiSeasonGroup;
                 // When multi-season, embed the season segment in the URL
                 // so the Watch route lands on the correct cour's episode
                 // instead of the first-occurrence default.
