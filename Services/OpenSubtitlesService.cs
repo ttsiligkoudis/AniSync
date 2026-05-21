@@ -187,7 +187,16 @@ namespace AnimeList.Services
                 // as "&lt;font face=...&gt;It's so far away&lt;/font&gt;"
                 // on screen. Strip the opening + closing tags (preserve
                 // the inner text) before returning.
-                return StripFontTags(vtt);
+                vtt = StripFontTags(vtt);
+                // Lift cues off the bottom edge so they don't collide
+                // with ArtPlayer's controls bar / sit flush against
+                // the video frame. Provider VTTs almost never set a
+                // line position, so they all render at line:auto (~the
+                // bottom). 10% margin reads as a normal subtitle gap;
+                // cues that already declared a line stay untouched
+                // (a provider that took the trouble to position their
+                // captions knows where it wants them).
+                return ApplyDefaultLineMargin(vtt);
             }
             catch (Exception ex)
             {
@@ -387,5 +396,36 @@ namespace AnimeList.Services
 
         private static string StripFontTags(string vtt) =>
             string.IsNullOrEmpty(vtt) ? vtt : FontTag.Replace(vtt, string.Empty);
+
+        // Cue-header lines look like "00:00:01.500 --> 00:00:04.000"
+        // optionally followed by space-separated cue settings. The
+        // regex matches the timing pair and captures any existing
+        // settings tail so we can decide whether to append our default.
+        private static readonly Regex CueHeader = new(
+            @"^(\d\d:\d\d:\d\d\.\d{3}\s+-->\s+\d\d:\d\d:\d\d\.\d{3})([^\r\n]*)$",
+            RegexOptions.Compiled | RegexOptions.Multiline);
+
+        /// <summary>
+        /// Appends <c>line:90%</c> to every VTT cue header that doesn't
+        /// already carry a <c>line:</c> setting, lifting bottom-default
+        /// cues off the video edge by ~10%. The browser's native
+        /// caption renderer hugs the frame at <c>line:auto</c>, which
+        /// collides with ArtPlayer's controls bar when visible and reads
+        /// cramped when it's not; provider VTTs almost never set a line
+        /// of their own, so the default is what every viewer sees.
+        /// Cues that did set a line (sign translations, song-lyric
+        /// overlays) stay untouched.
+        /// </summary>
+        private static string ApplyDefaultLineMargin(string vtt)
+        {
+            if (string.IsNullOrEmpty(vtt)) return vtt;
+            return CueHeader.Replace(vtt, m =>
+            {
+                var settings = m.Groups[2].Value;
+                // Already positioned by the source — leave it alone.
+                if (settings.IndexOf("line:", StringComparison.Ordinal) >= 0) return m.Value;
+                return m.Groups[1].Value + settings + " line:90%";
+            });
+        }
     }
 }
