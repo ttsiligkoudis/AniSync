@@ -164,45 +164,12 @@
         </section>
     }
 
-    @* Preferences — toggles that affect the site + addon experience outside
-       the Stremio catalog/stream switches. The list is built per-page so the
-       same partial can render zero, one, or several toggles; the partial
-       omits the whole card (Save button included) when the list is empty,
-       which is why the always-available toggles below are added
-       unconditionally. *@
-    var configurePrefs = new List<(string Id, string Label, string Description, bool Checked)>();
-    if (!Model.AnonymousUser)
-    {
-        configurePrefs.Add((
-            "hideUnreleasedWatching",
-            "Hide unaired from Watching",
-            "When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.",
-            Model.HideUnreleasedWatching));
-    }
-    @* Group-anime-seasons — used to be addon-only but the web app now honors
-       the same toggle, so it lives on the general Preferences card. When on,
-       multi-cour franchises collapse into a single catalog card across
-       Library, Discover, Continue Watching, and the Stremio addon, and the
-       card's id is the franchise's IMDb id regardless of the user's primary
-       provider so click-throughs land on the same canonical detail page
-       everywhere. *@
-    configurePrefs.Add((
-        "groupSeasons",
-        "Group anime seasons",
-        "Collapse multi-cour franchises into a single card across the site and the Stremio addon. Off shows every cour separately.",
-        Model.GroupSeasons));
-    @* Adult-content gate. Available to everyone (anonymous included) so a
-       fresh visitor's Discover grid stays family-safe by default. Off →
-       Discover / Library / Stremio catalogs strip out anime AniList flags
-       as isAdult, MAL flags as nsfw=black, or Kitsu rates R18. Detail
-       navigation isn't filtered — a direct /anime/{id} link still works
-       — only listing surfaces. *@
-    configurePrefs.Add((
-        "showAdultContent",
-        "Show 18+ content",
-        "Off (default) hides hentai / R18 entries from Discover, Library, and the Stremio addon catalogs. Direct anime URLs still work either way — this only affects what shows up in the grid.",
-        Model.ShowAdultContent));
-    @await Html.PartialAsync("_PreferencesSection", (IReadOnlyList<(string, string, string, bool)>)configurePrefs)
+    @* Preferences — shared card hosted on both /configure and /stremio.
+       The partial owns the canonical toggle set + visibility rules so a
+       new pref only needs to be added in one place; this page just
+       renders it. Save click on either page persists the full set via
+       _ConfigurePageScript's bitFor() reads. *@
+    @await Html.PartialAsync("_PreferencesSection", Model)
 
     @* Stremio-addon-specific config (catalogs, streams, install URL) lives
        on its own page at /stremio so /configure stays focused on the

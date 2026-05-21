@@ -153,24 +153,14 @@
 
     </section>
 
-    @* Preferences card. hide-unaired stays here for non-anonymous users since
-       it's a per-list-view toggle that's most visible alongside the addon
-       catalog controls. Group-anime-seasons used to live here too but has
-       moved to /configure's Preferences card — it's no longer addon-only
-       (the web app honors it now), so it belongs on the general settings
-       page. Anonymous users have no per-list preferences left to surface on
-       this page, so the card collapses to empty (the partial omits it when
-       the list is empty). *@
-    var stremioPrefs = new List<(string Id, string Label, string Description, bool Checked)>();
-    if (!Model.AnonymousUser)
-    {
-        stremioPrefs.Add((
-            "hideUnreleasedWatching",
-            "Hide unaired from Watching",
-            "When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.",
-            Model.HideUnreleasedWatching));
-    }
-    @await Html.PartialAsync("_PreferencesSection", (IReadOnlyList<(string, string, string, bool)>)stremioPrefs)
+    @* Preferences — same shared partial /configure renders, so every site
+       and addon-wide toggle is configurable from either page and Save
+       persists the full set regardless of which page the click came
+       from (_ConfigurePageScript's bitFor() reads every checkbox on the
+       current page; toggles missing on this page fall back to their
+       initial value, so the partial moving in or out doesn't lose
+       state). *@
+    @await Html.PartialAsync("_PreferencesSection", Model)
 
     <!-- ─── STREAMS ─────────────────────────────────────────────────── -->
     @* Shared partial — same card lives on /advanced with isStremio=false

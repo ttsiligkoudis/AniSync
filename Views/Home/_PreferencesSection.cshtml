@@ -1,17 +1,46 @@
 @*
-    Shared "Preferences" card used by both /configure and /stremio. The caller
-    passes a list of toggle descriptors; this partial renders the section-card
-    chrome with one toggle row per descriptor. Saving is owned by the floating
-    save bar (_FloatingSaveBar.cshtml) — any flag-bearing toggle in the page
-    flips it on, and one Save click persists every toggle's state in one call.
-    When the descriptor list is empty (anonymous user / nothing to surface
-    on this view) the whole card is omitted so the page doesn't get an
-    empty section header. DOM ids on each <input> must match the selectors
-    readFlags() in _ConfigurePageScript already drives.
-*@
-@model IReadOnlyList<(string Id, string Label, string Description, bool Checked)>
+    Shared "Preferences" card. Both /configure and /stremio render this
+    partial with the same ConfigureViewModel so the toggle set stays in
+    sync — any pref added here surfaces on every page that hosts the
+    section without per-page lists drifting out of step. Saving is owned
+    by the floating save bar (_FloatingSaveBar.cshtml): the shared
+    _ConfigurePageScript reads every toggle's checkbox via bitFor() so
+    one Save click on either page persists the full pref set.
 
-@if (Model != null && Model.Count > 0)
+    Per-toggle visibility:
+      - hideUnreleasedWatching is hidden for anonymous users (they have
+        no library to filter against, so the toggle would be inert);
+      - groupSeasons and showAdultContent are available to everyone so
+        the addon catalogs anonymous users install respect them too.
+
+    DOM ids must match the selectors readFlags() in _ConfigurePageScript
+    already drives.
+*@
+@model ConfigureViewModel
+
+@{
+    var prefs = new List<(string Id, string Label, string Description, bool Checked)>();
+    if (!Model.AnonymousUser)
+    {
+        prefs.Add((
+            "hideUnreleasedWatching",
+            "Hide unaired from Watching",
+            "When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.",
+            Model.HideUnreleasedWatching));
+    }
+    prefs.Add((
+        "groupSeasons",
+        "Group anime seasons",
+        "Collapse multi-cour franchises into a single card across the site and the Stremio addon. Off shows every cour separately.",
+        Model.GroupSeasons));
+    prefs.Add((
+        "showAdultContent",
+        "Show 18+ content",
+        "Off (default) hides hentai / R18 entries from Discover, Library, and the Stremio addon catalogs. Direct anime URLs still work either way — this only affects what shows up in the grid.",
+        Model.ShowAdultContent));
+}
+
+@if (prefs.Count > 0)
 {
     <section class="section-card">
         <span class="section-title">Preferences</span>
@@ -20,7 +49,7 @@
         </p>
 
         <div class="streams-grid">
-            @foreach (var pref in Model)
+            @foreach (var pref in prefs)
             {
                 <div class="stream-option">
                     <div class="option-name-wrap">
