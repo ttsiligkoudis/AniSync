@@ -221,7 +221,18 @@
                 // waiting for Cinemeta to catch up to the real broadcast.
                 var todayHero = DateTime.UtcNow.Date;
                 var nowUnixHero = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                var targetVideo = a.videos?.FirstOrDefault(v => v.episode == nextEp);
+                // For multi-season (imdb-grouped) renders, the target video
+                // could legitimately live in any season — pick the one
+                // matching the entry's tracked cour when possible so a
+                // S4-airing franchise lands on S4 ep N instead of the
+                // first cour's same-numbered episode.
+                var entrySeason = a.videos?
+                    .Where(v => v.episode == nextEp)
+                    .Select(v => (int?)(v.season > 0 ? v.season : 1))
+                    .LastOrDefault();
+                var targetVideo = a.videos?
+                    .FirstOrDefault(v => v.episode == nextEp
+                        && (entrySeason == null || (v.season > 0 ? v.season : 1) == entrySeason.Value));
                 var targetIsFuture = false;
                 if (targetVideo != null)
                 {
@@ -243,12 +254,19 @@
                     && nextEp <= totalEps
                     && !isCompleted
                     && !targetIsFuture;
+                // When multi-season, embed the season segment in the URL
+                // so the Watch route lands on the correct cour's episode
+                // instead of the first-occurrence default.
+                var watchHref = targetVideo != null
+                        && (a.videos?.Select(v => v.season > 0 ? v.season : 1).Distinct().Count() ?? 0) > 1
+                    ? $"/anime/{a.id}/watch/{(targetVideo.season > 0 ? targetVideo.season : 1)}/{nextEp}"
+                    : $"/anime/{a.id}/watch/{nextEp}";
             }
             @if (showWatchCta)
             {
                 var watchLabel = watchProgress > 0 ? $"Continue · Ep {nextEp}" : $"Watch Ep {nextEp}";
                 <div class="anime-detail-watch-next-wrap">
-                    <a class="anime-detail-watch-next" href="@($"/anime/{a.id}/watch/{nextEp}")"
+                    <a class="anime-detail-watch-next" href="@watchHref"
                        aria-label="@watchLabel">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
                             <polygon points="6 4 20 12 6 20 6 4"></polygon>
