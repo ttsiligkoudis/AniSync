@@ -1871,18 +1871,18 @@
                     if (!text) continue;
                     var settings = buildVttCueSettings(overrideText, playRes);
                     // Default bottom dialogue (no explicit line: in
-                    // the settings) gets a `line:-3` snap-to-lines
-                    // setting — the cue's bottom edge sits 3 text
-                    // lines up from the video's bottom. Tried line:80%
-                    // first (percentage mode) but Chromium browsers
-                    // appear to ignore percentage line offsets for
-                    // bottom-anchored default cues; the snap-to-lines
-                    // integer form (-1 = bottom, -2 = second-bottom,
-                    // …) is the older mode and is honoured uniformly
-                    // across Chrome / Brave / Safari / Firefox.
-                    // \pos / \an cues that already declared a line
-                    // stay untouched.
-                    if (!/(^|\s)line:/.test(settings)) settings += ' line:-3';
+                    // the settings) gets a `line:-2` snap-to-lines
+                    // setting — the cue's bottom edge sits one text
+                    // line up from the video's bottom. Tried line:80%
+                    // / 90% first (percentage mode) but Chromium
+                    // browsers appear to ignore percentage line
+                    // offsets for bottom-anchored default cues; the
+                    // snap-to-lines integer form (-1 = bottom, -2 =
+                    // second-from-bottom) is the older mode and is
+                    // honoured uniformly across Chrome / Brave /
+                    // Safari / Firefox. \pos / \an cues that already
+                    // declared a line stay untouched.
+                    if (!/(^|\s)line:/.test(settings)) settings += ' line:-2';
                     out.push(vttTimestamp(start) + ' --> ' + vttTimestamp(end) + settings);
                     out.push(text);
                     out.push('');
