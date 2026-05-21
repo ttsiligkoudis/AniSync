@@ -1871,16 +1871,18 @@
                     if (!text) continue;
                     var settings = buildVttCueSettings(overrideText, playRes);
                     // Default bottom dialogue (no explicit line: in
-                    // the settings) gets a `line:80%` margin from the
-                    // bottom edge. Browser-native cues default to
-                    // line:auto which renders flush against the
-                    // video's bottom edge — that collides with
-                    // ArtPlayer's controls bar when visible and reads
-                    // cramped against the player frame when it's not.
-                    // 20% lift keeps dialogue clear of both without
-                    // pushing it into the picture. \pos / \an cues
-                    // that already declared a line stay untouched.
-                    if (!/(^|\s)line:/.test(settings)) settings += ' line:80%';
+                    // the settings) gets a `line:-3` snap-to-lines
+                    // setting — the cue's bottom edge sits 3 text
+                    // lines up from the video's bottom. Tried line:80%
+                    // first (percentage mode) but Chromium browsers
+                    // appear to ignore percentage line offsets for
+                    // bottom-anchored default cues; the snap-to-lines
+                    // integer form (-1 = bottom, -2 = second-bottom,
+                    // …) is the older mode and is honoured uniformly
+                    // across Chrome / Brave / Safari / Firefox.
+                    // \pos / \an cues that already declared a line
+                    // stay untouched.
+                    if (!/(^|\s)line:/.test(settings)) settings += ' line:-3';
                     out.push(vttTimestamp(start) + ' --> ' + vttTimestamp(end) + settings);
                     out.push(text);
                     out.push('');
