@@ -191,11 +191,13 @@ namespace AnimeList.Services
                 // Lift cues off the bottom edge so they don't collide
                 // with ArtPlayer's controls bar / sit flush against
                 // the video frame. Provider VTTs almost never set a
-                // line position, so they all render at line:auto (~the
-                // bottom). 20% margin reads as a normal subtitle gap;
-                // cues that already declared a line stay untouched
-                // (a provider that took the trouble to position their
-                // captions knows where it wants them).
+                // line position, so they all render at line:auto
+                // (~bottom). Uses snap-to-lines integer mode (line:-3
+                // = third row from bottom) rather than percentages —
+                // Chromium browsers appear to ignore percentage line
+                // offsets for bottom-anchored default cues; the
+                // integer form is honoured uniformly. Cues that
+                // already declared a line stay untouched.
                 return ApplyDefaultLineMargin(vtt);
             }
             catch (Exception ex)
@@ -406,15 +408,19 @@ namespace AnimeList.Services
             RegexOptions.Compiled | RegexOptions.Multiline);
 
         /// <summary>
-        /// Appends <c>line:80%</c> to every VTT cue header that doesn't
-        /// already carry a <c>line:</c> setting, lifting bottom-default
-        /// cues off the video edge by ~20%. The browser's native
-        /// caption renderer hugs the frame at <c>line:auto</c>, which
-        /// collides with ArtPlayer's controls bar when visible and reads
-        /// cramped when it's not; provider VTTs almost never set a line
-        /// of their own, so the default is what every viewer sees.
-        /// Cues that did set a line (sign translations, song-lyric
-        /// overlays) stay untouched.
+        /// Appends <c>line:-3</c> (snap-to-lines, third row from
+        /// bottom) to every VTT cue header that doesn't already carry
+        /// a <c>line:</c> setting. Lifts the cue's bottom edge two
+        /// text-line heights up from the video's bottom edge — the
+        /// browser's native caption renderer hugs the frame at
+        /// <c>line:auto</c>, which collides with ArtPlayer's controls
+        /// bar when visible and reads cramped when it's not. Uses the
+        /// integer snap-to-lines mode rather than a percentage because
+        /// Chromium browsers appear to ignore percentage line offsets
+        /// for bottom-anchored default cues — the integer form is
+        /// honoured uniformly across browsers. Cues that did set a
+        /// line (sign translations, song-lyric overlays) stay
+        /// untouched.
         /// </summary>
         private static string ApplyDefaultLineMargin(string vtt)
         {
@@ -424,7 +430,7 @@ namespace AnimeList.Services
                 var settings = m.Groups[2].Value;
                 // Already positioned by the source — leave it alone.
                 if (settings.IndexOf("line:", StringComparison.Ordinal) >= 0) return m.Value;
-                return m.Groups[1].Value + settings + " line:80%";
+                return m.Groups[1].Value + settings + " line:-3";
             });
         }
     }
