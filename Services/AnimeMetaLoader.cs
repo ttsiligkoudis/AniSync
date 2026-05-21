@@ -206,10 +206,23 @@ namespace AnimeList.Services
             var anime = await _cinemetaService.GetMetaAsync(imdbId);
             if (anime == null || anime.videos == null || anime.videos.Count == 0) return (null, null, null);
 
+            // Drop season=0 specials / side-stories — Cinemeta's
+            // convention is that bonus content sits at season=0 (OVAs,
+            // recaps, "Side Story" extras) while canonical cour episodes
+            // start at season=1. The franchise umbrella render here
+            // mirrors what Stremio's catalog rendering shows, which
+            // hides season=0 by default; without this filter the
+            // /anime/tt... page surfaces interleaved "Side Story" rows
+            // (sortable as (season=0→1, episode=1)) right next to the
+            // main S1E1, and the count creeps past what the user thinks
+            // of as the franchise's episode total. The per-cour path
+            // (GetCourEpisodesAsync) already applies the same filter.
             anime.videos = anime.videos
-                .OrderBy(v => v.season > 0 ? v.season : 1)
+                .Where(v => v != null && v.season > 0)
+                .OrderBy(v => v.season)
                 .ThenBy(v => v.episode)
                 .ToList();
+            if (anime.videos.Count == 0) return (null, null, null);
             anime.episodes = anime.videos.Count;
             // Belt-and-braces: Cinemeta should already stamp meta.id with
             // the imdb tt-id, but force-set in case the upstream payload
