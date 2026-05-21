@@ -1747,8 +1747,103 @@
                 function pad(n, w) { var x = String(n); while (x.length < w) x = '0' + x; return x; }
                 return pad(h, 2) + ':' + pad(m, 2) + ':' + pad(s, 2) + '.' + pad(ms, 3);
             }
+            // Pulls PlayResX / PlayResY out of an ASS document's
+            // [Script Info] block so the \pos(x,y) override tags can be
+            // re-expressed as percentages for WebVTT. Defaults to
+            // 1920x1080 — the modern-anime convention and what every
+            // sane release tags. Older shows that ship 640x480 ASS
+            // declare the actual values explicitly, so the fallback
+            // only matters for malformed scripts.
+            function parseAssPlayRes(assText) {
+                var x = 1920, y = 1080;
+                if (!assText) return { x: x, y: y };
+                var lines = assText.split('\n');
+                for (var i = 0; i < lines.length; i++) {
+                    var ln = lines[i];
+                    var mx = /^\s*PlayResX\s*:\s*(\d+)/i.exec(ln);
+                    if (mx) x = parseInt(mx[1], 10) || x;
+                    var my = /^\s*PlayResY\s*:\s*(\d+)/i.exec(ln);
+                    if (my) y = parseInt(my[1], 10) || y;
+                    // Once we leave [Script Info] there's nothing more
+                    // to find — bail to avoid scanning the whole file.
+                    if (/^\s*\[/.test(ln) && !/Script Info/i.test(ln)) break;
+                }
+                return { x: x, y: y };
+            }
+
+            // ASS uses numpad-style alignment (1..9) where 1=bottom-left,
+            // 2=bottom-center, ..., 9=top-right. WebVTT splits that into
+            // a (line, position, align) triple. The mapping below preserves
+            // the on-screen anchor so sign translations, song-lyric
+            // overlays, and side titles land in the same spots libass would
+            // render them — without it every cue collapses to the centre,
+            // which is what made our player look messy compared to the
+            // libass-driven Stremio render.
+            function vttSettingsForAlign(an) {
+                var line, position, align;
+                if (an === 7 || an === 8 || an === 9) line = '5%';      // top row
+                else if (an === 4 || an === 5 || an === 6) line = '50%'; // middle
+                else line = null;                                         // bottom = VTT default
+                if (an === 1 || an === 4 || an === 7) { position = '5%';  align = 'start'; }
+                else if (an === 3 || an === 6 || an === 9) { position = '95%'; align = 'end'; }
+                else { position = null; align = null; } // centre = VTT default
+                return { line: line, position: position, align: align };
+            }
+
+            function buildVttCueSettings(overrideText, playRes) {
+                if (!overrideText) return '';
+                var anMatch = /\\an([1-9])/.exec(overrideText);
+                var aMatch  = /\\a(\d+)/.exec(overrideText); // legacy SSA alignment
+                var posMatch = /\\pos\(\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*\)/.exec(overrideText);
+                // \move(x1,y1,x2,y2[,t1,t2]) animates from (x1,y1) to
+                // (x2,y2). VTT can't animate a cue, so snap to the
+                // start coordinates — it lands at the right anchor and
+                // stays put, which is closer to the intended rendering
+                // than the default centre dump.
+                var moveMatch = /\\move\(\s*([\d.\-]+)\s*,\s*([\d.\-]+)/.exec(overrideText);
+
+                var line = null, position = null, align = null;
+                var posSource = posMatch || moveMatch;
+
+                if (posSource) {
+                    var px = (parseFloat(posSource[1]) / playRes.x) * 100;
+                    var py = (parseFloat(posSource[2]) / playRes.y) * 100;
+                    if (px < 0) px = 0; else if (px > 100) px = 100;
+                    if (py < 0) py = 0; else if (py > 100) py = 100;
+                    position = px.toFixed(1) + '%';
+                    line     = py.toFixed(1) + '%';
+                    if (anMatch) {
+                        var anA = parseInt(anMatch[1], 10);
+                        if (anA === 1 || anA === 4 || anA === 7) align = 'start';
+                        else if (anA === 3 || anA === 6 || anA === 9) align = 'end';
+                        else align = 'center';
+                    }
+                } else if (anMatch) {
+                    var s = vttSettingsForAlign(parseInt(anMatch[1], 10));
+                    line = s.line; position = s.position; align = s.align;
+                } else if (aMatch) {
+                    // SSA legacy \a (bitmap): 1=left, 2=centre, 3=right
+                    // + 4 = top, + 8 = middle. Translate to \an numpad
+                    // so the same vttSettingsForAlign maps it cleanly.
+                    var v = parseInt(aMatch[1], 10);
+                    var legacyToAn = { 1: 1, 2: 2, 3: 3, 5: 7, 6: 8, 7: 9, 9: 4, 10: 5, 11: 6 };
+                    var mapped = legacyToAn[v];
+                    if (mapped) {
+                        var s2 = vttSettingsForAlign(mapped);
+                        line = s2.line; position = s2.position; align = s2.align;
+                    }
+                }
+
+                var parts = [];
+                if (line) parts.push('line:' + line);
+                if (position) parts.push('position:' + position);
+                if (align) parts.push('align:' + align);
+                return parts.length ? ' ' + parts.join(' ') : '';
+            }
+
             function assToVtt(assText) {
                 if (!assText) return 'WEBVTT\n\n';
+                var playRes = parseAssPlayRes(assText);
                 var lines = assText.replace(/\r\n/g, '\n').split('\n');
                 var out = ['WEBVTT', ''];
                 for (var i = 0; i < lines.length; i++) {
@@ -1769,13 +1864,20 @@
                     var start = assTimeToSeconds(fields[1]);
                     var end   = assTimeToSeconds(fields[2]);
                     if (start === null || end === null || end <= start) continue;
-                    var text = body.substring(split + 1)
+                    var rawText = body.substring(split + 1);
+                    // Concat every override block before stripping so the
+                    // cue-settings parser sees positioning even when the
+                    // ASS author split it across multiple {...} groups
+                    // (e.g. {\an8}{\fad(200,200)}Lyrics…).
+                    var overrideText = (rawText.match(ASS_OVERRIDE_RE) || []).join('');
+                    var text = rawText
                         .replace(ASS_OVERRIDE_RE, '')
                         .replace(/\\N/g, '\n')
                         .replace(/\\h/g, ' ')
                         .trim();
                     if (!text) continue;
-                    out.push(vttTimestamp(start) + ' --> ' + vttTimestamp(end));
+                    var settings = buildVttCueSettings(overrideText, playRes);
+                    out.push(vttTimestamp(start) + ' --> ' + vttTimestamp(end) + settings);
                     out.push(text);
                     out.push('');
                 }
