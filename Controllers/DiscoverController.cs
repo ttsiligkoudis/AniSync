@@ -170,6 +170,21 @@ namespace AnimeList.Controllers
                     .OrderByDescending(x => x.score)
                     .Select(x => x.meta)
                     .ToList();
+
+                // Search runs ungrouped at the service layer to avoid the
+                // dedup name-flatten that would mangle movie titles sharing
+                // an IMDb id with a series. Post-rank, fold cours of the
+                // same franchise into one card when the user has grouping
+                // on — keeps the result list short and consistent with what
+                // every other surface shows.
+                if (groupSeasons)
+                {
+                    metas = await _anilistFallback.ApplyGroupingToMetasAsync(metas, groupSeasons: true);
+                    metas = metas
+                        .GroupBy(m => m.id, StringComparer.Ordinal)
+                        .Select(g => g.First())
+                        .ToList();
+                }
             }
 
             // Season dropdown drives only the Seasonal list type. Default is
@@ -308,6 +323,17 @@ namespace AnimeList.Controllers
                     .OrderByDescending(x => x.score)
                     .Select(x => x.meta)
                     .ToList();
+
+                // Same post-rank grouping pass Index() runs — fold cours
+                // with a shared IMDb id when the user has grouping on.
+                if (groupSeasons)
+                {
+                    metas = await _anilistFallback.ApplyGroupingToMetasAsync(metas, groupSeasons: true);
+                    metas = metas
+                        .GroupBy(m => m.id, StringComparer.Ordinal)
+                        .Select(g => g.First())
+                        .ToList();
+                }
             }
 
             var labels = new Dictionary<ListType, string>

@@ -68,11 +68,13 @@ namespace AnimeList.Controllers
             if (skip < 0) skip = 0;
             var items = await _store.ListForUserAsync(uid, limit, skip);
             // Translate stored anime_id / LinkPath into the user's CURRENT
-            // primary service so a click after a provider swap lands on
-            // /anime/{primary-service-id}/watch/... rather than the
-            // creation-time service. Falls back to the stored link when
-            // no cross-service mapping exists.
-            await _mapping.RewriteLinksToServiceAsync(items, token.anime_service);
+            // primary service (or the imdb-grouped franchise umbrella when
+            // they've turned on the Group anime seasons pref) so a click
+            // lands on the id-space the rest of the site is using right
+            // now — not the creation-time service.
+            var cfg = await GetConfigByUidAsync(uid, _configStore);
+            var groupSeasons = cfg?.enableSeasonGrouping == true;
+            await _mapping.RewriteLinksToServiceAsync(items, token.anime_service, groupSeasons);
             return new JsonResult(new { items });
         }
 
