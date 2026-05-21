@@ -22,14 +22,13 @@ namespace AnimeList.Controllers
         private readonly ITmdbService _tmdbService;
         private readonly IAnimeMappingService _mappingService;
         private readonly IConfigStore _configStore;
-        private readonly IFillerListService _fillerListService;
         private readonly IAnilistFallback _anilistFallback;
+        private readonly IAnimeMetaLoader _animeMetaLoader;
         private readonly IAddonStreamService _addonStreamService;
         private readonly IAniSkipService _aniSkipService;
         private readonly ISubtitleService _subtitleService;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ISyncService _syncService;
-        private readonly ICinemetaService _cinemetaService;
         private readonly ILogger<AnimeController> _logger;
 
         public AnimeController(
@@ -40,14 +39,13 @@ namespace AnimeList.Controllers
             ITmdbService tmdbService,
             IAnimeMappingService mappingService,
             IConfigStore configStore,
-            IFillerListService fillerListService,
             IAnilistFallback anilistFallback,
+            IAnimeMetaLoader animeMetaLoader,
             IAddonStreamService addonStreamService,
             IAniSkipService aniSkipService,
             ISubtitleService subtitleService,
             IHttpClientFactory httpClientFactory,
             ISyncService syncService,
-            ICinemetaService cinemetaService,
             ILogger<AnimeController> logger)
         {
             _tokenService = tokenService;
@@ -57,14 +55,13 @@ namespace AnimeList.Controllers
             _tmdbService = tmdbService;
             _mappingService = mappingService;
             _configStore = configStore;
-            _fillerListService = fillerListService;
             _anilistFallback = anilistFallback;
+            _animeMetaLoader = animeMetaLoader;
             _addonStreamService = addonStreamService;
             _aniSkipService = aniSkipService;
             _subtitleService = subtitleService;
             _httpClientFactory = httpClientFactory;
             _syncService = syncService;
-            _cinemetaService = cinemetaService;
             _logger = logger;
         }
 
@@ -87,138 +84,36 @@ namespace AnimeList.Controllers
             var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
             var animeService = tokenData.anime_service;
+
+            // 18+ gate gets its toggle from the user's config; null for
+            // anonymous viewers reads as "no adult content" which matches
+            // the per-service filtering on /discover / /library.
+            var detailConfig = await GetConfigByUidAsync(uid, _configStore);
+            var showAdultContent = detailConfig?.showAdultContent == true;
+
             // /anime/{id} is per-cour by default — the per-service detail
             // page wants the cour-specific data (videos, score, status) for
             // the entry the user clicked, not the franchise umbrella. The
-            // grouped-imdb path below overrides this when the URL itself
-            // already collapses the cours (id starts with tt) so the page
-            // can render season tabs across every cour the franchise has.
-            const bool groupSeasons = false;
+            // grouped-imdb path inside the loader overrides this when the
+            // URL itself already collapses the cours (id starts with tt)
+            // so the page can render season tabs across every cour the
+            // franchise has.
+            var loadResult = await _animeMetaLoader.LoadAsync(id, tokenData, groupSeasons: false, showAdultContent: showAdultContent);
 
-            // IMDb-id deep-link → franchise-umbrella render. Aggregates every
-            // cour's episodes into one Meta with season-numbered videos so
-            // the existing multi-season tab UI in Detail.cshtml lights up.
-            // Hero metadata comes from the first mapped cour in the user's
-            // primary service. Falls through to the per-cour path below
-            // when no mapping is found (broken / unknown imdb id).
-            bool isImdbGrouped = id.StartsWith(imdbPrefix);
-            // Tracks whether the multi-cour render actually succeeded — when
-            // BuildGroupedImdbAnimeAsync returns null (mapping miss or head-
-            // cour load failure) we fall through to the per-service path
-            // below so a broken imdb mapping still resolves to *something*.
-            bool renderedAsGrouped = false;
-            Meta anime = null;
-            int? imdbHeadSeason = null;
-            int? imdbHeadAnilistId = null;
-            try
+            if (loadResult.Anime == null)
             {
-                if (isImdbGrouped)
-                {
-                    (anime, imdbHeadSeason, imdbHeadAnilistId) = await BuildGroupedImdbAnimeAsync(id, animeService, tokenData);
-                    renderedAsGrouped = anime != null;
-                }
-                if (anime == null && id.StartsWith(tmdbPrefix))
-                    anime = await _tmdbService.GetAnimeByIdAsync(id, tokenData);
-                if (anime == null)
-                {
-                    // Resolve cross-service ids (imdb:/tmdb:) to the user's
-                    // primary's native id so we can hit the right per-service
-                    // endpoint with rich detail data. Falls back to first-
-                    // mapping pick if there's no direct id for the primary's
-                    // service.
-                    id = await ResolveToServiceIdAsync(id, animeService) ?? id;
-
-                    if (id.StartsWith(kitsuPrefix))
-                    {
-                        anime = await _kitsuService.GetAnimeByIdAsync(id, tokenData, groupSeasons: groupSeasons);
-                        if (anime == null)
-                        {
-                            var mapping = await _mappingService.GetKitsuMapping(id);
-                            if (mapping?.AnilistId != null)
-                                anime = await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData, groupSeasons: groupSeasons);
-                        }
-                    }
-                    else if (id.StartsWith(anilistPrefix))
-                    {
-                        anime = await _anilistService.GetAnimeByIdAsync(id, tokenData, groupSeasons: groupSeasons);
-                        if (anime == null)
-                        {
-                            var mapping = await _mappingService.GetAnilistMapping(id);
-                            if (mapping?.KitsuId != null)
-                                anime = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData, groupSeasons: groupSeasons);
-                        }
-                    }
-                    else if (id.StartsWith(malPrefix))
-                    {
-                        anime = await _malService.GetAnimeByIdAsync(id, tokenData, groupSeasons: groupSeasons);
-                        if (anime == null)
-                        {
-                            var mapping = await _mappingService.GetMalMapping(id);
-                            if (mapping?.AnilistId != null)
-                                anime = await _anilistService.GetAnimeByIdAsync($"{anilistPrefix}{mapping.AnilistId}", tokenData, groupSeasons: groupSeasons);
-                            else if (mapping?.KitsuId != null)
-                                anime = await _kitsuService.GetAnimeByIdAsync($"{kitsuPrefix}{mapping.KitsuId}", tokenData, groupSeasons: groupSeasons);
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "AnimeController.Detail failed (id={Id}).", id);
+                // Mapping miss / upstream gone / adult-filtered. Hand off
+                // to the shared 404 page so this matches what users see
+                // on any other bad URL.
                 Response.StatusCode = 404;
                 return View("NotFound");
             }
 
-            if (anime == null)
-            {
-                // Mapping miss / upstream gone. Hand off to the shared 404
-                // page so this matches what users see on any other bad URL.
-                Response.StatusCode = 404;
-                return View("NotFound");
-            }
-
-            // 18+ gate — if the viewer hasn't opted into adult content, a
-            // direct /anime/{id} request to an isAdult entry 404s. Anonymous
-            // viewers (uid == null) hit the same gate via a null config →
-            // showAdultContent defaults false. Matches the per-service
-            // filtering on Discover / Library: same toggle, same effect,
-            // no sneaking adult entries in via deep-link.
-            if (anime.isAdult)
-            {
-                var detailConfig = await GetConfigByUidAsync(uid, _configStore);
-                if (detailConfig?.showAdultContent != true)
-                {
-                    Response.StatusCode = 404;
-                    return View("NotFound");
-                }
-            }
-
-            // Normalise the videos array to within-cour 1..N — see Watch
-            // action's matching block for the full rationale. Both pages
-            // need to stay in sync so a Detail-page click of "Ep 6" maps
-            // to /watch/6 and the Watch lookup actually finds the row.
-            // Skipped for the grouped-imdb render: that path already carries
-            // multi-season videos with their Cinemeta season numbers intact
-            // so the multi-season tab UI in Detail.cshtml can pivot on them.
-            if (!renderedAsGrouped) NormaliseCourEpisodeNumbering(anime);
-
-            // Multi-cour grouped = >1 distinct season in the franchise's
-            // Cinemeta video list. Drives the hero's entry-pill rendering
-            // (generic Manage Entry instead of head-cour-specific status)
-            // and skips the per-cour entry fetch below. Single-cour
-            // grouped (mappings.Count == 1) reads as the regular per-cour
-            // page so the existing entry behaviour applies.
-            bool isMultiSeasonGroup = renderedAsGrouped
-                && (anime.videos?.Select(v => v.season > 0 ? v.season : 1).Distinct().Count() ?? 0) > 1;
-
-            // Filler / canon enrichment — same pattern as MetaController's
-            // EnrichMetaWithFillerAsync used by the Stremio addon path.
-            // Episodes get a coloured emoji prefix (🟦 canon, 🟨 filler,
-            // 🟧 mixed) so the user can skip filler at a glance. Best-effort:
-            // failures swallow into the standard logger and the list renders
-            // without prefixes. Skipped for movie-shaped entries since
-            // AnimeFillerList is a per-episode dataset.
-            await TryEnrichWithFillerAsync(anime);
+            var anime = loadResult.Anime;
+            var sourceLinks = loadResult.SourceLinks;
+            var isMultiSeasonGroup = loadResult.IsMultiSeasonGroup;
+            var imdbHeadSeason = loadResult.ImdbHeadSeason;
+            var imdbHeadAnilistId = loadResult.ImdbHeadAnilistId;
 
             // uid was already resolved at the top of the action (alongside
             // the configuration load); reuse it here for the entry fetch.
@@ -260,33 +155,6 @@ namespace AnimeList.Controllers
                     _logger.LogWarning(ex, "AnimeController.Detail: entry fetch failed for {Id}.", anime.id);
                 }
             }
-
-            // Cross-service links surfaced in the hero ("Open on AniList / MAL /
-            // Kitsu / IMDb"). The mapping lookup is keyed on the anime's own id —
-            // whichever service the page was loaded against, the same row of the
-            // mapping dataset carries the sibling-service ids and the imdb tt id
-            // when known. Best-effort: missing mapping = no links rendered, which
-            // is the correct degradation for entries outside the curated dataset.
-            var sourceLinks = await BuildSourceLinksAsync(anime.id);
-
-            // Overlay AniList's per-episode airing schedule onto the Cinemeta-
-            // sourced videos. Cinemeta's `released` field occasionally lags
-            // the real broadcast by 1–2 days for shows whose IMDb/TheTVDB
-            // entries get the next-week placeholder set before the real airing
-            // is logged; that staleness made already-aired episodes look
-            // future-dated on the click gate even after the notification
-            // system (which already uses the AniList schedule) pinged users.
-            // Doing the overlay here means /anime/{id}'s isFuture check and
-            // displayed date track the same source of truth the notifier
-            // dispatcher does — see AnilistFallback.GetAiringScheduleByAnilistIdAsync.
-            // For an imdb-grouped render the season-filter scopes the overlay
-            // to the head cour so we don't paint head-cour airing times onto
-            // other seasons' same-numbered episodes (a different broadcast).
-            // BuildGroupedImdbAnimeAsync hands us the head's anilist id
-            // directly so we don't rely on BuildSourceLinksAsync's
-            // .FirstOrDefault() pick (which can land on a different cour).
-            var overlayAnilistId = imdbHeadAnilistId ?? sourceLinks?.AnilistId;
-            await OverlayAniListAiringScheduleAsync(anime, overlayAnilistId, imdbHeadSeason);
 
             // Related + recommendations + supplementary chip rows (Tag / Studio /
             // director / writer / Composer / Artist / Producer / Staff) are now
@@ -379,8 +247,8 @@ namespace AnimeList.Controllers
             // Cross-service id resolution mirrors what Detail does so the
             // same /anime/{id}/extras URL works regardless of which service-
             // prefix the page was loaded against.
-            var resolvedId = await ResolveToServiceIdAsync(id, animeService) ?? id;
-            var sourceLinks = await BuildSourceLinksAsync(resolvedId);
+            var resolvedId = await _animeMetaLoader.ResolveToServiceIdAsync(id, animeService) ?? id;
+            var sourceLinks = await _mappingService.BuildSourceLinksAsync(resolvedId);
             if (!sourceLinks.AnilistId.HasValue) return Json(new AnimeExtrasResponse());
 
             var anilistId = sourceLinks.AnilistId.Value;
@@ -447,12 +315,12 @@ namespace AnimeList.Controllers
             {
                 if (isImdbGrouped)
                 {
-                    (anime, imdbHeadSeason, imdbHeadAnilistId) = await BuildGroupedImdbAnimeAsync(id, animeService, tokenData);
+                    (anime, imdbHeadSeason, imdbHeadAnilistId) = await _animeMetaLoader.BuildGroupedImdbAnimeAsync(id);
                     renderedAsGrouped = anime != null;
                 }
                 if (anime == null)
                 {
-                    id = await ResolveToServiceIdAsync(id, animeService) ?? id;
+                    id = await _animeMetaLoader.ResolveToServiceIdAsync(id, animeService) ?? id;
                     anime = await LoadAnimeForWatchAsync(id, animeService, tokenData, groupSeasons);
                 }
             }
@@ -508,7 +376,7 @@ namespace AnimeList.Controllers
                 // Cinemeta's full episode list; NormaliseCourEpisodeNumbering
                 // would collapse them to season 1 which defeats the season
                 // tab UI on the matching Detail render.
-                NormaliseCourEpisodeNumbering(anime);
+                AnimeMetaLoader.NormaliseCourEpisodeNumbering(anime);
             }
 
             // Same airing-schedule overlay Detail() does — keeps the Watch
@@ -517,9 +385,9 @@ namespace AnimeList.Controllers
             // without the Cinemeta-stale released-date logic skipping over
             // episodes that have actually aired (see Detail() for the full
             // rationale).
-            var watchSourceLinks = await BuildSourceLinksAsync(anime.id);
+            var watchSourceLinks = await _mappingService.BuildSourceLinksAsync(anime.id);
             var watchOverlayAnilistId = imdbHeadAnilistId ?? watchSourceLinks?.AnilistId;
-            await OverlayAniListAiringScheduleAsync(anime, watchOverlayAnilistId, imdbHeadSeason);
+            await _animeMetaLoader.OverlayAniListAiringScheduleAsync(anime, watchOverlayAnilistId, imdbHeadSeason);
 
             // Match on episode + season — season null means "any cour", which
             // covers the common single-cour case where the videos all carry
@@ -637,81 +505,6 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
-        /// Renumbers <see cref="Meta.videos"/> to within-cour 1..N collapsed
-        /// into a single virtual season, preserving the original IMDb
-        /// coordinates on each <see cref="Video.imdbSeason"/> /
-        /// <see cref="Video.imdbEpisode"/> so the stream lookup can still
-        /// hit the right episode of the right IMDb season.
-        /// <para>
-        /// Why: the per-service GetAnimeByIdAsync's Cinemeta path returns
-        /// videos with their IMDb-absolute coordinates — for a flat-IMDb
-        /// franchise like anilist:171110's cour 4 that's
-        /// <c>videos[0..5].episode = 37..42, season = 1</c>; for a long-
-        /// running show like Naruto (anilist:20) that's 220 videos
-        /// split across IMDb seasons 1..5. Both shapes broke the site's
-        /// UX: the route <c>/watch/{episode}</c> 404'd for every
-        /// within-cour episode on flat-IMDb anime, and the Detail page
-        /// rendered "Season 1, 2, 3, 4, 5" tabs for shows whose AniList
-        /// entry is a single contiguous run.
-        /// </para>
-        /// <para>
-        /// After this call, all videos share <c>season = 1</c> and have
-        /// <c>episode = 1..N</c>, so the Detail page renders as one
-        /// season with continuous numbering and <c>/watch/{N}</c> means
-        /// "the Nth episode of this AniList entry" regardless of how
-        /// IMDb chose to slice the show. The Watch view's stream-fetch
-        /// JS reads the preserved <c>imdbSeason</c> / <c>imdbEpisode</c>
-        /// values when present so the addon query still goes to the
-        /// right IMDb coordinates.
-        /// </para>
-        /// </summary>
-        private static void NormaliseCourEpisodeNumbering(Meta anime)
-        {
-            if (anime?.videos == null || anime.videos.Count == 0) return;
-            var ordered = anime.videos
-                .OrderBy(v => v.season > 0 ? v.season : 1)
-                .ThenBy(v => v.episode)
-                .ToList();
-            for (var i = 0; i < ordered.Count; i++)
-            {
-                var v = ordered[i];
-                var originalEpisode = v.episode;
-                // Preserve only when the source numbering looks like it
-                // came from Cinemeta — i.e. the video already had a
-                // non-zero episode. The streamingEpisodes fallback path
-                // in the per-service implementations renumbers to 1..N
-                // before reaching us, so its season/episode are AniList-
-                // cour values, not IMDb — preserving them would mislead
-                // the addon query downstream.
-                if (v.episode > 0 && v.imdbEpisode == null)
-                {
-                    v.imdbSeason = v.season > 0 ? v.season : 1;
-                    v.imdbEpisode = v.episode;
-                }
-                v.season = 1;
-                v.episode = i + 1;
-
-                // Cinemeta emits placeholder names like "Episode 43" for
-                // not-yet-aired rows that don't have a real title yet.
-                // After we renumber, the row reads "7. Episode 43" which
-                // is off-by-one and confusing. Rewrite the placeholder
-                // to track the new ordinal — only when the existing
-                // name/title is literally "Episode <originalNumber>", so
-                // real titles like "Harspiel Concert" stay untouched.
-                if (originalEpisode > 0 && originalEpisode != v.episode)
-                {
-                    var placeholder = $"Episode {originalEpisode}";
-                    var rebuilt = $"Episode {v.episode}";
-                    if (string.Equals(v.name?.Trim(), placeholder, StringComparison.OrdinalIgnoreCase))
-                        v.name = rebuilt;
-                    if (string.Equals(v.title?.Trim(), placeholder, StringComparison.OrdinalIgnoreCase))
-                        v.title = rebuilt;
-                }
-            }
-            anime.videos = ordered;
-        }
-
-        /// <summary>
         /// Walks the episode list (in (season, episode) order) and finds the
         /// neighbours of <paramref name="current"/>. Returns (null, null) at
         /// the ends so the view can hide the prev / next buttons cleanly.
@@ -764,50 +557,6 @@ namespace AnimeList.Controllers
                 return d.Date > DateTime.UtcNow.Date;
             }
             return false;
-        }
-
-        /// <summary>
-        /// Best-effort overlay of AniList's <c>Media.airingSchedule</c> onto
-        /// <paramref name="anime"/>'s video list. After
-        /// <see cref="NormaliseCourEpisodeNumbering"/> has renumbered each
-        /// video to within-cour 1..N, AniList's airing-schedule episode
-        /// ordinals line up directly, so a per-episode lookup populates
-        /// <see cref="Video.airingAt"/>. Silently no-ops when there's no
-        /// cross-service AniList id or AniList has no schedule for the anime
-        /// — both are normal for older / catalog-only entries and shouldn't
-        /// downgrade the page from "render fine on Cinemeta-only data".
-        /// </summary>
-        private async Task OverlayAniListAiringScheduleAsync(Meta anime, int? anilistId, int? seasonFilter = null)
-        {
-            if (anime?.videos == null || anime.videos.Count == 0) return;
-            if (!anilistId.HasValue || anilistId.Value <= 0) return;
-
-            Dictionary<int, long> schedule;
-            try
-            {
-                schedule = await _anilistFallback.GetAiringScheduleByAnilistIdAsync(anilistId.Value);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "AnimeController.OverlayAniListAiringScheduleAsync failed for anilist {Id}", anilistId);
-                return;
-            }
-            if (schedule == null || schedule.Count == 0) return;
-
-            foreach (var v in anime.videos)
-            {
-                if (v.episode <= 0) continue;
-                // For multi-cour grouped renders, scope the overlay to just
-                // the cour we fetched the schedule for — otherwise the
-                // head cour's airingAt[7] would also stamp itself onto
-                // season 2's episode 7, which is a different broadcast.
-                if (seasonFilter.HasValue
-                    && (v.season > 0 ? v.season : 1) != seasonFilter.Value) continue;
-                if (schedule.TryGetValue(v.episode, out var airingAt))
-                {
-                    v.airingAt = airingAt;
-                }
-            }
         }
 
         /// <summary>
@@ -1377,117 +1126,6 @@ namespace AnimeList.Controllers
             }
         }
 
-        private Task<AnimeSourceLinks> BuildSourceLinksAsync(string animeId)
-            => _mappingService.BuildSourceLinksAsync(animeId);
-
-        /// <summary>
-        /// Builds a "franchise umbrella" Meta for an imdb-id deep-link
-        /// straight from Cinemeta — title, synopsis, poster, score, year,
-        /// runtime, genres, and the full multi-cour video list all come
-        /// from a single Cinemeta meta fetch. Mirrors Stremio's own catalog
-        /// rendering for a grouped imdb entry (Cinemeta IS Stremio's meta
-        /// provider) and skips the per-service round-trip — the imdb URL
-        /// already collapses every cour, so a single-cour's AniList/MAL/
-        /// Kitsu metadata wouldn't honestly describe the franchise anyway.
-        ///
-        /// Returns the head cour's season + anilist id alongside the
-        /// franchise Meta so the airing-schedule overlay can scope to the
-        /// right cour (first cour by default, matching the Cinemeta hero).
-        /// HeadSeason / HeadAnilistId are null when no AniList mapping
-        /// exists — the overlay then no-ops and the page falls back to
-        /// Cinemeta's <c>released</c> strings for the click gate.
-        /// </summary>
-        private async Task<(Meta Anime, int? HeadSeason, int? HeadAnilistId)> BuildGroupedImdbAnimeAsync(string imdbId, AnimeService animeService, TokenData tokenData)
-        {
-            if (string.IsNullOrEmpty(imdbId) || !imdbId.StartsWith(imdbPrefix)) return (null, null, null);
-
-            var anime = await _cinemetaService.GetMetaAsync(imdbId);
-            if (anime == null || anime.videos == null || anime.videos.Count == 0) return (null, null, null);
-
-            anime.videos = anime.videos
-                .OrderBy(v => v.season > 0 ? v.season : 1)
-                .ThenBy(v => v.episode)
-                .ToList();
-            anime.episodes = anime.videos.Count;
-            // Belt-and-braces: Cinemeta should already stamp meta.id with the
-            // imdb tt-id, but force-set in case the upstream payload changes
-            // shape — the view-side hrefs depend on this carrying the
-            // franchise umbrella id.
-            anime.id = imdbId;
-
-            // First-cour anchors the airing-schedule overlay. The mapping
-            // lookup is optional — when there's no AniList row for the
-            // imdb id (catalog-only franchise) we skip the overlay and the
-            // Cinemeta released strings drive the click gate.
-            var mappings = await _mappingService.GetImdbMapping(imdbId);
-            var head = mappings?
-                .OrderBy(m => m.Season ?? int.MaxValue)
-                .FirstOrDefault();
-            return (anime, head?.Season, head?.AnilistId);
-        }
-
-        // For imdb: ids, look up the cross-service mapping and translate to a
-        // service-native id the per-service GetAnimeByIdAsync can handle. For
-        // mal: ids consumed by non-MAL primaries, the same translation. Other
-        // ids pass through unchanged.
-        private async Task<string> ResolveToServiceIdAsync(string id, AnimeService service)
-        {
-            if (id.StartsWith(imdbPrefix))
-            {
-                var mappings = await _mappingService.GetImdbMapping(id);
-                var first = mappings.FirstOrDefault();
-                if (first == null) return null;
-                return BuildServiceId(first, service) ?? id;
-            }
-            if (id.StartsWith(malPrefix) && service != AnimeService.MyAnimeList)
-            {
-                return await _mappingService.GetIdWithPrefixAsync(id, service);
-            }
-            return id;
-        }
-
-        private static string BuildServiceId(AnimeIdMapping m, AnimeService service) => service switch
-        {
-            AnimeService.Anilist     => m.AnilistId.HasValue ? $"{anilistPrefix}{m.AnilistId.Value}" : null,
-            AnimeService.MyAnimeList => m.MalId.HasValue ? $"{malPrefix}{m.MalId.Value}" : null,
-            AnimeService.Kitsu       => m.KitsuId.HasValue ? $"{kitsuPrefix}{m.KitsuId.Value}" : null,
-            _                        => null,
-        };
-
-        // Mutate the meta's videos[] in place, prefixing each title with a
-        // coloured emoji that signals the AnimeFillerList classification for
-        // that episode. Mirrors MetaController.EnrichMetaWithFillerAsync. Best-
-        // effort: any lookup failure / unknown show is silently a no-op so the
-        // page still renders without prefixes.
-        private async Task TryEnrichWithFillerAsync(Meta meta)
-        {
-            try
-            {
-                if (meta == null || string.IsNullOrEmpty(meta.name) ||
-                    meta.videos == null || meta.videos.Count == 0) return;
-
-                var categories = await _fillerListService.GetEpisodeCategoriesAsync(meta.name);
-                if (categories.Count == 0) return;
-
-                foreach (var video in meta.videos)
-                {
-                    if (!categories.TryGetValue(video.episode, out var category)) continue;
-                    var prefix = category switch
-                    {
-                        "canon"  => "🟦 ",
-                        "filler" => "🟨 ",
-                        "mixed"  => "🟧 ",
-                        _ => null,
-                    };
-                    if (!string.IsNullOrEmpty(prefix))
-                        video.title = prefix + (video.title ?? string.Empty);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "AnimeController: filler enrichment failed for {Name}.", meta?.name);
-            }
-        }
     }
 
     /// <summary>
