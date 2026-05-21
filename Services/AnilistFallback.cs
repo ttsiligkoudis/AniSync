@@ -175,6 +175,7 @@ namespace AnimeList.Services
                                     node {
                                         mediaRecommendation {
                                             id
+                                            format
                                             title { english romaji }
                                         }
                                     }
@@ -207,14 +208,22 @@ namespace AnimeList.Services
 
                 var externalId = await ResolveExternalIdAsync(recId.Value, translateTo);
 
-                // Stremio's Link.url is opened externally, so we point at the AniList page;
-                // the externalId is preserved in name for clients that want to deep-link inside
-                // the addon. (We can revisit this if a Stremio "go to detail" URL form exists.)
+                // Stremio-side "Similar" chip — points at web.stremio.com
+                // so a chip tap opens the recommended anime inside Stremio
+                // (or the native app via Universal / App Links) instead of
+                // bouncing to anilist.co in a browser. The id format
+                // mirrors the Sequel / Prequel relation chips: anilist:N
+                // resolved by whichever Stremio addon catalogs anilist
+                // ids on the user's side.
+                var recIsMovie = IsMovieFormat((string)rec.format);
+                var recStremioType = recIsMovie ? MetaType.movie.ToString() : MetaType.series.ToString();
+                var encodedId = Uri.EscapeDataString($"{anilistPrefix}{recId.Value}");
                 result.Add(new Link
                 {
                     name = name,
                     category = "Similar",
-                    url = $"https://anilist.co/anime/{recId.Value}",
+                    url = $"https://web.stremio.com/#/detail/{recStremioType}/{encodedId}",
+                    anilistId = recId.Value,
                 });
             }
             return result;
