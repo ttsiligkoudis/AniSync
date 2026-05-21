@@ -284,9 +284,9 @@ namespace AnimeList.Controllers
             });
         }
 
-        private async Task<List<Meta>> TryGetRelatedAsync(int anilistId, AnimeService translateTo)
+        private async Task<List<Meta>> TryGetRelatedAsync(int anilistId, AnimeService translateTo, bool groupSeasons = false)
         {
-            try { return await _anilistFallback.GetRelatedAsync(anilistId, translateTo); }
+            try { return await _anilistFallback.GetRelatedAsync(anilistId, translateTo, groupSeasons); }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "AnimeController.Detail: related fetch failed for anilist {Id}.", anilistId);
@@ -312,9 +312,18 @@ namespace AnimeList.Controllers
         {
             if (string.IsNullOrEmpty(id)) return Json(new AnimeExtrasResponse());
 
-            var tokenData = await _tokenService.GetAccessTokenAsync()
-                ?? new TokenData { anime_service = AnimeService.Kitsu };
+            var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+            tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
             var animeService = tokenData.anime_service;
+
+            // Per-user grouping pref — recommendations + related lists hand
+            // their card ids over to client-side render so the same id-space
+            // rules Detail() applies (imdb-first when grouping is on) need to
+            // flow through here too. Anonymous users / no-config installs
+            // fall back to ungrouped (configuration?.enableSeasonGrouping is
+            // null → false).
+            var configuration = !string.IsNullOrEmpty(uid) ? await GetConfigByUidAsync(uid, _configStore) : null;
+            var groupSeasons = configuration?.enableSeasonGrouping == true;
 
             // Cross-service id resolution mirrors what Detail does so the
             // same /anime/{id}/extras URL works regardless of which service-
@@ -330,8 +339,14 @@ namespace AnimeList.Controllers
             // resulting Task rather than each firing a redundant upstream
             // request. Try/catch each so a partial failure still returns the
             // pieces that succeeded.
-            var relatedTask = TryGetRelatedAsync(anilistId, animeService);
-            var recommendationsTask = TryGetRecommendationsAsync(anilistId, animeService);
+            // Related is skipped when grouping is on — by definition a grouped
+            // franchise umbrella card already includes the prequel/sequel
+            // cours, so the Related rail would just duplicate the same
+            // franchise links the user already navigated through.
+            var relatedTask = groupSeasons
+                ? Task.FromResult(new List<Meta>())
+                : TryGetRelatedAsync(anilistId, animeService, groupSeasons);
+            var recommendationsTask = TryGetRecommendationsAsync(anilistId, animeService, groupSeasons);
             var supplementaryTask = TryGetSupplementaryLinksAsync(anilistId);
             await Task.WhenAll(relatedTask, recommendationsTask, supplementaryTask);
 
@@ -1265,9 +1280,9 @@ namespace AnimeList.Controllers
             }
         }
 
-        private async Task<List<Meta>> TryGetRecommendationsAsync(int anilistId, AnimeService translateTo)
+        private async Task<List<Meta>> TryGetRecommendationsAsync(int anilistId, AnimeService translateTo, bool groupSeasons = false)
         {
-            try { return await _anilistFallback.GetRecommendationMetasAsync(anilistId, translateTo); }
+            try { return await _anilistFallback.GetRecommendationMetasAsync(anilistId, translateTo, groupSeasons); }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "AnimeController.Extras: recommendations fetch failed for anilist {Id}.", anilistId);

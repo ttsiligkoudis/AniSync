@@ -232,10 +232,10 @@ namespace AnimeList.Services
             List<Meta> Related,
             List<Link> SupplementaryLinks);
 
-        public async Task<List<Meta>> GetRecommendationMetasAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist)
+        public async Task<List<Meta>> GetRecommendationMetasAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist, bool groupSeasons = false)
             => await TranslateMetaIdsAsync(
                 CloneMetas((await FetchSidedataAsync(anilistId)).Recommendations),
-                translateTo);
+                translateTo, groupSeasons);
 
         private async Task<AnilistSidedata> FetchSidedataAsync(int anilistId)
         {
@@ -708,7 +708,8 @@ namespace AnimeList.Services
 
         public async Task<List<Meta>> GetNewEpisodesTodayAsync(
             AnimeService translateTo = AnimeService.Anilist,
-            int tzOffsetMinutes = 0)
+            int tzOffsetMinutes = 0,
+            bool groupSeasons = false)
         {
             // Bucket "today" against the viewer's local calendar day rather
             // than UTC. tzOffsetMinutes follows JS Date.getTimezoneOffset()
@@ -740,7 +741,7 @@ namespace AnimeList.Services
                 // requesting service's native id space so a MAL/Kitsu
                 // primary's clicks resolve directly. CloneMetas first so
                 // the cached list itself doesn't get mutated.
-                return await TranslateMetaIdsAsync(CloneMetas(cached), translateTo);
+                return await TranslateMetaIdsAsync(CloneMetas(cached), translateTo, groupSeasons);
             }
 
             try
@@ -843,7 +844,7 @@ namespace AnimeList.Services
                 // Same translate-on-return contract as the cache-hit path so
                 // the caller's primary determines the id-space regardless of
                 // whether this call populated or read the cache.
-                return await TranslateMetaIdsAsync(CloneMetas(result), translateTo);
+                return await TranslateMetaIdsAsync(CloneMetas(result), translateTo, groupSeasons);
             }
             catch (Exception ex)
             {
@@ -985,10 +986,10 @@ namespace AnimeList.Services
             }
         }
 
-        public async Task<List<Meta>> GetRelatedAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist)
+        public async Task<List<Meta>> GetRelatedAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist, bool groupSeasons = false)
             => await TranslateMetaIdsAsync(
                 CloneMetas((await FetchSidedataAsync(anilistId)).Related),
-                translateTo);
+                translateTo, groupSeasons);
 
         // Sidedata is cached in-memory; we Clone the metas before
         // translation so the per-call native-id translation doesn't mutate
@@ -1017,18 +1018,82 @@ namespace AnimeList.Services
             return copy;
         }
 
-        public async Task<List<Meta>> TranslateMetaIdsAsync(List<Meta> metas, AnimeService translateTo)
+        public async Task<List<Meta>> TranslateMetaIdsAsync(List<Meta> metas, AnimeService translateTo, bool groupSeasons = false)
         {
             if (metas == null || metas.Count == 0) return metas;
-            if (translateTo == AnimeService.Anilist) return metas;
+            // groupSeasons=true short-circuits the AniList early-return below:
+            // an AniList primary with grouping on still wants IMDb-prefixed ids
+            // on the cards so click-throughs land on the franchise umbrella
+            // page (per /configure's "Group anime seasons" toggle), not on the
+            // per-cour anilist:N detail.
+            if (translateTo == AnimeService.Anilist && !groupSeasons) return metas;
             await _mappingService.EnsureLoadedAsync();
             foreach (var meta in metas)
             {
                 if (string.IsNullOrEmpty(meta?.id) || !meta.id.StartsWith(anilistPrefix)) continue;
                 if (!int.TryParse(meta.id[anilistPrefix.Length..], out var anilistId)) continue;
-                meta.id = await ResolveNativeIdAsync(anilistId, translateTo);
+                meta.id = groupSeasons
+                    ? await ResolveExternalIdAsync(anilistId, translateTo)
+                    : await ResolveNativeIdAsync(anilistId, translateTo);
             }
             return metas;
+        }
+
+        /// <summary>
+        /// Per-user id rewrite for metas that already carry a service-native
+        /// or imdb id (i.e. weren't produced by AnilistFallback and so didn't
+        /// pass through <see cref="TranslateMetaIdsAsync"/>). Handles
+        /// recommendations + the search dedup post-pass: per-service
+        /// GetAnimeByIdAsync emits mal:/kitsu:/anilist: ids depending on the
+        /// caller's primary, but a user with grouping on wants every card to
+        /// surface as imdb:tt... so franchise click-throughs land on the
+        /// canonical /anime/imdb:tt... page everywhere. groupSeasons=false is
+        /// the no-op pass-through; ids the mapping table doesn't recognise
+        /// stay unchanged either way so the card still links somewhere
+        /// reasonable.
+        /// </summary>
+        public async Task<List<Meta>> ApplyGroupingToMetasAsync(List<Meta> metas, bool groupSeasons)
+        {
+            if (!groupSeasons || metas == null || metas.Count == 0) return metas;
+            await _mappingService.EnsureLoadedAsync();
+            foreach (var meta in metas)
+            {
+                if (string.IsNullOrEmpty(meta?.id)) continue;
+                // Already imdb-prefixed → nothing to rewrite. tmdb is also
+                // an acceptable grouped id (next-best after imdb in the
+                // ResolveGroupedId chain) so we leave it alone too.
+                if (meta.id.StartsWith(imdbPrefix) || meta.id.StartsWith(tmdbPrefix)) continue;
+
+                var imdbId = await ResolveImdbAsync(meta.id);
+                if (!string.IsNullOrEmpty(imdbId)) meta.id = imdbId;
+            }
+            return metas;
+        }
+
+        /// <summary>
+        /// Resolves any service-prefixed id (anilist:/mal:/kitsu:) to the
+        /// imdb tt-id from the cross-service mapping table, or null when no
+        /// imdb mapping exists. Shared between the meta-translation path
+        /// above and the notification-link rewrite the dispatcher uses to
+        /// honor the per-user grouping pref when constructing the click
+        /// target.
+        /// </summary>
+        private async Task<string> ResolveImdbAsync(string animeId)
+        {
+            if (string.IsNullOrEmpty(animeId)) return null;
+            AnimeIdMapping mapping = null;
+            try
+            {
+                if (animeId.StartsWith(anilistPrefix))
+                    mapping = await _mappingService.GetAnilistMapping(animeId);
+                else if (animeId.StartsWith(malPrefix))
+                    mapping = await _mappingService.GetMalMapping(animeId);
+                else if (animeId.StartsWith(kitsuPrefix))
+                    mapping = await _mappingService.GetKitsuMapping(animeId);
+            }
+            catch { return null; }
+            var imdb = mapping?.ImdbId;
+            return !string.IsNullOrEmpty(imdb) && imdb.StartsWith("tt") ? imdb : null;
         }
 
         public async Task<List<Link>> GetSupplementaryLinksAsync(int anilistId)
@@ -1055,7 +1120,7 @@ namespace AnimeList.Services
         // user's primary's per-cour detail page so Manage Entry resolves
         // directly. AniList id is the fallback when no native mapping
         // exists for the requested service.
-        private async Task<List<Meta>> BuildBrowseMetasAsync(dynamic mediaArr, AnimeService translateTo, bool hideAdult = false)
+        private async Task<List<Meta>> BuildBrowseMetasAsync(dynamic mediaArr, AnimeService translateTo, bool hideAdult = false, bool groupSeasons = false)
         {
             if (mediaArr == null) return [];
             await _mappingService.EnsureLoadedAsync();
@@ -1076,7 +1141,15 @@ namespace AnimeList.Services
                 // for those paths.
                 if (hideAdult && (bool?)media.isAdult == true) continue;
 
-                var externalId = await ResolveNativeIdAsync(anilistId.Value, translateTo);
+                // Per-user grouping pref picks the id-resolver: imdb-first
+                // when on (matches Stremio's grouped catalog id space), the
+                // primary's native id when off (so Manage Entry / detail
+                // hand-offs land on the per-cour page). seen-set dedup
+                // collapses cours that share an imdb id into a single card
+                // when grouping is on.
+                var externalId = groupSeasons
+                    ? await ResolveExternalIdAsync(anilistId.Value, translateTo)
+                    : await ResolveNativeIdAsync(anilistId.Value, translateTo);
                 if (!seen.Add(externalId)) continue;
 
                 var name = string.IsNullOrEmpty((string)media.title?.english)
@@ -1108,7 +1181,7 @@ namespace AnimeList.Services
                 .ToList();
         }
 
-        public async Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null, bool hideAdult = false)
+        public async Task<List<Meta>> GetByTagAsync(string tag, AnimeService translateTo, string skip = null, bool hideAdult = false, bool groupSeasons = false)
         {
             if (string.IsNullOrWhiteSpace(tag)) return [];
             var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
@@ -1138,10 +1211,10 @@ namespace AnimeList.Services
             });
 
             var data = await PostJsonAsync(requestBody);
-            return await BuildBrowseMetasAsync(data?.Page?.media, translateTo, hideAdult);
+            return await BuildBrowseMetasAsync(data?.Page?.media, translateTo, hideAdult, groupSeasons);
         }
 
-        public async Task<(List<Meta> Items, bool HasNextPage)> GetByTagPageAsync(string tag, AnimeService translateTo, int page = 1, bool hideAdult = false)
+        public async Task<(List<Meta> Items, bool HasNextPage)> GetByTagPageAsync(string tag, AnimeService translateTo, int page = 1, bool hideAdult = false, bool groupSeasons = false)
         {
             if (string.IsNullOrWhiteSpace(tag)) return ([], false);
             if (page < 1) page = 1;
@@ -1170,7 +1243,7 @@ namespace AnimeList.Services
             });
 
             var data = await PostJsonAsync(requestBody);
-            var items = await BuildBrowseMetasAsync(data?.Page?.media, translateTo, hideAdult);
+            var items = await BuildBrowseMetasAsync(data?.Page?.media, translateTo, hideAdult, groupSeasons);
             bool hasNext = data?.Page?.pageInfo?.hasNextPage != null
                 && (bool)data.Page.pageInfo.hasNextPage;
             return (items, hasNext);
@@ -1242,7 +1315,7 @@ namespace AnimeList.Services
             return tags;
         }
 
-        public async Task<(string Name, List<Meta> Items)> GetStaffMediaAsync(int staffId, AnimeService translateTo, string skip = null, bool hideAdult = false)
+        public async Task<(string Name, List<Meta> Items)> GetStaffMediaAsync(int staffId, AnimeService translateTo, string skip = null, bool hideAdult = false, bool groupSeasons = false)
         {
             var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
 
@@ -1288,10 +1361,10 @@ namespace AnimeList.Services
                 foreach (var edge in staff.staffMedia.edges)
                     if (edge.node != null) nodes.Add(edge.node);
             }
-            return (name, await BuildBrowseMetasAsync(nodes, translateTo, hideAdult));
+            return (name, await BuildBrowseMetasAsync(nodes, translateTo, hideAdult, groupSeasons));
         }
 
-        public async Task<(string Name, List<Meta> Items, bool HasNextPage)> GetStudioMediaAsync(int studioId, AnimeService translateTo, int page = 1, bool hideAdult = false)
+        public async Task<(string Name, List<Meta> Items, bool HasNextPage)> GetStudioMediaAsync(int studioId, AnimeService translateTo, int page = 1, bool hideAdult = false, bool groupSeasons = false)
         {
             if (page < 1) page = 1;
 
@@ -1353,7 +1426,7 @@ namespace AnimeList.Services
             bool hasNext = studio.media?.pageInfo?.hasNextPage != null
                 && (bool)studio.media.pageInfo.hasNextPage;
 
-            return (name, await BuildBrowseMetasAsync(nodes, translateTo, hideAdult), hasNext);
+            return (name, await BuildBrowseMetasAsync(nodes, translateTo, hideAdult, groupSeasons), hasNext);
         }
 
         public async Task<(List<StudioSummary> Studios, bool HasNextPage)> GetStudiosListAsync(int page = 1)
