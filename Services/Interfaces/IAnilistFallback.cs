@@ -132,6 +132,18 @@ namespace AnimeList.Services.Interfaces
         Task<List<Meta>> GetRelatedAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist, bool groupSeasons = false);
 
         /// <summary>
+        /// Stremio-shape relation links — Sequel / Prequel labels (the only
+        /// two categories Stremio's meta UI renders as relation chips) with
+        /// a web.stremio.com deep-link URL per entry. Same underlying
+        /// GraphQL data as <see cref="GetRelatedAsync"/>, but preserves the
+        /// relationType labels that the Meta-returning variant collapses.
+        /// Backs MetaController's imdb-grouped enrichment, which has to
+        /// inject these into the raw Cinemeta JSON because the imdb path
+        /// never goes through AnilistService's inline relation builder.
+        /// </summary>
+        Task<List<Link>> GetRelatedLinksAsync(int anilistId);
+
+        /// <summary>
         /// Walks a list of Meta and replaces every anilist:N id with the
         /// equivalent kitsu:N / mal:N native id when the mapping table has
         /// one for the requested service. Anime without a matching mapping

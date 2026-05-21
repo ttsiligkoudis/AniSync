@@ -230,7 +230,8 @@ namespace AnimeList.Services
         private sealed record AnilistSidedata(
             List<Meta> Recommendations,
             List<Meta> Related,
-            List<Link> SupplementaryLinks);
+            List<Link> SupplementaryLinks,
+            List<Link> RelatedLinks);
 
         public async Task<List<Meta>> GetRecommendationMetasAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist, bool groupSeasons = false)
             => await TranslateMetaIdsAsync(
@@ -243,7 +244,7 @@ namespace AnimeList.Services
             if (_cache.TryGetValue<AnilistSidedata>(cacheKey, out var cached) && cached != null)
                 return cached;
 
-            var empty = new AnilistSidedata([], [], []);
+            var empty = new AnilistSidedata([], [], [], []);
 
             try
             {
@@ -281,6 +282,7 @@ namespace AnimeList.Services
                                             episodes
                                             averageScore
                                             seasonYear
+                                            isAdult
                                             title { english romaji }
                                             coverImage { large }
                                         }
@@ -301,14 +303,16 @@ namespace AnimeList.Services
                 var sidedata = new AnilistSidedata(
                     Recommendations: ParseRecommendations(media),
                     Related: ParseRelated(media),
-                    SupplementaryLinks: ParseSupplementaryLinks(media));
+                    SupplementaryLinks: ParseSupplementaryLinks(media),
+                    RelatedLinks: ParseRelatedLinks(media));
 
                 // Only cache when at least one bucket is non-empty so a
                 // transient AniList blip / rate-limit / 5xx doesn't lock in
                 // an empty record for 24h.
                 if (sidedata.Recommendations.Count > 0
                     || sidedata.Related.Count > 0
-                    || sidedata.SupplementaryLinks.Count > 0)
+                    || sidedata.SupplementaryLinks.Count > 0
+                    || sidedata.RelatedLinks.Count > 0)
                 {
                     _cache.Set(cacheKey, sidedata, new MemoryCacheEntryOptions
                     {
@@ -355,6 +359,60 @@ namespace AnimeList.Services
                     episodes = (int?)rec.episodes,
                     year = (int?)rec.seasonYear,
                     format = NormalizeFormat((string)rec.format),
+                });
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Stremio-shape relation Links — Sequel / Prequel labels with
+        /// web.stremio.com deep-link URLs. Mirrors the inline relation
+        /// builder in <see cref="AnilistService"/> so the imdb-grouped
+        /// enrichment in <see cref="MetaController"/> can inject the same
+        /// chip strip the per-service paths emit natively. The Meta-
+        /// returning <see cref="ParseRelated"/> collapses Sequel and
+        /// Prequel into a single "Related" carousel for the web app's
+        /// detail page — Stremio needs them tagged.
+        /// </summary>
+        private static List<Link> ParseRelatedLinks(dynamic media)
+        {
+            var edges = media?.relations?.edges;
+            if (edges == null) return [];
+
+            var relLabels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["PREQUEL"] = "Prequel",
+                ["SEQUEL"]  = "Sequel",
+            };
+
+            var result = new List<Link>();
+            foreach (var edge in edges)
+            {
+                var relType = (string)edge.relationType;
+                if (relType == null || !relLabels.TryGetValue(relType, out var label)) continue;
+
+                var node = edge.node;
+                if (node == null) continue;
+                if ((bool?)node.isAdult == true) continue;
+                if (!string.Equals((string)node.type, "ANIME", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var relId = (int?)node.id;
+                if (!relId.HasValue) continue;
+
+                var name = string.IsNullOrEmpty((string)node.title?.english)
+                    ? (string)node.title?.romaji
+                    : (string)node.title?.english;
+                if (string.IsNullOrEmpty(name)) continue;
+
+                var isRelMovie = IsMovieFormat((string)node.format);
+                var stremioType = isRelMovie ? MetaType.movie.ToString() : MetaType.series.ToString();
+                var encodedId = Uri.EscapeDataString($"{anilistPrefix}{relId.Value}");
+                result.Add(new Link
+                {
+                    name = name,
+                    category = label,
+                    url = $"https://web.stremio.com/#/detail/{stremioType}/{encodedId}",
+                    anilistId = relId.Value,
                 });
             }
             return result;
@@ -990,6 +1048,9 @@ namespace AnimeList.Services
             => await TranslateMetaIdsAsync(
                 CloneMetas((await FetchSidedataAsync(anilistId)).Related),
                 translateTo, groupSeasons);
+
+        public async Task<List<Link>> GetRelatedLinksAsync(int anilistId)
+            => (await FetchSidedataAsync(anilistId)).RelatedLinks;
 
         // Sidedata is cached in-memory; we Clone the metas before
         // translation so the per-call native-id translation doesn't mutate
