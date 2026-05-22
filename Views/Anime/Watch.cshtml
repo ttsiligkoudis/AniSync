@@ -1958,9 +1958,31 @@
                 var firstLine = (stream.title || stream.name || '').split('\n')[0].trim();
                 var open = el('button', { type: 'button', class: 'btn-ghost btn-ghost-sm' }, 'Open externally');
                 open.addEventListener('click', function () {
-                    resolvePlaybackUrl(stream.url).then(function (resolvedUrl) {
-                        openWithExternalPlayer(resolvedUrl, firstLine);
-                    });
+                    // Same mid-launch feedback the per-row icon button
+                    // shows — relabels to "Opening…" + disables clicks
+                    // while resolvePlaybackUrl + openWithExternalPlayer
+                    // is in flight, then restores on the next tick.
+                    // Without this the 2–3s resolve looks like a no-op.
+                    if (!open.dataset.originalLabel) {
+                        open.dataset.originalLabel = open.textContent;
+                    }
+                    open.textContent = 'Opening…';
+                    open.classList.add('is-loading');
+                    open.disabled = true;
+                    resolvePlaybackUrl(stream.url)
+                        .then(function (resolvedUrl) {
+                            openWithExternalPlayer(resolvedUrl, firstLine);
+                        })
+                        .finally(function () {
+                            setTimeout(function () {
+                                if (open.dataset.originalLabel) {
+                                    open.textContent = open.dataset.originalLabel;
+                                    delete open.dataset.originalLabel;
+                                }
+                                open.classList.remove('is-loading');
+                                open.disabled = false;
+                            }, 800);
+                        });
                 });
                 row.appendChild(open);
 
@@ -2785,6 +2807,15 @@
             // text colour — no separate icon font / sprite needed.
             var EXTERNAL_ICON_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
 
+            // Inline spinner SVG shown while a click is mid-resolve.
+            // resolvePlaybackUrl + the external-launch handshake can take
+            // 2–3s on a cold debrid cache, and without feedback users hit
+            // the button repeatedly thinking it didn't register. The
+            // spinner replaces the external icon while the promise is
+            // pending — same currentColor / 16px sizing so the swap
+            // doesn't shift the button's footprint.
+            var EXTERNAL_SPINNER_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" class="episode-stream-action-spinner"><circle cx="12" cy="12" r="9" opacity="0.25"/><path d="M21 12a9 9 0 0 0-9-9"/></svg>';
+
             // Build the external-player launcher. One click → defers
             // straight to openWithExternalPlayer, which dispatches an
             // Android intent (system app-chooser) on mobile or
@@ -2808,11 +2839,47 @@
                     // Fly.io IP the token was signed against), so we
                     // hand the external app the post-redirect debrid
                     // CDN URL instead.
-                    resolvePlaybackUrl(url).then(function (resolvedUrl) {
-                        openWithExternalPlayer(resolvedUrl, displayName);
-                    });
+                    setExternalActionLoading(btn, true);
+                    resolvePlaybackUrl(url)
+                        .then(function (resolvedUrl) {
+                            openWithExternalPlayer(resolvedUrl, displayName);
+                        })
+                        .finally(function () {
+                            // Hold the spinner a touch past the open
+                            // call so the user sees confirmation that
+                            // the dispatch fired before the icon
+                            // restores — without the delay the swap
+                            // back is too fast to register.
+                            setTimeout(function () {
+                                setExternalActionLoading(btn, false);
+                            }, 800);
+                        });
                 });
                 return btn;
+            }
+
+            // Toggles the per-row external button into / out of its
+            // mid-launch state: spinner swapped in for the icon, button
+            // disabled so repeated clicks don't queue parallel resolves.
+            // Same helper is shared with the fallback panel's "Open
+            // externally" button so both entrypoints feel identical.
+            function setExternalActionLoading(btn, loading) {
+                if (!btn) return;
+                if (loading) {
+                    if (!btn.dataset.originalContent) {
+                        btn.dataset.originalContent = btn.innerHTML;
+                    }
+                    btn.innerHTML = EXTERNAL_SPINNER_SVG;
+                    btn.classList.add('is-loading');
+                    btn.disabled = true;
+                } else {
+                    if (btn.dataset.originalContent) {
+                        btn.innerHTML = btn.dataset.originalContent;
+                        delete btn.dataset.originalContent;
+                    }
+                    btn.classList.remove('is-loading');
+                    btn.disabled = false;
+                }
             }
 
             // Cross-platform "Open with…" launcher — defers to the
