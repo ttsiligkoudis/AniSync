@@ -3161,6 +3161,14 @@
                     '#EXTINF:-1,' + safeName + '\n' +
                     subLine +
                     streamUrl + '\n';
+                // Diagnostic log so a user investigating "VLC loaded
+                // but no OS sub appeared in the menu" can paste the
+                // exact .m3u content into a bug report. Logged before
+                // the download triggers so it's captured even when
+                // the user closes the tab right after the dispatch.
+                try { console.info('[AniSync] external-launch m3u:\n' + m3u); }
+                catch (_) { /* console may be unavailable on some
+                                old WebViews; never crash the launch */ }
                 var blob = new Blob([m3u], { type: 'audio/x-mpegurl' });
                 var blobUrl = URL.createObjectURL(blob);
                 var a = document.createElement('a');
