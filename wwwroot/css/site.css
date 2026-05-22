@@ -2095,6 +2095,14 @@ body.modal-open {
     border-right-color: transparent;
     border-radius: 50%;
     box-sizing: border-box;
+    /* will-change hoists the element onto its own compositor
+       layer so the rotate animation runs on the GPU and isn't
+       paused by main-thread work (the resolvePlaybackUrl fetch,
+       the iframe vlc:// probe, the OS handler prompt) that
+       happens for the duration the spinner is on-screen. Without
+       this the animation gets paused mid-frame when the main
+       thread is busy and reads as a frozen C-shape. */
+    will-change: transform;
     animation: loader-spin 0.75s linear infinite;
 }
 
@@ -3150,8 +3158,19 @@ body.modal-open {
     animation: loader-spin 0.8s linear infinite;
 }
 
+/* Explicit from + to keyframes: the implicit-from form
+   (`to { transform: rotate(360deg) }`) infers a `from` state of
+   the element's current computed transform — which is fine when
+   the element has no other transforms applied, but on some
+   Chromium builds the implicit `from` is computed as `none`
+   instead of `rotate(0deg)`, and the transition between `none`
+   and a `rotate` value can't be interpolated → animation
+   silently no-ops and the spinner appears frozen as a static
+   C-shape. Spelling out both keyframes pins the start to a
+   concrete rotate so interpolation always runs. */
 @keyframes loader-spin {
-    to { transform: rotate(360deg); }
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
 }
 
 /* Back-to-top button. Fixed bottom-right; positioned above the iOS home-
@@ -4600,7 +4619,11 @@ a.stats-cell-link:hover {
     /* CSS-only border spinner — same approach as
        .episode-stream-action-spinner, just sized to fit inside
        the source-chip-mark badge. Plain <span> rotation so the
-       animation runs reliably without SVG transform-origin quirks. */
+       animation runs reliably without SVG transform-origin quirks.
+       will-change: transform hoists to a GPU compositor layer so
+       the rotation isn't paused while the deep-link probe is
+       blocking the main thread (see the matching comment on the
+       per-row spinner for the full rationale). */
     display: inline-block;
     width: 12px;
     height: 12px;
@@ -4608,6 +4631,7 @@ a.stats-cell-link:hover {
     border-right-color: transparent;
     border-radius: 50%;
     box-sizing: border-box;
+    will-change: transform;
     animation: loader-spin 0.75s linear infinite;
 }
 
