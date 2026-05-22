@@ -2070,6 +2070,23 @@ body.modal-open {
     color: #fff;
 }
 
+/* External-launch button while a click is mid-resolve. The
+   resolvePlaybackUrl + openWithExternalPlayer chain takes 2–3 s on
+   a cold debrid cache, so the icon is swapped for a spinner SVG
+   (.episode-stream-action-spinner) and the button is disabled to
+   block parallel clicks. is-loading is also applied to the
+   fallback panel's text-style "Open externally" button so both
+   entrypoints share the same disabled-while-busy treatment.   */
+.episode-stream-action.is-loading,
+.btn-ghost.is-loading {
+    opacity: 0.7;
+    cursor: progress;
+}
+
+.episode-stream-action-spinner {
+    animation: loader-spin 0.75s linear infinite;
+}
+
 .episode-stream-pick:hover,
 .episode-stream-pick:focus {
     background: rgba(255, 255, 255, 0.07);
@@ -4548,6 +4565,28 @@ a.stats-cell-link:hover {
 .source-chip-stremio:visited {
     background: #7B5BF5;
     color: #fff;
+}
+
+/* Stremio chip while the deep-link probe is running. The chip's
+   inner spans get swapped out for a spinner + "Opening…" label
+   while we wait ~1.5s for the OS to claim stremio:// — without
+   the visual change the click feels frozen. .source-chip-spinner
+   is the inline SVG circle the JS injects. */
+.source-chip-stremio.is-loading {
+    cursor: progress;
+}
+
+.source-chip-stremio.is-loading:hover,
+.source-chip-stremio.is-loading:focus {
+    /* Suppress the regular hover-lift / brightness while loading
+       so the spinner doesn't shimmer with the chip's transform. */
+    transform: none;
+    filter: none;
+    box-shadow: none;
+}
+
+.source-chip-spinner {
+    animation: loader-spin 0.75s linear infinite;
 }
 
 .source-chip-imdb .source-chip-mark {

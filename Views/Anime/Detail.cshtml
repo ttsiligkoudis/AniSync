@@ -1342,11 +1342,32 @@ else
 
                 e.preventDefault();
 
+                // Loading state on the chip so the ~1.5s app-probe
+                // window doesn't read as a frozen click. Stores the
+                // original markup so it can be restored after the
+                // probe resolves (either branch). Doesn't disable the
+                // chip — the click already preventDefault'd so a
+                // re-click would just re-fire the same probe.
+                if (!chip.dataset.originalContent) {
+                    chip.dataset.originalContent = chip.innerHTML;
+                }
+                chip.classList.add('is-loading');
+                chip.innerHTML = '<span class="source-chip-mark" aria-hidden="true">' +
+                    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" class="source-chip-spinner"><circle cx="12" cy="12" r="9" opacity="0.3"/><path d="M21 12a9 9 0 0 0-9-9"/></svg>' +
+                    '</span><span class="source-chip-label">Opening…</span>';
+
+                // App-probe signal: when the page becomes hidden
+                // within the probe window, the OS handed off to the
+                // Stremio app and we don't need to fire the web
+                // fallback. Only `visibilitychange` is watched (not
+                // `blur`) so background-tab spawn / quick window
+                // focus changes don't trip the flag — only a real
+                // app handoff drops the page out of visibility.
                 var appClaimed = false;
-                var claim = function () { appClaimed = true; };
-                document.addEventListener('visibilitychange', claim, { once: true });
-                window.addEventListener('blur', claim, { once: true });
-                window.addEventListener('pagehide', claim, { once: true });
+                var claim = function () {
+                    if (document.visibilityState === 'hidden') appClaimed = true;
+                };
+                document.addEventListener('visibilitychange', claim);
 
                 // Trigger the stremio:// scheme on the current tab. On
                 // mobile with the app installed the OS switches focus
@@ -1362,20 +1383,35 @@ else
 
                 setTimeout(function () {
                     document.removeEventListener('visibilitychange', claim);
-                    window.removeEventListener('blur', claim);
-                    window.removeEventListener('pagehide', claim);
+
+                    // Restore the chip regardless of which branch we
+                    // take below — the user will either be on the
+                    // Stremio app, the new web tab, or here looking
+                    // at the chip in its restored state.
+                    chip.classList.remove('is-loading');
+                    if (chip.dataset.originalContent) {
+                        chip.innerHTML = chip.dataset.originalContent;
+                        delete chip.dataset.originalContent;
+                    }
 
                     if (appClaimed || document.hidden) return;
 
-                    // No handler claimed the deep link in time —
-                    // navigate the current tab to the web Stremio URL
-                    // so the click isn't a no-op. window.open from a
-                    // setTimeout sits outside the original user-
-                    // gesture window and gets blocked by every modern
-                    // popup blocker, which is why we navigate in-place
-                    // rather than spawning a new tab. Browser back
-                    // restores the detail page.
-                    window.location.href = webUrl;
+                    // No app handler claimed the deep link in time —
+                    // open the web fallback in a new tab. Chrome's
+                    // transient user-activation lasts ~5s after a
+                    // gesture, so window.open from the 1500ms timeout
+                    // is still permitted on Chrome / Edge / modern
+                    // Firefox. Safari is stricter (some versions only
+                    // honour synchronous gesture opens); on those the
+                    // call returns null / a closed window and we fall
+                    // back to current-tab nav so the click still
+                    // resolves to something.
+                    var win = null;
+                    try { win = window.open(webUrl, '_blank', 'noopener,noreferrer'); }
+                    catch (_) { /* popup-blocked — fall through */ }
+                    if (!win || win.closed) {
+                        window.location.href = webUrl;
+                    }
                 }, 1500);
             });
         });
