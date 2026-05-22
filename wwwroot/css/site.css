@@ -850,6 +850,38 @@ body.modal-open {
    browser link (cobalt + underlined), so we now use an image and
    neutralise the inherited link styling explicitly on every state
    the anchor goes through (link / visited / hover / focus). */
+/* Universal back button — sits at the very left of the header,
+   ahead of the logo. Calls history.back() to rescue users from
+   Stremio desktop's embedded webview (which navigates to our
+   chip URLs without offering its own back UI) and doubles as a
+   generic in-site back nav. Same muted-icon styling as the
+   header nav links so it reads as chrome rather than a
+   destination of its own. */
+.site-back-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.2rem;
+    height: 2.2rem;
+    padding: 0;
+    margin-right: 0.25rem;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.6rem;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+
+.site-back-btn:hover,
+.site-back-btn:focus {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #fff;
+    outline: none;
+}
+
 .site-logo,
 .site-logo:link,
 .site-logo:visited,

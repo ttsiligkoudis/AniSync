@@ -188,6 +188,21 @@
        content stays aligned with the page via the inner .container. *@
     <header class="site-header">
         <div class="container site-header-inner">
+            @* Universal back button — primarily for embedded-browser
+               contexts (Stremio desktop opens our chip-link URLs in
+               its in-app webview, which doesn't surface its own back
+               UI, so a user who clicks a Tag / Studio / Manage Entry
+               link gets stuck on the AniSync page with no way back
+               to Stremio's meta view). Calls history.back() so it
+               also doubles as a generic in-site back-nav for users
+               who navigated AniSync → AniSync. The 500ms no-op
+               fallback to "/" catches the cold-load case where the
+               webview's history doesn't contain a previous entry. *@
+            <button type="button" class="site-back-btn" aria-label="Go back" data-site-back>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M15 18l-6-6 6-6"/>
+                </svg>
+            </button>
             <a class="site-logo" href="/" aria-label="AniSync home">
                 <img src="/logo.png" alt="AniSync" />
             </a>
@@ -510,6 +525,27 @@
     <script src="~/js/pwa-install.js" asp-append-version="true" defer></script>
     <script src="~/js/scroll-top.js" asp-append-version="true" defer></script>
     <script src="~/js/site-search.js" asp-append-version="true" defer></script>
+    <script>
+        // Universal back button. Lives in the layout so every page
+        // has it — primarily a rescue valve for Stremio desktop's in-
+        // app webview (clicking a Tag / Studio / Manage Entry chip
+        // navigates the embedded view to AniSync with no native back
+        // UI). Falls back to the AniSync home when history.back()
+        // doesn't budge the URL within 500ms — covers the cold-load
+        // case where the webview's history doesn't contain a previous
+        // entry, so the click still resolves to something useful.
+        (function () {
+            var btn = document.querySelector('[data-site-back]');
+            if (!btn) return;
+            btn.addEventListener('click', function () {
+                var before = location.href;
+                try { history.back(); } catch (_) { /* fall through */ }
+                setTimeout(function () {
+                    if (location.href === before) location.href = '/';
+                }, 500);
+            });
+        })();
+    </script>
     @if (layoutLoggedIn)
     {
         <script src="~/js/notifications.js" asp-append-version="true" defer></script>
