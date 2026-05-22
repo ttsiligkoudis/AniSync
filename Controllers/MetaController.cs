@@ -133,7 +133,140 @@ namespace AnimeList.Controllers
                 anime.links.Add(new Link { name = "Manage Entry", category = "Manage", url = manageUrl });
             }
 
+            // Final tidy of the chip strip Stremio renders below the
+            // hero: drops noisy categories the user said to remove
+            // (Staff, Composer, Producer), merges Sequel + Prequel
+            // into a single "Related" bucket, renames Similar to
+            // Recommended, caps the long-tail categories to a
+            // sensible head, and orders the surviving categories in
+            // the explicit sequence Manage → Related → Recommended →
+            // Tag → Studio → director → writer → Artist. Stremio's
+            // section headers reflect the category names, so this
+            // also drives what the user sees as the row labels.
+            NormaliseAndOrderStremioLinks(anime);
+
             return anime;
+        }
+
+        // Categories surfaced on the Stremio meta page, in the order
+        // they should render below the hero. Anything not in this
+        // list is dropped (Staff / Composer / Producer / etc.) to
+        // keep the page from sprawling — the chip strip used to run
+        // off the screen on detail pages of long-running shows where
+        // every category had dozens of entries.
+        private static readonly string[] StremioCategoryOrder =
+        {
+            "Manage",
+            "Related",       // Prequel + Sequel collapsed into one bucket
+            "Recommended",   // ex-"Similar"
+            "Tag",
+            "Studio",
+            "director",
+            "writer",
+            "Artist",
+        };
+
+        // Per-category head cap. Stremio renders chip rows with no
+        // horizontal-scroll affordance, so 30+ tag entries pushed the
+        // hero out of frame. 5 is a head sample that still gives the
+        // user the most relevant entries (AniList returns these
+        // ranked, so the head is meaningful).
+        private static readonly Dictionary<string, int> StremioCategoryCaps =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                { "Recommended", 5 },
+                { "Tag",         5 },
+                { "director",    5 },
+                { "writer",      5 },
+                { "Artist",      5 },
+            };
+
+        /// <summary>
+        /// Final pass on <see cref="Meta.links"/> for the Stremio meta
+        /// response: enforces the category allow-list / order /
+        /// per-category cap from <see cref="StremioCategoryOrder"/>
+        /// and <see cref="StremioCategoryCaps"/>, and merges Prequel +
+        /// Sequel entries into a single "Related" bucket with
+        /// prequels listed first (chronological story-order
+        /// approximation). Runs as the last step before returning the
+        /// Meta so it sees the union of every upstream that
+        /// contributed links (per-service inline + Sidedata extras +
+        /// Manage Entry append).
+        /// </summary>
+        private static void NormaliseAndOrderStremioLinks(Meta anime)
+        {
+            if (anime?.links == null || anime.links.Count == 0) return;
+
+            var prequels = new List<Link>();
+            var sequels = new List<Link>();
+            var byCategory = new Dictionary<string, List<Link>>(StringComparer.OrdinalIgnoreCase);
+            // Track whether a category appears in the explicit order
+            // list (case-insensitive). Anything not on the list is
+            // dropped silently.
+            var allowed = new HashSet<string>(StremioCategoryOrder, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var link in anime.links)
+            {
+                if (link == null || string.IsNullOrEmpty(link.category)) continue;
+
+                // Prequel + Sequel both belong to the merged
+                // "Related" bucket — collected separately so the
+                // final order is prequels-then-sequels regardless
+                // of how AniList interleaved them in the source.
+                if (string.Equals(link.category, "Prequel", StringComparison.OrdinalIgnoreCase))
+                {
+                    prequels.Add(link);
+                    continue;
+                }
+                if (string.Equals(link.category, "Sequel", StringComparison.OrdinalIgnoreCase))
+                {
+                    sequels.Add(link);
+                    continue;
+                }
+                // "Similar" was AniList's wording; Stremio surfaces
+                // this as a "RECOMMENDED" header in the UI which is
+                // the clearer label.
+                if (string.Equals(link.category, "Similar", StringComparison.OrdinalIgnoreCase))
+                {
+                    link.category = "Recommended";
+                }
+
+                if (!allowed.Contains(link.category)) continue;
+
+                if (!byCategory.TryGetValue(link.category, out var bucket))
+                {
+                    bucket = [];
+                    byCategory[link.category] = bucket;
+                }
+                bucket.Add(link);
+            }
+
+            if (prequels.Count > 0 || sequels.Count > 0)
+            {
+                var related = new List<Link>(prequels.Count + sequels.Count);
+                related.AddRange(prequels);
+                related.AddRange(sequels);
+                foreach (var l in related) l.category = "Related";
+                byCategory["Related"] = related;
+            }
+
+            foreach (var (category, cap) in StremioCategoryCaps)
+            {
+                if (byCategory.TryGetValue(category, out var bucket) && bucket.Count > cap)
+                {
+                    byCategory[category] = bucket.Take(cap).ToList();
+                }
+            }
+
+            var ordered = new List<Link>();
+            foreach (var category in StremioCategoryOrder)
+            {
+                if (byCategory.TryGetValue(category, out var bucket))
+                {
+                    ordered.AddRange(bucket);
+                }
+            }
+            anime.links = ordered;
         }
 
         /// <summary>
