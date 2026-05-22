@@ -2084,6 +2084,11 @@ body.modal-open {
 }
 
 .episode-stream-action-spinner {
+    /* SVG elements default to transform-origin: 0 0, so without
+       this the loader-spin keyframe rotates around the SVG's top-
+       left corner — visually a static frozen circle. Re-anchoring
+       to centre makes the rotation actually look like a spinner. */
+    transform-origin: center;
     animation: loader-spin 0.75s linear infinite;
 }
 
@@ -4586,6 +4591,10 @@ a.stats-cell-link:hover {
 }
 
 .source-chip-spinner {
+    /* Centre-anchor the spin so the SVG actually rotates instead
+       of pivoting around its top-left corner — see the matching
+       comment on .episode-stream-action-spinner for the rationale. */
+    transform-origin: center;
     animation: loader-spin 0.75s linear infinite;
 }
 
