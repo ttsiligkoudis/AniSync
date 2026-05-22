@@ -2957,22 +2957,29 @@
                     markEpisodeAsWatched('external-launch', streamUrl);
                 }
 
-                // Decide what to pass as the sidecar subtitle. Three
-                // outcomes:
-                //   * Player is already open AND user has a VTT
-                //     entry picked → reuse currentSubKey directly
-                //     (no refetch).
-                //   * Player is open AND user picked None / an
-                //     embedded SSA track → null (None = no subs;
-                //     embedded lives in the MKV already).
-                //   * Player NOT open yet (user clicked the external
-                //     action straight off the source list) → kick
-                //     off /anime/episode-subtitles for this stream,
-                //     mirror the auto-preselect logic to pick the
-                //     first English entry, then launch. Same
-                //     decision the in-app player would have made.
-                if (art) {
-                    dispatchExternalLaunch(streamUrl, displayName, sidecarFromCurrentPick());
+                // Decide what to pass as the sidecar subtitle:
+                //   * Player open AND user picked a VTT entry → reuse
+                //     currentSubKey directly (no refetch). Hands VLC
+                //     exactly the OS sub the user already chose.
+                //   * Otherwise (player not open, OR player open
+                //     but the user picked None / an embedded SSA
+                //     track) → fetch /anime/episode-subtitles for
+                //     this stream and pick the first English entry,
+                //     same auto-preselect rule the in-app player
+                //     uses. Previously the "embedded SSA picked"
+                //     case returned null and VLC ended up with no
+                //     OS sub at all — which made the external-
+                //     launch path useless for users who were
+                //     watching with the embedded track in our
+                //     player and wanted the OS sub as an alternate
+                //     option in VLC. The MKV ships its embedded
+                //     subs to VLC regardless, so this always-
+                //     include behaviour gives VLC the union of both
+                //     and lets the viewer switch between them from
+                //     the Subtitle Track menu.
+                var picked = sidecarFromCurrentPick();
+                if (picked) {
+                    dispatchExternalLaunch(streamUrl, displayName, picked);
                     return;
                 }
                 fetchEnglishSidecarForStream(displayName).then(function (sub) {
