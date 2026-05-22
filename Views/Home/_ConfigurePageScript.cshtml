@@ -669,11 +669,24 @@
     // first load; this JS only handles mutations.
     function buildAddonRow(addon) {
         var url = addon.url || addon.Url || '';
-        var $li = $('<li class="stream-addon-row"></li>').attr('data-url', url);
+        // Match the server-rendered row shape from _StreamsSection.cshtml
+        // — drag handle, meta block, up / down reorder buttons, then
+        // Configure + Remove. draggable so desktop drag-and-drop works
+        // without an extra .attr() set after.
+        var $li = $('<li class="stream-addon-row" draggable="true"></li>').attr('data-url', url);
+        $li.append(
+            '<span class="stream-addon-drag-handle" aria-hidden="true" title="Drag to reorder">' +
+                '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+                    '<line x1="3" y1="8" x2="21" y2="8"/>' +
+                    '<line x1="3" y1="16" x2="21" y2="16"/>' +
+                '</svg>' +
+            '</span>');
         var $meta = $('<div class="stream-addon-meta"></div>');
         $meta.append($('<span class="stream-addon-name"></span>').text(addon.name || addon.Name || '(addon)'));
         $meta.append($('<span class="stream-addon-url"></span>').text(url));
         $li.append($meta);
+        $li.append('<button class="btn-ghost btn-ghost-sm stream-addon-up" type="button" aria-label="Move up" title="Move up">&#8593;</button>');
+        $li.append('<button class="btn-ghost btn-ghost-sm stream-addon-down" type="button" aria-label="Move down" title="Move down">&#8595;</button>');
         // Mirror the server-rendered Configure link from
         // _StreamsSection.cshtml: swap /manifest.json for /configure
         // to land on the addon's HTML configurator. href is set via
@@ -686,6 +699,91 @@
         $li.append('<button class="btn-ghost btn-ghost-sm stream-addon-remove" type="button" style="white-space: nowrap;">Remove</button>');
         return $li;
     }
+
+    // Reordering: drag-and-drop on desktop + ↑ / ↓ buttons everywhere.
+    // Persists the new order to the server after every change so a
+    // refresh keeps the user's preference. Best-effort POST — a
+    // network failure leaves the DOM order ahead of the server, but
+    // a subsequent reorder syncs it back.
+    function persistStreamAddonOrder() {
+        if (!configUid) return;
+        var urls = $('#streamAddonList .stream-addon-row').map(function () {
+            return $(this).attr('data-url');
+        }).get().filter(function (u) { return !!u; });
+        if (urls.length === 0) return;
+        fetch('/Home/ReorderStreamAddons', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: configUid, urls: urls }),
+        }).catch(function () { /* best-effort */ });
+    }
+
+    $('#streamAddonList').on('click', '.stream-addon-up', function () {
+        var $row = $(this).closest('.stream-addon-row');
+        var $prev = $row.prev('.stream-addon-row');
+        if ($prev.length === 0) return; // already at the top
+        $row.insertBefore($prev);
+        persistStreamAddonOrder();
+    });
+
+    $('#streamAddonList').on('click', '.stream-addon-down', function () {
+        var $row = $(this).closest('.stream-addon-row');
+        var $next = $row.next('.stream-addon-row');
+        if ($next.length === 0) return; // already at the bottom
+        $row.insertAfter($next);
+        persistStreamAddonOrder();
+    });
+
+    // HTML5 drag-and-drop. dataTransfer carries the dragged row's URL
+    // so we can find it again on drop (cleaner than tracking the
+    // dragged element in a closure across event handlers). Touch
+    // browsers don't fire these events — that's why the ↑ / ↓
+    // buttons exist as a parallel path.
+    var draggedAddonUrl = null;
+    $('#streamAddonList').on('dragstart', '.stream-addon-row', function (e) {
+        draggedAddonUrl = $(this).attr('data-url');
+        if (e.originalEvent && e.originalEvent.dataTransfer) {
+            e.originalEvent.dataTransfer.effectAllowed = 'move';
+            try { e.originalEvent.dataTransfer.setData('text/plain', draggedAddonUrl || ''); }
+            catch (_) { /* Firefox sometimes refuses on file:// origins */ }
+        }
+        $(this).addClass('is-dragging');
+    });
+
+    $('#streamAddonList').on('dragend', '.stream-addon-row', function () {
+        $(this).removeClass('is-dragging');
+        $('#streamAddonList .stream-addon-row').removeClass('drop-above drop-below');
+        draggedAddonUrl = null;
+    });
+
+    $('#streamAddonList').on('dragover', '.stream-addon-row', function (e) {
+        if (!draggedAddonUrl) return;
+        e.preventDefault();
+        if (e.originalEvent && e.originalEvent.dataTransfer) {
+            e.originalEvent.dataTransfer.dropEffect = 'move';
+        }
+        // Highlight the half of the target the cursor is over so the
+        // user can tell whether the drop will insert above or below.
+        var rect = this.getBoundingClientRect();
+        var above = e.originalEvent.clientY < rect.top + rect.height / 2;
+        $('#streamAddonList .stream-addon-row').removeClass('drop-above drop-below');
+        $(this).addClass(above ? 'drop-above' : 'drop-below');
+    });
+
+    $('#streamAddonList').on('drop', '.stream-addon-row', function (e) {
+        if (!draggedAddonUrl) return;
+        e.preventDefault();
+        var $target = $(this);
+        var $dragged = $('#streamAddonList .stream-addon-row[data-url="' +
+            String(draggedAddonUrl).replace(/"/g, '\\"') + '"]');
+        $('#streamAddonList .stream-addon-row').removeClass('drop-above drop-below');
+        if ($dragged.length === 0 || $dragged.is($target)) return;
+        var rect = this.getBoundingClientRect();
+        var above = e.originalEvent.clientY < rect.top + rect.height / 2;
+        if (above) $dragged.insertBefore($target);
+        else       $dragged.insertAfter($target);
+        persistStreamAddonOrder();
+    });
 
     $('#streamAddonAddBtn').on('click', async function () {
         if (!configUid) return;

@@ -540,6 +540,43 @@ namespace AnimeList.Services
             return true;
         }
 
+        public async Task<bool> ReorderStreamAddonsAsync(string uid, IList<string> orderedUrls)
+        {
+            if (string.IsNullOrEmpty(uid) || orderedUrls == null) return false;
+            var existing = await GetStreamAddonsAsync(uid);
+            if (existing.Count == 0) return false;
+
+            // Build a URL → addon lookup. Drain it as we walk the
+            // ordered list so anything leftover at the end (an addon
+            // the client didn't mention) survives — defensive against
+            // a stale client losing rows. Comparer-insensitive match
+            // mirrors the duplicate-detection in AddStreamAddonAsync.
+            var byUrl = existing.ToDictionary(a => a.Url, a => a, StringComparer.OrdinalIgnoreCase);
+            var reordered = new List<StreamAddon>(existing.Count);
+            foreach (var url in orderedUrls)
+            {
+                if (string.IsNullOrEmpty(url)) continue;
+                if (byUrl.Remove(url, out var addon)) reordered.Add(addon);
+            }
+            reordered.AddRange(byUrl.Values);
+
+            // No-op when the order didn't change — avoids a needless
+            // sqlite write + the cache invalidation that comes with it.
+            var changed = false;
+            for (int i = 0; i < existing.Count; i++)
+            {
+                if (!string.Equals(existing[i].Url, reordered[i].Url, StringComparison.OrdinalIgnoreCase))
+                {
+                    changed = true;
+                    break;
+                }
+            }
+            if (!changed) return false;
+
+            await WriteStreamAddonsAsync(uid, reordered);
+            return true;
+        }
+
         private async Task WriteStreamAddonsAsync(string uid, List<StreamAddon> addons)
         {
             using var conn = new SqliteConnection(_connectionString);

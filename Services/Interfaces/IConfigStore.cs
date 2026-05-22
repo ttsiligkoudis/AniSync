@@ -140,6 +140,17 @@ namespace AnimeList.Services.Interfaces
         Task<bool> RemoveStreamAddonAsync(string uid, string addonUrl);
 
         /// <summary>
+        /// Reorders the stored stream-addon list to match the order of
+        /// the supplied URL list. URLs not currently in the list are
+        /// ignored; addons not in the supplied list keep their relative
+        /// order and are appended at the end (defensive — shouldn't
+        /// happen since the caller renders the list from the same
+        /// source, but stops a stale client from accidentally dropping
+        /// addons). Returns true when the list was changed.
+        /// </summary>
+        Task<bool> ReorderStreamAddonsAsync(string uid, IList<string> orderedUrls);
+
+        /// <summary>
         /// Swaps the primary provider with the linked token of <paramref name="newPrimaryService"/>.
         /// The chosen link becomes the primary on this row; the previous primary moves into the
         /// linked-tokens array. The UID is preserved so existing install URLs keep working.
