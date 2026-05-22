@@ -3119,13 +3119,18 @@
                     .substring(0, 80) || 'stream';
 
                 // Sidecar wiring: VLC reads EXTVLCOPT lines that
-                // precede an EXTINF/URL pair and applies them to that
-                // stream. input-slave=URI loads the URI as an auxiliary
-                // input — for a .vtt URL VLC's demuxer recognises it
-                // as a subtitle slave and exposes it in the Subtitle
-                // Track menu alongside the MKV's embedded SSA tracks.
+                // sit BETWEEN an EXTINF marker and the URL it
+                // describes, applying them to that stream. The
+                // ordering matters — EXTVLCOPT lines placed before
+                // the EXTINF attach to the *previous* track (or get
+                // dropped entirely when there isn't one). input-
+                // slave=URI loads the URI as an auxiliary input;
+                // for a .vtt URL VLC's demuxer recognises it as a
+                // subtitle slave and exposes it in the Subtitle
+                // Track menu alongside the MKV's embedded SSA
+                // tracks.
                 //
-                // Previously tried pairing input-slave with
+                // Previously paired input-slave with
                 // sub-autodetect-file=1 + sub-track-id=0:
                 //   - sub-autodetect-file scans the *local directory*
                 //     of the playing file for matching .srt files. On
@@ -3135,9 +3140,6 @@
                 //   - sub-track-id=0 forced selection of track id 0,
                 //     which is whatever VLC discovered first — almost
                 //     always the embedded MKV track, never the slave.
-                //     That hard-overrode the user's likely intent
-                //     (they wanted the OS sub) AND made the slave
-                //     look like it wasn't loading at all.
                 // The bare input-slave line behaves cleanest: the OS
                 // sub shows up as a selectable track, the user picks
                 // it from VLC's Subtitle menu (or keeps the embedded
@@ -3149,8 +3151,8 @@
                     : '';
                 var m3u =
                     '#EXTM3U\n' +
-                    subLine +
                     '#EXTINF:-1,' + safeName + '\n' +
+                    subLine +
                     streamUrl + '\n';
                 var blob = new Blob([m3u], { type: 'audio/x-mpegurl' });
                 var blobUrl = URL.createObjectURL(blob);
