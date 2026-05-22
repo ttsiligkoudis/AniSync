@@ -1756,6 +1756,52 @@ body.modal-open {
     background: rgba(0,0,0,0.4);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 8px;
+    transition: border-color 0.15s, background 0.15s, opacity 0.15s;
+}
+
+/* Drag handle on the left of each row — pure visual affordance,
+   the actual draggability is the <li draggable="true"> attribute. */
+.stream-addon-drag-handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.45);
+    cursor: grab;
+    flex-shrink: 0;
+}
+
+.stream-addon-row[draggable="true"]:active .stream-addon-drag-handle {
+    cursor: grabbing;
+}
+
+/* While being dragged: fade the source row so the user can see the
+   placeholder gap where it'll land. Browsers also paint a native
+   ghost overlay during drag, which is what makes the move feel
+   responsive — this is purely the "source" feedback. */
+.stream-addon-row.is-dragging {
+    opacity: 0.4;
+}
+
+/* Drop-target indicator: a coloured edge on the side the cursor
+   is closer to. drop-above paints the top edge, drop-below the
+   bottom — matches the insertBefore / insertAfter the JS does on
+   drop, so the indicator visually predicts where the row lands. */
+.stream-addon-row.drop-above {
+    box-shadow: inset 0 2px 0 0 #7c3aed;
+}
+.stream-addon-row.drop-below {
+    box-shadow: inset 0 -2px 0 0 #7c3aed;
+}
+
+/* Single-item lists can't be reordered, but the buttons render
+   anyway for layout consistency — dim them so the user gets a
+   passive "no-op" signal instead of a button that looks live. */
+.stream-addon-row:only-of-type .stream-addon-up,
+.stream-addon-row:only-of-type .stream-addon-down,
+.stream-addon-row:first-of-type .stream-addon-up,
+.stream-addon-row:last-of-type .stream-addon-down {
+    opacity: 0.35;
+    pointer-events: none;
 }
 
 .stream-addon-meta {

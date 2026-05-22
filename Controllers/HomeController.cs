@@ -677,6 +677,23 @@ public class HomeController : Controller
     }
 
     /// <summary>
+    /// Reorders the user's stream-addon list to match the supplied URL
+    /// order. Backs the drag-and-drop / up-down reorder buttons on the
+    /// /advanced Streams card.
+    /// </summary>
+    [HttpPost("Home/ReorderStreamAddons")]
+    public async Task<JsonResult> ReorderStreamAddons([FromBody] ReorderStreamAddonsRequest request)
+    {
+        if (string.IsNullOrEmpty(request?.uid))
+            return new JsonResult(new { success = false, error = "missing uid" });
+        if (request.urls == null || request.urls.Count == 0)
+            return new JsonResult(new { success = false, error = "urls required" });
+
+        var changed = await _configStore.ReorderStreamAddonsAsync(request.uid, request.urls);
+        return new JsonResult(new { success = true, changed });
+    }
+
+    /// <summary>
     /// Persists the toggle bits to the config store for the given UID. Auto-called by the
     /// Install button on the configure page so the manifest the addon serves immediately
     /// reflects the user's current toggle state. Bumps the revision so the install URL
@@ -801,6 +818,16 @@ public class StreamAddonRequest
     // the server fetches it once to validate and derive the display name;
     // for remove, it's the lookup key (string-compared, case-insensitive).
     public string manifestUrl { get; set; }
+}
+
+public class ReorderStreamAddonsRequest
+{
+    public string uid { get; set; }
+    // URL list in the new desired order. Match is case-insensitive
+    // against StreamAddon.Url; unknown URLs are silently skipped and
+    // any addon the list omits stays at its current relative position
+    // (defensive against stale clients losing rows).
+    public List<string> urls { get; set; }
 }
 
 public class ConfigBackup

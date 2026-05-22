@@ -96,11 +96,21 @@
                 // /manifest.json is left alone — link still works as a
                 // fallback.
                 var configureUrl = addon.Url?.Replace("/manifest.json", "/configure") ?? addon.Url;
-                <li class="stream-addon-row" data-url="@addon.Url">
+                @* draggable on desktop browsers — HTML5 drag-and-drop;
+                   the up / down buttons cover mobile + keyboard + a11y. *@
+                <li class="stream-addon-row" data-url="@addon.Url" draggable="true">
+                    <span class="stream-addon-drag-handle" aria-hidden="true" title="Drag to reorder">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="3" y1="8" x2="21" y2="8"/>
+                            <line x1="3" y1="16" x2="21" y2="16"/>
+                        </svg>
+                    </span>
                     <div class="stream-addon-meta">
                         <span class="stream-addon-name">@addon.Name</span>
                         <span class="stream-addon-url">@addon.Url</span>
                     </div>
+                    <button class="btn-ghost btn-ghost-sm stream-addon-up" type="button" aria-label="Move up" title="Move up">↑</button>
+                    <button class="btn-ghost btn-ghost-sm stream-addon-down" type="button" aria-label="Move down" title="Move down">↓</button>
                     <a class="btn-ghost btn-ghost-sm" href="@configureUrl" target="_blank" rel="noopener" style="white-space: nowrap;">Configure</a>
                     <button class="btn-ghost btn-ghost-sm stream-addon-remove" type="button" style="white-space: nowrap;">Remove</button>
                 </li>
