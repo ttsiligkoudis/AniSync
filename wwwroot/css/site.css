@@ -1759,30 +1759,41 @@ body.modal-open {
     transition: border-color 0.15s, background 0.15s, opacity 0.15s;
 }
 
-/* Drag handle on the left of each row — pure visual affordance,
-   the actual draggability is the <li draggable="true"> attribute. */
+/* Drag handle on the left of each row. The ONLY trigger for the
+   pointer-events reorder gesture — sized large enough to be an
+   easy thumb target on mobile (~32px ≥ Apple's 44px minimum
+   relative to the row height we have). touch-action: none tells
+   the browser not to interpret a vertical swipe over the handle
+   as a page scroll, so the pointerdown / pointermove can run the
+   custom drag instead. user-select: none stops the handle's
+   "≡" from being selected as text when the user holds it. */
 .stream-addon-drag-handle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    width: 2rem;
+    height: 2rem;
     color: rgba(255, 255, 255, 0.45);
     cursor: grab;
     flex-shrink: 0;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
-.stream-addon-row[draggable="true"]:active .stream-addon-drag-handle {
+.stream-addon-drag-handle:active {
     cursor: grabbing;
+    color: rgba(255, 255, 255, 0.75);
 }
 
-/* While being dragged: fade the source row so the user can see the
-   placeholder gap where it'll land. Browsers also paint a native
-   ghost overlay during drag, which is what makes the move feel
-   responsive — this is purely the "source" feedback. */
+/* While being dragged: fade the source row so the placeholder gap
+   reads as the row's "live" position while the drop indicators
+   point at the target. */
 .stream-addon-row.is-dragging {
     opacity: 0.4;
 }
 
-/* Drop-target indicator: a coloured edge on the side the cursor
+/* Drop-target indicator: a coloured edge on the side the pointer
    is closer to. drop-above paints the top edge, drop-below the
    bottom — matches the insertBefore / insertAfter the JS does on
    drop, so the indicator visually predicts where the row lands. */
@@ -1793,27 +1804,12 @@ body.modal-open {
     box-shadow: inset 0 -2px 0 0 #7c3aed;
 }
 
-/* Single-item lists can't be reordered, but the buttons render
-   anyway for layout consistency — dim them so the user gets a
-   passive "no-op" signal instead of a button that looks live. */
-.stream-addon-row:only-of-type .stream-addon-up,
-.stream-addon-row:only-of-type .stream-addon-down,
-.stream-addon-row:first-of-type .stream-addon-up,
-.stream-addon-row:last-of-type .stream-addon-down {
-    opacity: 0.35;
-    pointer-events: none;
-}
-
-/* Action group on each row. DOM order is ↑ Configure ↓ Remove so
-   the mobile 2-column grid below renders as
-       ↑ Configure
-       ↓ Remove
-   per the user's spec. Desktop overrides this to a single 4-icon
-   row since horizontal space is plentiful — see the @media block
-   at the bottom of this file. */
+/* Action group on each row — just Configure + Remove now, the
+   ↑ / ↓ buttons were removed in favour of the drag-handle-only
+   reorder gesture. Two icons fit on one row both on mobile and
+   desktop without needing a media-query override. */
 .stream-addon-actions {
-    display: grid;
-    grid-template-columns: auto auto;
+    display: flex;
     gap: 0.3rem;
     flex-shrink: 0;
 }
@@ -1855,16 +1851,6 @@ body.modal-open {
     background: rgba(239, 68, 68, 0.18);
     border-color: rgba(239, 68, 68, 0.5);
     color: rgb(252, 165, 165);
-}
-
-@media (min-width: 641px) {
-    /* On desktop the row has plenty of horizontal space, so the
-       2-column grid collapses to a single 4-icon row — keeps the
-       row height matching every other addon row + the manifest
-       URL input below the list. */
-    .stream-addon-actions {
-        grid-template-columns: repeat(4, auto);
-    }
 }
 
 .stream-addon-meta {
