@@ -1379,18 +1379,37 @@ else
                 window.addEventListener('blur', claim);
                 window.addEventListener('pagehide', claim);
 
-                // Trigger the stremio:// scheme on the current tab. On
-                // mobile with the app installed the OS switches focus
-                // to Stremio (no current-tab navigation happens). On
-                // desktop with a registered handler the browser shows
-                // its built-in "Open Stremio?" prompt without leaving
-                // the page. On systems without a handler modern
-                // browsers either silently no-op (mobile, modern
-                // desktops) or briefly attempt navigation and stay on
-                // a protocol-error page — we paper over that case via
-                // the timeout fallback below.
-                try { window.location.href = appUrl; } catch (_) { }
+                // Trigger the stremio:// scheme on the current tab,
+                // but defer it past the next paint so the spinner has
+                // a chance to render + start animating before the
+                // browser's "Allow this site to open stremio?" prompt
+                // appears and pauses page animations. Without the
+                // defer, the protocol call runs synchronously after
+                // the DOM mutation and the user sees a frozen
+                // C-shape because the spinner never reached its
+                // first animated frame.
+                //
+                // On mobile with the app installed the OS switches
+                // focus to Stremio (no current-tab navigation
+                // happens). On desktop with a registered handler the
+                // browser shows its built-in "Allow…" prompt without
+                // leaving the page. On systems without a handler
+                // modern browsers either silently no-op (mobile) or
+                // briefly attempt navigation and stay on a protocol-
+                // error page — the timeout fallback below papers
+                // over that case by opening the web Stremio URL in a
+                // new tab.
+                setTimeout(function () {
+                    try { window.location.href = appUrl; } catch (_) { }
+                }, 250);
 
+                // 3000ms is long enough for the user to see + dismiss
+                // a "Allow this site to open stremio?" prompt before
+                // the no-app fallback fires. Shorter timeouts (1500
+                // was the previous value) raced the prompt — the
+                // fallback tab opened while the user was still
+                // deciding, ending up with both the app launching
+                // AND a web tab in the background.
                 setTimeout(function () {
                     document.removeEventListener('visibilitychange', claim);
                     window.removeEventListener('blur', claim);
@@ -1409,22 +1428,19 @@ else
                     if (appClaimed || document.hidden) return;
 
                     // No app handler claimed the deep link in time —
-                    // open the web fallback in a new tab. Chrome's
-                    // transient user-activation lasts ~5s after a
-                    // gesture, so window.open from the 1500ms timeout
-                    // is still permitted on Chrome / Edge / modern
-                    // Firefox. Safari is stricter (some versions only
-                    // honour synchronous gesture opens); on those the
-                    // call returns null / a closed window and we fall
-                    // back to current-tab nav so the click still
-                    // resolves to something.
-                    var win = null;
-                    try { win = window.open(webUrl, '_blank', 'noopener,noreferrer'); }
-                    catch (_) { /* popup-blocked — fall through */ }
-                    if (!win || win.closed) {
-                        window.location.href = webUrl;
-                    }
-                }, 1500);
+                    // open the web fallback in a new tab. `noopener`
+                    // is intentionally omitted so window.open returns
+                    // a real window reference we can inspect — with
+                    // noopener set it always returns null, which made
+                    // us unable to tell a successful popup from a
+                    // popup-blocked one and fall back to navigating
+                    // the original tab (which the user explicitly
+                    // doesn't want — the click should never disturb
+                    // the page they came from).
+                    try { window.open(webUrl, '_blank'); }
+                    catch (_) { /* popup-blocked — silent no-op,
+                                   never navigate the original tab */ }
+                }, 3000);
             });
         });
     })();
