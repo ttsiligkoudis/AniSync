@@ -1969,20 +1969,26 @@
                     open.textContent = 'Opening…';
                     open.classList.add('is-loading');
                     open.disabled = true;
-                    resolvePlaybackUrl(stream.url)
-                        .then(function (resolvedUrl) {
-                            openWithExternalPlayer(resolvedUrl, firstLine);
-                        })
-                        .finally(function () {
-                            setTimeout(function () {
-                                if (open.dataset.originalLabel) {
-                                    open.textContent = open.dataset.originalLabel;
-                                    delete open.dataset.originalLabel;
-                                }
-                                open.classList.remove('is-loading');
-                                open.disabled = false;
-                            }, 800);
-                        });
+                    // Defer past the next paint so the "Opening…" /
+                    // disabled state is visible before the OS prompt
+                    // / handler fires — see the matching comment on
+                    // buildExternalAction's click handler.
+                    setTimeout(function () {
+                        resolvePlaybackUrl(stream.url)
+                            .then(function (resolvedUrl) {
+                                openWithExternalPlayer(resolvedUrl, firstLine);
+                            })
+                            .finally(function () {
+                                setTimeout(function () {
+                                    if (open.dataset.originalLabel) {
+                                        open.textContent = open.dataset.originalLabel;
+                                        delete open.dataset.originalLabel;
+                                    }
+                                    open.classList.remove('is-loading');
+                                    open.disabled = false;
+                                }, 800);
+                            });
+                    }, 250);
                 });
                 row.appendChild(open);
 
@@ -2843,20 +2849,32 @@
                     // hand the external app the post-redirect debrid
                     // CDN URL instead.
                     setExternalActionLoading(btn, true);
-                    resolvePlaybackUrl(url)
-                        .then(function (resolvedUrl) {
-                            openWithExternalPlayer(resolvedUrl, displayName);
-                        })
-                        .finally(function () {
-                            // Hold the spinner a touch past the open
-                            // call so the user sees confirmation that
-                            // the dispatch fired before the icon
-                            // restores — without the delay the swap
-                            // back is too fast to register.
-                            setTimeout(function () {
-                                setExternalActionLoading(btn, false);
-                            }, 800);
-                        });
+                    // Defer past the next paint so the spinner has a
+                    // chance to render and start animating before
+                    // resolvePlaybackUrl's fetch + the openWithExternal
+                    // Player handshake start. On a warm debrid cache
+                    // the resolve completes in ~50ms and the OS prompt
+                    // / handler fires immediately after — without the
+                    // defer the spinner never reaches its first
+                    // animated frame and the user sees a frozen
+                    // C-shape.
+                    setTimeout(function () {
+                        resolvePlaybackUrl(url)
+                            .then(function (resolvedUrl) {
+                                openWithExternalPlayer(resolvedUrl, displayName);
+                            })
+                            .finally(function () {
+                                // Hold the spinner a touch past the
+                                // open call so the user sees
+                                // confirmation that the dispatch
+                                // fired before the icon restores —
+                                // without the delay the swap back is
+                                // too fast to register.
+                                setTimeout(function () {
+                                    setExternalActionLoading(btn, false);
+                                }, 800);
+                            });
+                    }, 250);
                 });
                 return btn;
             }
