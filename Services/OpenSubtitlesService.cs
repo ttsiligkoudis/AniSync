@@ -166,6 +166,22 @@ namespace AnimeList.Services
                 return null;
             }
 
+            // Cached VTT served from memory for the (long-ish) lifetime
+            // of the sub URL. Important for the external-launch flow:
+            // strem.io's subs5 endpoint is rate-limited per Fly IP and
+            // a second fetch for the same URL within a couple minutes
+            // tends to 502, even when the first one succeeded. Caching
+            // lets the watch page's in-browser player and the
+            // external-launch sidecar both come off one upstream
+            // round-trip. Cache key includes the full URL since
+            // OpenSubtitles' "subencoding-stremio-utf8" transform is
+            // path-bearing — different paths fetch different bytes.
+            var cacheKey = "subtitle-vtt:" + url;
+            if (_cache.TryGetValue<string>(cacheKey, out var cached) && !string.IsNullOrEmpty(cached))
+            {
+                return cached;
+            }
+
             var fetchUrl = EnsureUtf8Transform(url);
 
             try
@@ -198,7 +214,19 @@ namespace AnimeList.Services
                 // offsets for bottom-anchored default cues; the
                 // integer form is honoured uniformly. Cues that
                 // already declared a line stay untouched.
-                return ApplyDefaultLineMargin(vtt);
+                vtt = ApplyDefaultLineMargin(vtt);
+
+                // Cache the final VTT body keyed by upstream URL.
+                // 15-minute TTL covers a normal "open + watch + maybe
+                // re-open externally" session window; short enough
+                // that an actually-rotated URL doesn't get pinned to
+                // a stale response, long enough that the rate-limit
+                // window passes before the next cache miss.
+                _cache.Set(cacheKey, vtt, new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(15),
+                });
+                return vtt;
             }
             catch (Exception ex)
             {

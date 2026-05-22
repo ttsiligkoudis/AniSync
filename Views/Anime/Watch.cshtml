@@ -3111,8 +3111,55 @@
                     // Fall back to the .m3u download — whichever
                     // player owns the .m3u file association opens
                     // the stream when the user clicks the download.
-                    downloadM3uForStream(streamUrl, displayName, sidecarSub);
+                    // sidecarToDataUriAsync turns the HTTPS .vtt
+                    // proxy URL into an inline data:text/vtt;base64
+                    // URI so VLC doesn't have to fetch anything to
+                    // load the subtitle — VLC's input-slave does
+                    // honour HTTPS URLs for video/audio slaves but
+                    // the subtitle-loading code path looks at the
+                    // URL's file extension (sees …/subtitle.vtt?
+                    // url=… and can't make sense of the trailing
+                    // query) and skips the slave entirely. Inlining
+                    // sidesteps both the extension check and the
+                    // HTTPS-fetch path.
+                    sidecarToDataUriAsync(sidecarSub).then(function (sub) {
+                        downloadM3uForStream(streamUrl, displayName, sub);
+                    });
                 }, 1200);
+            }
+
+            // Fetches a sidecar subtitle URL and re-encodes the body
+            // as a data:text/vtt;base64 URI. The .m3u handed to VLC
+            // then carries the subtitle bytes inline — VLC's input
+            // slave reads the data: scheme directly without an HTTP
+            // round-trip, sidesteps its quirky URL-extension-based
+            // subtitle-format detection (which trips on the query
+            // string in our /anime/subtitle.vtt?url=… proxy URL),
+            // and survives offline / certificate / CDN-flake cases
+            // since there's no network call at playback time. Falls
+            // back to the original URL form on any failure so VLC
+            // at least has SOMETHING to try; null in / null out.
+            function sidecarToDataUriAsync(url) {
+                if (!url) return Promise.resolve(null);
+                return fetch(url, { credentials: 'same-origin' })
+                    .then(function (r) {
+                        if (!r.ok) throw new Error('sub fetch ' + r.status);
+                        return r.text();
+                    })
+                    .then(function (text) {
+                        try {
+                            // btoa expects Latin-1; UTF-8 → Latin-1
+                            // via encodeURIComponent + unescape so
+                            // multibyte chars (Japanese romaji
+                            // titles, accented language names)
+                            // survive the base64 round-trip.
+                            var b64 = btoa(unescape(encodeURIComponent(text)));
+                            return 'data:text/vtt;base64,' + b64;
+                        } catch (_) {
+                            return url;
+                        }
+                    })
+                    .catch(function () { return url; });
             }
 
             function downloadM3uForStream(streamUrl, displayName, sidecarSub) {
