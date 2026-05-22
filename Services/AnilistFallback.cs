@@ -242,7 +242,8 @@ namespace AnimeList.Services
             List<Meta> Recommendations,
             List<Meta> Related,
             List<Link> SupplementaryLinks,
-            List<Link> RelatedLinks);
+            List<Link> RelatedLinks,
+            string BannerImage);
 
         public async Task<List<Meta>> GetRecommendationMetasAsync(int anilistId, AnimeService translateTo = AnimeService.Anilist, bool groupSeasons = false)
             => await TranslateMetaIdsAsync(
@@ -255,19 +256,26 @@ namespace AnimeList.Services
             if (_cache.TryGetValue<AnilistSidedata>(cacheKey, out var cached) && cached != null)
                 return cached;
 
-            var empty = new AnilistSidedata([], [], [], []);
+            var empty = new AnilistSidedata([], [], [], [], null);
 
             try
             {
                 // One combined query: recommendations + relations + tags +
-                // studios + staff. All five subselections share the same
-                // Media(id) root so AniList resolves them in one go; the
-                // complexity-budget cost is well within their 500 ceiling.
+                // studios + staff + banner. All subselections share the
+                // same Media(id) root so AniList resolves them in one go;
+                // the complexity-budget cost is well within their 500
+                // ceiling. bannerImage rides along so the watch / detail
+                // hero can fall back to AniList's full-bleed banner
+                // (~1900x800) when the user's primary service exposes a
+                // lower-resolution image — MAL's pictures[0].large in
+                // particular tops out at ~600-1000px and scales poorly
+                // on big screens.
                 var requestBody = SerializeObject(new
                 {
                     query = @"
                         query ($id: Int) {
                             Media(id: $id, type: ANIME) {
+                                bannerImage
                                 recommendations(sort: RATING_DESC, perPage: 15) {
                                     edges {
                                         node {
@@ -315,7 +323,8 @@ namespace AnimeList.Services
                     Recommendations: ParseRecommendations(media),
                     Related: ParseRelated(media),
                     SupplementaryLinks: ParseSupplementaryLinks(media),
-                    RelatedLinks: ParseRelatedLinks(media));
+                    RelatedLinks: ParseRelatedLinks(media),
+                    BannerImage: (string)media.bannerImage);
 
                 // Only cache when at least one bucket is non-empty so a
                 // transient AniList blip / rate-limit / 5xx doesn't lock in
@@ -323,7 +332,8 @@ namespace AnimeList.Services
                 if (sidedata.Recommendations.Count > 0
                     || sidedata.Related.Count > 0
                     || sidedata.SupplementaryLinks.Count > 0
-                    || sidedata.RelatedLinks.Count > 0)
+                    || sidedata.RelatedLinks.Count > 0
+                    || !string.IsNullOrEmpty(sidedata.BannerImage))
                 {
                     _cache.Set(cacheKey, sidedata, new MemoryCacheEntryOptions
                     {
@@ -1295,6 +1305,9 @@ namespace AnimeList.Services
 
         public async Task<List<Link>> GetSupplementaryLinksAsync(int anilistId)
             => (await FetchSidedataAsync(anilistId)).SupplementaryLinks;
+
+        public async Task<string> GetBannerImageAsync(int anilistId)
+            => (await FetchSidedataAsync(anilistId)).BannerImage;
 
         // Mirrors AnilistService.StaffRoleToCategory — keeps the augmented
         // page's link categories identical to a native AniList load.

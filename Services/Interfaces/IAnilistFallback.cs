@@ -220,6 +220,21 @@ namespace AnimeList.Services.Interfaces
         Task<List<Link>> GetSupplementaryLinksAsync(int anilistId);
 
         /// <summary>
+        /// AniList's full-bleed banner image URL (~1900×800) for the
+        /// detail / watch page hero. MAL's pictures[0].large tops out
+        /// around 600-1000px and scales poorly on big screens / TVs,
+        /// so MAL primaries fall back to this banner when the per-
+        /// service path didn't surface a high-resolution image.
+        /// Returns null when AniList has no banner for the anime
+        /// (rare — usually only brand-new entries or non-anime
+        /// classifications). Reads from the same cached Sidedata
+        /// bundle the chip-strip endpoints use, so this carries no
+        /// extra GraphQL round-trip beyond the existing per-anime
+        /// fetch.
+        /// </summary>
+        Task<string> GetBannerImageAsync(int anilistId);
+
+        /// <summary>
         /// Anonymous browse of every anime tagged with <paramref name="tag"/>,
         /// sorted by popularity desc. Skip / pagination uses the same offset
         /// convention discover-pagination follows (skip = number of cards

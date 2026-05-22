@@ -172,6 +172,34 @@ namespace AnimeList.Services
             var overlayAnilistId = imdbHeadAnilistId ?? sourceLinks?.AnilistId;
             await OverlayAniListAiringScheduleAsync(anime, overlayAnilistId, imdbHeadSeason);
 
+            // Hero background overlay. MAL's pictures[0].large +
+            // Kitsu's coverImage.original + Cinemeta's background
+            // field all top out at ~1000-1280px wide for a lot of
+            // titles; AniList's bannerImage is ~1900x800 and scales
+            // much cleaner on big screens / TVs / the Stremio
+            // detail-page hero. Prefer the AniList banner whenever
+            // we have one AND the per-service result didn't come
+            // straight from AniList (in which case the inline
+            // GetAnimeByIdAsync already populated background with
+            // the same banner, so a second fetch would just be
+            // wasted work). Rides on the same cached Sidedata
+            // bundle the chip-strip endpoints already fetch, so no
+            // extra round-trip beyond the per-anime sidedata fetch
+            // the meta + extras pipeline already does.
+            var fromAniList = anime.id != null && anime.id.StartsWith(anilistPrefix);
+            if (!fromAniList && overlayAnilistId is int bannerAnilistId && bannerAnilistId > 0)
+            {
+                try
+                {
+                    var banner = await _anilistFallback.GetBannerImageAsync(bannerAnilistId);
+                    if (!string.IsNullOrEmpty(banner)) anime.background = banner;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "AnimeMetaLoader: AniList banner fallback failed for anilist {Id}", bannerAnilistId);
+                }
+            }
+
             return new AnimeMetaLoadResult(
                 Anime: anime,
                 AdultFiltered: false,
