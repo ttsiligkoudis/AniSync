@@ -847,6 +847,46 @@ namespace AnimeList.Controllers
             {
                 return BadRequest();
             }
+            return await ServeSubtitleVtt(url);
+        }
+
+        /// <summary>
+        /// Alternative subtitle proxy route that carries the upstream
+        /// URL as a base64url-encoded path segment instead of a query
+        /// parameter. Used by the watch page's external-launch flow:
+        /// VLC's input-slave subtitle-format detection looks at the
+        /// URL's file extension, and "?url=…" at the end of a query-
+        /// string-bearing URL means the slave never registers as a
+        /// subtitle file (.vtt) at all. This route ends the URL in a
+        /// literal "/subtitle.vtt" so the extension check fires
+        /// cleanly. The shape of the path is intentional — putting
+        /// the encoded payload BEFORE the filename keeps the .vtt as
+        /// the very last segment.
+        /// </summary>
+        [HttpGet("/anime/sub/{encoded}/subtitle.vtt")]
+        public async Task<IActionResult> SubtitleByPath(string encoded)
+        {
+            if (string.IsNullOrWhiteSpace(encoded)) return BadRequest();
+            string upstream;
+            try
+            {
+                // base64url ↔ base64: undo the URL-safe substitutions
+                // and restore padding so the .NET decoder accepts it.
+                var b64 = encoded.Replace('-', '+').Replace('_', '/');
+                var pad = b64.Length % 4;
+                if (pad > 0) b64 += new string('=', 4 - pad);
+                upstream = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(b64));
+            }
+            catch
+            {
+                return BadRequest();
+            }
+            if (string.IsNullOrWhiteSpace(upstream)) return BadRequest();
+            return await ServeSubtitleVtt(upstream);
+        }
+
+        private async Task<IActionResult> ServeSubtitleVtt(string url)
+        {
             var vtt = await _subtitleService.FetchAsVttAsync(url);
             if (string.IsNullOrEmpty(vtt))
             {
