@@ -2807,14 +2807,17 @@
             // text colour — no separate icon font / sprite needed.
             var EXTERNAL_ICON_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
 
-            // Inline spinner SVG shown while a click is mid-resolve.
-            // resolvePlaybackUrl + the external-launch handshake can take
-            // 2–3s on a cold debrid cache, and without feedback users hit
-            // the button repeatedly thinking it didn't register. The
-            // spinner replaces the external icon while the promise is
-            // pending — same currentColor / 16px sizing so the swap
-            // doesn't shift the button's footprint.
-            var EXTERNAL_SPINNER_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" class="episode-stream-action-spinner"><circle cx="12" cy="12" r="9" opacity="0.25"/><path d="M21 12a9 9 0 0 0-9-9"/></svg>';
+            // CSS-only border spinner shown while a click is mid-
+            // resolve. resolvePlaybackUrl + the external-launch
+            // handshake can take 2–3s on a cold debrid cache, and
+            // without feedback users hit the button repeatedly
+            // thinking it didn't register. The span replaces the
+            // external icon while the promise is pending — border-
+            // based circle so the rotation animation runs reliably
+            // across browsers (an SVG variant rendered as a static
+            // frozen circle on some Chromium builds even with
+            // transform-origin pinned to centre).
+            var EXTERNAL_SPINNER_SVG = '<span class="episode-stream-action-spinner" role="status" aria-label="Opening…"></span>';
 
             // Build the external-player launcher. One click → defers
             // straight to openWithExternalPlayer, which dispatches an

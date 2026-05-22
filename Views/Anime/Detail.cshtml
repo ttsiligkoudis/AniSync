@@ -1353,7 +1353,7 @@ else
                 }
                 chip.classList.add('is-loading');
                 chip.innerHTML = '<span class="source-chip-mark" aria-hidden="true">' +
-                    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" class="source-chip-spinner"><circle cx="12" cy="12" r="9" opacity="0.3"/><path d="M21 12a9 9 0 0 0-9-9"/></svg>' +
+                    '<span class="source-chip-spinner" role="status" aria-label="Opening…"></span>' +
                     '</span><span class="source-chip-label">Opening…</span>';
 
                 // App-probe signal: when the page becomes hidden
