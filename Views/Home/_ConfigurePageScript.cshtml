@@ -555,6 +555,14 @@
         // save, toggle off, save: the second save should also see a
         // change and wipe again).
         initialFlags3 = f.flags3;
+
+        // Stream-addon reorder rides on the same Save click. Diffed
+        // against initialAddonOrder so this is a no-op when nothing
+        // moved. Awaiting it inside saveFlags means a single Save
+        // click commits both flag changes AND the new addon order in
+        // one user-facing operation, and the "Saved" pill / dirty
+        // state below only flips after both POSTs have succeeded.
+        await saveStreamAddonOrderIfChanged();
     }
 
     // Both install buttons trigger a save first so the new URL reflects the latest flags.
@@ -721,20 +729,49 @@
     // leaves it (no risk of losing the drag if the finger drifts off
     // the icon mid-gesture). HTML5 drag events were touch-unreliable
     // on mobile, so we use pointer events as the only path everywhere.
-    function persistStreamAddonOrder() {
-        if (!configUid) return;
-        var urls = $('#streamAddonList .stream-addon-row').map(function () {
-            return $(this).attr('data-url');
+    //
+    // Reorder is NOT persisted on every drop — the new order marks the
+    // page dirty (setDirty(true)) and the actual POST is folded into
+    // the global Save click via saveFlags() below. That matches how
+    // every other toggle on this page behaves: change → Unsaved
+    // changes pill → user commits with Save. Drag-and-drag-back-again
+    // ends up as a no-op POST because saveFlags compares the current
+    // DOM order to initialAddonOrder before sending.
+    function currentStreamAddonOrder() {
+        return $('#streamAddonList .stream-addon-row').map(function () {
+            return $(this).attr('data-url') || '';
         }).get().filter(function (u) { return !!u; });
+    }
+
+    // Snapshot of the addon order at page load. saveFlags() diffs the
+    // current order against this to decide whether to POST a reorder,
+    // and refreshes it after a successful save so the next pass starts
+    // from the just-persisted state.
+    var initialAddonOrder = currentStreamAddonOrder();
+
+    function streamAddonOrderChanged() {
+        var current = currentStreamAddonOrder();
+        if (current.length !== initialAddonOrder.length) return true;
+        for (var i = 0; i < current.length; i++) {
+            if (current[i] !== initialAddonOrder[i]) return true;
+        }
+        return false;
+    }
+
+    async function saveStreamAddonOrderIfChanged() {
+        if (!configUid || !streamAddonOrderChanged()) return;
+        var urls = currentStreamAddonOrder();
         if (urls.length === 0) return;
-        fetch('/Home/ReorderStreamAddons', {
+        var resp = await fetch('/Home/ReorderStreamAddons', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ uid: configUid, urls: urls }),
-        }).catch(function () { /* best-effort */ });
+        });
+        if (!resp.ok) throw new Error('Reorder save failed: ' + resp.status);
+        initialAddonOrder = urls;
     }
 
-    var addonDrag = null; // { row, list, handle, pointerId, startedAt }
+    var addonDrag = null; // { row, list, handle, pointerId }
 
     function clearAddonDropIndicators(list) {
         list.querySelectorAll('.drop-above, .drop-below').forEach(function (el) {
@@ -821,7 +858,15 @@
         try { handle.releasePointerCapture(addonDrag.pointerId); } catch (_) {}
 
         addonDrag = null;
-        persistStreamAddonOrder();
+
+        // Mark the page dirty so the floating Save bar reveals
+        // its "Unsaved changes" state — the actual POST is folded
+        // into the global save click, same as every flag toggle on
+        // this page. setDirty becomes a no-op if the drag ended
+        // back at the original position (streamAddonOrderChanged()
+        // checks against the saved baseline), so a "drag and drop
+        // it right back" gesture doesn't falsely dirty the bar.
+        if (streamAddonOrderChanged()) setDirty(true);
     }
 
     $('#streamAddonList').on('pointerup pointercancel', '.stream-addon-drag-handle', function (e) {
@@ -847,6 +892,13 @@
             if (!data.success) throw new Error(data.error || 'add failed');
             if (data.added && data.addon) {
                 $('#streamAddonList').append(buildAddonRow(data.addon));
+                // Add / Remove POST immediately (the server stores the
+                // canonical list at the same moment the DOM updates),
+                // so re-baseline the reorder snapshot here. Otherwise
+                // a subsequent Save would diff the new row against an
+                // out-of-date initialAddonOrder and POST a spurious
+                // ReorderStreamAddons request.
+                initialAddonOrder = currentStreamAddonOrder();
             }
             $('#streamAddonInput').val('');
         } catch (e) {
@@ -871,6 +923,10 @@
             });
             if (!resp.ok) throw new Error('remove failed: ' + resp.status);
             $row.remove();
+            // Re-baseline so the next Save doesn't see the removed
+            // row as a "missing entry" the reorder POST would need to
+            // address. Same rationale as the add-handler refresh.
+            initialAddonOrder = currentStreamAddonOrder();
         } catch (e) {
             alert('Could not remove stream addon: ' + e.message);
         }
