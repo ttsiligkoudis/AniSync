@@ -3117,21 +3117,35 @@
                     .replace(/\s+/g, ' ')
                     .trim()
                     .substring(0, 80) || 'stream';
-                // VLC sidecar wiring. input-slave= accepts URIs
-                // (unlike sub-file= which is path-resolved relative
-                // to the m3u's location and broke for HTTP URLs);
-                // sub-track-id=0 + sub-autodetect-file=1 nudge VLC
-                // to actually activate the loaded slave as the
-                // current subtitle track instead of just attaching
-                // it silently to the track list. The .vtt path
-                // extension on sidecarSub (rebased server-side via
-                // /anime/subtitle.vtt) gives the demuxer a strong
-                // format hint so the slave is recognised as a
-                // subtitle file in the first place.
+
+                // Sidecar wiring: VLC reads EXTVLCOPT lines that
+                // precede an EXTINF/URL pair and applies them to that
+                // stream. input-slave=URI loads the URI as an auxiliary
+                // input — for a .vtt URL VLC's demuxer recognises it
+                // as a subtitle slave and exposes it in the Subtitle
+                // Track menu alongside the MKV's embedded SSA tracks.
+                //
+                // Previously tried pairing input-slave with
+                // sub-autodetect-file=1 + sub-track-id=0:
+                //   - sub-autodetect-file scans the *local directory*
+                //     of the playing file for matching .srt files. On
+                //     a remote HTTPS stream there's no local dir, and
+                //     having it enabled caused VLC to skip the manual
+                //     slave on some 3.x builds.
+                //   - sub-track-id=0 forced selection of track id 0,
+                //     which is whatever VLC discovered first — almost
+                //     always the embedded MKV track, never the slave.
+                //     That hard-overrode the user's likely intent
+                //     (they wanted the OS sub) AND made the slave
+                //     look like it wasn't loading at all.
+                // The bare input-slave line behaves cleanest: the OS
+                // sub shows up as a selectable track, the user picks
+                // it from VLC's Subtitle menu (or keeps the embedded
+                // SSA if they prefer the styling). m3u-side auto-
+                // activation isn't reliable across VLC versions, so
+                // we don't try to force it.
                 var subLine = sidecarSub
-                    ? '#EXTVLCOPT:input-slave=' + sidecarSub + '\n' +
-                      '#EXTVLCOPT:sub-autodetect-file=1\n' +
-                      '#EXTVLCOPT:sub-track-id=0\n'
+                    ? '#EXTVLCOPT:input-slave=' + sidecarSub + '\n'
                     : '';
                 var m3u =
                     '#EXTM3U\n' +
