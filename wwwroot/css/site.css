@@ -779,11 +779,14 @@ body.modal-open {
        spinner just looks like a stack of static circles and gives the
        user no signal that work is in flight. Re-enable the spin for
        loader elements specifically so the dashboard's Continue-Watching
-       fetch, infinite-scroll pagination, and the Manage Entry overlay
+       fetch, infinite-scroll pagination, the Manage Entry overlay, and
+       the watch-page external-launch / Stremio chip mid-action states
        all surface a moving indicator even when the user has reduced
        motion enabled at the OS level. */
     .loader-spinner,
-    .paginator-loader-spinner {
+    .paginator-loader-spinner,
+    .episode-stream-action-spinner,
+    .source-chip-spinner {
         animation-duration: 0.8s !important;
         animation-iteration-count: infinite !important;
     }
