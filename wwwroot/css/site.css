@@ -2084,11 +2084,17 @@ body.modal-open {
 }
 
 .episode-stream-action-spinner {
-    /* SVG elements default to transform-origin: 0 0, so without
-       this the loader-spin keyframe rotates around the SVG's top-
-       left corner — visually a static frozen circle. Re-anchoring
-       to centre makes the rotation actually look like a spinner. */
-    transform-origin: center;
+    /* CSS-only border spinner — three-quarters of a circle outline
+       that rotates. Rendered as a plain <span> (HTML element, so
+       transform-origin defaults to centre, no SVG quirks to work
+       around) with a transparent right border for the gap. */
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    box-sizing: border-box;
     animation: loader-spin 0.75s linear infinite;
 }
 
@@ -4591,10 +4597,17 @@ a.stats-cell-link:hover {
 }
 
 .source-chip-spinner {
-    /* Centre-anchor the spin so the SVG actually rotates instead
-       of pivoting around its top-left corner — see the matching
-       comment on .episode-stream-action-spinner for the rationale. */
-    transform-origin: center;
+    /* CSS-only border spinner — same approach as
+       .episode-stream-action-spinner, just sized to fit inside
+       the source-chip-mark badge. Plain <span> rotation so the
+       animation runs reliably without SVG transform-origin quirks. */
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    box-sizing: border-box;
     animation: loader-spin 0.75s linear infinite;
 }
 
