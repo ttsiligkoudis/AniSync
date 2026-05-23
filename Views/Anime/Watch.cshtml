@@ -2292,7 +2292,15 @@
                     fullscreen: true,
                     fullscreenWeb: !isMobile,
                     subtitleOffset: true,
-                    miniProgressBar: true,
+                    // ArtPlayer's miniProgressBar paints a thin
+                    // progress strip at the very bottom of the video
+                    // when the full controls auto-hide. Disabled — on
+                    // a phone in fullscreen the strip sits flush with
+                    // the screen edge and reads as a stuck rendering
+                    // glitch rather than a deliberate affordance.
+                    // Users get back to the controls with a single tap
+                    // anywhere on the video.
+                    miniProgressBar: false,
                     autoOrientation: true,
                     hotkey: true,
                     airplay: true,
