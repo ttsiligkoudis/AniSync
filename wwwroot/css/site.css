@@ -2512,17 +2512,37 @@ body.modal-open {
 }
 
 /* ArtPlayer drops .art-bottom's opacity when controls auto-hide but
-   leaves the element interactive. On mobile in fullscreen that turns
-   the bottom strip of the screen — exactly where the system swipe-up
-   home gesture starts — into an invisible seek track: the user
-   swipes up to go home, the gesture lands on the progress bar first,
-   and the playhead jumps. Disabling pointer events on .art-bottom
-   while .art-hover is absent lets touches fall through to either the
-   gesture layer above (single-tap to bring controls back) or the OS
-   below (home swipe). The seek track returns to interactive the
-   moment the controls become visible again. */
-.watch-player .art-video-player:not(.art-hover) .art-bottom {
-    pointer-events: none;
+   leaves the element interactive — and worse, the gestureInit
+   listener binds touchstart / touchmove to .art-progress
+   UNCONDITIONALLY on mobile (option.gesture = false only covers the
+   $video surface swipe, not the seek track itself). The result on a
+   phone in fullscreen: the bottom strip of the screen — exactly
+   where the system swipe-up home gesture begins — is an invisible
+   seek track that scrubs the timeline before the OS gesture takes
+   over.
+
+   Two layers of defence, both gated on the .art-hover class missing
+   (ArtPlayer adds the class while controls are visible, drops it on
+   the auto-hide tick):
+
+   • pointer-events: none on .art-bottom AND every descendant — the
+     descendant override matters because ArtPlayer's bundled CSS sets
+     pointer-events: auto on .art-progress directly, which would beat
+     a parent-level rule without the * + !important combo.
+   • touch-action: none — disables the browser's own touch
+     interpretation on the same elements so a swipe-up that happens
+     to start a few pixels INSIDE the player surface still falls
+     through to the OS home gesture cleanly.
+
+   Touches now land on either the underlying tap-to-show-controls
+   layer (which still works because clickInit is on $player, not on
+   the disabled descendants) or the OS gesture region below the
+   player. Dragging the real seek bar still works the moment the
+   controls become visible again. */
+.watch-player .art-video-player:not(.art-hover) .art-bottom,
+.watch-player .art-video-player:not(.art-hover) .art-bottom * {
+    pointer-events: none !important;
+    touch-action: none !important;
 }
 
 .watch-nav {

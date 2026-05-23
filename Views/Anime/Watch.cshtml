@@ -2377,6 +2377,47 @@
                     ],
                 });
 
+                // Belt + braces against the mobile scrub-while-hidden
+                // gesture. ArtPlayer binds touchstart / touchmove to
+                // .art-progress UNCONDITIONALLY on mobile (gestureInit
+                // — option.gesture only governs the $video surface
+                // swipe), so the seek bar inside .art-bottom catches
+                // touches even when the bar has faded out. The CSS
+                // override in site.css (pointer-events / touch-action
+                // on .art-bottom + descendants while .art-hover is
+                // missing) handles the steady-state case, but there's
+                // still a race: a single tap that begins on the
+                // hidden bar will, before the touchend, cause
+                // clickInit to add .art-hover synchronously — which
+                // restores pointer-events: auto on the seek track
+                // inside the same gesture, so a touchstart-then-drag
+                // home-swipe lands on the now-interactive track and
+                // scrubs. We seal that race with a capture-phase
+                // touchstart listener on the player root that
+                // stopImmediatePropagation()s touches targeting
+                // .art-progress while the player isn't already in
+                // the hover state. ArtPlayer's bound listener runs
+                // in the bubbling phase, so this cleanly preempts
+                // it without unbinding anything (and the seek bar
+                // still works once controls are visible — the guard
+                // self-disables the moment .art-hover is present).
+                try {
+                    var $player = art.template && art.template.$player;
+                    if ($player) {
+                        $player.addEventListener('touchstart', function (e) {
+                            if ($player.classList.contains('art-hover')) return;
+                            var t = e.target;
+                            while (t && t !== $player) {
+                                if (t.classList && t.classList.contains('art-progress')) {
+                                    e.stopImmediatePropagation();
+                                    return;
+                                }
+                                t = t.parentNode;
+                            }
+                        }, { capture: true, passive: true });
+                    }
+                } catch (_) { /* defensive — non-fatal if template shape changes */ }
+
                 // Initial subtitle-track activation. ArtPlayer's
                 // built-in overlay is disabled (subtitle: {} above) so
                 // sub rendering lives entirely on the <track> we
