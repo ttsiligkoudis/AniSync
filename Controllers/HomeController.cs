@@ -655,10 +655,10 @@ public class HomeController : Controller
         }
 
         var added = await _configStore.AddStreamAddonAsync(request.uid, addon);
-        // The per-(uid, episode) fan-out cache was computed against the
-        // pre-add addon list; a new provider wouldn't surface streams
-        // until the TTL elapsed without this wipe.
-        if (added) await _configStore.InvalidateStreamCacheAsync(request.uid);
+        // The matching stream cache lives in the user's browser
+        // (localStorage anisync.streams.{uid}.*) and is wiped client-
+        // side by the same handler that hit this endpoint — see
+        // _ConfigurePageScript.cshtml.
         return new JsonResult(new { success = true, added, addon });
     }
 
@@ -677,11 +677,8 @@ public class HomeController : Controller
             return new JsonResult(new { success = false, error = "manifest URL required" });
 
         var removed = await _configStore.RemoveStreamAddonAsync(request.uid, manifestUrl);
-        // The fan-out cache still has streams from the removed provider
-        // in its rows — wipe so the next watch-page render rebuilds
-        // against the new addon list instead of serving stale debrid
-        // URLs that route through a provider the user just kicked out.
-        if (removed) await _configStore.InvalidateStreamCacheAsync(request.uid);
+        // Client-side localStorage cache wipe happens in
+        // _ConfigurePageScript.cshtml's remove handler.
         return new JsonResult(new { success = true, removed });
     }
 
@@ -699,11 +696,8 @@ public class HomeController : Controller
             return new JsonResult(new { success = false, error = "urls required" });
 
         var changed = await _configStore.ReorderStreamAddonsAsync(request.uid, request.urls);
-        // Cached fan-out preserved the addon emit order, so a reorder
-        // also needs a wipe — otherwise the source picker would keep
-        // showing rows in the pre-reorder sequence for up to a full
-        // TTL window after the user committed the change.
-        if (changed) await _configStore.InvalidateStreamCacheAsync(request.uid);
+        // Client-side localStorage cache wipe happens in
+        // _ConfigurePageScript.cshtml's save handler.
         return new JsonResult(new { success = true, changed });
     }
 

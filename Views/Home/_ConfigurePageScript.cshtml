@@ -776,6 +776,30 @@
         });
         if (!resp.ok) throw new Error('Reorder save failed: ' + resp.status);
         initialAddonOrder = urls;
+        // The watch page's localStorage stream cache preserved the
+        // pre-reorder addon emit order in its rendered rows. Wipe so
+        // the next watch render fan-outs against the new order
+        // instead of replaying stale ordering for up to a full TTL
+        // window.
+        wipeStreamCache();
+    }
+
+    // Strip every anisync.streams.{uid}.* entry so a subsequent
+    // /watch render re-runs the fan-out against the user's current
+    // addon list. Cheaper than a precise key-set diff and fires only
+    // on the (uncommon) Add / Remove / Reorder paths — the steady-
+    // state watch flow doesn't touch this.
+    function wipeStreamCache() {
+        if (!configUid) return;
+        var prefix = 'anisync.streams.' + configUid + '.';
+        try {
+            var doomed = [];
+            for (var i = 0; i < localStorage.length; i++) {
+                var k = localStorage.key(i);
+                if (k && k.indexOf(prefix) === 0) doomed.push(k);
+            }
+            doomed.forEach(function (k) { localStorage.removeItem(k); });
+        } catch (_) { /* private mode / disabled storage — best-effort */ }
     }
 
     var addonDrag = null; // { row, list, handle, pointerId }
@@ -906,6 +930,11 @@
                 // out-of-date initialAddonOrder and POST a spurious
                 // ReorderStreamAddons request.
                 initialAddonOrder = currentStreamAddonOrder();
+                // Watch-page localStorage cache was computed against
+                // the pre-add addon list; a new provider wouldn't
+                // surface streams until the 10-min TTL elapsed
+                // without this wipe.
+                wipeStreamCache();
             }
             $('#streamAddonInput').val('');
         } catch (e) {
@@ -971,6 +1000,10 @@
             // row as a "missing entry" the reorder POST would need to
             // address. Same rationale as the add-handler refresh.
             initialAddonOrder = currentStreamAddonOrder();
+            // Watch-page localStorage cache still has streams from the
+            // removed provider in its rendered rows — wipe so the next
+            // /watch render rebuilds against the new addon list.
+            wipeStreamCache();
         } catch (e) {
             alert('Could not remove stream addon: ' + e.message);
         }
