@@ -31,6 +31,13 @@ namespace AnimeList.Controllers
         private readonly ISyncService _syncService;
         private readonly ILogger<AnimeController> _logger;
 
+        // TTL for the per-(uid, episode) stream-addon fan-out cache.
+        // 10 minutes is short enough that an upstream-resolved URL
+        // (Real-Debrid, MediaFusion signed paths, …) hasn't started
+        // 403'ing on most tokens, long enough that hitting refresh
+        // doesn't re-pull through the addon's rate-limit window.
+        private static readonly TimeSpan StreamCacheTtl = TimeSpan.FromMinutes(10);
+
         public AnimeController(
             ITokenService tokenService,
             IAnilistService anilistService,
@@ -603,6 +610,20 @@ namespace AnimeList.Controllers
             var debridStreams = Array.Empty<object>() as IReadOnlyList<object>;
             if (addons.Count > 0)
             {
+                // 10-minute fan-out cache keyed by (uid, anime+season+
+                // episode). Upstream addons (Torrentio, MediaFusion,
+                // Comet, …) rate-limit per-IP and a refresh inside that
+                // window otherwise re-pulls a (rate-limit-affected) set.
+                // Stored in sqlite so a Fly machine restart doesn't
+                // dump the warm cache. Invalidated on Add / Remove /
+                // Reorder via _configStore.InvalidateStreamCacheAsync.
+                var episodeKey = $"{id}|s={lookupSeason?.ToString() ?? "_"}|e={lookupEpisode?.ToString() ?? "_"}";
+                List<AddonStream> cachedStreams = null;
+                if (!string.IsNullOrEmpty(uid))
+                {
+                    cachedStreams = await _configStore.GetCachedStreamsAsync(uid, episodeKey, StreamCacheTtl);
+                }
+
                 var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
 
                 // Override sourceLinks.ImdbSeason with the per-call value
@@ -635,33 +656,61 @@ namespace AnimeList.Controllers
                 // id-space) so a show missing both an IMDb and a Kitsu
                 // mapping still produces a request the user's addons
                 // might know about under mal:N / anilist:N.
-                var primaryService = tokenData.anime_service;
-                var fetchTasks = addons
-                    .Select(a => _addonStreamService.GetStreamsAsync(
-                        a.Url, sourceLinks, lookupSeason, lookupEpisode, primaryService, clientIp))
-                    .ToArray();
-                await Task.WhenAll(fetchTasks);
-
-                // Override each stream's URL-host-derived Provider
-                // fallback with the addon's persisted display name
-                // (pulled from manifest.name on save), since the addon
-                // doesn't echo its name on the /stream response.
-                // Preserve the addon's emit order — no post-fetch
-                // dedupe, no per-quality cap. Whatever the user's
-                // configured addons return (in the order they returned
-                // it) is what the source picker shows; filtering /
-                // ordering belongs in each addon's own config URL.
-                // Earlier passes dedup-and-rebucketed across addons,
-                // which silently dropped MediaFusion's lone result on
-                // anime where its quality marker didn't match our
-                // allowlist or hashed equal to a higher-seeder Torrentio
-                // row.
-                var labelledStreams = new List<AddonStream>();
-                for (int i = 0; i < addons.Count; i++)
+                List<AddonStream> labelledStreams;
+                if (cachedStreams != null)
                 {
-                    foreach (var s in fetchTasks[i].Result)
+                    // Cache hit — reuse the labelled fan-out from a
+                    // recent render. URLs in cachedStreams were signed
+                    // for the same uid (≈ same user IP in practice
+                    // since web sessions don't usually roam mid-
+                    // watch); if the user's IP did change, the URL
+                    // would 403 at play time and a re-render would
+                    // miss the cache anyway after the 10-minute TTL.
+                    labelledStreams = cachedStreams;
+                }
+                else
+                {
+                    var primaryService = tokenData.anime_service;
+                    var fetchTasks = addons
+                        .Select(a => _addonStreamService.GetStreamsAsync(
+                            a.Url, sourceLinks, lookupSeason, lookupEpisode, primaryService, clientIp))
+                        .ToArray();
+                    await Task.WhenAll(fetchTasks);
+
+                    // Override each stream's URL-host-derived Provider
+                    // fallback with the addon's persisted display name
+                    // (pulled from manifest.name on save), since the
+                    // addon doesn't echo its name on the /stream
+                    // response. Preserve the addon's emit order — no
+                    // post-fetch dedupe, no per-quality cap. Whatever
+                    // the user's configured addons return (in the
+                    // order they returned it) is what the source
+                    // picker shows; filtering / ordering belongs in
+                    // each addon's own config URL. Earlier passes
+                    // dedup-and-rebucketed across addons, which
+                    // silently dropped MediaFusion's lone result on
+                    // anime where its quality marker didn't match our
+                    // allowlist or hashed equal to a higher-seeder
+                    // Torrentio row.
+                    labelledStreams = new List<AddonStream>();
+                    for (int i = 0; i < addons.Count; i++)
                     {
-                        labelledStreams.Add(s with { Provider = addons[i].Name });
+                        foreach (var s in fetchTasks[i].Result)
+                        {
+                            labelledStreams.Add(s with { Provider = addons[i].Name });
+                        }
+                    }
+
+                    // Persist only when the fan-out actually produced
+                    // something — caching an empty list would lock
+                    // the user into "no streams" for 10 minutes after
+                    // a single unlucky refresh that hit the upstream
+                    // addon's rate-limit window. An empty result is
+                    // the exact case the retry was meant to recover,
+                    // so we want the NEXT refresh to retry too.
+                    if (!string.IsNullOrEmpty(uid) && labelledStreams.Count > 0)
+                    {
+                        await _configStore.SetCachedStreamsAsync(uid, episodeKey, labelledStreams);
                     }
                 }
 

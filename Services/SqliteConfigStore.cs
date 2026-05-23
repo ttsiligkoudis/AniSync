@@ -140,6 +140,25 @@ namespace AnimeList.Services
                 );
                 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_uid
                     ON push_subscriptions(uid);
+
+                -- Per-(uid, episode) stream-addon fan-out cache. Backs
+                -- the 10-minute reuse window on the watch page —
+                -- without it, upstream addons rate-limit per Fly IP and
+                -- every refresh re-rolls a (rate-limit-affected) fetch.
+                -- streams_json holds the post-labelling AddonStream[]
+                -- list straight from the fan-out so a hit serves the
+                -- exact same source rows the cold-render computed.
+                CREATE TABLE IF NOT EXISTS user_stream_cache (
+                    uid          TEXT NOT NULL,
+                    episode_key  TEXT NOT NULL,
+                    streams_json TEXT NOT NULL,
+                    created_at   INTEGER NOT NULL,
+                    PRIMARY KEY (uid, episode_key)
+                );
+                -- Periodic sweepers can prune by created_at; the TTL
+                -- check on read is the primary expiry mechanism.
+                CREATE INDEX IF NOT EXISTS idx_user_stream_cache_created
+                    ON user_stream_cache(created_at);
                 """;
             create.ExecuteNonQuery();
 
@@ -575,6 +594,78 @@ namespace AnimeList.Services
 
             await WriteStreamAddonsAsync(uid, reordered);
             return true;
+        }
+
+        public async Task<List<AddonStream>> GetCachedStreamsAsync(string uid, string episodeKey, TimeSpan ttl)
+        {
+            if (string.IsNullOrEmpty(uid) || string.IsNullOrEmpty(episodeKey)) return null;
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT streams_json, created_at FROM user_stream_cache
+                 WHERE uid = $uid AND episode_key = $key LIMIT 1
+                """;
+            cmd.Parameters.AddWithValue("$uid", uid);
+            cmd.Parameters.AddWithValue("$key", episodeKey);
+            using var reader = await cmd.ExecuteReaderAsync();
+            if (!await reader.ReadAsync()) return null;
+
+            var createdAt = reader.GetInt64(1);
+            var ageSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - createdAt;
+            // Treat an over-TTL row as a cache miss. Don't bother
+            // DELETing here — the next SetCachedStreamsAsync upsert for
+            // this key overwrites it, and the index lets a background
+            // sweeper clean orphans by created_at if we ever add one.
+            if (ageSec >= (long)ttl.TotalSeconds) return null;
+
+            var json = reader.GetString(0);
+            try
+            {
+                return DeserializeObject<List<AddonStream>>(json) ?? [];
+            }
+            catch
+            {
+                // Bad row (schema drift, partial write) — treat as miss
+                // so the caller refetches; the next Set replaces it.
+                return null;
+            }
+        }
+
+        public async Task SetCachedStreamsAsync(string uid, string episodeKey, IReadOnlyList<AddonStream> streams)
+        {
+            if (string.IsNullOrEmpty(uid) || string.IsNullOrEmpty(episodeKey) || streams == null) return;
+            var json = SerializeObject(streams);
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            // INSERT OR REPLACE so a repeated save under the same key
+            // refreshes both the JSON body and the created_at clock —
+            // the TTL window restarts from the most recent successful
+            // fetch, which is the user-intuitive behaviour ("I just
+            // refreshed and saw streams, so 10 minutes starts NOW").
+            cmd.CommandText = """
+                INSERT OR REPLACE INTO user_stream_cache
+                    (uid, episode_key, streams_json, created_at)
+                VALUES ($uid, $key, $json, $ts)
+                """;
+            cmd.Parameters.AddWithValue("$uid", uid);
+            cmd.Parameters.AddWithValue("$key", episodeKey);
+            cmd.Parameters.AddWithValue("$json", json);
+            cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task InvalidateStreamCacheAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return;
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM user_stream_cache WHERE uid = $uid";
+            cmd.Parameters.AddWithValue("$uid", uid);
+            await cmd.ExecuteNonQueryAsync();
         }
 
         private async Task WriteStreamAddonsAsync(string uid, List<StreamAddon> addons)
