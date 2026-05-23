@@ -502,6 +502,36 @@
             // art.destroy(true) detaches the player, removes its DOM,
             // and unbinds every listener it registered.
             var art = null;
+
+            // Pause playback whenever the tab / app loses visibility
+            // (swiping to the phone home menu, switching apps, tab
+            // backgrounded, screen lock). Without this, a paused
+            // network read keeps the decoder in a held-buffer state
+            // and the audio carries on under the home screen until
+            // the buffer drains — both browser-policy gaps the user
+            // has to mop up manually otherwise. Listener attached
+            // once at the script root so it doesn't stack with each
+            // source pick (art is swapped via destroy/new, but the
+            // closure-captured `art` reference always points at the
+            // live instance — so a single listener pauses whichever
+            // player is currently mounted).
+            document.addEventListener('visibilitychange', function () {
+                if (document.visibilityState !== 'hidden') return;
+                try {
+                    var v = art && art.video;
+                    if (v && !v.paused) v.pause();
+                } catch (_) { /* defensive — non-fatal */ }
+            });
+            // Safari's BFCache path doesn't always fire
+            // visibilitychange before the page is frozen — pagehide
+            // is the reliable mobile-Safari signal. Same idempotent
+            // pause body so a double-fire (both events) is a no-op.
+            window.addEventListener('pagehide', function () {
+                try {
+                    var v = art && art.video;
+                    if (v && !v.paused) v.pause();
+                } catch (_) { /* defensive — non-fatal */ }
+            });
             // Cached last /episode-streams response so playStream +
             // wireSkipOverlay can read the same skipTimes + subtitles
             // bundle without an extra fetch on every source pick.
@@ -2279,7 +2309,16 @@
                     title: @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(episodeLabel)),
                     theme: '#7c3aed',
                     autoplay: true,
-                    pip: true,
+                    // Picture-in-Picture turned off intentionally. On
+                    // mobile, swiping home while a video is playing
+                    // fullscreen otherwise triggers the browser's auto-
+                    // PiP behaviour and the video keeps running in a
+                    // little floating window. We pair this option-off
+                    // with disablePictureInPicture on the <video> below
+                    // (the ArtPlayer flag drops the toolbar button;
+                    // the HTML attribute is what actually blocks the
+                    // browser's automatic PiP entry).
+                    pip: false,
                     // screenshot / aspectRatio dropped from the toolbar —
                     // the screenshot icon and the aspect-ratio toggle
                     // were noise for the average viewer; users who want
@@ -2320,6 +2359,15 @@
                     airplay: true,
                     moreVideoAttr: {
                         playsInline: true,
+                        // The HTML attribute that actually blocks the
+                        // browser's automatic Picture-in-Picture entry
+                        // when the user swipes home from a fullscreen
+                        // video on iOS Safari / Android Chrome. The
+                        // ArtPlayer pip: false flag only drops the
+                        // toolbar button — without this attribute the
+                        // browser still pops the floating PiP window
+                        // on the home swipe.
+                        disablePictureInPicture: true,
                         // Browser default for <video> preload is
                         // 'metadata' — fetches just enough to read
                         // duration / codec and then waits for play().
