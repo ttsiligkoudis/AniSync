@@ -2511,6 +2511,20 @@ body.modal-open {
     border-radius: 0;
 }
 
+/* ArtPlayer drops .art-bottom's opacity when controls auto-hide but
+   leaves the element interactive. On mobile in fullscreen that turns
+   the bottom strip of the screen — exactly where the system swipe-up
+   home gesture starts — into an invisible seek track: the user
+   swipes up to go home, the gesture lands on the progress bar first,
+   and the playhead jumps. Disabling pointer events on .art-bottom
+   while .art-hover is absent lets touches fall through to either the
+   gesture layer above (single-tap to bring controls back) or the OS
+   below (home swipe). The seek track returns to interactive the
+   moment the controls become visible again. */
+.watch-player .art-video-player:not(.art-hover) .art-bottom {
+    pointer-events: none;
+}
+
 .watch-nav {
     display: grid;
     grid-template-columns: 1fr 1fr;
