@@ -1853,6 +1853,16 @@ body.modal-open {
     color: rgb(252, 165, 165);
 }
 
+/* Brief success pulse after a successful clipboard write — green
+   tint to read as "did the thing" without needing a toast. Class
+   is applied for ~1.5s by the click handler then removed. */
+.stream-addon-icon-btn.stream-addon-copy.copied,
+.stream-addon-icon-btn.stream-addon-copy.copied:hover {
+    background: rgba(74, 222, 128, 0.18);
+    border-color: rgba(74, 222, 128, 0.5);
+    color: rgb(134, 239, 172);
+}
+
 .stream-addon-meta {
     flex: 1;
     min-width: 0;
