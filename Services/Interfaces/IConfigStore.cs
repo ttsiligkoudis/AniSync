@@ -151,6 +151,37 @@ namespace AnimeList.Services.Interfaces
         Task<bool> ReorderStreamAddonsAsync(string uid, IList<string> orderedUrls);
 
         /// <summary>
+        /// Returns the cached stream-addon fan-out result for the given
+        /// (uid, episodeKey) when the row is younger than <paramref
+        /// name="ttl"/>; null on a miss or when the cache row has
+        /// expired. <paramref name="episodeKey"/> is opaque to the
+        /// store — callers build it from anime id + season + episode,
+        /// see AnimeController.Watch. Backed by a sqlite row so the
+        /// cache survives a process restart, which is the whole point:
+        /// the upstream addons rate-limit per-IP and a fresh process
+        /// kept hitting the rate-limit window after every deploy.
+        /// </summary>
+        Task<List<AddonStream>> GetCachedStreamsAsync(string uid, string episodeKey, TimeSpan ttl);
+
+        /// <summary>
+        /// Persists the fan-out result for a (uid, episodeKey).
+        /// Idempotent upsert — repeated saves under the same key
+        /// refresh the created_at timestamp so the TTL window
+        /// restarts from the most recent successful fetch.
+        /// </summary>
+        Task SetCachedStreamsAsync(string uid, string episodeKey, IReadOnlyList<AddonStream> streams);
+
+        /// <summary>
+        /// Deletes every cached stream entry for the user. Called when
+        /// the user's stream-addon list changes (add / remove /
+        /// reorder) — the cached result was computed against a
+        /// different addon list and would surface stale streams (or
+        /// hide newly-added providers) for up to a full TTL window
+        /// otherwise.
+        /// </summary>
+        Task InvalidateStreamCacheAsync(string uid);
+
+        /// <summary>
         /// Swaps the primary provider with the linked token of <paramref name="newPrimaryService"/>.
         /// The chosen link becomes the primary on this row; the previous primary moves into the
         /// linked-tokens array. The UID is preserved so existing install URLs keep working.
