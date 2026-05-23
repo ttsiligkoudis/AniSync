@@ -211,55 +211,90 @@ namespace AnimeList.Services
             // window is small in practice.
             var streamsUrl = $"{addonRoot}/stream/{idType}/{idPath}.json";
 
-            try
+            // Single retry against the addon when the first attempt
+            // returns empty / errors. Stream addons (Torrentio,
+            // MediaFusion, Comet, Jackettio, …) frequently 200-empty
+            // under rate-limit pressure or backend hiccups — same URL
+            // refreshed twice can return a populated list once and
+            // an empty list once, which lines up with user reports
+            // of "sometimes I get a stream, sometimes I don't" on
+            // identical URLs. A bare retry recovers the transient
+            // case without needing per-addon circuit-breaker state
+            // or upstream-specific heuristics. ~500 ms backoff is
+            // enough for most rate-limit windows to elapse without
+            // adding noticeable latency to the page render.
+            const int MaxAttempts = 2;
+            List<Stream> lastResult = null;
+            for (var attempt = 1; attempt <= MaxAttempts; attempt++)
             {
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(StreamsTimeout);
-
-                var client = _clientFactory.CreateClient();
-                using var req = new HttpRequestMessage(HttpMethod.Get, streamsUrl);
-                // Tell the addon who the real client is so it can bind
-                // its playback URLs to the user's IP rather than ours.
-                // X-Forwarded-For is the universally-recognised header
-                // — sending the CDN-specific variants alongside it
-                // (CF-Connecting-IP / Fly-Client-IP) tends to trip
-                // anti-spoofing checks on addons that expect those
-                // headers only from their own edge, so we stick to
-                // X-Forwarded-For exclusively.
-                if (!string.IsNullOrEmpty(clientIp))
+                try
                 {
-                    req.Headers.TryAddWithoutValidation("X-Forwarded-For", clientIp);
+                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    cts.CancelAfter(StreamsTimeout);
+
+                    var client = _clientFactory.CreateClient();
+                    using var req = new HttpRequestMessage(HttpMethod.Get, streamsUrl);
+                    // Tell the addon who the real client is so it can bind
+                    // its playback URLs to the user's IP rather than ours.
+                    // X-Forwarded-For is the universally-recognised header
+                    // — sending the CDN-specific variants alongside it
+                    // (CF-Connecting-IP / Fly-Client-IP) tends to trip
+                    // anti-spoofing checks on addons that expect those
+                    // headers only from their own edge, so we stick to
+                    // X-Forwarded-For exclusively.
+                    if (!string.IsNullOrEmpty(clientIp))
+                    {
+                        req.Headers.TryAddWithoutValidation("X-Forwarded-For", clientIp);
+                    }
+                    var response = await client.SendAsync(req, cts.Token);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        _logger.LogWarning(
+                            "Addon stream fetch {Status} for {Path} via {Host} (clientIp={Ip}, attempt={Attempt}).",
+                            (int)response.StatusCode, idPath, addonRoot,
+                            string.IsNullOrEmpty(clientIp) ? "(none)" : clientIp, attempt);
+                        lastResult = [];
+                    }
+                    else
+                    {
+                        var content = await response.Content.ReadAsStringAsync(cts.Token);
+                        lastResult = ParseStreams(content, addonRoot);
+                        if (lastResult.Count > 0)
+                        {
+                            _logger.LogInformation(
+                                "Addon stream fetch returned {Count} entries for {Path} via {Host} (clientIp={Ip}, attempt={Attempt}).",
+                                lastResult.Count, idPath, addonRoot,
+                                string.IsNullOrEmpty(clientIp) ? "(none)" : clientIp, attempt);
+                            return lastResult;
+                        }
+                        _logger.LogInformation(
+                            "Addon stream fetch returned 0 entries for {Path} via {Host} (clientIp={Ip}, attempt={Attempt}).",
+                            idPath, addonRoot,
+                            string.IsNullOrEmpty(clientIp) ? "(none)" : clientIp, attempt);
+                    }
                 }
-                var response = await client.SendAsync(req, cts.Token);
-                if (!response.IsSuccessStatusCode)
+                catch (OperationCanceledException)
                 {
                     _logger.LogWarning(
-                        "Addon stream fetch {Status} for {Path} via {Host} (clientIp={Ip}).",
-                        (int)response.StatusCode, idPath, addonRoot,
-                        string.IsNullOrEmpty(clientIp) ? "(none)" : clientIp);
-                    return [];
+                        "Addon stream fetch timed out ({Path} via {Host}, attempt={Attempt}).",
+                        idPath, addonRoot, attempt);
+                    lastResult = [];
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Addon stream fetch failed ({Path} via {Host}, attempt={Attempt}).",
+                        idPath, addonRoot, attempt);
+                    lastResult = [];
                 }
 
-                var content = await response.Content.ReadAsStringAsync(cts.Token);
-                var parsed = ParseStreams(content, addonRoot);
-
-                _logger.LogInformation(
-                    "Addon stream fetch returned {Count} entries for {Path} via {Host} (clientIp={Ip}).",
-                    parsed.Count, idPath, addonRoot,
-                    string.IsNullOrEmpty(clientIp) ? "(none)" : clientIp);
-
-                return parsed;
+                if (attempt < MaxAttempts)
+                {
+                    try { await Task.Delay(TimeSpan.FromMilliseconds(500), ct); }
+                    catch (OperationCanceledException) { return lastResult ?? []; }
+                }
             }
-            catch (OperationCanceledException)
-            {
-                _logger.LogWarning("Addon stream fetch timed out ({Path} via {Host}).", idPath, addonRoot);
-                return [];
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Addon stream fetch failed ({Path} via {Host}).", idPath, addonRoot);
-                return [];
-            }
+            return lastResult ?? [];
         }
 
         /// <summary>
