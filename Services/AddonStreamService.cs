@@ -224,7 +224,7 @@ namespace AnimeList.Services
             // enough for most rate-limit windows to elapse without
             // adding noticeable latency to the page render.
             const int MaxAttempts = 2;
-            List<Stream> lastResult = null;
+            List<AddonStream> lastResult = null;
             for (var attempt = 1; attempt <= MaxAttempts; attempt++)
             {
                 try
