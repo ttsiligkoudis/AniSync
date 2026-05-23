@@ -2301,6 +2301,20 @@
                     // Users get back to the controls with a single tap
                     // anywhere on the video.
                     miniProgressBar: false,
+                    // ArtPlayer's mobile gesture layer binds touchstart
+                    // / touchmove to the <video> element itself: a
+                    // horizontal swipe anywhere on the player surface
+                    // scrubs the timeline (no visible seek track
+                    // required). On a phone in fullscreen that
+                    // collides with the system home-swipe — the user
+                    // swipes up from the bottom of the screen, the
+                    // gesture is read as a (slightly diagonal)
+                    // horizontal drag first, and the playhead jumps
+                    // before the OS gesture takes over. Disabling the
+                    // gesture layer leaves tap-to-toggle-controls,
+                    // double-tap-to-seek, and dragging the actual
+                    // seek bar intact.
+                    gesture: false,
                     autoOrientation: true,
                     hotkey: true,
                     airplay: true,
