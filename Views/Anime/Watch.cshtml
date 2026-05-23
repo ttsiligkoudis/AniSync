@@ -421,6 +421,12 @@
             var streamSeason  = @(Model.Current.imdbSeason ?? (Model.Current.season > 0 ? Model.Current.season : 1));
             var streamEpisode = @(Model.Current.imdbEpisode ?? Model.Current.episode);
 
+            // UID-scoped namespace for the localStorage stream cache.
+            // Empty for anonymous viewers — those skip the cache layer
+            // entirely (anonymous renders fan out fresh every refresh
+            // because they don't have addons configured anyway).
+            var configUid = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.ConfigUid ?? string.Empty));
+
             // One-shot guard so the 70 %-progress check, the external
             // launcher, and any future trigger don't double-fire the
             // mark-watched POST for the same episode. Cleared on a
@@ -3340,37 +3346,104 @@
                 + '&episode=' + encodeURIComponent(streamEpisode)
                 + '&season=' + encodeURIComponent(streamSeason)
                 + (isMovie ? '&type=movie' : '');
-            fetch('/anime/episode-streams?' + qs, {
-                credentials: 'same-origin',
-                headers: { 'Accept': 'application/json' },
-                // The Sources panel renders its own "Looking for streams…"
-                // placeholder while the request is in flight — the global
-                // full-screen loader-overlay on top of that would just be
-                // double-loading.
-                skipLoader: true,
-            })
-                .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (data) {
-                    if (!data) {
-                        sourcesBody.innerHTML = '<p class="hint-text">Couldn\'t load sources. Try refreshing.</p>';
-                        return;
-                    }
-                    lastData = data;
-                    // Hide the auto-skip toggle when AniSkip didn't
-                    // return any markers for this episode — the toggle
-                    // would have nothing to act on and just adds chrome
-                    // the user can't use. The corner skip button is
-                    // already gated on the same data inside
-                    // wireSkipOverlay, so it stays hidden too.
-                    if (skipAutoBtn) {
-                        var sk = data && data.skipTimes;
-                        skipAutoBtn.hidden = !sk || (!sk.intro && !sk.outro);
-                    }
-                    renderSources(data);
+
+            // localStorage layer for the fan-out result. Lives in the
+            // browser (not the server) because the upstream rate-limit
+            // signal that the cache is meant to soften is per-id /
+            // per-IP — a shared server cache wouldn't help two users
+            // hitting the same episode at the same time anyway, and a
+            // per-user server row would still pay a DB round-trip on
+            // every render. localStorage is single-writer per browser,
+            // survives reloads / Prev-Next nav, and the entries live
+            // close to the device whose IP the debrid URLs were signed
+            // for.
+            var STREAM_CACHE_TTL_MS = 10 * 60 * 1000;
+            var streamCacheKeyPrefix = configUid
+                ? 'anisync.streams.' + configUid + '.'
+                : '';
+            var streamCacheKey = streamCacheKeyPrefix
+                ? streamCacheKeyPrefix + animeId
+                    + '|s=' + (streamSeason != null ? streamSeason : '_')
+                    + '|e=' + (streamEpisode != null ? streamEpisode : '_')
+                    + (isMovie ? '|movie' : '')
+                : null;
+
+            function readCachedStreamData() {
+                if (!streamCacheKey) return null;
+                var raw;
+                try { raw = localStorage.getItem(streamCacheKey); }
+                catch (_) { return null; }
+                if (!raw) return null;
+                try {
+                    var entry = JSON.parse(raw);
+                    if (!entry || typeof entry.ts !== 'number') return null;
+                    if (Date.now() - entry.ts >= STREAM_CACHE_TTL_MS) return null;
+                    return entry.data || null;
+                } catch (_) { return null; }
+            }
+
+            function writeCachedStreamData(data) {
+                if (!streamCacheKey || !data) return;
+                // Don't cache the negative scenario — an empty fan-out
+                // is the exact case the user wants the NEXT visit to
+                // re-attempt (rate-limit window opens up, addon's
+                // upstream scrape lands fresh). Caching zero results
+                // would lock the user into the bad refresh for the
+                // full TTL window.
+                var debrid = (data && data.debridStreams) || [];
+                if (debrid.length === 0) return;
+                try {
+                    localStorage.setItem(streamCacheKey, JSON.stringify({
+                        ts: Date.now(),
+                        data: data,
+                    }));
+                } catch (_) {
+                    // Quota / private-mode failures are non-fatal —
+                    // the page still renders from the live fetch.
+                }
+            }
+
+            function applyStreamData(data) {
+                lastData = data;
+                // Hide the auto-skip toggle when AniSkip didn't
+                // return any markers for this episode — the toggle
+                // would have nothing to act on and just adds chrome
+                // the user can't use. The corner skip button is
+                // already gated on the same data inside
+                // wireSkipOverlay, so it stays hidden too.
+                if (skipAutoBtn) {
+                    var sk = data && data.skipTimes;
+                    skipAutoBtn.hidden = !sk || (!sk.intro && !sk.outro);
+                }
+                renderSources(data);
+            }
+
+            var cachedStreamData = readCachedStreamData();
+            if (cachedStreamData) {
+                applyStreamData(cachedStreamData);
+            } else {
+                fetch('/anime/episode-streams?' + qs, {
+                    credentials: 'same-origin',
+                    headers: { 'Accept': 'application/json' },
+                    // The Sources panel renders its own "Looking for streams…"
+                    // placeholder while the request is in flight — the global
+                    // full-screen loader-overlay on top of that would just be
+                    // double-loading.
+                    skipLoader: true,
                 })
-                .catch(function () {
-                    sourcesBody.innerHTML = '<p class="hint-text">Couldn\'t load sources. Try refreshing.</p>';
-                });
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (data) {
+                        if (!data) {
+                            sourcesBody.innerHTML = '<p class="hint-text">Couldn\'t load sources. Try refreshing.</p>';
+                            return;
+                        }
+                        writeCachedStreamData(data);
+                        applyStreamData(data);
+                    })
+                    .catch(function () {
+                        sourcesBody.innerHTML = '<p class="hint-text">Couldn\'t load sources. Try refreshing.</p>';
+                    });
+            }
         })();
     </script>
 }
