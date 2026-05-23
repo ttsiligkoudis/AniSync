@@ -9,7 +9,27 @@ using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Force the IHttpClientFactory primary handler to recycle its pooled
+// connections every 5 minutes. The .NET default is InfiniteTimeSpan,
+// which is a well-known landmine for long-running services: a
+// connection that quietly wedges (upstream TCP half-close that didn't
+// propagate, CDN edge rotation, transient DNS / route change, partial
+// HTTP/2 deadlock) sticks in the pool forever and every subsequent
+// request to that host fails until the process is restarted. Five
+// minutes is short enough that recovery happens automatically within
+// a viewing session, long enough to keep most of the connection-reuse
+// benefit. Stream-addon fetches (Torrentio, MediaFusion, etc.) hit
+// many third-party hosts at varying availability so this is exactly
+// the workload that exposes the pitfall — restarting the Fly machine
+// after stream addons "stopped working" matches a wedged-pool
+// recovery curve. See:
+//   https://learn.microsoft.com/dotnet/architecture/microservices/implement-resilient-applications/use-httpclientfactory-to-implement-resilient-http-requests#issues-with-the-original-httpclient-class-available-in-net
 builder.Services.AddHttpClient();
+builder.Services.ConfigureHttpClientDefaults(b =>
+    b.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+    }));
 // Persistent session cookie. The default AddSession() emits a "session
 // cookie" with no MaxAge/Expires, which Android (and any browser, but
 // most noticeably the PWA running in standalone mode) discards when the
