@@ -427,6 +427,108 @@
             // because they don't have addons configured anyway).
             var configUid = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.ConfigUid ?? string.Empty));
 
+            // ── Resume-from-where-you-left-off (per episode, per uid) ──
+            // localStorage on purpose — resume position is intrinsically
+            // per-device (you're not switching devices mid-episode) and
+            // keeping it out of the server DB means no extra schema +
+            // no extra writes per timeupdate tick. Key shape matches
+            // the streams cache namespace for consistency: an entry's
+            // value is { position, duration, ts } so we can both seek
+            // back AND treat an entry near completion as "finished —
+            // don't resume".
+            var RESUME_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+            // Below this we treat the playback as "barely started" and
+            // ignore the saved position — skipping the first few
+            // seconds of an episode feels worse than starting from
+            // zero, and an accidental click+close shouldn't lose the
+            // cold-open.
+            var RESUME_MIN_POSITION_S = 15;
+            // Once playback is this close to the end, treat the
+            // episode as effectively finished — resuming the last
+            // 30 seconds would just replay the credits.
+            var RESUME_COMPLETE_RATIO = 0.95;
+            var resumeStorageKey = configUid
+                ? 'anisync.resume.' + configUid + '.' + animeId
+                    + '|s=' + (hasSeasons ? season : '_')
+                    + '|e=' + episode
+                : null;
+
+            function readResumePosition() {
+                if (!resumeStorageKey) return 0;
+                var raw;
+                try { raw = localStorage.getItem(resumeStorageKey); }
+                catch (_) { return 0; }
+                if (!raw) return 0;
+                try {
+                    var entry = JSON.parse(raw);
+                    if (!entry || typeof entry.position !== 'number') return 0;
+                    if (Date.now() - entry.ts >= RESUME_TTL_MS) {
+                        try { localStorage.removeItem(resumeStorageKey); } catch (_) {}
+                        return 0;
+                    }
+                    if (entry.position < RESUME_MIN_POSITION_S) return 0;
+                    return entry.position;
+                } catch (_) { return 0; }
+            }
+
+            // Throttle floor for writeResumePosition — at most one
+            // localStorage write per ~5 seconds of playback. Set to 0
+            // before calling write() from pause / pagehide /
+            // visibilitychange to force a capture-the-current-moment
+            // save regardless of throttle window.
+            var lastResumeSaveTs = 0;
+            function writeResumePosition(position, duration) {
+                if (!resumeStorageKey) return;
+                if (!isFinite(position) || position < RESUME_MIN_POSITION_S) return;
+                // Near-completion → wipe so we don't resume the
+                // credits. Treats finished episodes as "no entry",
+                // consistent with the wipe on video:ended below.
+                if (duration > 0 && position / duration >= RESUME_COMPLETE_RATIO) {
+                    try { localStorage.removeItem(resumeStorageKey); } catch (_) {}
+                    return;
+                }
+                var now = Date.now();
+                if (now - lastResumeSaveTs < 5000) return;
+                lastResumeSaveTs = now;
+                try {
+                    localStorage.setItem(resumeStorageKey, JSON.stringify({
+                        position: position,
+                        duration: duration || 0,
+                        ts: now,
+                    }));
+                } catch (_) {
+                    // Quota / private-mode failures are non-fatal —
+                    // the player still plays without resume support.
+                }
+            }
+
+            function clearResumePosition() {
+                if (!resumeStorageKey) return;
+                try { localStorage.removeItem(resumeStorageKey); } catch (_) {}
+            }
+
+            // Snapshot the live player's position regardless of
+            // throttle. Used by visibility / unload paths where we
+            // want to capture the exact moment the user backgrounded
+            // the tab rather than wait for the next 5-second tick.
+            function saveResumeNow() {
+                var v = art && art.video;
+                if (!v) return;
+                lastResumeSaveTs = 0;
+                writeResumePosition(v.currentTime || 0, v.duration || 0);
+            }
+
+            function formatResumeTime(seconds) {
+                seconds = Math.max(0, Math.floor(seconds || 0));
+                var h = Math.floor(seconds / 3600);
+                var m = Math.floor((seconds % 3600) / 60);
+                var s = seconds % 60;
+                var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+                return h > 0
+                    ? h + ':' + pad(m) + ':' + pad(s)
+                    : m + ':' + pad(s);
+            }
+
             // One-shot guard so the 70 %-progress check, the external
             // launcher, and any future trigger don't double-fire the
             // mark-watched POST for the same episode. Cleared on a
@@ -518,6 +620,11 @@
             document.addEventListener('visibilitychange', function () {
                 if (document.visibilityState !== 'hidden') return;
                 try {
+                    // Snapshot the resume position before pausing so a
+                    // user who swipes away mid-episode lands back at
+                    // the same second on re-open, not at the throttled
+                    // last-tick mark.
+                    saveResumeNow();
                     var v = art && art.video;
                     if (v && !v.paused) v.pause();
                 } catch (_) { /* defensive — non-fatal */ }
@@ -528,6 +635,7 @@
             // pause body so a double-fire (both events) is a no-op.
             window.addEventListener('pagehide', function () {
                 try {
+                    saveResumeNow();
                     var v = art && art.video;
                     if (v && !v.paused) v.pause();
                 } catch (_) { /* defensive — non-fatal */ }
@@ -2600,6 +2708,51 @@
                         markEpisodeAsWatched('70%-progress');
                     }
                 });
+
+                // ── Resume: read on metadata load, write throttled on
+                // timeupdate, clear on completion. Metadata-load is the
+                // first event that has a real duration + a seekable
+                // <video>, so seek-back happens before the user sees
+                // playback start (no visible "jump" mid-frame).
+                var hasResumedThisSource = false;
+                art.on('video:loadedmetadata', function () {
+                    if (hasResumedThisSource) return;
+                    hasResumedThisSource = true;
+                    var v = art && art.video;
+                    if (!v) return;
+                    var dur = v.duration;
+                    if (!isFinite(dur) || dur <= 60) return;
+                    var pos = readResumePosition();
+                    if (pos <= 0) return;
+                    // Same near-completion guard as the read helper —
+                    // belt + braces in case a previous save crossed
+                    // the threshold but happened before the wipe
+                    // landed (Safari background-tab limits, full
+                    // localStorage, etc.).
+                    if (pos / dur >= RESUME_COMPLETE_RATIO) return;
+                    try {
+                        art.seek = pos;
+                        if (art.notice) {
+                            art.notice.show = 'Resumed from ' + formatResumeTime(pos);
+                        }
+                    } catch (_) { /* defensive — non-fatal */ }
+                });
+
+                art.on('video:timeupdate', function () {
+                    var v = art && art.video;
+                    if (!v) return;
+                    writeResumePosition(v.currentTime || 0, v.duration || 0);
+                });
+
+                // Pause is the most likely "I'm stepping away" signal
+                // — capture the exact second so re-open lands on it.
+                // Bypasses the 5s throttle inside writeResumePosition.
+                art.on('video:pause', saveResumeNow);
+
+                // Episode finished — wipe the resume entry so the
+                // next visit starts from 0 instead of replaying the
+                // last frame.
+                art.on('video:ended', clearResumePosition);
 
                 // Move the skip-intro overlay button into the player
                 // host now that ArtPlayer has mounted its DOM there.
