@@ -620,16 +620,42 @@ namespace AnimeList.Controllers
                 // wouldn't have played from a different device anyway.
                 var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
 
-                // Override sourceLinks.ImdbSeason with the per-call value
-                // when the JS supplied one explicitly (Watch.cshtml passes
-                // the imdbSeason field NormaliseCourEpisodeNumbering
-                // preserved on each Video). BuildStremioId prefers
-                // links.ImdbSeason over the passed-in season, so without
-                // this override a long show like Naruto would request
-                // tt0409591:1:100 for /watch/100 (sourceLinks.ImdbSeason
-                // is 1 from the Fribb mapping) instead of the right
-                // tt0409591:3:28 the JS asked for via lookupSeason.
-                if (!isMovie && lookupSeason.HasValue)
+                // Override sourceLinks.ImdbSeason with the per-call
+                // value ONLY when the JS supplied a >1 season. The
+                // signal disambiguates two opposite Cinemeta data
+                // shapes:
+                //
+                //   • Multi-season Cinemeta (Naruto): one IMDb id
+                //     spans every cour as S1 / S2 / S3 with the cours'
+                //     episodes correctly bucketed.
+                //     NormaliseCourEpisodeNumbering preserves the
+                //     original Cinemeta season (e.g. 3) on each video,
+                //     so the JS supplies streamSeason=3. Fribb's
+                //     mapping.Season for these shows is often 1 (the
+                //     mapping points to the franchise's head cour
+                //     rather than the specific cour), so without this
+                //     override the query goes to tt0409591:1:100
+                //     instead of the correct tt0409591:3:28.
+                //
+                //   • Single-season Cinemeta with cour-specific IMDb
+                //     id (Bookworm S3): Cinemeta serves only the S3
+                //     cour's 12 episodes under its IMDb id, all
+                //     labelled season=1. After Normalise, imdbSeason=1,
+                //     so the JS supplies streamSeason=1. Fribb's
+                //     mapping.Season for this MAL/AniList cour is the
+                //     authoritative franchise pointer (3) and
+                //     BuildSourceLinksAsync already wrote it into
+                //     sourceLinks.ImdbSeason. Skipping the override
+                //     here keeps the query at :3:2 (matches the
+                //     addon's torrent-name index for the S3 cour)
+                //     instead of routing to :1:2 — which the user
+                //     reported finds streams of S1E2 from the
+                //     franchise instead.
+                //
+                // streamSeason==1 is also the harmless single-cour
+                // default — for a genuine S1 cour the mapping.Season
+                // is 1 too, so no-op either way.
+                if (!isMovie && lookupSeason.HasValue && lookupSeason.Value > 1)
                 {
                     sourceLinks.ImdbSeason = lookupSeason.Value;
                 }
