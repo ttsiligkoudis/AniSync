@@ -227,6 +227,48 @@ namespace AnimeList.Services
             // episodes. Must come BEFORE the season-filter branch below.
             if (mappings.Count <= 1)
             {
+                // Single Fribb mapping for this IMDb id. Two sub-cases:
+                //
+                //   • Genuine single-cour anime: Cinemeta returns the
+                //     exact episodes Fribb says belong to this cour
+                //     (allVideos.Count ≈ currentEpisodeCount). Return
+                //     allVideos as-is, the existing behaviour.
+                //
+                //   • Franchise umbrella IMDb mapped under one cour:
+                //     Fribb only has the current cour wired into this
+                //     IMDb id but Cinemeta covers the entire franchise
+                //     flat as season=1 (Bookworm S4 / mal:57466). The
+                //     old code returned all 48 episodes from S1
+                //     onwards, which made the page render S1's
+                //     episode 1 first and the addon query go to :1:2
+                //     even though the user wants :4:2. Slice based on
+                //     (mapping.Season − 1) × currentEpisodeCount as
+                //     an equal-cour-length approximation and relabel
+                //     the slice with the cour-specific season + a
+                //     1..N within-cour episode number so downstream
+                //     (NormaliseCourEpisodeNumbering, Watch.cshtml,
+                //     EpisodeStreams) all see the right coordinates.
+                if (cinemetaSeason.HasValue && cinemetaSeason.Value > 1
+                    && currentEpisodeCount > 0
+                    && allVideos.Count > currentEpisodeCount)
+                {
+                    var skip = (cinemetaSeason.Value - 1) * currentEpisodeCount;
+                    if (skip >= 0 && skip < allVideos.Count)
+                    {
+                        var slice = allVideos.Skip(skip).Take(currentEpisodeCount).ToList();
+                        for (int i = 0; i < slice.Count; i++)
+                        {
+                            slice[i].season = cinemetaSeason.Value;
+                            slice[i].episode = i + 1;
+                        }
+                        _logger.LogInformation(
+                            "GetCourEpisodes: imdb={Imdb} single Fribb mapping + Season={Season} + flat Cinemeta " +
+                            "({TotalVideos} videos, cour wants {CurrentEpisodeCount}) → sliced at offset {Skip}.",
+                            imdbId, cinemetaSeason.Value, allVideos.Count, currentEpisodeCount, skip);
+                        return slice;
+                    }
+                }
+
                 _logger.LogInformation("GetCourEpisodes: imdb={Imdb} single-cour franchise — returning all {Count} videos.",
                     imdbId, allVideos.Count);
                 return allVideos;
