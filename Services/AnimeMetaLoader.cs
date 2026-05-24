@@ -306,27 +306,6 @@ namespace AnimeList.Services
         public static void NormaliseCourEpisodeNumbering(Meta anime)
         {
             if (anime?.videos == null || anime.videos.Count == 0) return;
-
-            // Multi-season videos coming from a grouped source — either
-            // the imdb-grouped path's BuildGroupedImdbAnimeAsync or
-            // CinemetaService.GetCourEpisodesAsync's multi-cour-franchise
-            // branch (Bookworm shape: one IMDb id covers all cours with
-            // flat Cinemeta numbering, Fribb supplies per-cour Season
-            // values so we can split into proper cour seasons) — already
-            // carry the correct (cour-season, within-cour-episode)
-            // shape. Re-flattening to season=1 would defeat the season-
-            // tab UI on Detail.cshtml AND force the addon query down
-            // the wrong path (the stream lookup needs the cour's real
-            // season number, not the post-flatten 1). Idempotent here
-            // so the per-service callers don't have to special-case
-            // skipping the call.
-            var distinctSeasons = anime.videos
-                .Where(v => v != null && v.season > 0)
-                .Select(v => v.season)
-                .Distinct()
-                .Count();
-            if (distinctSeasons > 1) return;
-
             var ordered = anime.videos
                 .OrderBy(v => v.season > 0 ? v.season : 1)
                 .ThenBy(v => v.episode)

@@ -77,12 +77,26 @@ namespace AnimeList.Models
                 if (SeasonRaw == null || !SeasonRaw.HasValues)
                     return null; // default
 
-                var firstValue = SeasonRaw.Properties().FirstOrDefault()?.Value;
-
-                if (firstValue == null || firstValue.Type == JTokenType.Null)
-                    return null; // default
-
-                return firstValue.Value<int?>();
+                // Fribb's "season" field is a per-provider object like
+                // {"tvdb": 4, "tmdb": null}. The old "first property"
+                // pick returned null whenever the first key (alphabetic
+                // serialisation order) happened to be null, even when
+                // a later key carried a valid integer — that was the
+                // bug behind the Bookworm-S4 stream lookup falling
+                // back to :1:N: mapping.Season came back as null for
+                // mal:57466 because the first season-key was null,
+                // even though Fribb's data has 4 set on another key,
+                // and BuildSourceLinksAsync had nothing to write into
+                // sourceLinks.ImdbSeason. Iterate every property and
+                // return the first one that's a non-null integer.
+                foreach (var prop in SeasonRaw.Properties())
+                {
+                    var v = prop.Value;
+                    if (v == null || v.Type == JTokenType.Null) continue;
+                    var parsed = v.Value<int?>();
+                    if (parsed.HasValue) return parsed;
+                }
+                return null;
             }
         }
 
