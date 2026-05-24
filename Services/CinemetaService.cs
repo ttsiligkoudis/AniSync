@@ -232,6 +232,85 @@ namespace AnimeList.Services
                 return allVideos;
             }
 
+            // Multi-cour franchise where Fribb supplies a unique Season
+            // value per cour AND Cinemeta returns flat single-season
+            // data (Bookworm shape: one IMDb id for the franchise,
+            // Cinemeta lists every cour's episodes under season=1 with
+            // absolute numbering, Fribb's mapping rows identify cour
+            // seasons as 1/2/3/4). Build a full multi-season video
+            // list so the detail page renders season tabs and the
+            // Stremio addon query later goes to :cour-season:
+            // within-cour-episode — querying :1:absolute-episode
+            // instead routes to the franchise's S1 episodes (S1E2
+            // when the user wanted S4E2, the bug the user reported).
+            //
+            // Specials (Season=null/0 in Fribb) are ignored: allVideos
+            // is already filtered to season > 0 (the main-line cours),
+            // so consuming a special's Episodes count would shift the
+            // remaining slice offsets and route episodes onto the
+            // wrong cour. Same reason the fribbHasPerCourSeasons
+            // check counts seasoned mappings only.
+            //
+            // Gated tightly because the override would BREAK the
+            // Naruto shape (Cinemeta multi-season + Fribb all
+            // Season=1): cinemetaIsFlat would be false there, so
+            // the branch skips and the existing cumulative-slice
+            // logic takes over.
+            var distinctCinemetaSeasons = allVideos.Select(v => v.season).Distinct().Count();
+            var cinemetaIsFlat = distinctCinemetaSeasons == 1;
+            var seasonedMappings = mappings
+                .Where(m => m.Season.HasValue && m.Season.Value > 0)
+                .ToList();
+            var fribbHasPerCourSeasons = seasonedMappings.Count > 1
+                && seasonedMappings.Select(m => m.Season.Value).Distinct().Count() == seasonedMappings.Count;
+
+            if (cinemetaIsFlat && fribbHasPerCourSeasons)
+            {
+                // Hydrate Episodes for every (seasoned) cour. The
+                // cumulative-slice path below only hydrates cours
+                // BEFORE the current one — the multi-season build
+                // needs every cour's count so each slice is sized
+                // correctly.
+                var multiUpdateMappings = false;
+                foreach (var m in seasonedMappings)
+                {
+                    if (m.Episodes.HasValue) continue;
+                    var idHere = IdFor(m);
+                    if (!idHere.HasValue) continue;
+                    (m.Name, m.Episodes) = await getSummary($"{prefix}{idHere}");
+                    multiUpdateMappings = true;
+                }
+
+                var multiSeasonVideos = new List<Video>();
+                int multiOffset = 0;
+                foreach (var m in seasonedMappings)
+                {
+                    var courEpisodes = m.Episodes ?? 0;
+                    if (courEpisodes <= 0) continue;
+
+                    var courSlice = allVideos.Skip(multiOffset).Take(courEpisodes).ToList();
+                    multiOffset += courEpisodes;
+                    var courSeason = m.Season.Value;
+                    for (int i = 0; i < courSlice.Count; i++)
+                    {
+                        courSlice[i].season = courSeason;
+                        courSlice[i].episode = i + 1;
+                    }
+                    multiSeasonVideos.AddRange(courSlice);
+                }
+
+                if (multiUpdateMappings)
+                {
+                    await _animeMapping.EnrichImdbMappings(mappings);
+                }
+
+                _logger.LogInformation(
+                    "GetCourEpisodes: imdb={Imdb} multi-cour franchise + Fribb per-cour seasons + flat Cinemeta → " +
+                    "rebuilt {Count} videos across {Cours} cours.",
+                    imdbId, multiSeasonVideos.Count, seasonedMappings.Count);
+                return multiSeasonVideos;
+            }
+
             // Skip the season filter when more than one cour shares the same Season
             // number — the value is then per-source ambiguous and would lump multiple
             // cours together.
