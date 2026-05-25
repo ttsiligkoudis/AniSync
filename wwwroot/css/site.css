@@ -1146,6 +1146,47 @@ body.modal-open {
     }
 }
 
+/* The header on mobile crams back-btn + logo + search + bell + install
+   pill + hamburger into 360-414px of viewport. With the default 1rem
+   gap and a full "Install" label the search input gets squeezed to
+   ~120px and the results dropdown becomes unreadable. Two compounding
+   fixes:
+     1. Tighten the header gap so each chrome slot eats less padding.
+     2. Drop the "Install" word on narrow screens — the icon alone is
+        enough since the pill only appears when beforeinstallprompt
+        already fired (the user can probably guess what's about to
+        install). Frees the largest single chunk of header width.
+   The dropdown also gets a min-width override so even a still-narrow
+   input renders a comfortable results popup — absolute positioning
+   means it overflows the input's right edge without affecting the
+   header layout. */
+@media (max-width: 600px) {
+    .site-header-inner {
+        gap: 0.5rem;
+    }
+
+    .pwa-install-btn {
+        padding: 0.35rem 0.5rem;
+        gap: 0;
+    }
+
+    .pwa-install-btn > span {
+        display: none;
+    }
+
+    /* Anchor the dropdown to the input's right edge and let it extend
+       leftward so a narrow input doesn't truncate result titles. The
+       max-width cap keeps the dropdown inside the viewport on small
+       phones (360px), where pushing 280px from the input's right edge
+       would otherwise overrun the logo / back button area. */
+    .site-search-results {
+        left: auto;
+        right: 0;
+        min-width: 280px;
+        max-width: calc(100vw - 24px);
+    }
+}
+
 .site-header-badge {
     display: inline-flex;
     align-items: center;
