@@ -47,137 +47,6 @@
     }
 </section>
 
-@* "This Season" stat strip — applies to every visitor since the counts
-   describe the whole AniList catalog, not the viewer's list. Skipped
-   silently when AniList returned zeros (transient failure / sandbox
-   blocks the upstream / etc.) so the dashboard doesn't show a placeholder
-   row of zeros. Each cell links to the relevant /discover filter so
-   tapping the count is a useful navigation, not just a number. *@
-@if (Model.SeasonTotal > 0)
-{
-    <section class="dashboard-section">
-        <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">This Season</h2>
-            <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(CurrentSeasonLabel())">
-                <span>View all</span>
-                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                    <polyline points="12 5 19 12 12 19"></polyline>
-                </svg>
-            </a>
-        </div>
-        <div class="stats-strip">
-            @* These tiles are informational only — no link target. The
-               equivalent navigation already lives in the Discover tab on
-               the bottom-nav / drawer, so making the tiles tap targets
-               just added an inconsistent path. *@
-            <div class="stats-cell" aria-label="Currently airing anime">
-                <span class="stats-icon stats-icon-blue">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect>
-                        <polyline points="17 2 12 7 7 2"></polyline>
-                    </svg>
-                </span>
-                <div class="stats-number">@Model.SeasonCurrentlyAiring</div>
-                <div class="stats-label">Currently Airing</div>
-            </div>
-            <div class="stats-cell" aria-label="New this season">
-                <span class="stats-icon stats-icon-green">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 3 L13.5 9 L19 10.5 L13.5 12 L12 18 L10.5 12 L5 10.5 L10.5 9 Z"></path>
-                        <path d="M19 4 L19.6 5.5 L21 6 L19.6 6.5 L19 8 L18.4 6.5 L17 6 L18.4 5.5 Z"></path>
-                    </svg>
-                </span>
-                <div class="stats-number">@Model.SeasonNewThis</div>
-                <div class="stats-label">New This Season</div>
-            </div>
-            <div class="stats-cell" aria-label="Total this season">
-                <span class="stats-icon stats-icon-amber">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                    </svg>
-                </span>
-                <div class="stats-number">@Model.SeasonTotal</div>
-                <div class="stats-label">Total This Season</div>
-            </div>
-        </div>
-    </section>
-}
-
-@* New episodes airing today. Day-bounded slice of the AniList airing
-   schedule, deduped to one card per show. Cached server-side until the
-   next UTC midnight so the shelf rotates with the calendar day rather
-   than 24h-rolling. Hidden when the upstream returned empty (transient
-   AniList failure, or genuinely no episodes airing today in the AniList
-   schedule). *@
-@if (Model.NewEpisodesToday.Count > 0)
-{
-    <section class="dashboard-section">
-        <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">New Episodes Today</h2>
-            <span class="dashboard-section-link-muted">Refreshes daily</span>
-        </div>
-        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
-        {
-            Items = Model.NewEpisodesToday,
-            ConfigUid = Model.ConfigUid,
-            Variant = "scroll",
-        })
-    </section>
-}
-
-@* Popular-this-season + most-anticipated shelves. Same horizontal-scroll
-   _PosterGrid the anime detail page's Recommended carousel uses, so the
-   card chrome (poster + score + format / episodes / year info row) is
-   identical across surfaces. Rendered for every visitor — the underlying
-   AniList data is public; logged-in users get per-card Manage Entry
-   hand-off via ConfigUid the same way Continue Watching does. *@
-@if (Model.PopularThisSeason.Count > 0)
-{
-    var currentSeasonHref = $"/discover?list=seasonal&season={Uri.EscapeDataString(CurrentSeasonLabel())}";
-    <section class="dashboard-section">
-        <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">Most Popular this Season</h2>
-            <a class="dashboard-section-link" href="@currentSeasonHref">
-                <span>View all</span>
-                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                    <polyline points="12 5 19 12 12 19"></polyline>
-                </svg>
-            </a>
-        </div>
-        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
-        {
-            Items = Model.PopularThisSeason,
-            ConfigUid = Model.ConfigUid,
-            Variant = "scroll",
-        })
-    </section>
-}
-
-@if (Model.MostAnticipated.Count > 0)
-{
-    var nextSeasonHref = $"/discover?list=seasonal&season={Uri.EscapeDataString(NextSeasonLabel())}";
-    <section class="dashboard-section">
-        <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">Most Anticipated</h2>
-            <a class="dashboard-section-link" href="@nextSeasonHref">
-                <span>View all</span>
-                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                    <polyline points="12 5 19 12 12 19"></polyline>
-                </svg>
-            </a>
-        </div>
-        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
-        {
-            Items = Model.MostAnticipated,
-            ConfigUid = Model.ConfigUid,
-            Variant = "scroll",
-        })
-    </section>
-}
-
 @* Stats strip: two big counts (Watching / Completed) plus a top-genres chip
    row. Only renders for logged-in non-anonymous users with at least one
    completed entry — without that, the genre breakdown would be empty and
@@ -509,6 +378,137 @@
             }
         })();
     </script>
+}
+
+@* "This Season" stat strip — applies to every visitor since the counts
+   describe the whole AniList catalog, not the viewer's list. Skipped
+   silently when AniList returned zeros (transient failure / sandbox
+   blocks the upstream / etc.) so the dashboard doesn't show a placeholder
+   row of zeros. Each cell links to the relevant /discover filter so
+   tapping the count is a useful navigation, not just a number. *@
+@if (Model.SeasonTotal > 0)
+{
+    <section class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h2 class="dashboard-section-title">This Season</h2>
+            <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(CurrentSeasonLabel())">
+                <span>View all</span>
+                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                    <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+            </a>
+        </div>
+        <div class="stats-strip">
+            @* These tiles are informational only — no link target. The
+               equivalent navigation already lives in the Discover tab on
+               the bottom-nav / drawer, so making the tiles tap targets
+               just added an inconsistent path. *@
+            <div class="stats-cell" aria-label="Currently airing anime">
+                <span class="stats-icon stats-icon-blue">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect>
+                        <polyline points="17 2 12 7 7 2"></polyline>
+                    </svg>
+                </span>
+                <div class="stats-number">@Model.SeasonCurrentlyAiring</div>
+                <div class="stats-label">Currently Airing</div>
+            </div>
+            <div class="stats-cell" aria-label="New this season">
+                <span class="stats-icon stats-icon-green">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 3 L13.5 9 L19 10.5 L13.5 12 L12 18 L10.5 12 L5 10.5 L10.5 9 Z"></path>
+                        <path d="M19 4 L19.6 5.5 L21 6 L19.6 6.5 L19 8 L18.4 6.5 L17 6 L18.4 5.5 Z"></path>
+                    </svg>
+                </span>
+                <div class="stats-number">@Model.SeasonNewThis</div>
+                <div class="stats-label">New This Season</div>
+            </div>
+            <div class="stats-cell" aria-label="Total this season">
+                <span class="stats-icon stats-icon-amber">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                    </svg>
+                </span>
+                <div class="stats-number">@Model.SeasonTotal</div>
+                <div class="stats-label">Total This Season</div>
+            </div>
+        </div>
+    </section>
+}
+
+@* New episodes airing today. Day-bounded slice of the AniList airing
+   schedule, deduped to one card per show. Cached server-side until the
+   next UTC midnight so the shelf rotates with the calendar day rather
+   than 24h-rolling. Hidden when the upstream returned empty (transient
+   AniList failure, or genuinely no episodes airing today in the AniList
+   schedule). *@
+@if (Model.NewEpisodesToday.Count > 0)
+{
+    <section class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h2 class="dashboard-section-title">New Episodes Today</h2>
+            <span class="dashboard-section-link-muted">Refreshes daily</span>
+        </div>
+        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+        {
+            Items = Model.NewEpisodesToday,
+            ConfigUid = Model.ConfigUid,
+            Variant = "scroll",
+        })
+    </section>
+}
+
+@* Popular-this-season + most-anticipated shelves. Same horizontal-scroll
+   _PosterGrid the anime detail page's Recommended carousel uses, so the
+   card chrome (poster + score + format / episodes / year info row) is
+   identical across surfaces. Rendered for every visitor — the underlying
+   AniList data is public; logged-in users get per-card Manage Entry
+   hand-off via ConfigUid the same way Continue Watching does. *@
+@if (Model.PopularThisSeason.Count > 0)
+{
+    var currentSeasonHref = $"/discover?list=seasonal&season={Uri.EscapeDataString(CurrentSeasonLabel())}";
+    <section class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h2 class="dashboard-section-title">Most Popular this Season</h2>
+            <a class="dashboard-section-link" href="@currentSeasonHref">
+                <span>View all</span>
+                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                    <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+            </a>
+        </div>
+        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+        {
+            Items = Model.PopularThisSeason,
+            ConfigUid = Model.ConfigUid,
+            Variant = "scroll",
+        })
+    </section>
+}
+
+@if (Model.MostAnticipated.Count > 0)
+{
+    var nextSeasonHref = $"/discover?list=seasonal&season={Uri.EscapeDataString(NextSeasonLabel())}";
+    <section class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h2 class="dashboard-section-title">Most Anticipated</h2>
+            <a class="dashboard-section-link" href="@nextSeasonHref">
+                <span>View all</span>
+                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                    <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+            </a>
+        </div>
+        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+        {
+            Items = Model.MostAnticipated,
+            ConfigUid = Model.ConfigUid,
+            Variant = "scroll",
+        })
+    </section>
 }
 
 @* Browse By: secondary discovery surfaces. Replaces the previous three nav
