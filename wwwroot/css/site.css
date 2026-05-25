@@ -38,14 +38,12 @@ body {
 
 main {
     margin: 0 auto;
-    /* Mobile-first: full viewport width with horizontal padding + a
-       comfortable bottom inset (covers the iOS home-indicator and
-       leaves room around the floating FAB at bottom-right so the
-       last shelf isn't pressed up against it). Desktop cap is 1280px
-       so every page shares the same side gaps — Library / Discover
-       always wanted the room, and the dashboard / configure pages
-       now match instead of squeezing to 760px. */
-    padding: 1.25rem 1rem calc(4.5rem + env(safe-area-inset-bottom, 0px));
+    /* Mobile-first: full viewport width with horizontal padding + tall bottom
+       padding to clear the fixed bottom-nav (plus iOS home-indicator inset).
+       Desktop cap is 1280px so every page shares the same side gaps —
+       Library / Discover always wanted the room, and the dashboard /
+       configure pages now match instead of squeezing to 760px. */
+    padding: 1.25rem 1rem calc(7.5rem + env(safe-area-inset-bottom, 0px));
     width: 100%;
     max-width: 1280px;
     display: flex;
@@ -411,111 +409,52 @@ body.drawer-open .drawer-backdrop {
     color: #fff;
 }
 
-/* ── Mobile floating action menu ──
-   Replaces the previous flush bottom-nav. A single FAB at the
-   bottom-right; tap to pop up a 3-col grid panel with the same
-   Home/Library/Discover/Settings/Sign-in destinations the drawer
-   exposes. The FAB sits ~16px from each edge with the iOS home-
-   indicator inset accounted for, so it never overlaps the system
-   gesture bar. Hidden on desktop (≥768px) — the inline header
-   nav + hamburger drawer cover navigation there. */
-.mobile-fab {
+/* ── Bottom nav (mobile) ── */
+.bottom-nav {
     position: fixed;
-    right: max(16px, env(safe-area-inset-right, 0px));
-    bottom: max(16px, calc(env(safe-area-inset-bottom, 0px) + 16px));
-    z-index: 60;
-}
-
-.mobile-fab-trigger {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 52px;
-    height: 52px;
-    padding: 0;
-    border: none;
-    border-radius: 999px;
-    background: #3B82F6;
-    color: #fff;
-    cursor: pointer;
-    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
-    transition: transform 0.15s, background 0.15s;
-}
-
-.mobile-fab-trigger:hover,
-.mobile-fab-trigger:focus {
-    background: #60A5FA;
-    transform: translateY(-1px);
-    outline: none;
-}
-
-/* Open-state nudge — trigger morphs into a "close" affordance once
-   the panel is up; the rotation reads as feedback even before the
-   user notices the panel itself. */
-.mobile-fab.is-open .mobile-fab-trigger {
-    background: #2563EB;
-    transform: rotate(90deg);
-}
-
-.mobile-fab-panel {
-    position: absolute;
+    left: 0;
     right: 0;
-    bottom: calc(100% + 8px);
-    width: 240px;
-    padding: 0.75rem;
-    background: #141414;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 0.85rem;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 0.4rem;
+    bottom: 0;
+    display: flex;
+    background: #0A0A0A;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 0.4rem 0 calc(0.4rem + env(safe-area-inset-bottom, 0));
+    z-index: 50;
 }
 
-.mobile-fab-panel[hidden] {
-    display: none;
-}
-
-.mobile-fab-item,
-.mobile-fab-item:link,
-.mobile-fab-item:visited {
+.bottom-nav-item,
+.bottom-nav-item:link,
+.bottom-nav-item:visited {
+    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 0.3rem;
-    padding: 0.65rem 0.25rem;
-    background: transparent;
-    border: none;
-    border-radius: 0.55rem;
-    color: rgba(255, 255, 255, 0.7);
-    font-family: inherit;
+    gap: 0.15rem;
+    padding: 0.4rem 0.2rem;
+    color: #777;
+    text-decoration: none;
     font-size: 0.7rem;
-    font-weight: 500;
-    text-align: center;
-    text-decoration: none;
-    cursor: pointer;
-    transition: background 0.12s, color 0.12s;
+    transition: color 0.15s;
 }
 
-.mobile-fab-item:hover,
-.mobile-fab-item:focus {
-    background: rgba(255, 255, 255, 0.06);
+.bottom-nav-item:hover,
+.bottom-nav-item:focus {
+    color: #ccc;
+    text-decoration: none;
+}
+
+.bottom-nav-item.active {
     color: #fff;
-    text-decoration: none;
-    outline: none;
 }
 
-.mobile-fab-item.active {
-    color: #93c5fd;
-}
-
-.mobile-fab-close {
-    color: rgba(255, 255, 255, 0.5);
+.bottom-nav-label {
+    font-size: 0.68rem;
+    font-weight: 500;
+    line-height: 1;
 }
 
 @media (min-width: 768px) {
-    .mobile-fab {
+    .bottom-nav {
         display: none;
     }
 }
