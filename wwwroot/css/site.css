@@ -461,33 +461,132 @@ body.drawer-open .drawer-backdrop {
     line-height: 1;
 }
 
-/* "More" toggle lights up the same way an .active cell does once the
-   slide-up panel is open, so the user has a clear visual handle on
-   which row of options is being driven from where. */
-.bottom-nav-more.is-open {
+/* Wrapper that holds the More toggle + its arc panel. position:
+   relative anchors the absolutely-positioned panel to the cell's
+   centre so the fan radiates out from the button rather than from
+   the bar's edge. */
+.bottom-nav-more-wrapper {
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
+}
+
+.bottom-nav-more-wrapper .bottom-nav-more {
+    flex: 1;
+    position: relative;
+    z-index: 1;
+}
+
+/* Two-icon stack on the More toggle — the bars icon is visible by
+   default and swapped out for the ✕ icon when the fan is open. Both
+   sit absolutely on top of each other so the surrounding label cell
+   doesn't shift width as we swap. */
+.bottom-nav-more-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.15s, transform 0.15s;
+}
+
+.bottom-nav-more-icon-close {
+    position: absolute;
+    opacity: 0;
+    transform: rotate(-90deg) scale(0.7);
+    pointer-events: none;
+}
+
+.bottom-nav-more-wrapper.is-open [data-more-icon] {
+    opacity: 0;
+    transform: rotate(90deg) scale(0.7);
+}
+
+.bottom-nav-more-wrapper.is-open [data-close-icon] {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+}
+
+.bottom-nav-more-wrapper.is-open .bottom-nav-more {
     color: #fff;
 }
 
-/* Slide-up panel that the More cell drives. Same flush dark surface
-   as the bottom-nav itself + a hairline divider so the panel reads as
-   a second row of the same bar rather than a floating popover. Anchored
-   to the bar's top edge so the two strips visually stack. */
+/* The fan panel itself is a zero-size anchor pinned at the More cell's
+   centre — children offset themselves outward via --fan-x / --fan-y
+   set per-item by the inline script. */
 .bottom-nav-more-panel {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 3.5rem);
-    display: flex;
-    background: #0A0A0A;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    padding: 0.4rem 0;
-    z-index: 51;
-    box-shadow: 0 -8px 18px rgba(0, 0, 0, 0.35);
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+    z-index: 2;
 }
 
 .bottom-nav-more-panel[hidden] {
+    /* Keep the items in the DOM (so the JS can read their hidden state
+       to decide who participates in the fan), but clip clicks and
+       interaction by overriding the default [hidden] display:none —
+       individual items handle their own opacity / pointer-events. */
+    display: block;
+}
+
+/* Each fan item sits centred at the panel's anchor by default
+   (translate(-50%, -50%)) then offsets along the arc using the
+   --fan-x / --fan-y vars the inline JS computes from the visible
+   item count. Items render as 64×64 chips with their own icon +
+   label so they read at a glance even in the fanned position. */
+.bottom-nav-more-panel .bottom-nav-fan-item,
+.bottom-nav-more-panel .bottom-nav-fan-item:link,
+.bottom-nav-more-panel .bottom-nav-fan-item:visited {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 64px;
+    height: 64px;
+    padding: 0.45rem 0.3rem;
+    background: #141414;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.85rem;
+    color: rgba(255, 255, 255, 0.85);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    transform: translate(-50%, -50%);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1.2),
+                opacity 0.18s ease-out;
+}
+
+.bottom-nav-more-panel .bottom-nav-fan-item .bottom-nav-label {
+    font-size: 0.62rem;
+}
+
+.bottom-nav-more-panel .bottom-nav-fan-item[hidden] {
+    /* Don't render hidden items at all — they shouldn't take up a slot
+       in the arc, and the JS already filters them out when computing
+       --fan-x / --fan-y. */
     display: none;
+}
+
+/* Open state: fan the items out to their computed offsets. The
+   :not([hidden]) guard keeps install (which stays hidden until the
+   browser fires beforeinstallprompt) from animating in even when the
+   panel itself is open. */
+.bottom-nav-more-wrapper.is-open .bottom-nav-more-panel .bottom-nav-fan-item:not([hidden]) {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, -50%) translate(var(--fan-x, 0), var(--fan-y, 0));
+}
+
+.bottom-nav-more-wrapper.is-open .bottom-nav-more-panel {
+    pointer-events: auto;
 }
 
 @media (min-width: 768px) {
