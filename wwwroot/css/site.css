@@ -2606,6 +2606,23 @@ body.modal-open {
     margin: 0 0 0.6rem;
 }
 
+.watch-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin: 0 0 0.6rem;
+}
+
+.watch-section-header .watch-section-title {
+    margin: 0;
+}
+
+.watch-sources-refresh {
+    height: 2.4rem;
+    flex-shrink: 0;
+}
+
 .watch-section-subtitle {
     font-size: 0.8rem;
     font-weight: 600;
