@@ -22,8 +22,16 @@
         });
     }
 
-    var installBtn = document.querySelector('[data-pwa-install]');
+    // Every element marked data-pwa-install gets toggled together — the
+    // layout now has two (the header pill on desktop, the bottom-nav More
+    // popup on mobile) and both should reveal / hide in lockstep so the
+    // chrome stays consistent across breakpoints.
+    var installBtns = Array.prototype.slice.call(document.querySelectorAll('[data-pwa-install]'));
     var deferredPrompt = null;
+
+    function setInstallVisible(visible) {
+        installBtns.forEach(function (b) { b.hidden = !visible; });
+    }
 
     // Helper: detect "already installed". navigator.standalone is
     // iOS-only (Safari sets it true when launched from Home Screen);
@@ -39,28 +47,28 @@
     window.addEventListener('beforeinstallprompt', function (e) {
         e.preventDefault();
         deferredPrompt = e;
-        if (installBtn && !isStandalone()) {
-            installBtn.hidden = false;
+        if (installBtns.length && !isStandalone()) {
+            setInstallVisible(true);
         }
     });
 
-    if (installBtn) {
-        installBtn.addEventListener('click', function () {
+    installBtns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
             if (!deferredPrompt) return;
             deferredPrompt.prompt();
             deferredPrompt.userChoice.then(function () {
                 // Hide regardless — the prompt can only fire once per
                 // event instance. The appinstalled handler hides on
-                // accept; for a dismissed prompt the pill stays hidden
+                // accept; for a dismissed prompt the buttons stay hidden
                 // until the next pageload (deferredPrompt is exhausted).
-                installBtn.hidden = true;
+                setInstallVisible(false);
                 deferredPrompt = null;
             });
         });
-    }
+    });
 
     window.addEventListener('appinstalled', function () {
-        if (installBtn) installBtn.hidden = true;
+        setInstallVisible(false);
         deferredPrompt = null;
     });
 

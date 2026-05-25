@@ -435,12 +435,20 @@ body.drawer-open .drawer-backdrop {
     text-decoration: none;
     font-size: 0.7rem;
     transition: color 0.15s;
+    /* Buttons inside the nav (More toggle, Install) need to look like
+       the anchor cells — strip the default button chrome so the row
+       reads as one continuous strip of equally-styled cells. */
+    background: transparent;
+    border: 0;
+    font-family: inherit;
+    cursor: pointer;
 }
 
 .bottom-nav-item:hover,
 .bottom-nav-item:focus {
     color: #ccc;
     text-decoration: none;
+    outline: none;
 }
 
 .bottom-nav-item.active {
@@ -453,8 +461,50 @@ body.drawer-open .drawer-backdrop {
     line-height: 1;
 }
 
+/* "More" toggle lights up the same way an .active cell does once the
+   slide-up panel is open, so the user has a clear visual handle on
+   which row of options is being driven from where. */
+.bottom-nav-more.is-open {
+    color: #fff;
+}
+
+/* Slide-up panel that the More cell drives. Same flush dark surface
+   as the bottom-nav itself + a hairline divider so the panel reads as
+   a second row of the same bar rather than a floating popover. Anchored
+   to the bar's top edge so the two strips visually stack. */
+.bottom-nav-more-panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 3.5rem);
+    display: flex;
+    background: #0A0A0A;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 0.4rem 0;
+    z-index: 51;
+    box-shadow: 0 -8px 18px rgba(0, 0, 0, 0.35);
+}
+
+.bottom-nav-more-panel[hidden] {
+    display: none;
+}
+
 @media (min-width: 768px) {
-    .bottom-nav {
+    .bottom-nav,
+    .bottom-nav-more-panel {
+        display: none;
+    }
+}
+
+/* Mobile cleanup: the header's PWA Install pill and hamburger drawer
+   trigger both move into the bottom-nav More panel on mobile, so hide
+   their header instances at the same breakpoint the bottom-nav lives
+   at. Tablet (768-991px) still uses the hamburger drawer since the
+   bottom-nav itself is gone there. */
+@media (max-width: 767px) {
+    .pwa-install-btn,
+    .hamburger-btn {
         display: none;
     }
 }
