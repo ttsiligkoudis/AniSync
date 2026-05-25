@@ -1122,6 +1122,32 @@ body.modal-open {
     white-space: nowrap;
 }
 
+/* Movie / TV badge — anchored to the row's right edge so the eye can
+   scan a column of badges down the dropdown rather than hunting for
+   them inline. Two tints so the two types read as distinct at a glance:
+   teal for series (the catalog default) and amber for the rarer movie
+   entries. */
+.site-search-result-type {
+    flex-shrink: 0;
+    padding: 0.1rem 0.45rem;
+    border-radius: 0.35rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.site-search-result-type-tv {
+    background: rgba(56, 189, 248, 0.14);
+    color: rgba(125, 211, 252, 0.95);
+}
+
+.site-search-result-type-movie {
+    background: rgba(251, 191, 36, 0.16);
+    color: rgba(253, 224, 71, 0.95);
+}
+
 .site-search-status {
     padding: 0.75rem 0.85rem;
     color: #999;
