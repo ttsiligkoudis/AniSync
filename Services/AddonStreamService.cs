@@ -87,6 +87,51 @@ namespace AnimeList.Services
             @"\b(?:hevc|x265|h\.?265|hi10p?|10[\s-]?bit)\b",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+        // Source / release-type tokens. Listed most-specific first so
+        // "1080p BluRay REMUX" surfaces as REMUX (the better signal)
+        // rather than BluRay. BDRip / BRRip collapse into BluRay
+        // because the upstream-quality distinction those imply is
+        // already captured by the size + bitrate the user can see.
+        private static readonly (Regex Re, string Label)[] SourceDetectors =
+        {
+            (new Regex(@"\bREMUX\b",                       RegexOptions.Compiled | RegexOptions.IgnoreCase), "REMUX"),
+            (new Regex(@"\b(?:BluRay|Blu-?Ray|BDRip|BRRip)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase), "BluRay"),
+            (new Regex(@"\b(?:WEB[-_. ]?DL)\b",             RegexOptions.Compiled | RegexOptions.IgnoreCase), "WEB-DL"),
+            (new Regex(@"\b(?:WEB[-_. ]?Rip)\b",            RegexOptions.Compiled | RegexOptions.IgnoreCase), "WEBRip"),
+            (new Regex(@"\b(?:HDTV|HDRip)\b",               RegexOptions.Compiled | RegexOptions.IgnoreCase), "HDTV"),
+            (new Regex(@"\bDVDRip\b",                       RegexOptions.Compiled | RegexOptions.IgnoreCase), "DVD"),
+        };
+
+        // HDR / Dolby Vision detection. DV / HDR10+ first so a
+        // "Dolby Vision HDR10+" release reports the higher tier
+        // before the more common HDR10 / HDR fallbacks. Plain
+        // "10bit" is intentionally NOT here — it's a colour-depth
+        // signal, not an HDR signal (Hi10P AVC is 10-bit but SDR),
+        // and the HEVC badge already flags the browser-compat
+        // implication.
+        private static readonly (Regex Re, string Label)[] HdrDetectors =
+        {
+            (new Regex(@"\b(?:Dolby[\s.]*Vision|DoVi|DV)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase), "DV"),
+            (new Regex(@"\bHDR10\+",                         RegexOptions.Compiled | RegexOptions.IgnoreCase), "HDR10+"),
+            (new Regex(@"\bHDR10\b",                         RegexOptions.Compiled | RegexOptions.IgnoreCase), "HDR10"),
+            (new Regex(@"\bHDR\b",                           RegexOptions.Compiled | RegexOptions.IgnoreCase), "HDR"),
+        };
+
+        // Audio codec + channel layout in a single match. The codec
+        // alternation is most-specific first (DDP / EAC3 → DD / AC3,
+        // DTS-HD MA → DTS) so a "DDP5.1 Atmos" tag doesn't collapse
+        // to bare "DD". The optional trailing channel pattern eats
+        // "5.1" / "7.1" / "2.0" / "5.1ch" so the badge reads as a
+        // full audio spec ("DDP5.1") rather than a bare codec.
+        //
+        // Note: no \b between the codec and the channel group —
+        // regex word-boundary doesn't fire between letters and
+        // digits ("DDP" → "5" is \w→\w), so requiring one there
+        // would break the common "DDP5.1" / "AAC2.0" packing.
+        private static readonly Regex AudioRegex = new(
+            @"\b(Atmos|TrueHD|DTS-?HD(?:[\s.]?MA)?|DTS-?X|DDP|E-?AC-?3|EAC3|AC-?3|DD\+|DTS|FLAC|AAC|Opus|MP3|PCM|Vorbis)(?:[\s.]?(\d\.\d)(?:ch)?)?\b",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
         public AddonStreamService(
             IHttpClientFactory clientFactory,
             ILogger<AddonStreamService> logger)
@@ -453,6 +498,14 @@ namespace AnimeList.Services
                 // lives in `description` and gets dropped before the
                 // JSON projection reaches the client.
                 var isHevc = HevcOrHi10Regex.IsMatch(combined);
+                // Comet emits these on its multi-line description
+                // (BluRay / WEB-DL, HDR / DV, DDP5.1 / Atmos). They
+                // also land in the filename for releases scraped by
+                // Torrentio / MediaFusion, so the same haystack
+                // surfaces them across every addon shape.
+                var source = DetectSource(combined);
+                var hdr = DetectHdr(combined);
+                var audio = DetectAudio(combined);
 
                 string bingeGroup = null;
                 if (s["behaviorHints"] is JObject hints)
@@ -490,7 +543,10 @@ namespace AnimeList.Services
                     InfoHash: infoHash,
                     FileIdx: fileIdx,
                     Provider: providerFallback,
-                    IsHevc: isHevc));
+                    IsHevc: isHevc,
+                    Source: source,
+                    Hdr: hdr,
+                    Audio: audio));
             }
 
             // Return in the addon's emit order — no re-sort, no cap. Each
@@ -547,6 +603,34 @@ namespace AnimeList.Services
                     return label;
             }
             return null;
+        }
+
+        private static string DetectSource(string haystack)
+        {
+            foreach (var (re, label) in SourceDetectors)
+            {
+                if (re.IsMatch(haystack)) return label;
+            }
+            return null;
+        }
+
+        private static string DetectHdr(string haystack)
+        {
+            foreach (var (re, label) in HdrDetectors)
+            {
+                if (re.IsMatch(haystack)) return label;
+            }
+            return null;
+        }
+
+        private static string DetectAudio(string haystack)
+        {
+            var m = AudioRegex.Match(haystack);
+            if (!m.Success) return null;
+            // Collapse runs of whitespace to a single space — "DTS-HD MA  5.1"
+            // → "DTS-HD MA 5.1" — but keep the single space between codec
+            // and channel info intact for readability. "DDP5.1" stays packed.
+            return Regex.Replace(m.Value.Trim(), @"\s+", " ");
         }
 
         private static bool IsBrowserPlayable(string url, string nameAndDescription)

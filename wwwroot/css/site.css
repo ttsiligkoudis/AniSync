@@ -2382,6 +2382,55 @@ body.modal-open {
     font-size: 0.72rem;
 }
 
+/* Source pill (BluRay / WEB-DL / REMUX). Cool teal tint so it reads as
+   distinct from the warm provider pill and the alert-coloured HEVC /
+   HDR badges. Highest-information chip in the sub-row after quality. */
+.episode-stream-source {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.05rem 0.4rem;
+    background: rgba(56, 189, 248, 0.14);
+    border-radius: 0.35rem;
+    color: rgba(125, 211, 252, 0.95);
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+/* HDR / Dolby Vision badge. Distinct gold tint — matches the
+   "this release will light up your HDR display" connotation and
+   stands clear of the amber HEVC warning so the two read as
+   different signals at a glance. */
+.episode-stream-hdr {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.05rem 0.4rem;
+    background: rgba(250, 204, 21, 0.16);
+    border-radius: 0.35rem;
+    color: rgba(253, 224, 71, 0.95);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+/* Audio-codec pill (DDP5.1 / Atmos / DTS-HD). Muted neutral so it
+   sits below the quality / source / HDR signals in visual weight —
+   useful tertiary metadata that shouldn't compete with the primary
+   "is this a good release" cues. */
+.episode-stream-audio {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.05rem 0.4rem;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 0.35rem;
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
 /* ─── Watch page (/anime/{id}/watch/{episode}) ───────────────────── */
 
 .watch-page {

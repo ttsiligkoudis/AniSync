@@ -714,6 +714,9 @@ namespace AnimeList.Controllers
                     language = s.Language,
                     provider = s.Provider,
                     isHevc = s.IsHevc,
+                    source = s.Source,
+                    hdr = s.Hdr,
+                    audio = s.Audio,
                 }).ToList();
             }
 
