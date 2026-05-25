@@ -455,6 +455,55 @@ namespace AnimeList.Controllers
             return token == null || token.anonymousUser ? null : token;
         }
 
+        /// <summary>
+        /// Renders the standalone signup form. Kitsu is the only one of the three providers
+        /// we support that exposes a public registration API (JSON:API users endpoint) —
+        /// AniList and MAL require a manual signup on their own sites.
+        /// </summary>
+        [HttpGet]
+        public IActionResult Register()
+        {
+            return View();
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Register(string name, string email, string password, string confirmPassword)
+        {
+            // Mirror the basic constraints Kitsu would reject server-side anyway, but
+            // surface them inline so the user doesn't pay a network round-trip to learn
+            // their password is too short or doesn't match the confirmation.
+            string error = null;
+            if (string.IsNullOrWhiteSpace(name)) error = "Username is required.";
+            else if (string.IsNullOrWhiteSpace(email)) error = "Email is required.";
+            else if (string.IsNullOrWhiteSpace(password)) error = "Password is required.";
+            else if (password.Length < 8) error = "Password must be at least 8 characters.";
+            else if (password != confirmPassword) error = "Passwords don't match.";
+
+            if (error != null)
+            {
+                ViewBag.Error = error;
+                ViewBag.Name = name;
+                ViewBag.Email = email;
+                return View();
+            }
+
+            var (ok, kitsuError) = await _kitsuService.RegisterAsync(name, email, password);
+            if (!ok)
+            {
+                ViewBag.Error = kitsuError;
+                ViewBag.Name = name;
+                ViewBag.Email = email;
+                return View();
+            }
+
+            // Account exists — drop straight into the same password-grant flow Login uses so
+            // the user lands on /Home/Configure already authenticated. If the token exchange
+            // itself fails (unlikely directly after a 201), Configure renders the login
+            // form and the user can sign in manually with the credentials they just typed.
+            await _tokenService.GetAccessTokenByCredsAsync(name, password, setContext: true);
+            return RedirectToAction("Configure", "Home");
+        }
+
         public async Task<IActionResult> Logout()
         {
             // Pure disconnect: clears the session cookie + in-memory token cache so the

@@ -224,6 +224,13 @@ else
         <a id="loginUrl" class="btn-primary-action btn-login" href='@Url.Action("Login", "Auth", new { animeService = Model.AnimeService })'>
             Login with <span id="loginServiceName">@Model.ServiceDisplay</span>
         </a>
+        @* Kitsu is the only provider that exposes a public registration API — for
+           AniList / MAL we point the user at their own signup page from the
+           Register view itself. The link mirrors #kitsuCreds' visibility so it
+           only shows when Kitsu is the selected provider. *@
+        <div id="kitsuRegister" class="kitsu-register" style="display:@(Model.IsKitsu ? "block" : "none")">
+            <a href='@Url.Action("Register", "Auth")' class="hint-text">Don't have a Kitsu account? <span class="kitsu-register-link">Create one</span></a>
+        </div>
     </div>
 
     <p class="hint-text">Login to your anime list provider to get started.</p>

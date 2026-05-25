@@ -1477,6 +1477,32 @@ body.modal-open {
     margin-bottom: 0.75rem;
 }
 
+/* "Don't have a Kitsu account? Create one" affordance under the login
+   button on the Configure page. Visibility is toggled to follow the
+   provider picker — only the Kitsu pill surfaces it. */
+.kitsu-register {
+    margin-top: 0.6rem;
+    text-align: center;
+}
+
+.kitsu-register .kitsu-register-link {
+    color: #93c5fd;
+    text-decoration: underline;
+}
+
+/* Inline validation banner used by the Kitsu signup form. Sits above the
+   form so the user sees what went wrong before they re-type credentials. */
+.register-error {
+    margin-bottom: 0.75rem;
+    padding: 0.55rem 0.75rem;
+    border-radius: 8px;
+    background: rgba(220, 38, 38, 0.12);
+    border: 1px solid rgba(220, 38, 38, 0.35);
+    color: #fecaca;
+    font-size: 0.85rem;
+    line-height: 1.35;
+}
+
 .cred-group label {
     display: block;
     font-size: 0.8rem;
