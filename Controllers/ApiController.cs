@@ -286,14 +286,16 @@ namespace AnimeList.Controllers
         /// <param name="title">The show title. Page-scraped strings with dub/sub
         /// suffixes, year tags or romanised variants are fine — the scorer
         /// normalises them.</param>
-        /// <param name="service">Which provider's search to query. AniList default;
-        /// pick MyAnimeList or Kitsu only if you have a strong reason.</param>
+        /// <param name="service">Which provider's search to query. When unspecified,
+        /// resolves to the caller's session primary (so the in-app site search returns
+        /// ids in the user's own id-space) and falls through to AniList for callers
+        /// without a session — browser extensions, webhooks, bots.</param>
         /// <param name="limit">Maximum number of ranked matches to return. Defaults
         /// to 5; capped at 20.</param>
         [HttpGet("match")]
         [ProducesResponseType(typeof(MatchResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> Match(string title, AnimeService service = AnimeService.Anilist, int limit = 5)
+        public async Task<IActionResult> Match(string title, AnimeService? service = null, int limit = 5)
         {
             var hideAdult = await ResolveHideAdultAsync();
             try
@@ -304,6 +306,23 @@ namespace AnimeList.Controllers
                 limit = Math.Clamp(limit, 1, 20);
                 var normalisedQuery = NormalizeTitle(title);
 
+                // When the caller didn't pick a service explicitly, default to
+                // their session's primary so the in-app site search returns ids
+                // in the user's own id-space — clicking a Kitsu user's result
+                // should land on /anime/kitsu:N, not /anime/anilist:N. Callers
+                // without a session (the API's primary external audience —
+                // extensions / bots / webhooks) fall through to AniList.
+                var requestedService = service;
+                if (!requestedService.HasValue)
+                {
+                    try
+                    {
+                        var (token, _) = await _tokenService.ResolveCurrentAsync(_configStore);
+                        if (token != null) requestedService = token.anime_service;
+                    }
+                    catch { /* session corrupt — fall through to AniList */ }
+                }
+
                 // groupSeasons=false forces the catalog to emit service-native ids
                 // (anilist:N / kitsu:N / mal:N) instead of collapsing to IMDb / TMDB.
                 // Downstream callers — including the browser-extension auto-tracker —
@@ -311,7 +330,7 @@ namespace AnimeList.Controllers
                 // native id space, so handing back an IMDb id would 400 on save.
                 // Same outage fallback as /search — Kitsu when AniList is down,
                 // so the global header search-as-you-type stays useful.
-                var effectiveService = service;
+                var effectiveService = requestedService ?? AnimeService.Anilist;
                 if (effectiveService == AnimeService.Anilist && AnimeList.Services.AnilistHealthMonitor.IsDown)
                     effectiveService = AnimeService.Kitsu;
                 var raw = effectiveService switch
