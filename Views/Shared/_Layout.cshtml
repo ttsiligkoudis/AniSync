@@ -370,44 +370,126 @@
         </main>
     </div>
 
-    @* Mobile-first bottom nav. Always 4 primary destinations matching the
-       drawer's first four items so users have a quick-access bar without
-       opening the drawer. Hidden on wider viewports via media query in
-       site.css — desktop users rely on the hamburger drawer instead. *@
-    <nav class="bottom-nav" aria-label="Primary">
-        <a href="/" class="bottom-nav-item @(activeNav == "home" ? "active" : "")" aria-label="Home">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3 12L12 3l9 9"></path>
-                <path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path>
+    @* Mobile floating menu — replaces the previous flush bottom-nav so the
+       last shelf on every page (Continue watching's "View all" link being
+       the canonical culprit) isn't permanently obscured. Tap the FAB at
+       bottom-right and the same Home/Library/Discover/Settings/Sign-in
+       links pop up as a 3-col grid panel, AniList-style. Hidden on
+       desktop (≥768px) where the inline header nav + hamburger drawer
+       already cover primary navigation. *@
+    <div class="mobile-fab" data-mobile-fab>
+        <button type="button" class="mobile-fab-trigger" aria-label="Open menu"
+                aria-expanded="false" aria-controls="mobile-fab-panel" data-mobile-fab-toggle>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="4" y1="7" x2="20" y2="7"></line>
+                <line x1="4" y1="12" x2="20" y2="12"></line>
+                <line x1="4" y1="17" x2="20" y2="17"></line>
             </svg>
-            <span class="bottom-nav-label">Home</span>
-        </a>
-        @* Library tab omitted for anonymous users — the page just redirects
-           them back to /, so the cell would be a dead end on the bottom nav. *@
-        @if (layoutLoggedIn)
-        {
-            <a href="/library" class="bottom-nav-item @(activeNav == "library" ? "active" : "")" aria-label="Library">
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+        </button>
+        <div class="mobile-fab-panel" id="mobile-fab-panel" role="menu" hidden>
+            <a class="mobile-fab-item @(activeNav == "home" ? "active" : "")" href="/" role="menuitem">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 12L12 3l9 9"></path>
+                    <path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path>
                 </svg>
-                <span class="bottom-nav-label">Library</span>
+                <span>Home</span>
             </a>
-        }
-        <a href="/discover" class="bottom-nav-item @(activeNav == "discover" ? "active" : "")" aria-label="Discover">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="11" cy="11" r="8"></circle>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
-            <span class="bottom-nav-label">Discover</span>
-        </a>
-        <a href="@Url.Action("Configure", "Home")" class="bottom-nav-item @(activeNav == "configure" || activeNav == "stremio" ? "active" : "")" aria-label="Settings">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="3"></circle>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-            </svg>
-            <span class="bottom-nav-label">Settings</span>
-        </a>
-    </nav>
+            @if (layoutLoggedIn)
+            {
+                <a class="mobile-fab-item @(activeNav == "library" ? "active" : "")" href="/library" role="menuitem">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    <span>Library</span>
+                </a>
+            }
+            <a class="mobile-fab-item @(activeNav == "discover" ? "active" : "")" href="/discover" role="menuitem">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <span>Discover</span>
+            </a>
+            <a class="mobile-fab-item @(activeNav == "configure" || activeNav == "stremio" ? "active" : "")" href="@Url.Action("Configure", "Home")" role="menuitem">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+                <span>Settings</span>
+            </a>
+            @if (layoutHasSession)
+            {
+                <a class="mobile-fab-item" href="@Url.Action("Logout", "Auth")" role="menuitem">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                        <polyline points="16 17 21 12 16 7"></polyline>
+                        <line x1="21" y1="12" x2="9" y2="12"></line>
+                    </svg>
+                    <span>Disconnect</span>
+                </a>
+            }
+            else
+            {
+                <a class="mobile-fab-item" href="@Url.Action("Configure", "Home")" role="menuitem">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                        <polyline points="10 17 15 12 10 7"></polyline>
+                        <line x1="15" y1="12" x2="3" y2="12"></line>
+                    </svg>
+                    <span>Sign in</span>
+                </a>
+            }
+            <button type="button" class="mobile-fab-item mobile-fab-close" role="menuitem" aria-label="Close menu" data-mobile-fab-close>
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                <span>Close</span>
+            </button>
+        </div>
+    </div>
+    <script>
+        (function () {
+            var wrap = document.querySelector('[data-mobile-fab]');
+            if (!wrap) return;
+            var trigger = wrap.querySelector('[data-mobile-fab-toggle]');
+            var panel = wrap.querySelector('.mobile-fab-panel');
+            var closeBtn = wrap.querySelector('[data-mobile-fab-close]');
+
+            function close() {
+                panel.hidden = true;
+                trigger.setAttribute('aria-expanded', 'false');
+                wrap.classList.remove('is-open');
+            }
+            function open() {
+                panel.hidden = false;
+                trigger.setAttribute('aria-expanded', 'true');
+                wrap.classList.add('is-open');
+            }
+            trigger.addEventListener('click', function (e) {
+                e.stopPropagation();
+                if (panel.hidden) open(); else close();
+            });
+            if (closeBtn) {
+                closeBtn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    close();
+                });
+            }
+            // Tap outside the FAB area closes the panel. mousedown rather
+            // than click so dismissal happens before any focus-loss
+            // animation kicks in, matching the search dropdown's pattern.
+            document.addEventListener('mousedown', function (e) {
+                if (!wrap.contains(e.target)) close();
+            });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && !panel.hidden) {
+                    close();
+                    trigger.focus();
+                }
+            });
+        })();
+    </script>
 
     @* Inline Manage Entry modal — single instance, hidden by default. The web-app
        pages (Library / Discover / Dashboard) intercept clicks on poster cards
