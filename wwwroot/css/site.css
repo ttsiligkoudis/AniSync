@@ -1156,34 +1156,53 @@ body.modal-open {
         enough since the pill only appears when beforeinstallprompt
         already fired (the user can probably guess what's about to
         install). Frees the largest single chunk of header width.
-   The dropdown also gets a min-width override so even a still-narrow
-   input renders a comfortable results popup — absolute positioning
-   means it overflows the input's right edge without affecting the
-   header layout. */
+   The dropdown switches to a fixed-position sheet below the header
+   so it spans the viewport symmetrically rather than jutting off to
+   one side from a narrow input. */
 @media (max-width: 600px) {
     .site-header-inner {
         gap: 0.5rem;
     }
 
+    /* Match the notif bell exactly — same 36×36 circle, same border /
+       background tint — so the right-side header cluster reads as a
+       row of equal-weight chips rather than a circle next to a
+       differently-shaped pill. */
     .pwa-install-btn {
-        padding: 0.35rem 0.5rem;
+        width: 36px;
+        height: 36px;
+        padding: 0;
         gap: 0;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: #ccc;
+        justify-content: center;
+    }
+
+    .pwa-install-btn:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.22);
+        color: #fff;
     }
 
     .pwa-install-btn > span {
         display: none;
     }
 
-    /* Anchor the dropdown to the input's right edge and let it extend
-       leftward so a narrow input doesn't truncate result titles. The
-       max-width cap keeps the dropdown inside the viewport on small
-       phones (360px), where pushing 280px from the input's right edge
-       would otherwise overrun the logo / back button area. */
+    /* Full-width sheet anchored to the viewport so the dropdown sits
+       visually centred under the page rather than lurching left when
+       the input is squeezed against the right-side chrome. position:
+       fixed escapes the .site-search relative container — the input
+       on mobile is already pinned to the header which doesn't move,
+       so a fixed offset under the header reads the same as anchoring
+       to the input. */
     .site-search-results {
-        left: auto;
-        right: 0;
-        min-width: 280px;
-        max-width: calc(100vw - 24px);
+        position: fixed;
+        top: 56px;
+        left: 12px;
+        right: 12px;
+        min-width: 0;
+        max-width: none;
     }
 }
 
