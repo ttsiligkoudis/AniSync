@@ -191,7 +191,10 @@
 </nav>
 
 <section class="watch-sources" id="watchSources">
-    <h2 class="watch-section-title">Sources</h2>
+    <div class="watch-section-header">
+        <h2 class="watch-section-title">Sources</h2>
+        <button type="button" id="watchSourcesRefresh" class="episode-stream-action watch-sources-refresh" title="Refresh sources" aria-label="Refresh sources"></button>
+    </div>
     <div id="watchSourcesBody" class="watch-sources-body">
         <p class="hint-text">Looking for streams…</p>
     </div>
@@ -3682,10 +3685,25 @@
                 renderSources(data);
             }
 
-            var cachedStreamData = readCachedStreamData();
-            if (cachedStreamData) {
-                applyStreamData(cachedStreamData);
-            } else {
+            // Two-arrow refresh icon for the Sources header — clears the
+            // localStorage entry for this episode and refetches. Lets the
+            // user bypass the 10-min TTL when an empty / stale fan-out
+            // shouldn't be the final word (e.g. a Stremio addon just came
+            // back online, debrid cache just warmed).
+            var REFRESH_ICON_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
+
+            var refreshBtn = document.getElementById('watchSourcesRefresh');
+            if (refreshBtn) refreshBtn.innerHTML = REFRESH_ICON_SVG;
+
+            var streamsLoading = false;
+
+            function fetchStreams() {
+                if (streamsLoading) return;
+                streamsLoading = true;
+                if (refreshBtn) {
+                    refreshBtn.disabled = true;
+                    refreshBtn.classList.add('is-loading');
+                }
                 fetch('/anime/episode-streams?' + qs, {
                     credentials: 'same-origin',
                     headers: { 'Accept': 'application/json' },
@@ -3706,7 +3724,32 @@
                     })
                     .catch(function () {
                         sourcesBody.innerHTML = '<p class="hint-text">Couldn\'t load sources. Try refreshing.</p>';
+                    })
+                    .then(function () {
+                        streamsLoading = false;
+                        if (refreshBtn) {
+                            refreshBtn.disabled = false;
+                            refreshBtn.classList.remove('is-loading');
+                        }
                     });
+            }
+
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', function () {
+                    if (streamsLoading) return;
+                    if (streamCacheKey) {
+                        try { localStorage.removeItem(streamCacheKey); } catch (_) {}
+                    }
+                    sourcesBody.innerHTML = '<p class="hint-text">Looking for streams…</p>';
+                    fetchStreams();
+                });
+            }
+
+            var cachedStreamData = readCachedStreamData();
+            if (cachedStreamData) {
+                applyStreamData(cachedStreamData);
+            } else {
+                fetchStreams();
             }
         })();
     </script>
