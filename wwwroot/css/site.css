@@ -6035,7 +6035,7 @@ ol.anime-detail-episodes-busy {
     top: 56px;
     right: 16px;
     width: 360px;
-    max-height: 70vh;
+    max-height: 55vh;
     background: #141414;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 0.65rem;
@@ -6050,13 +6050,17 @@ ol.anime-detail-episodes-busy {
 @media (max-width: 600px) {
     /* On narrow viewports pin the panel near-full-width so it doesn't
        clip the screen edge — the header cluster sits flush right so a
-       360px panel would overshoot the viewport without this. */
+       360px panel would overshoot the viewport without this. Height
+       capped well short of the viewport so the panel reads as a
+       dropdown the user scrolls within, not a takeover sheet — the
+       page behind stays visible and the user can dismiss by tapping
+       outside. */
     .notif-panel {
         top: 56px;
         right: 8px;
         left: 8px;
         width: auto;
-        max-height: calc(100vh - 72px);
+        max-height: 60vh;
     }
 }
 
