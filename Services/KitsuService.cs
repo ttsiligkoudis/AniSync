@@ -973,5 +973,79 @@ namespace AnimeList.Services
                 ?? SafeGet<string>(anime, "attributes", "titles", "en_jp")
                 ?? SafeGet<string>(anime, "attributes", "canonicalTitle");
         }
+
+        public async Task<(bool ok, string error)> RegisterAsync(string name, string email, string password)
+        {
+            // Kitsu's JSON:API users endpoint accepts unauthenticated POSTs and is the only
+            // upstream account-creation surface among the three providers we support
+            // (AniList and MAL are web-signup only). On success Kitsu returns 201 with the
+            // user resource; on validation failure it returns a 4xx with a JSON:API errors
+            // envelope we lift the user-facing message out of.
+            var payload = new JObject
+            {
+                ["data"] = new JObject
+                {
+                    ["type"] = "users",
+                    ["attributes"] = new JObject
+                    {
+                        ["name"] = name,
+                        ["email"] = email,
+                        ["password"] = password,
+                    },
+                },
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{_kitsuApi}/users")
+            {
+                Content = new StringContent(payload.ToString(), Encoding.UTF8, "application/vnd.api+json"),
+            };
+            request.Headers.Accept.Clear();
+            request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/vnd.api+json"));
+
+            HttpResponseMessage response;
+            try
+            {
+                response = await _clientFactory.CreateClient().SendAsync(request);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kitsu registration request failed.");
+                return (false, "Couldn't reach Kitsu. Please try again.");
+            }
+
+            if (response.IsSuccessStatusCode) return (true, null);
+
+            var body = await response.Content.ReadAsStringAsync();
+            return (false, ExtractKitsuErrorMessage(body) ?? $"Kitsu rejected the signup ({(int)response.StatusCode}).");
+        }
+
+        /// <summary>
+        /// Lifts the first user-presentable message out of a Kitsu JSON:API errors envelope.
+        /// Kitsu returns an array under <c>errors</c> with <c>title</c> + <c>detail</c> +
+        /// optional <c>source.pointer</c>; we prefer the most specific combination available.
+        /// </summary>
+        private static string ExtractKitsuErrorMessage(string body)
+        {
+            if (string.IsNullOrWhiteSpace(body)) return null;
+            JObject parsed;
+            try { parsed = JObject.Parse(body); }
+            catch { return null; }
+
+            if (parsed["errors"] is not JArray errors || errors.Count == 0) return null;
+            var first = errors[0] as JObject;
+            if (first == null) return null;
+
+            var title = (string)first["title"];
+            var detail = (string)first["detail"];
+            var pointer = SafeGet<string>(first, "source", "pointer");
+
+            // Kitsu's pointer is shaped like "/data/attributes/email"; the last segment is
+            // a friendly field name for the user-facing message.
+            var field = pointer?.Split('/').LastOrDefault();
+
+            if (!string.IsNullOrEmpty(field) && !string.IsNullOrEmpty(title))
+                return $"{char.ToUpperInvariant(field[0])}{field[1..]} {title}";
+            return detail ?? title;
+        }
     }
 }

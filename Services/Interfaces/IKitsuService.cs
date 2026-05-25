@@ -48,6 +48,13 @@ namespace AnimeList.Services.Interfaces
         /// without re-prefixing.
         /// </summary>
         Task<List<AnimeEntry>> GetUserListEntriesAsync(TokenData tokenData);
+
+        /// <summary>
+        /// Creates a Kitsu user account via Kitsu's public JSON:API users endpoint. Returns
+        /// (true, null) on success; (false, message) on failure with a user-presentable
+        /// error pulled from Kitsu's JSON:API error envelope.
+        /// </summary>
+        Task<(bool ok, string error)> RegisterAsync(string name, string email, string password);
     }
 }
 

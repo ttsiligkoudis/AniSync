@@ -309,7 +309,10 @@
         $pill.addClass('active');
         $('#loginServiceName').text(serviceLabel(svc));
         // Only the Kitsu password-grant flow needs the username/password fields visible.
+        // The "Create Kitsu account" affordance follows the same rule — AniList / MAL
+        // signup is handled on those providers' own sites, not in-app.
         $('#kitsuCreds').toggle(svc === 0);
+        $('#kitsuRegister').toggle(svc === 0);
         updateLoginUrl();
     });
 
