@@ -461,28 +461,14 @@ body.drawer-open .drawer-backdrop {
     line-height: 1;
 }
 
-/* Wrapper that holds the More toggle + its arc panel. position:
-   relative anchors the absolutely-positioned panel to the cell's
-   centre so the fan radiates out from the button rather than from
-   the bar's edge. */
-.bottom-nav-more-wrapper {
-    position: relative;
-    flex: 1;
-    display: flex;
-    align-items: stretch;
-    justify-content: stretch;
-}
-
-.bottom-nav-more-wrapper .bottom-nav-more {
-    flex: 1;
-    position: relative;
-    z-index: 1;
-}
-
 /* Two-icon stack on the More toggle — the bars icon is visible by
-   default and swapped out for the ✕ icon when the fan is open. Both
+   default and swapped out for the ✕ icon when the dome is open. Both
    sit absolutely on top of each other so the surrounding label cell
    doesn't shift width as we swap. */
+.bottom-nav-more {
+    position: relative;
+}
+
 .bottom-nav-more-icon {
     display: inline-flex;
     align-items: center;
@@ -492,106 +478,133 @@ body.drawer-open .drawer-backdrop {
 
 .bottom-nav-more-icon-close {
     position: absolute;
+    top: 0.4rem;
+    left: 50%;
+    transform: translateX(-50%) rotate(-90deg) scale(0.7);
     opacity: 0;
-    transform: rotate(-90deg) scale(0.7);
     pointer-events: none;
 }
 
-.bottom-nav-more-wrapper.is-open [data-more-icon] {
+.bottom-nav-more.is-open [data-more-icon] {
     opacity: 0;
     transform: rotate(90deg) scale(0.7);
 }
 
-.bottom-nav-more-wrapper.is-open [data-close-icon] {
+.bottom-nav-more.is-open [data-close-icon] {
     opacity: 1;
-    transform: rotate(0deg) scale(1);
+    transform: translateX(-50%) rotate(0deg) scale(1);
 }
 
-.bottom-nav-more-wrapper.is-open .bottom-nav-more {
+.bottom-nav-more.is-open {
     color: #fff;
 }
 
-/* The fan panel itself is a zero-size anchor pinned at the More cell's
-   centre — children offset themselves outward via --fan-x / --fan-y
-   set per-item by the inline script. */
-.bottom-nav-more-panel {
-    position: absolute;
+/* ── Bottom-nav More dome ──
+   One unified half-circle tray that mates flush with the top edge of
+   the bottom-nav. Flat bottom + fully-rounded top gives the half-moon
+   silhouette; the dark surface continues the bar's chrome so the
+   dome reads as an extension of it rather than a floating popover.
+   Screen-centred — its width is independent of where the More cell
+   sits inside the bar. The dome stays a single rendered surface so
+   the items inside (Settings / Install / Sign-in) feel like cells
+   carved into the same tray rather than three disconnected chips. */
+.bottom-nav-more-dome {
+    position: fixed;
+    /* Mate the flat bottom of the dome with the top edge of the
+       bottom-nav. The bar is roughly 0.8rem padding + 48px content +
+       safe-area on mobile (≈ 3.8rem + safe-area total), so anchoring
+       the dome here lands its flat bottom flush with the bar's lip —
+       one continuous chrome surface, no seam. */
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 3.8rem);
     left: 50%;
-    top: 50%;
-    width: 0;
-    height: 0;
+    transform: translateX(-50%) translateY(8px) scale(0.96);
+    width: 260px;
+    height: 130px;
+    background: linear-gradient(180deg, #181818 0%, #0F0F0F 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: none;
+    border-radius: 130px 130px 0 0;
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.55);
+    z-index: 49;
+    opacity: 0;
     pointer-events: none;
-    z-index: 2;
+    transition: opacity 0.18s ease-out,
+                transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1.05);
 }
 
-.bottom-nav-more-panel[hidden] {
-    /* Keep the items in the DOM (so the JS can read their hidden state
-       to decide who participates in the fan), but clip clicks and
-       interaction by overriding the default [hidden] display:none —
-       individual items handle their own opacity / pointer-events. */
+/* Open state: lift the dome into view + fade in. The translate-up
+   undoes the resting-state offset so the dome settles onto the bar
+   from below rather than dropping from above. */
+.bottom-nav-more-dome:not([hidden]) {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(-50%) translateY(0) scale(1);
+}
+
+.bottom-nav-more-dome[hidden] {
+    /* Keep the dome rendered but invisible so the JS can read child
+       state (Install's hidden attribute, etc.) before opening, and so
+       the fade-out transition runs cleanly when we re-apply [hidden]. */
     display: block;
 }
 
-/* Each fan item sits centred at the panel's anchor by default
-   (translate(-50%, -50%)) then offsets along the arc using the
-   --fan-x / --fan-y vars the inline JS computes from the visible
-   item count. Items render as 64×64 chips with their own icon +
-   label so they read at a glance even in the fanned position. */
-.bottom-nav-more-panel .bottom-nav-fan-item,
-.bottom-nav-more-panel .bottom-nav-fan-item:link,
-.bottom-nav-more-panel .bottom-nav-fan-item:visited {
+/* Items inside the dome. Each cell is centred at the dome's bottom-
+   centre by default (translate(-50%, -50%)) then offset along the
+   inner arc via --dome-x / --dome-y, which the inline JS recomputes
+   on every open from the visible item count. No background of their
+   own — the dome IS the surface; the cells just hold icon + label. */
+.bottom-nav-more-dome .bottom-nav-dome-item,
+.bottom-nav-more-dome .bottom-nav-dome-item:link,
+.bottom-nav-more-dome .bottom-nav-dome-item:visited {
     position: absolute;
-    left: 0;
-    top: 0;
+    left: 50%;
+    bottom: 0;
     width: 64px;
-    height: 64px;
-    padding: 0.45rem 0.3rem;
-    background: #141414;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 0.85rem;
+    padding: 0.35rem 0.2rem;
+    background: transparent;
+    border: 0;
+    border-radius: 0.6rem;
     color: rgba(255, 255, 255, 0.85);
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
-    flex: 0 0 auto;
+    font-family: inherit;
+    font-size: 0.65rem;
+    font-weight: 500;
+    text-decoration: none;
+    cursor: pointer;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 0.2rem;
-    transform: translate(-50%, -50%);
-    opacity: 0;
-    pointer-events: none;
-    transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1.2),
-                opacity 0.18s ease-out;
+    gap: 0.25rem;
+    transform: translate(-50%, 0) translate(var(--dome-x, 0), var(--dome-y, 0));
+    transition: background 0.12s, color 0.12s;
 }
 
-.bottom-nav-more-panel .bottom-nav-fan-item .bottom-nav-label {
-    font-size: 0.62rem;
-}
-
-.bottom-nav-more-panel .bottom-nav-fan-item[hidden] {
-    /* Don't render hidden items at all — they shouldn't take up a slot
-       in the arc, and the JS already filters them out when computing
-       --fan-x / --fan-y. */
+.bottom-nav-more-dome .bottom-nav-dome-item[hidden] {
+    /* Hidden items shouldn't take up a slot — JS already filters them
+       out of the arc layout. */
     display: none;
 }
 
-/* Open state: fan the items out to their computed offsets. The
-   :not([hidden]) guard keeps install (which stays hidden until the
-   browser fires beforeinstallprompt) from animating in even when the
-   panel itself is open. */
-.bottom-nav-more-wrapper.is-open .bottom-nav-more-panel .bottom-nav-fan-item:not([hidden]) {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translate(-50%, -50%) translate(var(--fan-x, 0), var(--fan-y, 0));
+.bottom-nav-more-dome .bottom-nav-dome-item:hover,
+.bottom-nav-more-dome .bottom-nav-dome-item:focus {
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    text-decoration: none;
+    outline: none;
 }
 
-.bottom-nav-more-wrapper.is-open .bottom-nav-more-panel {
-    pointer-events: auto;
+.bottom-nav-more-dome .bottom-nav-dome-item.active {
+    color: #93c5fd;
+}
+
+.bottom-nav-dome-label {
+    font-size: 0.62rem;
+    font-weight: 500;
+    line-height: 1;
 }
 
 @media (min-width: 768px) {
     .bottom-nav,
-    .bottom-nav-more-panel {
+    .bottom-nav-more-dome {
         display: none;
     }
 }
