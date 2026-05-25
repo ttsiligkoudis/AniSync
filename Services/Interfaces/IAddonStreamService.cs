@@ -79,6 +79,12 @@ namespace AnimeList.Services.Interfaces
     /// from the addon's full name+description+title haystack because
     /// addons like MediaFusion put the codec line in <c>description</c>
     /// (which never makes the trip to the client otherwise).
+    /// <see cref="Source"/> / <see cref="Hdr"/> / <see cref="Audio"/>
+    /// are the richer signals Comet emits on its multi-line description
+    /// (BluRay / WEB-DL, HDR10 / DV, DDP5.1 / Atmos). All three are
+    /// detected from the same full haystack so they also work for
+    /// MediaFusion / Torrentio releases whose filename embeds the same
+    /// tokens. Null when nothing matched.
     /// </summary>
     public record AddonStream(
         string Name,
@@ -93,5 +99,8 @@ namespace AnimeList.Services.Interfaces
         string InfoHash,
         int? FileIdx,
         string Provider,
-        bool IsHevc);
+        bool IsHevc,
+        string Source = null,
+        string Hdr = null,
+        string Audio = null);
 }
