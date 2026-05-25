@@ -497,10 +497,21 @@ namespace AnimeList.Controllers
             }
 
             // Account exists — drop straight into the same password-grant flow Login uses so
-            // the user lands on /Home/Configure already authenticated. If the token exchange
-            // itself fails (unlikely directly after a 201), Configure renders the login
-            // form and the user can sign in manually with the credentials they just typed.
-            await _tokenService.GetAccessTokenByCredsAsync(name, password, setContext: true);
+            // the user lands on /Home/Configure already authenticated. Kitsu's OAuth endpoint
+            // occasionally rejects credentials for a brand-new account on the very first
+            // attempt (propagation between the users service and the OAuth service), and the
+            // password grant resolves emails more reliably than freshly-created usernames.
+            // Wait briefly and retry with the email if the first attempt comes back empty —
+            // a manual login moments later already works for the same user, so the
+            // credentials themselves are fine.
+            var token = await _tokenService.GetAccessTokenByCredsAsync(name, password, setContext: true);
+            if (token == null)
+            {
+                await Task.Delay(1000);
+                token = await _tokenService.GetAccessTokenByCredsAsync(email, password, setContext: true);
+                if (token == null)
+                    _logger.LogWarning("Kitsu auto-login failed after signup for {Name}/{Email}.", name, email);
+            }
             return RedirectToAction("Configure", "Home");
         }
 
