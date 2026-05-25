@@ -516,29 +516,46 @@ body.drawer-open .drawer-backdrop {
        the dome here lands its flat bottom flush with the bar's lip —
        one continuous chrome surface, no seam. */
     bottom: calc(env(safe-area-inset-bottom, 0px) + 3.8rem);
-    left: 50%;
-    transform: translateX(-50%) translateY(8px) scale(0.96);
-    width: 260px;
-    height: 130px;
-    background: linear-gradient(180deg, #181818 0%, #0F0F0F 100%);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    /* Anchored flush to the right viewport edge so the dome reads as
+       growing out of the Close button corner. With transform-origin
+       at bottom-right the scale animation visibly bursts from that
+       same corner — the dome looks like it's spilling out of the
+       More button rather than floating centred over the bar. */
+    right: 0;
+    width: 240px;
+    height: 120px;
+    /* Frosted-glass surface — semi-transparent fill + backdrop blur
+       so the dome reads as a hovering panel sitting above the page
+       rather than a solid card. saturate boosts the underlying colour
+       so the glass effect doesn't desaturate the page behind it into
+       washed-out grey. */
+    background: linear-gradient(180deg,
+        rgba(24, 24, 24, 0.72) 0%,
+        rgba(12, 12, 12, 0.68) 100%);
+    backdrop-filter: blur(16px) saturate(150%);
+    -webkit-backdrop-filter: blur(16px) saturate(150%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
     border-bottom: none;
-    border-radius: 130px 130px 0 0;
-    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.55);
+    border-radius: 120px 120px 0 0;
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.45);
     z-index: 49;
     opacity: 0;
     pointer-events: none;
+    /* Bottom-right origin so the scale animation grows the dome out
+       of the Close button corner, not from its centre. */
+    transform-origin: bottom right;
+    transform: scale(0.35);
     transition: opacity 0.18s ease-out,
-                transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1.05);
+                transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-/* Open state: lift the dome into view + fade in. The translate-up
-   undoes the resting-state offset so the dome settles onto the bar
-   from below rather than dropping from above. */
+/* Open state: pop to full size + fade in. The slight overshoot in the
+   easing curve (y2 > 1) gives the scale a hint of bounce so the dome
+   reads as snapping into place rather than gliding. */
 .bottom-nav-more-dome:not([hidden]) {
     opacity: 1;
     pointer-events: auto;
-    transform: translateX(-50%) translateY(0) scale(1);
+    transform: scale(1);
 }
 
 .bottom-nav-more-dome[hidden] {
