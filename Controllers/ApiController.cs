@@ -345,6 +345,7 @@ namespace AnimeList.Controllers
                         id = r.meta.id,
                         name = r.meta.name,
                         poster = r.meta.poster,
+                        type = r.meta.type,
                         score = Math.Round(r.score, 3),
                         mapping,
                     });

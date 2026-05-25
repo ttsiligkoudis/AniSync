@@ -59,14 +59,29 @@
                 var name = m && m.name ? String(m.name) : '(no title)';
                 var id = m && m.id ? String(m.id) : '';
                 var poster = m && m.poster ? String(m.poster) : '';
+                var type = m && m.type ? String(m.type).toLowerCase() : '';
 
                 var posterHtml = poster
                     ? '<img class="site-search-result-poster" src="' + escapeAttr(poster) + '" alt="" loading="lazy" />'
                     : '<div class="site-search-result-poster site-search-result-poster-placeholder" aria-hidden="true"></div>';
 
+                // Movie / TV badge — small visual differentiator so the
+                // user can pick "Naruto Shippuden the Movie" vs the
+                // series without parsing the title. Anything that isn't
+                // explicitly "movie" reads as TV (the canonical anime
+                // catalog default; covers both the "series" and legacy
+                // "anime" type values upstream emits).
+                var typeBadge = '';
+                if (type === 'movie') {
+                    typeBadge = '<span class="site-search-result-type site-search-result-type-movie">Movie</span>';
+                } else if (type) {
+                    typeBadge = '<span class="site-search-result-type site-search-result-type-tv">TV</span>';
+                }
+
                 return '<a class="site-search-result" role="option" href="/anime/' + encodeURIComponent(id) + '">'
                     + posterHtml
                     + '<span class="site-search-result-name">' + escapeHtml(name) + '</span>'
+                    + typeBadge
                     + '</a>';
             }).join('');
 
