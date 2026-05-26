@@ -1682,24 +1682,49 @@ namespace AnimeList.Services
             // `search` arg that does fuzzy name matching server-side.
             // Sort is dropped in this branch — search results carry
             // their own relevance ranking and re-sorting by favourites
-            // would dilute it.
-            var studiosArgs = hasSearch ? "search: $search" : "sort: FAVOURITES_DESC";
-            var requestBody = SerializeObject(new
+            // would dilute it. The $search variable + its declaration
+            // only appear when we're actually searching: AniList's
+            // GraphQL rejects unused variable declarations, so the
+            // default-sort path stays free of it.
+            string requestBody;
+            if (hasSearch)
             {
-                query = @"
-                    query ($page: Int, $perPage: Int, $search: String) {
-                        Page(page: $page, perPage: $perPage) {
-                            pageInfo { hasNextPage }
-                            studios(" + studiosArgs + @") {
-                                id
-                                name
-                                isAnimationStudio
-                                media { pageInfo { total } }
+                requestBody = SerializeObject(new
+                {
+                    query = @"
+                        query ($page: Int, $perPage: Int, $search: String) {
+                            Page(page: $page, perPage: $perPage) {
+                                pageInfo { hasNextPage }
+                                studios(search: $search) {
+                                    id
+                                    name
+                                    isAnimationStudio
+                                    media { pageInfo { total } }
+                                }
                             }
-                        }
-                    }",
-                variables = new { page, perPage = 50, search = trimmedSearch },
-            });
+                        }",
+                    variables = new { page, perPage = 50, search = trimmedSearch },
+                });
+            }
+            else
+            {
+                requestBody = SerializeObject(new
+                {
+                    query = @"
+                        query ($page: Int, $perPage: Int) {
+                            Page(page: $page, perPage: $perPage) {
+                                pageInfo { hasNextPage }
+                                studios(sort: FAVOURITES_DESC) {
+                                    id
+                                    name
+                                    isAnimationStudio
+                                    media { pageInfo { total } }
+                                }
+                            }
+                        }",
+                    variables = new { page, perPage = 50 },
+                });
+            }
 
             var data = await PostJsonAsync(requestBody);
             if (data?.Page?.studios == null)
