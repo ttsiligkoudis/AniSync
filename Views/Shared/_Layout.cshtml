@@ -396,12 +396,12 @@
             </svg>
             <span class="bottom-nav-label">Discover</span>
         </a>
-        @* "More" replaces the previous Settings tile. Tapping it lifts the
-           sibling .bottom-nav-more-dome — a single half-circle tray that
-           sits flush on the bar's top edge — with Settings / Install /
-           Sign-in arranged inside it along the inner arc. The button
-           itself morphs into a Close affordance (✕ + "Close" label) so a
-           second tap reads as the obvious dismiss. *@
+        @* "More" replaces the previous Settings tile. Tapping it lifts
+           the sibling .bottom-nav-more-sheet — a rounded floating card
+           anchored to the bottom-right corner — with Settings /
+           Notifications / Install / Sign-in stacked as full-width rows.
+           The button itself morphs into a Close affordance (✕ + "Close"
+           label) so a second tap reads as the obvious dismiss. *@
         <button type="button" class="bottom-nav-item bottom-nav-more" aria-label="More"
                 aria-expanded="false" aria-controls="bottom-nav-more-dome" data-bottom-nav-more-toggle>
             <span class="bottom-nav-more-icon" data-more-icon aria-hidden="true">
@@ -420,120 +420,93 @@
             <span class="bottom-nav-label" data-more-label>More</span>
         </button>
     </nav>
-    @* Half-circle tray that the More button drives. One unified surface
-       so the items inside read as a connected menu (rather than the
-       previous three floating chips). Anchored to the bottom-nav's top
-       edge — flat bottom mates flush with the bar, rounded top creates
-       the dome silhouette — and screen-centred so its width can ignore
-       where the More cell sits inside the bar. JS arranges the visible
-       items along the inner arc when opened. *@
-    <div class="bottom-nav-more-dome" id="bottom-nav-more-dome" hidden>
-        @* Settings cell hidden for anonymous visitors — there's nothing to
-           configure without a primary account; the dome falls back to
-           the Install + Sign-in cells alone, and the fan-layout JS
-           re-distributes the visible items along the arc on every open
-           so this gating just removes one slot rather than leaving a
-           gap. *@
+    @* Floating "More" sheet — rounded card anchored to the bottom-right
+       corner just above the bottom-nav. Replaces the previous half-circle
+       dome (which had to squeeze every item onto a 64px arc chip with a
+       sub-readable label). Vertical list of full-width rows gives every
+       action a 44px tap target and a 0.92rem label; the card auto-shrinks
+       when an item is gated off so anonymous visitors see a 1-2 row card
+       and logged-in users see a 4-row card without any redistribution
+       maths. The id stays as #bottom-nav-more-dome so the inline toggle
+       script + the More button's aria-controls still wire up unchanged. *@
+    <div class="bottom-nav-more-sheet" id="bottom-nav-more-dome" role="menu" hidden>
         @if (layoutLoggedIn)
         {
-            <a href="@Url.Action("Account", "Home")" class="bottom-nav-dome-item @(activeNav == "configure" || activeNav == "stremio" ? "active" : "")" aria-label="Settings">
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <a href="@Url.Action("Account", "Home")" class="bottom-nav-more-row @(activeNav == "configure" || activeNav == "stremio" ? "active" : "")" role="menuitem">
+                <svg class="bottom-nav-more-row-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <circle cx="12" cy="12" r="3"></circle>
                     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
                 </svg>
-                <span class="bottom-nav-dome-label">Settings</span>
+                <span class="bottom-nav-more-row-label">Settings</span>
+            </a>
+            @* Notifications full-history page — same destination the bell
+               panel's "View all" footer points at. Surfaces the link in
+               the More menu for users who don't reach for the header bell
+               (or whose bell is below-the-fold on tall mobile pages). *@
+            <a href="/notifications" class="bottom-nav-more-row @(activeNav == "notifications" ? "active" : "")" role="menuitem">
+                <svg class="bottom-nav-more-row-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                </svg>
+                <span class="bottom-nav-more-row-label">Notifications</span>
             </a>
         }
-        @* Install cell — pwa-install.js un-hides this once beforeinstall-
-           prompt has fired and the page is install-eligible. The dome's
-           open handler re-computes the arc so a freshly-revealed Install
-           gets its own slot without a reload. *@
-        <button type="button" class="bottom-nav-dome-item" data-pwa-install aria-label="Install" hidden>
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        @* Install row — pwa-install.js toggles [data-pwa-install]'s `hidden`
+           attribute on every matching element when beforeinstallprompt
+           fires (and on appinstalled to hide them again). The list layout
+           handles the row going away without any redistribution maths. *@
+        <button type="button" class="bottom-nav-more-row" data-pwa-install role="menuitem" aria-label="Install app" hidden>
+            <svg class="bottom-nav-more-row-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M12 3v12"></path>
                 <path d="M7 10l5 5 5-5"></path>
                 <path d="M5 21h14"></path>
             </svg>
-            <span class="bottom-nav-dome-label">Install</span>
+            <span class="bottom-nav-more-row-label">Install app</span>
         </button>
+        @* Divider above the auth row so destructive Disconnect (or its
+           Sign-in mirror image) sits visually segregated from the neutral
+           navigation rows above — same pattern .entry-modal-actions uses
+           to isolate Delete from Save/Cancel. *@
+        <span class="bottom-nav-more-divider" aria-hidden="true"></span>
         @if (layoutHasSession)
         {
-            <a href="@Url.Action("Logout", "Auth")" class="bottom-nav-dome-item" aria-label="Disconnect" data-disconnect>
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <a href="@Url.Action("Logout", "Auth")" class="bottom-nav-more-row bottom-nav-more-row-danger" role="menuitem" data-disconnect>
+                <svg class="bottom-nav-more-row-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
                     <polyline points="16 17 21 12 16 7"></polyline>
                     <line x1="21" y1="12" x2="9" y2="12"></line>
                 </svg>
-                <span class="bottom-nav-dome-label">Disconnect</span>
+                <span class="bottom-nav-more-row-label">Disconnect</span>
             </a>
         }
         else
         {
-            <a href="@Url.Action("Account", "Home")" class="bottom-nav-dome-item" aria-label="Sign in">
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <a href="@Url.Action("Account", "Home")" class="bottom-nav-more-row" role="menuitem">
+                <svg class="bottom-nav-more-row-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
                     <polyline points="10 17 15 12 10 7"></polyline>
                     <line x1="15" y1="12" x2="3" y2="12"></line>
                 </svg>
-                <span class="bottom-nav-dome-label">Sign in</span>
+                <span class="bottom-nav-more-row-label">Sign in</span>
             </a>
         }
     </div>
     <script>
         (function () {
             var toggle = document.querySelector('[data-bottom-nav-more-toggle]');
-            var dome = document.getElementById('bottom-nav-more-dome');
-            if (!toggle || !dome) return;
+            var sheet = document.getElementById('bottom-nav-more-dome');
+            if (!toggle || !sheet) return;
             var label = toggle.querySelector('[data-more-label]');
 
-            // Inner radius the dome arranges items along. Smaller than
-            // the dome's outer radius (120px, set on the .bottom-nav-
-            // more-dome's width/height) so items sit inside the curve
-            // with a few pixels of padding to the dome edge. Bottom-
-            // centre origin.
-            var ITEM_ORBIT = 64;
-
-            // Re-runs every time the dome opens so a freshly-revealed
-            // Install button gets a slot without a reload. Distributes
-            // visible items evenly across a 120° arc centred on 90°
-            // (straight up). For 1 item, sits at the top of the dome;
-            // for 2 items, at 60°/120°; for 3, at 30°/90°/150°; etc.
-            // Narrowing the arc for fewer items keeps the cells from
-            // sprawling to the extremes when there are only two.
-            function positionItems() {
-                var items = Array.prototype.slice.call(
-                    dome.querySelectorAll('.bottom-nav-dome-item')
-                ).filter(function (b) { return !b.hidden; });
-                var n = items.length;
-                if (n === 0) return;
-                // Arc grows by 60° per additional item but caps at 120°
-                // so we never push items past the dome's flat bottom.
-                var arc = Math.min(120, 60 * Math.max(0, n - 1));
-                var startAngle = 90 - arc / 2;
-                items.forEach(function (item, i) {
-                    var t = n === 1 ? 0 : i / (n - 1);
-                    var angle = startAngle + arc * t;
-                    var rad = angle * Math.PI / 180;
-                    // Bottom-centre origin: positive x = right of centre,
-                    // positive y in CSS = down, so flip the sine so
-                    // higher angles rise inside the dome.
-                    var x = Math.cos(rad) * ITEM_ORBIT;
-                    var y = -Math.sin(rad) * ITEM_ORBIT;
-                    item.style.setProperty('--dome-x', x.toFixed(1) + 'px');
-                    item.style.setProperty('--dome-y', y.toFixed(1) + 'px');
-                });
-            }
-
             function close() {
-                dome.hidden = true;
+                sheet.hidden = true;
                 toggle.setAttribute('aria-expanded', 'false');
                 toggle.classList.remove('is-open');
                 if (label) label.textContent = 'More';
                 toggle.setAttribute('aria-label', 'More');
             }
             function open() {
-                positionItems();
-                dome.hidden = false;
+                sheet.hidden = false;
                 toggle.setAttribute('aria-expanded', 'true');
                 toggle.classList.add('is-open');
                 if (label) label.textContent = 'Close';
@@ -541,18 +514,21 @@
             }
             toggle.addEventListener('click', function (e) {
                 e.stopPropagation();
-                if (dome.hidden) open(); else close();
+                if (sheet.hidden) open(); else close();
             });
-            dome.addEventListener('click', function (e) {
-                if (e.target.closest('.bottom-nav-dome-item')) close();
+            // Tapping a row navigates, then closes — same UX as the old
+            // dome. The path-stamp click handler in the data-disconnect
+            // chain still fires too because the row carries that marker.
+            sheet.addEventListener('click', function (e) {
+                if (e.target.closest('.bottom-nav-more-row')) close();
             });
             document.addEventListener('mousedown', function (e) {
-                if (dome.hidden) return;
-                if (toggle.contains(e.target) || dome.contains(e.target)) return;
+                if (sheet.hidden) return;
+                if (toggle.contains(e.target) || sheet.contains(e.target)) return;
                 close();
             });
             document.addEventListener('keydown', function (e) {
-                if (e.key === 'Escape' && !dome.hidden) {
+                if (e.key === 'Escape' && !sheet.hidden) {
                     close();
                     toggle.focus();
                 }

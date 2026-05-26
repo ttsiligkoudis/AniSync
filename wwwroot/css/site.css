@@ -508,120 +508,146 @@ body.drawer-open .drawer-backdrop {
    sits inside the bar. The dome stays a single rendered surface so
    the items inside (Settings / Install / Sign-in) feel like cells
    carved into the same tray rather than three disconnected chips. */
-.bottom-nav-more-dome {
+/* Floating rounded card the More button drives on mobile. Replaces the
+   previous half-circle "dome" which forced every item onto a 64px arc
+   chip with a 0.62rem label. The card sits 8px above the bottom-nav so
+   it reads as floating (not soldered to the bar like the dome was);
+   the same frosted-glass recipe + scale-from-bottom-right animation
+   preserves the original popup's visual identity, just on a silhouette
+   that can carry 4-5 readable rows comfortably. */
+.bottom-nav-more-sheet {
     position: fixed;
-    /* Mate the flat bottom of the dome with the top edge of the
-       bottom-nav. The bar is roughly 0.8rem padding + 48px content +
-       safe-area on mobile (≈ 3.8rem + safe-area total), so anchoring
-       the dome here lands its flat bottom flush with the bar's lip —
-       one continuous chrome surface, no seam. */
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 3.8rem);
-    /* Anchored flush to the right viewport edge so the dome reads as
-       growing out of the Close button corner. With transform-origin
-       at bottom-right the scale animation visibly bursts from that
-       same corner — the dome looks like it's spilling out of the
-       More button rather than floating centred over the bar. */
-    right: 0;
-    width: 240px;
-    height: 120px;
-    /* Frosted-glass surface — semi-transparent fill + backdrop blur
-       so the dome reads as a hovering panel sitting above the page
-       rather than a solid card. saturate boosts the underlying colour
-       so the glass effect doesn't desaturate the page behind it into
-       washed-out grey. */
+    /* 8px gap from the top of the bottom-nav. The bar measures ~3.8rem
+       on top of the safe-area inset, so this lands the card with a
+       deliberate breathing space rather than the previous flush mate. */
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 3.8rem + 8px);
+    right: 8px;
+    width: min(260px, calc(100vw - 16px));
+    max-height: 60vh;
+    overflow-y: auto;
+    padding: 6px 0;
     background: linear-gradient(180deg,
         rgba(24, 24, 24, 0.72) 0%,
         rgba(12, 12, 12, 0.68) 100%);
     backdrop-filter: blur(16px) saturate(150%);
     -webkit-backdrop-filter: blur(16px) saturate(150%);
     border: 1px solid rgba(255, 255, 255, 0.14);
-    border-bottom: none;
-    border-radius: 120px 120px 0 0;
-    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.45);
+    border-radius: 14px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
     z-index: 49;
     opacity: 0;
     pointer-events: none;
-    /* Bottom-right origin so the scale animation grows the dome out
-       of the Close button corner, not from its centre. */
+    /* Bottom-right origin so the scale animation grows the card out
+       of the More button corner — same identity beat the dome had. */
     transform-origin: bottom right;
-    transform: scale(0.35);
-    transition: opacity 0.18s ease-out,
-                transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transform: scale(0.5) translateY(8px);
+    transition: opacity 0.16s ease-out,
+                transform 0.26s cubic-bezier(0.34, 1.56, 0.64, 1.05);
 }
 
-/* Open state: pop to full size + fade in. The slight overshoot in the
-   easing curve (y2 > 1) gives the scale a hint of bounce so the dome
-   reads as snapping into place rather than gliding. */
-.bottom-nav-more-dome:not([hidden]) {
+.bottom-nav-more-sheet:not([hidden]) {
     opacity: 1;
     pointer-events: auto;
-    transform: scale(1);
+    transform: scale(1) translateY(0);
 }
 
-.bottom-nav-more-dome[hidden] {
-    /* Keep the dome rendered but invisible so the JS can read child
-       state (Install's hidden attribute, etc.) before opening, and so
-       the fade-out transition runs cleanly when we re-apply [hidden]. */
+.bottom-nav-more-sheet[hidden] {
+    /* Keep the sheet rendered but invisible so the fade-out / scale-down
+       transition runs cleanly when we re-apply [hidden] on close. The JS
+       toggles the attribute; the [hidden] override and the opacity / pointer-
+       events defaults above handle the resting state. */
     display: block;
+    transform: scale(0.6) translateY(4px);
+    transition: opacity 0.16s ease-in,
+                transform 0.16s cubic-bezier(0.4, 0, 1, 1);
 }
 
-/* Items inside the dome. Each cell is centred at the dome's bottom-
-   centre by default (translate(-50%, -50%)) then offset along the
-   inner arc via --dome-x / --dome-y, which the inline JS recomputes
-   on every open from the visible item count. No background of their
-   own — the dome IS the surface; the cells just hold icon + label. */
-.bottom-nav-more-dome .bottom-nav-dome-item,
-.bottom-nav-more-dome .bottom-nav-dome-item:link,
-.bottom-nav-more-dome .bottom-nav-dome-item:visited {
-    position: absolute;
-    left: 50%;
-    bottom: 0;
-    width: 64px;
-    padding: 0.35rem 0.2rem;
+/* Each row is a full-width tap target — comfortable 44px hit area (Apple
+   HIG minimum), 0.92rem label, 20px icon. No background of their own;
+   hover / active picks up the same rgba(255,255,255,0.06) token the
+   drawer + dome already used so the sheet inherits the established
+   visual vocabulary. */
+.bottom-nav-more-sheet .bottom-nav-more-row,
+.bottom-nav-more-sheet .bottom-nav-more-row:link,
+.bottom-nav-more-sheet .bottom-nav-more-row:visited {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    height: 44px;
+    padding: 0 14px;
     background: transparent;
     border: 0;
-    border-radius: 0.6rem;
-    color: rgba(255, 255, 255, 0.85);
+    color: rgba(255, 255, 255, 0.92);
     font-family: inherit;
-    font-size: 0.65rem;
+    font-size: 0.92rem;
     font-weight: 500;
+    text-align: left;
     text-decoration: none;
     cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.25rem;
-    transform: translate(-50%, 0) translate(var(--dome-x, 0), var(--dome-y, 0));
     transition: background 0.12s, color 0.12s;
 }
 
-.bottom-nav-more-dome .bottom-nav-dome-item[hidden] {
-    /* Hidden items shouldn't take up a slot — JS already filters them
-       out of the arc layout. */
+.bottom-nav-more-sheet .bottom-nav-more-row[hidden] {
+    /* Hidden items collapse out of the list — pwa-install.js toggles
+       this on the Install row when beforeinstallprompt fires / app
+       gets installed. */
     display: none;
 }
 
-.bottom-nav-more-dome .bottom-nav-dome-item:hover,
-.bottom-nav-more-dome .bottom-nav-dome-item:focus {
+.bottom-nav-more-sheet .bottom-nav-more-row:hover,
+.bottom-nav-more-sheet .bottom-nav-more-row:focus {
     background: rgba(255, 255, 255, 0.06);
     color: #fff;
     text-decoration: none;
     outline: none;
 }
 
-.bottom-nav-more-dome .bottom-nav-dome-item.active {
+.bottom-nav-more-sheet .bottom-nav-more-row.active {
     color: #93c5fd;
 }
 
-.bottom-nav-dome-label {
-    font-size: 0.62rem;
-    font-weight: 500;
-    line-height: 1;
+.bottom-nav-more-sheet .bottom-nav-more-row-icon {
+    flex: 0 0 20px;
+    color: rgba(255, 255, 255, 0.78);
+}
+
+.bottom-nav-more-sheet .bottom-nav-more-row:hover .bottom-nav-more-row-icon,
+.bottom-nav-more-sheet .bottom-nav-more-row:focus .bottom-nav-more-row-icon {
+    color: #fff;
+}
+
+.bottom-nav-more-sheet .bottom-nav-more-row-label {
+    flex: 1 1 auto;
+    line-height: 1.1;
+}
+
+/* Visual divider above the Disconnect / Sign-in row — mirrors the
+   deliberate destructive-action isolation .entry-modal-actions uses to
+   set Delete apart from Save / Cancel. */
+.bottom-nav-more-sheet .bottom-nav-more-divider {
+    display: block;
+    height: 1px;
+    margin: 6px 12px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .bottom-nav-more-sheet {
+        transition: opacity 0.12s linear;
+        transform: none;
+    }
+    .bottom-nav-more-sheet:not([hidden]) {
+        transform: none;
+    }
+    .bottom-nav-more-sheet[hidden] {
+        transform: none;
+    }
 }
 
 @media (min-width: 768px) {
     .bottom-nav,
-    .bottom-nav-more-dome {
+    .bottom-nav-more-sheet {
         display: none;
     }
 }
