@@ -3,6 +3,12 @@
     var error = ViewBag.Error as string;
     var name = ViewBag.Name as string;
     var email = ViewBag.Email as string;
+    // Post-signup destination threaded through from the caller page so
+    // Stremio-side signups land back on /configure and /account-side
+    // signups drop to the home dashboard. AuthController.Register
+    // gates the value through Url.IsLocalUrl so a hostile / external
+    // value silently falls back to home.
+    var returnUrl = ViewBag.ReturnUrl as string;
 }
 
 <header class="page-header">
@@ -17,6 +23,10 @@
     }
 
     <form method="post" action="@Url.Action("Register", "Auth")" autocomplete="on">
+        @if (!string.IsNullOrEmpty(returnUrl))
+        {
+            <input type="hidden" name="returnUrl" value="@returnUrl" />
+        }
         <div class="cred-group">
             <label for="name" class="required">Username</label>
             <input type="text" id="name" name="name" value="@name" required autocomplete="username" />

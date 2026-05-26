@@ -687,9 +687,24 @@
         // done before the browser begins navigation to /Auth/Logout.
         // Doesn't preventDefault — the link still navigates as usual.
         document.querySelectorAll('[data-disconnect]').forEach(function (el) {
+            // Stamp a returnUrl carrying the current page path onto the
+            // anchor's href so the server-side whitelist (Logout honours
+            // /account and /configure; everything else falls through to
+            // home) gets a real value to compare against. Updated on
+            // every click rather than at page load so deep navigations
+            // that don't full-reload (rare here, but bfcache restores
+            // count) still see the live path.
             el.addEventListener('click', function () {
                 try { localStorage.clear(); } catch (_) { /* quota / private mode — best-effort */ }
                 try { sessionStorage.clear(); } catch (_) { /* same */ }
+                if (el.tagName === 'A') {
+                    var base = el.getAttribute('href') || '';
+                    // Strip any previously-stamped returnUrl so repeated
+                    // clicks don't accumulate query params.
+                    base = base.split('?')[0];
+                    el.setAttribute('href',
+                        base + '?returnUrl=' + encodeURIComponent(window.location.pathname));
+                }
             });
         });
     </script>

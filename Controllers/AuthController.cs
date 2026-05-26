@@ -47,6 +47,23 @@ namespace AnimeList.Controllers
             return RedirectToAction("Configure", "Home");
         }
 
+        /// <summary>
+        /// Login / Register variant of <see cref="RedirectToReturnUrlOrConfigure"/> —
+        /// the same Url.IsLocalUrl gate but defaults to the home dashboard rather than
+        /// /configure. Used by Login + Register + the OAuth Callback's login branch so
+        /// a freshly-authenticated user lands somewhere generic by default, with
+        /// /configure (or /account, or any other valid local URL) as an opt-in
+        /// override the caller threads in.
+        /// </summary>
+        private IActionResult RedirectToReturnUrlOrHome(string returnUrl)
+        {
+            if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+            {
+                return Redirect(returnUrl);
+            }
+            return RedirectToAction("Index", "Home");
+        }
+
         public AuthController(ITokenService tokenService, IHttpContextAccessor httpContextAccessor,
             IConfigStore configStore, IConfiguration configuration, ISyncService syncService,
             IAnilistService anilistService, IKitsuService kitsuService, IMalService malService,
@@ -65,8 +82,18 @@ namespace AnimeList.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> Login(AnimeService? animeService = null, string username = null, string password = null, bool anonymous = false)
+        public async Task<IActionResult> Login(AnimeService? animeService = null, string username = null, string password = null, bool anonymous = false, string returnUrl = null)
         {
+            // Stash the post-login destination on the session for the OAuth
+            // branches (AniList / MAL) so /Auth/Callback can read + honour
+            // it on return. Same key the link-additional-provider flow uses;
+            // Callback always reads-and-clears it regardless of which flow
+            // populated it.
+            if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+                HttpContext.Session.SetString(OauthReturnUrlKey, returnUrl);
+            else
+                HttpContext.Session.Remove(OauthReturnUrlKey);
+
             if (anonymous)
             {
                 var tokenData = new TokenData
@@ -76,7 +103,7 @@ namespace AnimeList.Controllers
 
                 _httpContextAccessor.HttpContext.Session.SetString("AccessToken", SerializeObject(tokenData));
 
-                return RedirectToAction("Configure", "Home");
+                return RedirectToReturnUrlOrHome(returnUrl);
             }
             else if (animeService == AnimeService.Anilist)
             {
@@ -86,13 +113,13 @@ namespace AnimeList.Controllers
             }
             else if (animeService == AnimeService.MyAnimeList)
             {
-                return BeginMalOauth(OauthFlowLogin) ?? RedirectToAction("Configure", "Home");
+                return BeginMalOauth(OauthFlowLogin) ?? RedirectToReturnUrlOrHome(returnUrl);
             }
             else
             {
                 await _tokenService.GetAccessTokenByCredsAsync(username, password, true);
 
-                return RedirectToAction("Configure", "Home");
+                return RedirectToReturnUrlOrHome(returnUrl);
             }
         }
 
@@ -160,11 +187,14 @@ namespace AnimeList.Controllers
             if (isLink && linkedTokenData != null && !string.IsNullOrEmpty(primarySession))
                 await PersistLinkedTokenAsync(primarySession, linkedTokenData);
 
-            // Primary-login flow always lands on /Home/Configure (that's the canonical
-            // post-signin destination); the link flow honours the stashed return URL.
+            // Both flows honour the stashed return URL when set. Link flow falls
+            // back to /configure when nothing was stashed (the link partial always
+            // sets it, but be defensive); login flow falls back to the home
+            // dashboard so anonymous-to-authenticated transitions land somewhere
+            // generic by default unless the caller picked a specific destination.
             return isLink
                 ? RedirectToReturnUrlOrConfigure(oauthReturnUrl)
-                : RedirectToAction("Configure", "Home");
+                : RedirectToReturnUrlOrHome(oauthReturnUrl);
         }
 
         /// <summary>
@@ -502,13 +532,14 @@ namespace AnimeList.Controllers
         /// AniList and MAL require a manual signup on their own sites.
         /// </summary>
         [HttpGet]
-        public IActionResult Register()
+        public IActionResult Register(string returnUrl = null)
         {
+            ViewBag.ReturnUrl = returnUrl;
             return View();
         }
 
         [HttpPost]
-        public async Task<IActionResult> Register(string name, string email, string password, string confirmPassword)
+        public async Task<IActionResult> Register(string name, string email, string password, string confirmPassword, string returnUrl = null)
         {
             // Mirror the basic constraints Kitsu would reject server-side anyway, but
             // surface them inline so the user doesn't pay a network round-trip to learn
@@ -525,6 +556,7 @@ namespace AnimeList.Controllers
                 ViewBag.Error = error;
                 ViewBag.Name = name;
                 ViewBag.Email = email;
+                ViewBag.ReturnUrl = returnUrl;
                 return View();
             }
 
@@ -534,18 +566,21 @@ namespace AnimeList.Controllers
                 ViewBag.Error = kitsuError;
                 ViewBag.Name = name;
                 ViewBag.Email = email;
+                ViewBag.ReturnUrl = returnUrl;
                 return View();
             }
 
-            // Account exists — drop straight into the same password-grant flow Login uses so
-            // the user lands on /Home/Configure already authenticated. Kitsu's OAuth password
-            // grant only resolves identities by email, not by the freshly-created username,
-            // so the email is what we hand it.
+            // Account exists — drop straight into the same password-grant flow Login uses
+            // so the user lands authenticated. Kitsu's OAuth password grant only resolves
+            // identities by email, not by the freshly-created username, so the email is
+            // what we hand it. returnUrl lets the caller pick the post-signup destination
+            // (defaults to the home dashboard) — Stremio-initiated signups land on
+            // /configure, identity-page signups land on home.
             await _tokenService.GetAccessTokenByCredsAsync(email, password, setContext: true);
-            return RedirectToAction("Configure", "Home");
+            return RedirectToReturnUrlOrHome(returnUrl);
         }
 
-        public async Task<IActionResult> Logout()
+        public async Task<IActionResult> Logout(string returnUrl = null)
         {
             // Pure disconnect: clears the session cookie + in-memory token cache so the
             // user lands on the dashboard as an anonymous visitor, but leaves the config
@@ -554,6 +589,23 @@ namespace AnimeList.Controllers
             // UID, same row. The "Delete Configuration" Danger Zone action is the
             // destructive sibling for users who actually want their data gone.
             await _tokenService.RemoveCachedUser();
+
+            // Disconnect-return whitelist: only /account and /configure are valid
+            // post-logout landing pads. Any other source (drawer link clicked from
+            // an anime detail page, the watch page, library, etc.) falls back to
+            // the home dashboard — landing the user back on a deep page after
+            // they've explicitly disconnected reads as confusing rather than
+            // helpful. Url.IsLocalUrl already screens against external redirects;
+            // the path-level whitelist enforces the user's intent on top of that.
+            if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+            {
+                var path = returnUrl.Split('?', 2)[0].TrimEnd('/');
+                if (string.Equals(path, "/account", StringComparison.OrdinalIgnoreCase)
+                 || string.Equals(path, "/configure", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Redirect(returnUrl);
+                }
+            }
             return RedirectToAction("Index", "Home");
         }
     }

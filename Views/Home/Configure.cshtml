@@ -68,8 +68,10 @@ else
 {
     @* /account skips the anonymous fallback — that path is reserved for
        /configure, which Stremio users may land on before they have an
-       AniList / MAL / Kitsu account ready. *@
-    @await Html.PartialAsync("_LoginSection", Model)
+       AniList / MAL / Kitsu account ready. Post-login destination is the
+       home dashboard so the account page doesn't loop back on itself. *@
+    @await Html.PartialAsync("_LoginSection", Model,
+        new ViewDataDictionary(ViewData) { ["LoginReturnUrl"] = "/" })
 }
 
 
