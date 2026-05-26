@@ -106,14 +106,13 @@
                     params.delete('fullPane');
                     var visibleUrl = config.indexPath + (params.toString() ? ('?' + params.toString()) : '');
                     window.history.pushState({ filterSearch: true }, '', visibleUrl);
-
-                    // Scroll the pane into view so the user sees the new results
-                    // even if their previous scroll position was far down. Skip
-                    // this on the initial auto-load — the user is presumed to
-                    // already be looking at the pane and a programmatic scroll
-                    // would be jarring.
-                    pane.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }
+                // Scroll position is left alone on both paths. Earlier we
+                // smooth-scrolled the pane into view after a manual submit
+                // so users who had scrolled far down would still see the
+                // refreshed results, but the user reported the jump as
+                // disruptive — the new results land in place, and the user
+                // can scroll back up themselves if they want to.
             })
             .catch(function () {
                 // On failure, fall back to a real navigation — that way the
