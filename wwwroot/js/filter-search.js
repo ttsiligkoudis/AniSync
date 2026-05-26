@@ -91,6 +91,13 @@
         return fetch(url, {
             credentials: 'same-origin',
             headers: { 'Accept': 'text/html' },
+            // Initial auto-load runs on every /library and /discover paint —
+            // the global full-screen loader-overlay on top of the skeleton
+            // grid would just double-load the page and disrupt the calm
+            // "page is filling in" effect the skeletons sell. Manual Search
+            // clicks still get the loader so the user sees their action
+            // registered.
+            skipLoader: opts.initial === true,
         })
             .then(function (r) { return r.ok ? r.text() : null; })
             .then(function (html) {
