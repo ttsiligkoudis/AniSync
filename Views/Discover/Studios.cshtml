@@ -3,6 +3,8 @@
     ViewData["Title"] = "Studios";
     ViewData["BodyClass"] = "library-page";
     ViewData["ActiveNav"] = "discover";
+    var studioSearch = ViewData["StudioSearch"] as string;
+    var hasStudioSearch = !string.IsNullOrEmpty(studioSearch);
 }
 
 @* Shared Discover tab strip with the Studios pill active — keeps this
@@ -14,9 +16,38 @@
     ActiveBrowse = "studios",
 })
 
+@* Server-side search form. Studios are paginated (AniList has hundreds),
+   so a client-side filter would only catch entries the user has already
+   scrolled past — useless for finding a long-tail studio that lives on
+   page 4. Posting through the existing studios() page query with the
+   server-side `search` arg returns matches across the whole catalog.
+   When a search is active, the paginator JS reads the URL and forwards
+   the same term on subsequent page-fetches so infinite-scroll keeps
+   working through the search results. *@
+<form method="get" action="/discover/studio" class="filter-bar" role="search">
+    <input type="search"
+           name="search"
+           value="@studioSearch"
+           placeholder="Search studios…"
+           class="filter-bar-search"
+           autocomplete="off" />
+    <button type="submit" class="filter-bar-submit">Search</button>
+    @if (hasStudioSearch)
+    {
+        <a class="filter-bar-clear" href="/discover/studio">Clear</a>
+    }
+</form>
+
 @if (Model == null || Model.Count == 0)
 {
-    <p class="hint-text">No studios available right now. Try again in a moment.</p>
+    @if (hasStudioSearch)
+    {
+        <p class="hint-text">No studios match "@studioSearch".</p>
+    }
+    else
+    {
+        <p class="hint-text">No studios available right now. Try again in a moment.</p>
+    }
 }
 else
 {

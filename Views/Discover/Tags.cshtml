@@ -27,13 +27,73 @@
 }
 else
 {
+    @* Filter input — AniList returns every tag in one call so the full
+       set is already on the page; the filter just shows/hides DOM
+       tiles client-side. No network on each keystroke, no debounce
+       budget needed. Reuses the .filter-bar chrome the catalog
+       Discover view uses so the two filter surfaces feel consistent. *@
+    <div class="filter-bar" role="search">
+        <input type="search"
+               class="filter-bar-search"
+               placeholder="Filter tags…"
+               autocomplete="off"
+               spellcheck="false"
+               aria-label="Filter tags"
+               data-tag-filter />
+    </div>
+    <p class="hint-text" hidden data-tag-filter-empty>No tags match.</p>
+
     foreach (var group in groups)
     {
-        <section class="tag-group">
+        <section class="tag-group" data-tag-group>
             <h2 class="tag-group-title">@group.Key</h2>
             <div class="tag-grid">
                 @await Html.PartialAsync("_TagTiles", group.AsEnumerable())
             </div>
         </section>
     }
+
+    <script>
+        (function () {
+            var input = document.querySelector('[data-tag-filter]');
+            var empty = document.querySelector('[data-tag-filter-empty]');
+            if (!input) return;
+
+            // Each tile carries its display name in data-tag-name (lower-
+            // cased once on first run so per-keystroke work stays cheap).
+            var tiles = Array.prototype.slice.call(document.querySelectorAll('.tag-tile[data-tag-name]'));
+            tiles.forEach(function (el) {
+                el.dataset.tagNameLower = (el.getAttribute('data-tag-name') || '').toLowerCase();
+            });
+            var groups = Array.prototype.slice.call(document.querySelectorAll('[data-tag-group]'));
+
+            function applyFilter() {
+                var q = input.value.trim().toLowerCase();
+                var anyVisible = false;
+                tiles.forEach(function (el) {
+                    var match = q.length === 0 || el.dataset.tagNameLower.indexOf(q) !== -1;
+                    el.hidden = !match;
+                    if (match) anyVisible = true;
+                });
+                // Hide a category section when every tile inside it is
+                // filtered out — keeps the page from showing a string of
+                // empty headers when the user types a narrow query.
+                groups.forEach(function (g) {
+                    var hasVisible = g.querySelector('.tag-tile:not([hidden])');
+                    g.hidden = !hasVisible;
+                });
+                if (empty) empty.hidden = anyVisible;
+            }
+
+            input.addEventListener('input', applyFilter);
+            // Esc clears the filter — convention from the layout search.
+            input.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && input.value !== '') {
+                    input.value = '';
+                    applyFilter();
+                    e.preventDefault();
+                }
+            });
+        })();
+    </script>
 }

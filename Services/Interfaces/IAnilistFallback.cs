@@ -301,6 +301,6 @@ namespace AnimeList.Services.Interfaces
         /// subsequent pages on scroll. Cached 24h per page key so re-scrolls
         /// don't replay the upstream call.
         /// </summary>
-        Task<(List<StudioSummary> Studios, bool HasNextPage)> GetStudiosListAsync(int page = 1);
+        Task<(List<StudioSummary> Studios, bool HasNextPage)> GetStudiosListAsync(int page = 1, string search = null);
     }
 }
