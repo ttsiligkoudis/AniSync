@@ -250,6 +250,10 @@ builder.Services.AddSingleton<IAddonStreamService, AddonStreamService>();
 // repeatedly and the same /watch view re-fetches on every visit.
 builder.Services.AddSingleton<ISubtitleService, OpenSubtitlesService>();
 builder.Services.AddScoped<ISyncService, SyncService>();
+// Cross-provider list merge — backs the /library grid + dashboard Continue
+// Watching shelf. Scoped because it composes per-request scoped services
+// (Anilist / Kitsu / Mal + the per-user config store lookups).
+builder.Services.AddScoped<IMergedListService, MergedListService>();
 // Singleton — its (malId, episode) → markers cache is the whole point. Per-request
 // scoping would defeat the cache. The service depends only on IHttpClientFactory
 // which is itself singleton-safe.

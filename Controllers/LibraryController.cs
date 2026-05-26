@@ -16,29 +16,17 @@ namespace AnimeList.Controllers
     public class LibraryController : Controller
     {
         private readonly ITokenService _tokenService;
-        private readonly IAnilistService _anilistService;
-        private readonly IKitsuService _kitsuService;
-        private readonly IMalService _malService;
         private readonly IConfigStore _configStore;
-        private readonly IAnimeMappingService _mappingService;
-        private readonly ILogger<LibraryController> _logger;
+        private readonly IMergedListService _mergedListService;
 
         public LibraryController(
             ITokenService tokenService,
-            IAnilistService anilistService,
-            IKitsuService kitsuService,
-            IMalService malService,
             IConfigStore configStore,
-            IAnimeMappingService mappingService,
-            ILogger<LibraryController> logger)
+            IMergedListService mergedListService)
         {
             _tokenService = tokenService;
-            _anilistService = anilistService;
-            _kitsuService = kitsuService;
-            _malService = malService;
             _configStore = configStore;
-            _mappingService = mappingService;
-            _logger = logger;
+            _mergedListService = mergedListService;
         }
 
         // The six list types the user-list catalogs map to. Trending/Seasonal/Airing
@@ -178,8 +166,9 @@ namespace AnimeList.Controllers
             // so /library surfaces anime the user has on AniList / MAL / Kitsu
             // even when they're not on the primary. Same anime fetched from
             // multiple providers is deduped via the cross-service mapping;
-            // see FetchMergedLibraryAsync for the merge rules.
-            var metas = await FetchMergedLibraryAsync(tokenData, uid, listForCall, genre,
+            // the merge rules live in MergedListService (shared with the
+            // dashboard's Continue Watching shelf).
+            var metas = await _mergedListService.GetMergedListAsync(tokenData, uid, listForCall, genre,
                 groupSeasonsForCall, hideUnreleased, hideAdult);
 
             if (hasSearch && metas?.Count > 0)
@@ -216,195 +205,6 @@ namespace AnimeList.Controllers
                             : $"Nothing in your {activeLabel} list on {tokenData.anime_service}.",
                 },
             });
-        }
-
-        /// <summary>
-        /// Fetches the user's list for the requested status across the primary
-        /// AND every healthy linked secondary, in parallel, then merges the
-        /// results into a single deduped list. Same anime fetched from
-        /// multiple providers collapses to one card via the cross-service
-        /// mapping table — the dedup key is the primary's id when the
-        /// mapping has one, falling back to a canonical AniList id for
-        /// linked-only anime, and finally the raw service id when even
-        /// AniList has no mapping. Per-provider failures degrade
-        /// gracefully: a logged warning and an empty contribution from
-        /// that provider, so an AniList outage doesn't blank the user's
-        /// MAL + Kitsu cards too.
-        /// </summary>
-        private async Task<List<Meta>> FetchMergedLibraryAsync(
-            TokenData primary, string uid, ListType listType, string genre,
-            bool groupSeasons, bool hideUnreleased, bool hideAdult)
-        {
-            // Active linked tokens — same gate SyncService uses (skip
-            // NeedsReauth + missing access_token entries so we don't fan
-            // out into a guaranteed-failure call).
-            var linked = await _configStore.GetLinkedTokensAsync(uid);
-            var sources = new List<(TokenData Token, AnimeService Service)>
-            {
-                (primary, primary.anime_service),
-            };
-            foreach (var l in linked)
-            {
-                if (l.NeedsReauth || l.TokenData == null) continue;
-                if (string.IsNullOrEmpty(l.TokenData.access_token)) continue;
-                if (l.Service == primary.anime_service) continue;
-                sources.Add((l.TokenData, l.Service));
-            }
-
-            // Per-provider fetch wrapped so one upstream's failure doesn't
-            // poison the whole Task.WhenAll. Each entry returns an empty
-            // list on exception and the merge step just skips it.
-            async Task<List<Meta>> SafeFetch(TokenData token, AnimeService service)
-            {
-                try
-                {
-                    return service switch
-                    {
-                        AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(token, listType, genre: genre, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                        AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(token, listType, genre: genre, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                        _                        => await _kitsuService.GetAnimeListAsync(token, listType, genre: genre, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                    } ?? new List<Meta>();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Library multi-provider fetch failed for {Service}.", service);
-                    return new List<Meta>();
-                }
-            }
-
-            var results = await Task.WhenAll(sources.Select(s => SafeFetch(s.Token, s.Service)));
-
-            // Primary's batch is index 0 so its entries land first; collisions
-            // from linked providers get skipped via the seen-set, which means
-            // primary wins on overlap (status / progress / score the user has
-            // on their primary list shows on the card, not the linked
-            // provider's potentially stale copy).
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            // Title-based safety net for the case the cross-service mapping
-            // can't help with — same anime listed on both linked providers
-            // with no shared id (donghua, simulcast-only originals, recently
-            // licensed shows). For each kept entry we record a normalised
-            // title token set + year + format, then compare every new
-            // candidate against the kept ones before letting it through.
-            // Pairs collapse when:
-            //   - Jaccard token overlap is ≥ 0.7 (catches "World Trigger
-            //     Reboot" ↔ "World Trigger REBOOT Project (Provisional
-            //     Title)" — 3/4 = 0.75), AND
-            //   - either both entries agree on year OR at least one is
-            //     missing it (don't merge same-named different-year
-            //     entries like a 2018 OVA and its 2024 remake), AND
-            //   - same format guard (TV vs Movie remains distinct).
-            // Threshold + guards are deliberately conservative — false
-            // negatives (occasional duplicate slip-through) are way less
-            // user-hostile than false positives (a real anime getting
-            // hidden from the user's library).
-            const double TITLE_SIMILARITY_THRESHOLD = 0.7;
-            var titleSignatures = new List<(HashSet<string> Tokens, int? Year, string Format)>();
-            var merged = new List<Meta>();
-            var primaryService = primary.anime_service;
-
-            for (var i = 0; i < results.Length; i++)
-            {
-                var batch = results[i];
-                if (batch == null) continue;
-                foreach (var m in batch)
-                {
-                    if (m == null || string.IsNullOrEmpty(m.id)) continue;
-
-                    // Try mapping into the primary's id-space first — when
-                    // it succeeds the card links to the canonical detail
-                    // URL the rest of the app uses, and the dedup key is
-                    // the primary id so same-anime entries from different
-                    // providers collapse cleanly.
-                    var primaryId = await _mappingService.GetIdWithPrefixAsync(m.id, primaryService);
-
-                    string dedupKey;
-                    if (!string.IsNullOrEmpty(primaryId))
-                    {
-                        dedupKey = primaryId;
-                        if (primaryId != m.id) m.id = primaryId;
-                    }
-                    else
-                    {
-                        // No primary mapping. Fall back to a canonical
-                        // AniList id so the same anime fetched from MAL +
-                        // Kitsu (both with no primary-MAL row for this
-                        // donghua / obscure show) still dedupes when an
-                        // AniList row exists. Last resort uses the raw
-                        // source id, which may not dedupe across providers
-                        // but at least won't dedupe-DROP either.
-                        var anilistId = primaryService == AnimeService.Anilist
-                            ? null
-                            : await _mappingService.GetIdWithPrefixAsync(m.id, AnimeService.Anilist);
-                        dedupKey = anilistId ?? m.id;
-                    }
-
-                    if (!seen.Add(dedupKey)) continue;
-
-                    // Mapping-dedup passed; run the title-similarity safety
-                    // net before keeping the entry.
-                    var normalized = NormalizeTitle(m.name ?? string.Empty);
-                    var tokens = string.IsNullOrEmpty(normalized)
-                        ? new HashSet<string>()
-                        : new HashSet<string>(normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries));
-                    var fuzzyDup = false;
-                    if (tokens.Count > 0)
-                    {
-                        foreach (var prev in titleSignatures)
-                        {
-                            if (prev.Tokens.Count == 0) continue;
-                            // Year guard — same name, different year is almost
-                            // always different anime (OVA vs remake, original vs
-                            // sequel sharing a base title).
-                            if (m.year.HasValue && prev.Year.HasValue && m.year.Value != prev.Year.Value) continue;
-                            // Format guard — only blocks a merge across the
-                            // movie/not-movie line (a TV series and its
-                            // theatrical recap genuinely belong as separate
-                            // cards). Bucketed coarsely on purpose: providers
-                            // disagree on the fine-grained label for the SAME
-                            // show — Kitsu calls Monster Eater "TV" while
-                            // AniList calls it "TV Short" — and a strict string
-                            // compare let that duplicate slip through. TV / TV
-                            // Short / ONA / OVA / Special all bucket to
-                            // "series" so cross-provider label drift no longer
-                            // defeats the dedup.
-                            if (FormatBucket(m.format) is { } fb && FormatBucket(prev.Format) is { } pb
-                                && !string.Equals(fb, pb, StringComparison.Ordinal)) continue;
-                            var intersectCount = tokens.Intersect(prev.Tokens).Count();
-                            if (intersectCount == 0) continue;
-                            var unionCount = tokens.Union(prev.Tokens).Count();
-                            var jaccard = (double)intersectCount / unionCount;
-                            if (jaccard >= TITLE_SIMILARITY_THRESHOLD)
-                            {
-                                fuzzyDup = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (fuzzyDup) continue;
-
-                    merged.Add(m);
-                    titleSignatures.Add((tokens, m.year, m.format));
-                }
-            }
-            return merged;
-        }
-
-        /// <summary>
-        /// Collapses a per-provider format label into a coarse bucket for the
-        /// cross-provider dedup's format guard. Only the movie/not-movie line
-        /// matters there — a TV series and its theatrical recap are genuinely
-        /// separate cards — so everything that isn't a movie (TV, TV Short,
-        /// ONA, OVA, Special, …) buckets to "series". This is what stops
-        /// providers' fine-grained label disagreements (Kitsu "TV" vs AniList
-        /// "TV Short" for the same show) from defeating the dedup. Returns
-        /// null for an absent format so the guard treats "unknown" as
-        /// "could match anything".
-        /// </summary>
-        private static string FormatBucket(string format)
-        {
-            if (string.IsNullOrWhiteSpace(format)) return null;
-            return format.ToLowerInvariant().Contains("movie") ? "movie" : "series";
         }
     }
 
