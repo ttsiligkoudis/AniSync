@@ -223,9 +223,14 @@ else
        the configure URL from a freshly-installed addon may not yet
        have an AniList / MAL / Kitsu account, and the anonymous flow
        lets them set up the addon with an inline-token install URL
-       before deciding whether to sign up. *@
+       before deciding whether to sign up. Post-login destination is
+       this same page so the user lands back on the addon panel. *@
     @await Html.PartialAsync("_LoginSection", Model,
-        new ViewDataDictionary(ViewData) { ["AllowAnonymous"] = true })
+        new ViewDataDictionary(ViewData)
+        {
+            ["AllowAnonymous"] = true,
+            ["LoginReturnUrl"] = "/configure",
+        })
 }
 
 @await Html.PartialAsync("_FloatingSaveBar", Model)

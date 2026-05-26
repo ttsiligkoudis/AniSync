@@ -7,6 +7,12 @@
     // anonymous use case. Caller flips this via the ViewData override
     // when rendering the partial.
     var allowAnonymous = ViewData["AllowAnonymous"] as bool? ?? false;
+    // Post-login destination. /configure passes "/configure" so Stremio
+    // users continue on the addon panel; /account passes "/" so site
+    // users land on their dashboard rather than back on the account
+    // page they signed in from. /Auth/Login + /Auth/Register both
+    // accept it as a returnUrl query param.
+    var loginReturnUrl = ViewData["LoginReturnUrl"] as string ?? "/";
 }
 
 @* Shared login surface — provider picker lives in the _AccountSection
@@ -30,7 +36,9 @@
             refresh them automatically when they expire.
         </p>
     </div>
-    <a id="loginUrl" class="btn-primary-action btn-login" href='@Url.Action("Login", "Auth", new { animeService = Model.AnimeService })'>
+    <a id="loginUrl" class="btn-primary-action btn-login"
+       data-return-url="@loginReturnUrl"
+       href='@Url.Action("Login", "Auth", new { animeService = Model.AnimeService, returnUrl = loginReturnUrl })'>
         Login with <span id="loginServiceName">@Model.ServiceDisplay</span>
     </a>
     @* Kitsu is the only provider that exposes a public registration API — for
@@ -38,7 +46,7 @@
        Register view itself. The link mirrors #kitsuCreds' visibility so it
        only shows when Kitsu is the selected provider. *@
     <div id="kitsuRegister" class="kitsu-register" style="display:@(Model.IsKitsu ? "block" : "none")">
-        <a href='@Url.Action("Register", "Auth")' class="hint-text">Don't have a Kitsu account? <span class="kitsu-register-link">Create one</span></a>
+        <a href='@Url.Action("Register", "Auth", new { returnUrl = loginReturnUrl })' class="hint-text">Don't have a Kitsu account? <span class="kitsu-register-link">Create one</span></a>
     </div>
 </div>
 
@@ -46,7 +54,9 @@
 {
     <p class="hint-text">Login to your anime list provider to get started.</p>
 
-    <a id="loginAnonymousUrl" class="btn-primary-action btn-login" href='@Url.Action("Login", "Auth")'>
+    <a id="loginAnonymousUrl" class="btn-primary-action btn-login"
+       data-return-url="@loginReturnUrl"
+       href='@Url.Action("Login", "Auth")'>
        Or Continue without Account
     </a>
 }

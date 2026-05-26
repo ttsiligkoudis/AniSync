@@ -320,7 +320,12 @@
     });
 
     $('#disconnectBtn').on('click', function () {
-        window.location.href = '@Url.Action("Logout", "Auth")';
+        // Pass the current pathname as returnUrl so the server's Logout
+        // whitelist (/account or /configure only) can land the user back
+        // on the page they triggered the disconnect from. Any other path
+        // falls through to the home dashboard server-side.
+        window.location.href = '@Url.Action("Logout", "Auth")'
+            + '?returnUrl=' + encodeURIComponent(window.location.pathname);
     });
 
     // ── Linked Accounts ───────────────────────────────────────────────
@@ -1065,10 +1070,17 @@
     });
 
     // ── Login form (anonymous / Kitsu credentials) ────────────────────
+    // Post-login destination — /configure stays on /configure, /account
+    // sends to home. Rendered into the data-return-url attribute by the
+    // _LoginSection partial; falls back to "/" if missing so a misconfigured
+    // page still sends the user somewhere sensible.
+    var loginReturnUrl = $('#loginUrl').attr('data-return-url') || '/';
+
     $('#username, #password').on('input', updateLoginUrl);
 
     function updateLoginUrl() {
-        var href = loginBaseUrl + '?animeService=' + selectedService;
+        var href = loginBaseUrl + '?animeService=' + selectedService
+            + '&returnUrl=' + encodeURIComponent(loginReturnUrl);
         // Kitsu uses the password grant — credentials are typed into the form and
         // posted to /Auth/Login. The other providers are OAuth-redirected.
         if (selectedService === 0) {
@@ -1089,8 +1101,11 @@
 
     $('#loginAnonymousUrl').on('click', function (e) {
         e.preventDefault();
-        var href = $('#loginAnonymousUrl').attr('href');
-        href += '?animeService=' + selectedService + '&anonymous=true';
-        window.location.href = href;
+        var base = $('#loginAnonymousUrl').attr('href');
+        var anonReturnUrl = $('#loginAnonymousUrl').attr('data-return-url') || '/';
+        window.location.href = base
+            + '?animeService=' + selectedService
+            + '&anonymous=true'
+            + '&returnUrl=' + encodeURIComponent(anonReturnUrl);
     });
 </script>
