@@ -29,7 +29,7 @@ namespace AnimeList.Services
             _cache = cache;
         }
 
-        public async Task<List<Meta>> GetAiringScheduleAsync(AnimeService translateTo, string skip = null, string genre = null)
+        public async Task<List<Meta>> GetAiringScheduleAsync(AnimeService translateTo, string skip = null, string genre = null, bool hideAdult = false)
         {
             // Genre branch: AniList's airingSchedules query has no genre
             // filter, so when the caller wants to slice "airing" by genre we
@@ -41,11 +41,15 @@ namespace AnimeList.Services
             // still carry the show's full metadata.
             if (!string.IsNullOrEmpty(genre))
             {
-                return await GetCurrentlyAiringByGenreAsync(translateTo, skip, genre);
+                return await GetCurrentlyAiringByGenreAsync(translateTo, skip, genre, hideAdult);
             }
 
             var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
 
+            // Request isAdult on the embedded media so we can drop hentai
+            // entries client-side when the viewer has Show 18+ disabled.
+            // AniList's airingSchedules query itself takes no isAdult arg —
+            // unlike Media() — so post-filter is the only option.
             var requestBody = SerializeObject(new
             {
                 query = @"
@@ -57,6 +61,7 @@ namespace AnimeList.Services
                                 media {
                                     id
                                     format
+                                    isAdult
                                     title { english romaji }
                                     coverImage { large }
                                     description
@@ -83,6 +88,8 @@ namespace AnimeList.Services
                 var anilistId = (int?)media.id;
                 if (!anilistId.HasValue) continue;
 
+                if (hideAdult && (bool?)media.isAdult == true) continue;
+
                 var externalId = await ResolveExternalIdAsync(anilistId.Value, translateTo);
                 if (!seen.Add(externalId)) continue;
 
@@ -108,17 +115,20 @@ namespace AnimeList.Services
 
         // "Airing + genre" fallback path. Uses Media(status: RELEASING, genre)
         // because airingSchedules can't be sliced per-genre. Sort by popularity
-        // so the most-watched currently-airing shows in the genre lead.
-        private async Task<List<Meta>> GetCurrentlyAiringByGenreAsync(AnimeService translateTo, string skip, string genre)
+        // so the most-watched currently-airing shows in the genre lead. Media()
+        // accepts an isAdult arg directly so the 18+ gate is server-side here,
+        // unlike the schedule branch which has to post-filter.
+        private async Task<List<Meta>> GetCurrentlyAiringByGenreAsync(AnimeService translateTo, string skip, string genre, bool hideAdult)
         {
             var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
 
+            var adultArg = hideAdult ? ", isAdult: false" : string.Empty;
             var requestBody = SerializeObject(new
             {
                 query = @"
                     query ($page: Int, $perPage: Int, $genre: String) {
                         Page(page: $page, perPage: $perPage) {
-                            media(type: ANIME, status: RELEASING, genre: $genre, sort: POPULARITY_DESC) {
+                            media(type: ANIME, status: RELEASING, genre: $genre, sort: POPULARITY_DESC" + adultArg + @") {
                                 id
                                 format
                                 title { english romaji }

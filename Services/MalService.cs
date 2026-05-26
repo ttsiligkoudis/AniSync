@@ -64,7 +64,7 @@ namespace AnimeList.Services
             // MAL has no airing schedule endpoint, so use the AniList fallback like Kitsu does.
             // genre passes through so Airing-by-genre swaps to the RELEASING+genre query.
             if (list == ListType.Airing)
-                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.MyAnimeList, skip, genre);
+                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.MyAnimeList, skip, genre, hideAdult);
 
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.MyAnimeList);
             var isUserList = !list.HasValue || _userLists.Contains(list.Value);
