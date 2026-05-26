@@ -537,12 +537,22 @@
     async function saveFlags() {
         if (!configUid) return;
         var f = readFlags();
-        // 0x20 = enableSeasonGrouping bit on flags3. Captured before
-        // the POST so we can compare against the last-saved baseline
-        // (initialFlags3) and invalidate the dashboard's Continue
-        // Watching cache when the toggle flipped — see the wipe block
-        // below the save.
-        var groupSeasonsChanged = (f.flags3 & 0x20) !== (initialFlags3 & 0x20);
+        // flags3 preference bits that change what the dashboard's Continue
+        // Watching shelf renders — captured before the POST so we can diff
+        // against the last-saved baseline (initialFlags3) and wipe the
+        // client-side cache when any of them flipped:
+        //   0x20 enableSeasonGrouping  — changes the id space the cards link
+        //        to (per-cour anilist:/mal:/kitsu: vs tt umbrellas).
+        //   0x40 hideUnreleasedFromWatching — filters unaired entries out of
+        //        the Currently Watching list the shelf is built from.
+        //   0x80 showAdultContent — toggles whether R18 entries appear in
+        //        the shelf at all.
+        // All three would otherwise leave a stale cached shelf until the
+        // 10-minute TTL elapsed.
+        var groupSeasonsChanged   = (f.flags3 & 0x20) !== (initialFlags3 & 0x20);
+        var hideUnreleasedChanged = (f.flags3 & 0x40) !== (initialFlags3 & 0x40);
+        var showAdultChanged      = (f.flags3 & 0x80) !== (initialFlags3 & 0x80);
+        var continueWatchingAffected = groupSeasonsChanged || hideUnreleasedChanged || showAdultChanged;
         var resp = await fetch('/Home/SaveConfig', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -554,14 +564,12 @@
             configRevision = data.revision;
             refreshUrls();
         }
-        if (groupSeasonsChanged) {
-            // The Continue Watching cache is keyed only by client
-            // storage — flipping Group anime seasons changes which id
-            // space the cards link to (per-cour anilist: / mal: /
-            // kitsu: when off, tt umbrellas when on), so stale entries
-            // would route to the wrong detail page until the cache
-            // TTL elapsed. Wipe so the next dashboard render fetches
-            // a fresh list against the new grouping.
+        if (continueWatchingAffected) {
+            // The Continue Watching cache is keyed only by client storage,
+            // so any preference that changes which entries (or which id
+            // space) the shelf renders has to drop it here — otherwise the
+            // dashboard keeps showing the pre-toggle list until the TTL
+            // expires. Covers Group seasons, Hide unaired, and Show 18+.
             try { localStorage.removeItem('anisync.continueWatching.v1'); }
             catch (_) { /* quota / private mode — best-effort */ }
         }
