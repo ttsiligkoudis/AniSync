@@ -190,7 +190,12 @@ else
 </div>
 
 @section Scripts {
-    @if (!hasSearch && Model.Items.Count > 0)
+    @* discover-pagination.js binds against any .discover-paginator on the
+       page — both the skeleton state (data-needs-initial-load) and the
+       normal infinite-scroll state run through the same script. Gate on
+       !hasSearch because search results don't have a paginator wrapper
+       to bind to. *@
+    @if (!hasSearch)
     {
         <script src="~/js/discover-pagination.js" asp-append-version="true" defer></script>
     }
