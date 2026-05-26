@@ -132,11 +132,11 @@ else
    pagination-aware wrapper below is the initial server-rendered state
    for the non-search case. *@
 <div id="discover-results-pane">
-    @if (hasSearch || Model.Items.Count == 0)
+    @if (hasSearch)
     {
-        @* Search results aren't paginated upstream (single-shot relevance rank)
-           and an empty grid has nothing to paginate from, so render the bare
-           partial without the infinite-scroll plumbing in either case. *@
+        @* Search results aren't paginated upstream (single-shot relevance rank),
+           so render the bare partial without the infinite-scroll plumbing — and
+           do it server-side because the relevance call sourced the data anyway. *@
         @await Html.PartialAsync("_PosterGrid", posterGridModel)
     }
     else
@@ -144,17 +144,41 @@ else
         @* Wrapper carries the bookkeeping the discover-pagination.js needs:
            data-list (slug), data-genre (active filter), data-season (when on
            the Seasonal tab so paginated chunks fetch the same calendar window),
-           data-page (1-indexed page number rendered server-side). The
-           sentinel inside is what IntersectionObserver watches — when it
-           scrolls into the viewport's pre-load margin we fetch the next
-           page via /discover/page and append. *@
+           data-page (last page already rendered — 0 here means the JS owns
+           the first fetch). data-needs-initial-load tells the script to do
+           an immediate page-1 fetch and replace the skeleton placeholders
+           below with the real cards before normal infinite-scroll resumes. *@
         <div class="discover-paginator"
              data-list="@activeSlug"
              data-genre="@Model.Genre"
              data-season="@(isSeasonal ? Model.Season : null)"
              data-tag="@Model.Tag"
-             data-page="1">
-            @await Html.PartialAsync("_PosterGrid", posterGridModel)
+             data-page="@(Model.NeedsClientLoad ? 0 : 1)"
+             data-needs-initial-load="@(Model.NeedsClientLoad ? "true" : null)">
+            @if (Model.NeedsClientLoad)
+            {
+                @* Skeleton grid — same .library-grid shell + .library-card
+                   layout the real cards use, so the row dimensions don't
+                   shift when JS swaps the skeletons for real content.
+                   Twelve placeholders fill above the fold on any common
+                   mobile + desktop viewport. *@
+                <div class="library-grid">
+                    @for (var i = 0; i < 12; i++)
+                    {
+                        <div class="library-card library-card-skeleton">
+                            <div class="library-card-poster-wrap">
+                                <div class="library-card-poster skeleton-shimmer"></div>
+                            </div>
+                            <span class="library-card-skeleton-line"></span>
+                            <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                @await Html.PartialAsync("_PosterGrid", posterGridModel)
+            }
             @* paginator-loader is hidden by default; discover-pagination.js
                reveals it while the next chunk is in flight. *@
             <div class="paginator-loader" hidden aria-hidden="true">

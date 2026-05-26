@@ -134,8 +134,20 @@ namespace AnimeList.Controllers
             var catalogToken = fallbackToKitsu
                 ? new TokenData { anime_service = AnimeService.Kitsu }
                 : tokenData;
+            // Browse views (Trending / Seasonal / Airing / Tag) skip the
+            // upstream catalog fetch on the initial render — discover-
+            // pagination.js fires a page-1 fetch against /discover/page
+            // immediately on load and swaps skeleton placeholders for the
+            // real cards. Avoids holding the initial paint behind AniList
+            // when the same data is going to be fetched anyway one beat
+            // later. Search keeps server-side rendering because its
+            // relevance ranking shares the same upstream call.
             List<Meta> metas;
-            if (hasTag)
+            if (!hasSearch)
+            {
+                metas = new List<Meta>();
+            }
+            else if (hasTag)
             {
                 metas = await _anilistFallback.GetByTagAsync(tag, tokenData.anime_service, hideAdult: hideAdult, groupSeasons: groupSeasons);
             }
@@ -209,6 +221,7 @@ namespace AnimeList.Controllers
                 AvailableSeasons = BuildSeasonalDropdownOptions(),
                 Tag = hasTag ? tag.Trim() : null,
                 Items = metas ?? [],
+                NeedsClientLoad = !hasSearch,
             });
         }
 
@@ -387,8 +400,20 @@ namespace AnimeList.Controllers
         [Route("/discover/studio")]
         public async Task<IActionResult> Studios(string search = null)
         {
-            var (studios, _) = await _anilistFallback.GetStudiosListAsync(page: 1, search: search);
             ViewData["StudioSearch"] = search;
+            // Skip the upstream studios fetch on the initial browse
+            // render — studio-pagination.js kicks an immediate page-1
+            // call on load and swaps the skeleton placeholders for
+            // real tiles. Mirrors the /discover catalog-browse path so
+            // the page paints right away rather than holding behind
+            // AniList. Search stays server-rendered so the "No studios
+            // match …" hint can fire when the query returns nothing.
+            if (string.IsNullOrWhiteSpace(search))
+            {
+                ViewData["StudiosNeedsClientLoad"] = true;
+                return View("Studios", new List<StudioSummary>());
+            }
+            var (studios, _) = await _anilistFallback.GetStudiosListAsync(page: 1, search: search);
             return View("Studios", studios);
         }
 
@@ -611,6 +636,17 @@ namespace AnimeList.Controllers
         public string Season { get; set; }
         public IReadOnlyList<string> AvailableSeasons { get; set; } = [];
         public List<Meta> Items { get; set; } = [];
+
+        /// <summary>
+        /// Signals the view to skip the server-side first-page render and
+        /// emit skeleton placeholders instead — discover-pagination.js then
+        /// fetches /discover/page?page=1 on load and swaps them for real
+        /// cards. Set on every browse load (Trending / Seasonal / Airing /
+        /// Tag) so the initial paint isn't blocked on AniList. Search
+        /// keeps server-side rendering because relevance ranking happens
+        /// in the same round-trip the data fetch does.
+        /// </summary>
+        public bool NeedsClientLoad { get; set; }
     }
 
     /// <summary>

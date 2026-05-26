@@ -3866,6 +3866,31 @@ body.modal-open {
     line-height: 1.2;
 }
 
+/* Skeleton variant for the /discover/studio browse — same .studio-tile
+   chrome (so the grid layout stays put when JS swaps real tiles in)
+   but the .studio-tile-name / -count children are sized as shimmer
+   bars rather than rendered as text. pointer-events:none so the
+   placeholders don't intercept clicks while the fetch is in flight. */
+.studio-tile-skeleton {
+    pointer-events: none;
+    cursor: default;
+}
+
+.studio-tile-skeleton .studio-tile-name {
+    display: block;
+    height: 0.95rem;
+    width: 70%;
+    border-radius: 4px;
+}
+
+.studio-tile-skeleton .studio-tile-count {
+    display: block;
+    height: 0.65rem;
+    width: 45%;
+    margin-top: 0.35rem;
+    border-radius: 4px;
+}
+
 /* Same role as .discover-sentinel — a zero-height invisible tracker
    the IntersectionObserver watches to trigger the next-page fetch. */
 .studio-sentinel,

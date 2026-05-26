@@ -23,6 +23,13 @@
     var done = false;
     var observer = null;
 
+    // True when the grid is currently filled with skeleton placeholders
+    // and the first successful page fetch needs to wipe them before
+    // appending real tiles. Set by the view via data-needs-initial-load
+    // on the browse path (no search) so the page paints right away
+    // rather than holding behind the studios() AniList query.
+    var needsInitialLoad = paginator.getAttribute('data-needs-initial-load') === 'true';
+
     // Forward the active server-side search term on every page fetch so
     // infinite-scroll keeps working through search results instead of
     // silently flipping back to the default favourites-sorted catalog
@@ -50,6 +57,14 @@
         }
         if (sentinel && sentinel.parentNode) sentinel.parentNode.removeChild(sentinel);
         if (loader && loader.parentNode) loader.parentNode.removeChild(loader);
+        // If we never got real tiles to clear the skeletons with —
+        // happens on network failure, or when AniList returns nothing
+        // but rumour pages — wipe them now so the user sees an honest
+        // empty state instead of a perpetually-shimmering grid.
+        if (needsInitialLoad) {
+            grid.replaceChildren();
+            needsInitialLoad = false;
+        }
     }
 
     function showLoader() { if (loader) loader.hidden = false; }
@@ -64,6 +79,13 @@
             var next = child.nextElementSibling;
             var id = child.getAttribute && child.getAttribute('data-studio-id');
             if (id && !seenIds.has(id)) {
+                // First real tile lands — wipe the skeleton placeholders
+                // so they don't sit above the real tiles. Only fires
+                // once thanks to the needsInitialLoad guard.
+                if (needsInitialLoad) {
+                    grid.replaceChildren();
+                    needsInitialLoad = false;
+                }
                 seenIds.add(id);
                 grid.appendChild(child);
                 added++;
@@ -162,4 +184,14 @@
     }, { rootMargin: '400px' });
 
     observer.observe(sentinel);
+
+    // Browse view: server skipped the studios() AniList query so the
+    // grid is currently rendered as skeleton tiles. Kick the first
+    // fetch right away — the observer might also fire if the
+    // sentinel was already inside its 400px rootMargin, but the
+    // `loading` guard inside loadMore() collapses any race into a
+    // single in-flight fetch.
+    if (needsInitialLoad) {
+        loadMore();
+    }
 })();
