@@ -170,13 +170,13 @@
                     @* No mapping to the user's primary AND the source provider
                        (anilist: / kitsu: / mal:) isn't linked as a secondary —
                        there's literally nowhere for AniSync to write a save,
-                       so swap the button for an honest "Not on your list"
-                       badge. The user can still browse the meta + episodes;
-                       linking the source provider on /account would unlock
-                       Manage Entry retroactively. *@
+                       so swap the button for an honest "Not available" badge.
+                       The user can still browse the meta + episodes; linking
+                       the source provider on /account would unlock Manage
+                       Entry retroactively. *@
                     <span class="anime-detail-user-state anime-detail-user-state-unavailable"
                           title="Not available on your account — this anime isn't on your @Model.AnimeService catalog. Link the source provider on Account to track it.">
-                        Not on your list
+                        Not available
                     </span>
                 }
                 else if (Model.IsMultiSeasonGroup && canEdit)

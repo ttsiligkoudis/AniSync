@@ -20,19 +20,25 @@ namespace AnimeList.Controllers
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
         private readonly IConfigStore _configStore;
+        private readonly IAnimeMappingService _mappingService;
+        private readonly ILogger<LibraryController> _logger;
 
         public LibraryController(
             ITokenService tokenService,
             IAnilistService anilistService,
             IKitsuService kitsuService,
             IMalService malService,
-            IConfigStore configStore)
+            IConfigStore configStore,
+            IAnimeMappingService mappingService,
+            ILogger<LibraryController> logger)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
             _configStore = configStore;
+            _mappingService = mappingService;
+            _logger = logger;
         }
 
         // The six list types the user-list catalogs map to. Trending/Seasonal/Airing
@@ -168,12 +174,13 @@ namespace AnimeList.Controllers
             // flip whenever the user used the filter/search input.
             var groupSeasonsForCall = configuration?.enableSeasonGrouping == true;
 
-            var metas = tokenData.anime_service switch
-            {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-            };
+            // Fan out to primary + every healthy linked secondary in parallel
+            // so /library surfaces anime the user has on AniList / MAL / Kitsu
+            // even when they're not on the primary. Same anime fetched from
+            // multiple providers is deduped via the cross-service mapping;
+            // see FetchMergedLibraryAsync for the merge rules.
+            var metas = await FetchMergedLibraryAsync(tokenData, uid, listForCall, genre,
+                groupSeasonsForCall, hideUnreleased, hideAdult);
 
             if (hasSearch && metas?.Count > 0)
             {
@@ -209,6 +216,114 @@ namespace AnimeList.Controllers
                             : $"Nothing in your {activeLabel} list on {tokenData.anime_service}.",
                 },
             });
+        }
+
+        /// <summary>
+        /// Fetches the user's list for the requested status across the primary
+        /// AND every healthy linked secondary, in parallel, then merges the
+        /// results into a single deduped list. Same anime fetched from
+        /// multiple providers collapses to one card via the cross-service
+        /// mapping table — the dedup key is the primary's id when the
+        /// mapping has one, falling back to a canonical AniList id for
+        /// linked-only anime, and finally the raw service id when even
+        /// AniList has no mapping. Per-provider failures degrade
+        /// gracefully: a logged warning and an empty contribution from
+        /// that provider, so an AniList outage doesn't blank the user's
+        /// MAL + Kitsu cards too.
+        /// </summary>
+        private async Task<List<Meta>> FetchMergedLibraryAsync(
+            TokenData primary, string uid, ListType listType, string genre,
+            bool groupSeasons, bool hideUnreleased, bool hideAdult)
+        {
+            // Active linked tokens — same gate SyncService uses (skip
+            // NeedsReauth + missing access_token entries so we don't fan
+            // out into a guaranteed-failure call).
+            var linked = await _configStore.GetLinkedTokensAsync(uid);
+            var sources = new List<(TokenData Token, AnimeService Service)>
+            {
+                (primary, primary.anime_service),
+            };
+            foreach (var l in linked)
+            {
+                if (l.NeedsReauth || l.TokenData == null) continue;
+                if (string.IsNullOrEmpty(l.TokenData.access_token)) continue;
+                if (l.Service == primary.anime_service) continue;
+                sources.Add((l.TokenData, l.Service));
+            }
+
+            // Per-provider fetch wrapped so one upstream's failure doesn't
+            // poison the whole Task.WhenAll. Each entry returns an empty
+            // list on exception and the merge step just skips it.
+            async Task<List<Meta>> SafeFetch(TokenData token, AnimeService service)
+            {
+                try
+                {
+                    return service switch
+                    {
+                        AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(token, listType, genre: genre, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                        AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(token, listType, genre: genre, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                        _                        => await _kitsuService.GetAnimeListAsync(token, listType, genre: genre, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    } ?? new List<Meta>();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Library multi-provider fetch failed for {Service}.", service);
+                    return new List<Meta>();
+                }
+            }
+
+            var results = await Task.WhenAll(sources.Select(s => SafeFetch(s.Token, s.Service)));
+
+            // Primary's batch is index 0 so its entries land first; collisions
+            // from linked providers get skipped via the seen-set, which means
+            // primary wins on overlap (status / progress / score the user has
+            // on their primary list shows on the card, not the linked
+            // provider's potentially stale copy).
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var merged = new List<Meta>();
+            var primaryService = primary.anime_service;
+
+            for (var i = 0; i < results.Length; i++)
+            {
+                var batch = results[i];
+                if (batch == null) continue;
+                foreach (var m in batch)
+                {
+                    if (m == null || string.IsNullOrEmpty(m.id)) continue;
+
+                    // Try mapping into the primary's id-space first — when
+                    // it succeeds the card links to the canonical detail
+                    // URL the rest of the app uses, and the dedup key is
+                    // the primary id so same-anime entries from different
+                    // providers collapse cleanly.
+                    var primaryId = await _mappingService.GetIdWithPrefixAsync(m.id, primaryService);
+
+                    string dedupKey;
+                    if (!string.IsNullOrEmpty(primaryId))
+                    {
+                        dedupKey = primaryId;
+                        if (primaryId != m.id) m.id = primaryId;
+                    }
+                    else
+                    {
+                        // No primary mapping. Fall back to a canonical
+                        // AniList id so the same anime fetched from MAL +
+                        // Kitsu (both with no primary-MAL row for this
+                        // donghua / obscure show) still dedupes when an
+                        // AniList row exists. Last resort uses the raw
+                        // source id, which may not dedupe across providers
+                        // but at least won't dedupe-DROP either.
+                        var anilistId = primaryService == AnimeService.Anilist
+                            ? null
+                            : await _mappingService.GetIdWithPrefixAsync(m.id, AnimeService.Anilist);
+                        dedupKey = anilistId ?? m.id;
+                    }
+
+                    if (!seen.Add(dedupKey)) continue;
+                    merged.Add(m);
+                }
+            }
+            return merged;
         }
     }
 
