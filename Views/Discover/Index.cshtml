@@ -50,42 +50,18 @@
 @if (hasTag) { <!-- list tabs / filter form hidden in tag-browse mode --> }
 else
 {
-@* List-type tabs lead the page (Trending / Seasonal / Airing / Studios
-   / Tags). The first three are anchors that refresh the page with the
-   matching list type — Studios and Tags pivot to dedicated browse
-   pages (separate routes, no list-query semantics), so they sit on
-   the same pill row but link out rather than re-running the catalog
-   query in place. The active filters (genre / season / search) flow
-   through as query params on the catalog tabs so switching between
-   Trending/Seasonal/Airing doesn't reset what the user has dialled in. *@
-<nav class="library-tabs" role="tablist" aria-label="Discover lists">
-    @foreach (var t in Model.Tabs)
-    {
-        var isActive = t == Model.ActiveList;
-        // Preserve genre + season + search across list-tab clicks. Season only
-        // makes sense when the destination tab is Seasonal — drop it otherwise
-        // so the URL stays clean for Trending/Airing.
-        var values = new RouteValueDictionary { ["list"] = slugs[t] };
-        if (hasGenre) values["genre"] = Model.Genre;
-        if (hasSearch) values["search"] = Model.Search;
-        if (t == ListType.Seasonal && !string.IsNullOrEmpty(Model.Season)) values["season"] = Model.Season;
-        <a class="library-tab @(isActive ? "library-tab-active" : "")"
-           href="@Url.Action("Index", "Discover", values)"
-           role="tab"
-           aria-selected="@(isActive ? "true" : "false")">
-            @labels[t]
-        </a>
-    }
-    @* Browse-by surfaces — separate routes, never active on this view.
-       Same pill chrome as the catalog tabs so the row reads as a
-       single coherent "ways to discover" strip. *@
-    <a class="library-tab" href="/discover/studio" role="tab" aria-selected="false">
-        Studios
-    </a>
-    <a class="library-tab" href="/discover/tag" role="tab" aria-selected="false">
-        Tags
-    </a>
-</nav>
+@* Tab strip is shared with the Studios / Tags Browse-by pages so the
+   five-pill nav reads as one continuous Discover surface across all
+   three routes. The partial preserves the catalog-side filters
+   (genre / search / season) as query params on the Trending /
+   Seasonal / Airing pills. *@
+@await Html.PartialAsync("_DiscoverTabs", new AnimeList.Controllers.DiscoverTabsViewModel
+{
+    ActiveList = Model.ActiveList,
+    Genre = Model.Genre,
+    Search = Model.Search,
+    Season = Model.Season,
+})
 
 @* Combined filter form. Search input + genre dropdown + (when Seasonal)
    season dropdown + an explicit Search button. Nothing auto-submits — the

@@ -1,0 +1,59 @@
+@model AnimeList.Controllers.DiscoverTabsViewModel
+@{
+    var labels = new Dictionary<ListType, string>
+    {
+        [ListType.Trending_Desc] = "Trending",
+        [ListType.Seasonal]      = "Seasonal",
+        [ListType.Airing]        = "Airing",
+    };
+    var slugs = new Dictionary<ListType, string>
+    {
+        [ListType.Trending_Desc] = "trending",
+        [ListType.Seasonal]      = "seasonal",
+        [ListType.Airing]        = "airing",
+    };
+    var catalogTabs = new[] { ListType.Trending_Desc, ListType.Seasonal, ListType.Airing };
+    var hasGenre = !string.IsNullOrEmpty(Model.Genre);
+    var hasSearch = !string.IsNullOrEmpty(Model.Search);
+}
+
+@* Shared Discover tab strip. Lives across the catalog Index view and the two
+   Browse-by surfaces (Studios / Tags) so all five pages share the same nav
+   chrome — tapping any pill keeps the user inside the Discover surface
+   regardless of which view they started on. Catalog tabs preserve the
+   genre / search / season the user dialled in on the Index view so the
+   filter state survives a Trending → Seasonal → Airing roundtrip; the
+   Browse-by pills carry no filter state of their own. *@
+<nav class="library-tabs" role="tablist" aria-label="Discover lists">
+    @foreach (var t in catalogTabs)
+    {
+        var isActive = Model.ActiveList == t;
+        // Preserve genre + season + search across catalog-tab clicks. Season only
+        // makes sense when the destination tab is Seasonal — drop it otherwise
+        // so the URL stays clean for Trending/Airing.
+        var values = new RouteValueDictionary { ["list"] = slugs[t] };
+        if (hasGenre) values["genre"] = Model.Genre;
+        if (hasSearch) values["search"] = Model.Search;
+        if (t == ListType.Seasonal && !string.IsNullOrEmpty(Model.Season)) values["season"] = Model.Season;
+        <a class="library-tab @(isActive ? "library-tab-active" : "")"
+           href="@Url.Action("Index", "Discover", values)"
+           role="tab"
+           aria-selected="@(isActive ? "true" : "false")">
+            @labels[t]
+        </a>
+    }
+    @{ var studiosActive = Model.ActiveBrowse == "studios"; }
+    <a class="library-tab @(studiosActive ? "library-tab-active" : "")"
+       href="/discover/studio"
+       role="tab"
+       aria-selected="@(studiosActive ? "true" : "false")">
+        Studios
+    </a>
+    @{ var tagsActive = Model.ActiveBrowse == "tags"; }
+    <a class="library-tab @(tagsActive ? "library-tab-active" : "")"
+       href="/discover/tag"
+       role="tab"
+       aria-selected="@(tagsActive ? "true" : "false")">
+        Tags
+    </a>
+</nav>
