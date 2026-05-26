@@ -1409,12 +1409,16 @@ namespace AnimeList.Services
             // don't waste a page slot on entries we'd drop anyway.
             var adultArg = hideAdult ? ", isAdult: false" : string.Empty;
 
+            // POPULARITY_DESC so the user lands on the heaviest hitters
+            // for the tag first — Re:ZERO before some obscure 2003 OVA
+            // sharing the same theme. Same convention the catalog's
+            // "Trending" / "Popular this season" shelves use.
             var requestBody = SerializeObject(new
             {
                 query = $@"
                     query ($page: Int, $perPage: Int, $tag: String) {{
                         Page(page: $page, perPage: $perPage) {{
-                            media(type: ANIME, tag: $tag, sort: TITLE_ROMAJI{adultArg}) {{
+                            media(type: ANIME, tag: $tag, sort: POPULARITY_DESC{adultArg}) {{
                                 id
                                 isAdult
                                 format
@@ -1446,7 +1450,7 @@ namespace AnimeList.Services
                     query ($page: Int, $perPage: Int, $tag: String) {{
                         Page(page: $page, perPage: $perPage) {{
                             pageInfo {{ hasNextPage }}
-                            media(type: ANIME, tag: $tag, sort: TITLE_ROMAJI{adultArg}) {{
+                            media(type: ANIME, tag: $tag, sort: POPULARITY_DESC{adultArg}) {{
                                 id
                                 isAdult
                                 format
@@ -1542,13 +1546,15 @@ namespace AnimeList.Services
             // Staff.staffMedia doesn't accept an isAdult filter arg on the
             // GraphQL connection, so we select the field and filter inside
             // BuildBrowseMetasAsync. Costs one boolean per node — cheap.
+            // POPULARITY_DESC so the staff member's most-watched credits
+            // surface first — what users come to a staff page for.
             var requestBody = SerializeObject(new
             {
                 query = @"
                     query ($id: Int, $page: Int, $perPage: Int) {
                         Staff(id: $id) {
                             name { full }
-                            staffMedia(type: ANIME, sort: TITLE_ROMAJI, page: $page, perPage: $perPage) {
+                            staffMedia(type: ANIME, sort: POPULARITY_DESC, page: $page, perPage: $perPage) {
                                 edges {
                                     node {
                                         id
@@ -1591,13 +1597,15 @@ namespace AnimeList.Services
             // Studio.media doesn't accept an isAdult filter arg on the
             // GraphQL connection — same as Staff.staffMedia. Select the
             // field and filter inside BuildBrowseMetasAsync.
+            // POPULARITY_DESC so the studio's flagship shows lead — what
+            // users come to a studio page to see.
             var requestBody = SerializeObject(new
             {
                 query = @"
                     query ($id: Int, $page: Int, $perPage: Int) {
                         Studio(id: $id) {
                             name
-                            media(sort: TITLE_ROMAJI, page: $page, perPage: $perPage) {
+                            media(sort: POPULARITY_DESC, page: $page, perPage: $perPage) {
                                 pageInfo { hasNextPage }
                                 edges {
                                     node {
