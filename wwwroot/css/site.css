@@ -1360,13 +1360,16 @@ body.modal-open {
     text-align: center;
 }
 
-/* Mobile cap a touch narrower so a 360-414px header doesn't force the
-   hamburger to overflow. */
+/* Mobile: let the search fill the space its flex:1 share allows rather
+   than capping at a fixed width. On phones the header only carries
+   back-btn + logo + search (+ the notif bell when signed in) — the
+   install pill and hamburger moved to the More menu — so a hard cap
+   just leaves an awkward gap between the logo and a stranded search
+   box, most visible for anonymous visitors who don't even have the
+   bell on the right. flex:1 + max-width:none expands the input to
+   meet whatever sits to its right (the bell, or the viewport edge),
+   closing the gap. */
 @media (max-width: 480px) {
-    .site-search {
-        max-width: 240px;
-    }
-
     .site-search-input {
         padding-left: 2rem;
         font-size: 0.8rem;
@@ -1374,6 +1377,12 @@ body.modal-open {
 
     .site-search-icon {
         left: 0.65rem;
+    }
+}
+
+@media (max-width: 767px) {
+    .site-search {
+        max-width: none;
     }
 }
 
