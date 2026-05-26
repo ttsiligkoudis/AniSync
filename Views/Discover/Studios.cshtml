@@ -5,6 +5,10 @@
     ViewData["ActiveNav"] = "discover";
     var studioSearch = ViewData["StudioSearch"] as string;
     var hasStudioSearch = !string.IsNullOrEmpty(studioSearch);
+    // True when the controller skipped the upstream fetch on the
+    // browse view; the paginator below renders skeleton tiles and JS
+    // takes over to fetch page 1 + replace them.
+    var studiosNeedsClientLoad = ViewData["StudiosNeedsClientLoad"] as bool? ?? false;
 }
 
 @* Shared Discover tab strip with the Studios pill active — keeps this
@@ -38,7 +42,30 @@
     }
 </form>
 
-@if (Model == null || Model.Count == 0)
+@if (studiosNeedsClientLoad)
+{
+    @* Skeleton tiles for the browse view — studio-pagination.js owns
+       page 1 (server skipped the upstream call) and replaces the
+       placeholders with real tiles once /discover/studio/page returns.
+       data-page="0" + data-needs-initial-load="true" tells the script
+       it's responsible for the first fetch. *@
+    <div class="studio-paginator" data-page="0" data-needs-initial-load="true">
+        <div class="studio-grid">
+            @for (var i = 0; i < 12; i++)
+            {
+                <div class="studio-tile studio-tile-skeleton">
+                    <span class="studio-tile-name skeleton-shimmer"></span>
+                    <span class="studio-tile-count skeleton-shimmer"></span>
+                </div>
+            }
+        </div>
+        <div class="paginator-loader" hidden aria-hidden="true">
+            <div class="paginator-loader-spinner"></div>
+        </div>
+        <div class="studio-sentinel" aria-hidden="true"></div>
+    </div>
+}
+else if (Model == null || Model.Count == 0)
 {
     @if (hasStudioSearch)
     {

@@ -30,9 +30,19 @@
     var season = paginator.getAttribute('data-season') || '';
     var tag = paginator.getAttribute('data-tag') || '';
     // Last page already rendered. JS bumps this before each fetch so
-    // the next request asks for page+1.
+    // the next request asks for page+1. The view emits page=0 when
+    // the grid only holds skeleton placeholders — first loadMore()
+    // call then asks for page=1 and replaces them with real cards.
     var page = parseInt(paginator.getAttribute('data-page') || '1', 10);
     if (!list) return;
+
+    // True when the grid is currently rendered as skeleton placeholders
+    // and the first loadMore() needs to wipe them before appending the
+    // real cards. Set by the view via data-needs-initial-load when the
+    // server skipped the upstream catalog fetch (the default for every
+    // browse view — Trending / Seasonal / Airing / Tag — so the initial
+    // paint isn't blocked behind AniList).
+    var needsInitialLoad = paginator.getAttribute('data-needs-initial-load') === 'true';
 
     var loading = false;
     var done = false;
@@ -123,7 +133,26 @@
         })
             .then(function (r) { return r.ok ? r.text() : null; })
             .then(function (html) {
-                if (html === null || html === undefined) { teardown(); return; }
+                if (html === null || html === undefined) {
+                    // Fetch failed. If we were still showing skeletons,
+                    // wipe them so the user sees an honest empty state
+                    // rather than a forever-shimmering grid.
+                    if (needsInitialLoad) {
+                        grid.replaceChildren();
+                        needsInitialLoad = false;
+                    }
+                    teardown();
+                    return;
+                }
+                // Replace the skeleton placeholders with the real cards
+                // on the first successful fetch. seenIds is already
+                // empty (skeletons carry no data-meta-id) so we don't
+                // even need to reset it — just clear the grid before
+                // appendCards runs.
+                if (needsInitialLoad) {
+                    grid.replaceChildren();
+                    needsInitialLoad = false;
+                }
                 var added = appendCards(html);
                 if (added === 0) {
                     // Upstream returned an empty page → we've hit the end
@@ -134,7 +163,14 @@
                     page = nextPage;
                 }
             })
-            .catch(function () { /* swallow — sentinel stays, user can scroll back up and retry by re-scrolling */ })
+            .catch(function () {
+                // Same skeleton-wipe on network errors so the page
+                // doesn't strand the user looking at placeholders.
+                if (needsInitialLoad) {
+                    grid.replaceChildren();
+                    needsInitialLoad = false;
+                }
+            })
             .finally(function () { loading = false; hideLoader(); });
     }
 
@@ -151,4 +187,14 @@
     }, { rootMargin: '400px' });
 
     observer.observe(sentinel);
+
+    // Kick the first fetch right away when the server skipped the
+    // initial catalog query — discover-pagination.js owns page 1 in
+    // that mode. The IntersectionObserver above may also fire on its
+    // own if the sentinel was already in the viewport (short page
+    // before cards arrive), but the `loading` guard inside loadMore()
+    // collapses any race into a single fetch.
+    if (needsInitialLoad) {
+        loadMore();
+    }
 })();
