@@ -2,10 +2,6 @@
 @{
     ViewData["ActiveNav"] = "configure";
     ViewData["Title"] = "Account";
-    // linkedByService is recomputed on every Model.LinkedByService access, so
-    // cache it once here for the picker + the Linked Accounts loop to share.
-    // (stremioStr / cfg moved to Stremio.cshtml along with the addon sections.)
-    var linkedByService = Model.LinkedByService;
 }
 
 @* Page-level header. The site-header (logo + hamburger) above is layout chrome
@@ -19,150 +15,16 @@
     <p class="page-subtitle">Provider · linked accounts</p>
 </header>
 
-@if (!Model.AnonymousUser || Model.IsLoggedIn)
-{
-    @* Account card — wraps the provider picker and the connected/disconnect
-       badge into the same .section-card surface every other group on the page
-       uses, so the page reads as a stack of cards rather than a stripe of
-       loose chrome above one. The picker doubles as a primary swap when the
-       user has linked accounts. *@
-    <section class="section-card">
-        <span class="section-title">Account</span>
-
-        @if (!Model.AnonymousUser)
-        {
-            @* Pre-login the picker shows all three providers — the user picks one to authenticate.
-               Post-login it shrinks to "primary + healthy linked accounts" so unlinked providers
-               don't tease as tappable. The HTML stays identical between states; the only thing
-               that changes is which pills render. *@
-            var kitsuLinked   = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.Kitsu,        out var kl) && !kl.NeedsReauth;
-            var anilistLinked = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.Anilist,      out var al) && !al.NeedsReauth;
-            var malLinked     = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.MyAnimeList, out var ml) && !ml.NeedsReauth;
-
-            var showKitsu   = !Model.IsLoggedIn || Model.IsKitsu   || kitsuLinked;
-            var showAnilist = !Model.IsLoggedIn || Model.IsAnilist || anilistLinked;
-            var showMal     = !Model.IsLoggedIn || Model.IsMal     || malLinked;
-
-            if (Model.HasSwappableLinks)
-            {
-                <p class="service-toggle-hint">Tap another account below to make it your primary.</p>
-            }
-
-            <div class="service-toggle" id="serviceToggle">
-                @if (showKitsu)
-                {
-                    <span class="label @(Model.IsKitsu ? "active" : "")" id="labelKitsu" data-service="0" data-service-name="Kitsu">Kitsu</span>
-                }
-                @if (showAnilist)
-                {
-                    <span class="label @(Model.IsAnilist ? "active" : "")" id="labelAnilist" data-service="1" data-service-name="Anilist">AniList</span>
-                }
-                @if (showMal)
-                {
-                    <span class="label @(Model.IsMal ? "active" : "")" id="labelMal" data-service="2" data-service-name="MyAnimeList">MyAnimeList</span>
-                }
-            </div>
-        }
-
-        @if (Model.IsLoggedIn)
-        {
-            <div class="account-status">
-                <span class="success-badge">
-                    @(!Model.AnonymousUser ? $"✓ Connected to {Model.AnimeService}" : "Connected without Account")
-                </span>
-                <button id="disconnectBtn" type="button" class="account-disconnect-btn">Disconnect</button>
-            </div>
-        }
-    </section>
-}
+@* Account + Linked Accounts share between /configure and /stremio so the
+   Stremio surface can manage identity without bouncing back here. The
+   partials own their own visibility gates (anonymous / logged-in /
+   primary-only), so calling them unconditionally here matches the
+   previous inline behaviour exactly. *@
+@await Html.PartialAsync("_AccountSection", Model)
+@await Html.PartialAsync("_LinkedAccountsSection", Model)
 
 @if (Model.IsLoggedIn)
 {
-    @if (!Model.AnonymousUser)
-    {
-        // linkedTokens / linkedByService come from the page-top @{} block. Promotion to
-        // primary lives in the service picker pills above; this section just lists
-        // which providers are linked and offers Unlink / Re-link.
-        var allServices = new[] { AnimeService.Kitsu, AnimeService.Anilist, AnimeService.MyAnimeList };
-
-        <!-- ─── LINKED ACCOUNTS ─────────────────────────────────────────── -->
-        <section class="section-card">
-            <span class="section-title">Linked Accounts</span>
-            <p class="section-description">
-                Optional sync targets. When you save or auto-track an entry, AniSync writes
-                to your primary account first and then mirrors the change to every linked
-                provider it can map the anime onto.
-            </p>
-
-            <div class="linked-accounts">
-                @foreach (var svc in allServices)
-                {
-                    var label = svc == AnimeService.MyAnimeList ? "MyAnimeList" : svc.ToString();
-                    var isPrimary = svc == Model.AnimeService;
-                    var linked = linkedByService.GetValueOrDefault(svc);
-                    <div class="linked-account-row" data-service="@((int)svc)" data-service-name="@svc">
-                        <div class="linked-account-name">@label</div>
-                        <div class="linked-account-actions">
-                            @if (isPrimary)
-                            {
-                                <span class="linked-account-badge linked-account-primary">Primary</span>
-                            }
-                            else if (linked != null)
-                            {
-                                var needsReauth = linked.NeedsReauth;
-                                <span class="linked-account-badge @(needsReauth ? "linked-account-warn" : "linked-account-connected")">
-                                    @(needsReauth ? "Needs re-auth" : "Linked")
-                                </span>
-                                @* Promotion to primary is now driven by the service-picker pills at *@
-                                @* the top of the page; this row only handles re-link / unlink. *@
-                                @if (needsReauth)
-                                {
-                                    if (svc == AnimeService.Kitsu)
-                                    {
-                                        <button type="button" class="btn-ghost btn-ghost-sm linked-account-toggle">Re-link</button>
-                                    }
-                                    else
-                                    {
-                                        <a class="btn-ghost btn-ghost-sm" href="/Auth/LinkProvider?service=@svc">Re-link ↗</a>
-                                    }
-                                }
-                                <form method="post" action="/Auth/UnlinkProvider" class="linked-account-form">
-                                    <input type="hidden" name="service" value="@svc" />
-                                    <button type="submit" class="btn-ghost btn-ghost-sm">Unlink</button>
-                                </form>
-                            }
-                            else if (svc == AnimeService.Kitsu)
-                            {
-                                <button type="button" class="btn-ghost btn-ghost-sm linked-account-toggle">Link</button>
-                            }
-                            else
-                            {
-                                <a class="btn-ghost btn-ghost-sm" href="/Auth/LinkProvider?service=@svc">Link ↗</a>
-                            }
-                        </div>
-                        @* The Kitsu inline credentials form covers both first-time link and *@
-                        @* re-link after a needs-reauth transition (password rotated, etc.). *@
-                        @if (svc == AnimeService.Kitsu && !isPrimary && (linked == null || linked.NeedsReauth))
-                        {
-                            <form method="post" action="/Auth/LinkKitsu" class="linked-account-creds linked-kitsu-form">
-                                <input type="text" name="username" placeholder="Kitsu username" required />
-                                <input type="password" name="password" placeholder="Kitsu password" required />
-                                <button type="submit" class="btn-primary-action btn-login">Link Kitsu</button>
-                                <p class="option-name-sub" style="margin: 0;">
-                                    Used only to obtain an OAuth token from Kitsu — your password
-                                    is not stored in the configuration.
-                                </p>
-                            </form>
-                        }
-                    </div>
-                }
-            </div>
-
-            @* Backfill-linked-accounts moved to /advanced — it's a one-shot
-               maintenance action, the configure surface stays focused on
-               identity. See Advanced.cshtml's "Sync" section. *@
-        </section>
-    }
 
     @* Preferences — shared card hosted on both /configure and /stremio.
        The partial owns the canonical toggle set + visibility rules so a

@@ -6,16 +6,21 @@
     var cfg = Model.Configuration;
 }
 
-@* Stremio addon configuration — split off from /configure so users editing
-   their list account don't have to scroll past the catalogs / streams / install
-   URL panel that's only relevant to the Stremio integration. The shared
-   _ConfigurePageScript partial provides every JS handler this page needs;
-   selectors that don't match (linked accounts, danger zone, etc.) silently
-   no-op so the same script also drives /configure's site-side controls. *@
+@* Stremio addon configuration. The catalog / stream / install-URL panels
+   here belong to the Stremio integration specifically; the Account +
+   Linked Accounts cards at the top are shared partials with /configure
+   so a user landing here directly (e.g. via a bookmarked install URL)
+   can manage identity without bouncing to the other page first. The
+   shared _ConfigurePageScript partial provides every JS handler both
+   surfaces need — selectors that don't match on a given page silently
+   no-op so one script drives both. *@
 <header class="page-header">
     <h1 class="page-title">Stremio addon</h1>
     <p class="page-subtitle">Catalogs · streams · install URL</p>
 </header>
+
+@await Html.PartialAsync("_AccountSection", Model)
+@await Html.PartialAsync("_LinkedAccountsSection", Model)
 
 @if (Model.IsLoggedIn)
 {
