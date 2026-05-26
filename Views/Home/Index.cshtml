@@ -55,7 +55,7 @@
    scores; v0 sticks to what's already in the existing list-catalog response. *@
 @if (isLoggedIn && !anonymousUser && Model.HasStats)
 {
-    <section class="dashboard-section stats-section" data-stats-section>
+    <section class="dashboard-section stats-section" data-stats-section data-stats-loading>
         @{
             // Stats come from AniList's User.statistics GraphQL regardless of
             // which provider the user picked as their primary — that's where
@@ -254,6 +254,11 @@
                 setCell('completed', stats.completed, function (v) { return v.toLocaleString(); });
                 setCell('hours', stats.totalHoursWatched, function (v) { return v.toLocaleString(); });
                 setCell('mean', stats.meanScore, function (v) { return Number(v).toFixed(1); });
+                // Drop the [data-stats-loading] flag so CSS swaps the
+                // shimmer bars back to the real numbers. Cache-hit path
+                // runs synchronously and removes it before first paint,
+                // so the user never sees the skeleton on a warm load.
+                section.removeAttribute('data-stats-loading');
             }
             async function fetchAndRender() {
                 try {
@@ -294,11 +299,13 @@
 @* Continue Watching: a small slice of the user's Currently Watching list,
    fetched client-side from /Home/ContinueWatchingData (a rendered
    _PosterGrid partial) and cached in localStorage for 10 minutes. The
-   section's outer skeleton always renders for logged-in non-anonymous
-   users and starts [hidden]; the JS un-hides it once the HTML loads. *@
+   section renders visible for logged-in non-anonymous users with a row
+   of skeleton placeholder cards inside; the JS swaps them for the real
+   HTML once it lands, or hides the whole section if the user's
+   Currently Watching list comes back empty. *@
 @if (isLoggedIn && !anonymousUser)
 {
-    <section class="dashboard-section" data-continue-watching-section hidden>
+    <section class="dashboard-section" data-continue-watching-section>
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">Continue watching</h2>
             <a class="dashboard-section-link" href="/library?list=current">
@@ -309,7 +316,26 @@
                 </svg>
             </a>
         </div>
-        <div data-continue-watching-container></div>
+        <div data-continue-watching-container>
+            @* 6 skeleton cards — enough to fill the visible portion of the
+               horizontal scroll row on every common mobile viewport so the
+               user reads "this shelf is loading" instead of "this shelf
+               is empty". JS replaces the inner HTML wholesale when the
+               real cards arrive, so these aren't preserved past first
+               paint of the response. *@
+            <div class="poster-scroll-row">
+                @for (var i = 0; i < 6; i++)
+                {
+                    <div class="library-card library-card-skeleton">
+                        <div class="library-card-poster-wrap">
+                            <div class="library-card-poster skeleton-shimmer"></div>
+                        </div>
+                        <span class="library-card-skeleton-line"></span>
+                        <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                    </div>
+                }
+            </div>
+        </div>
     </section>
     <script>
         (function () {
@@ -344,6 +370,9 @@
 
             function paint(html) {
                 if (!html || !html.trim()) {
+                    // Empty result — hide the section entirely rather
+                    // than leaving the placeholder shelf visible with
+                    // nothing to put in it.
                     container.replaceChildren();
                     section.hidden = true;
                     return;
@@ -352,7 +381,8 @@
                 // text. innerHTML is safe here and lets the same markup the
                 // other shelves use (Views/Shared/_PosterGrid.cshtml) drop
                 // straight in without a parallel JS card builder to keep
-                // in sync.
+                // in sync. Replacing the inner HTML drops the skeleton
+                // placeholders we rendered server-side at the same time.
                 container.innerHTML = html;
                 section.hidden = false;
             }
@@ -363,11 +393,21 @@
                         credentials: 'same-origin',
                         skipLoader: true,
                     });
-                    if (!resp.ok) return;
+                    if (!resp.ok) {
+                        // Upstream returned non-2xx — drop the skeleton
+                        // shelf so the user doesn't sit looking at a
+                        // permanently-loading state.
+                        section.hidden = true;
+                        return;
+                    }
                     var html = await resp.text();
                     writeCache(html);
                     paint(html);
-                } catch (_) { /* network blip — leave the section hidden */ }
+                } catch (_) {
+                    // Network blip — same treatment as a non-2xx: hide
+                    // the section so the placeholders don't linger.
+                    section.hidden = true;
+                }
             }
 
             var cached = readCache();
