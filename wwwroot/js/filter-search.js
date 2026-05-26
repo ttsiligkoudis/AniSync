@@ -73,8 +73,13 @@
         document.body.appendChild(s);
     }
 
-    form.addEventListener('submit', function (e) {
-        e.preventDefault();
+    // True when the pane was rendered with skeleton placeholders and the
+    // server skipped the upstream fetch — runSubmit() needs to know
+    // about this so the initial replace doesn't scroll the pane into
+    // view (no real user action triggered it) and doesn't push a
+    // history entry (the URL the user is already on is correct).
+    function runSubmit(opts) {
+        opts = opts || {};
         var params = buildQuery();
         // fullPane=1 tells /discover/page to render the "Empty results"
         // message for empty payloads (the pagination-scroll path keeps it
@@ -83,7 +88,7 @@
         params.set('fullPane', '1');
         var url = config.pageEndpoint + '?' + params.toString();
 
-        fetch(url, {
+        return fetch(url, {
             credentials: 'same-origin',
             headers: { 'Accept': 'text/html' },
         })
@@ -91,26 +96,54 @@
             .then(function (html) {
                 if (html === null) return;
                 pane.innerHTML = html;
+                pane.removeAttribute('data-needs-initial-load');
                 reloadPaginationScript();
 
-                // Push the corresponding visible URL so deep-linking + back
-                // navigation works. Strip the fullPane=1 we appended for the
-                // partial endpoint — it has no meaning on the Index route.
-                params.delete('fullPane');
-                var visibleUrl = config.indexPath + (params.toString() ? ('?' + params.toString()) : '');
-                window.history.pushState({ filterSearch: true }, '', visibleUrl);
+                if (!opts.initial) {
+                    // Push the corresponding visible URL so deep-linking + back
+                    // navigation works. Strip the fullPane=1 we appended for the
+                    // partial endpoint — it has no meaning on the Index route.
+                    params.delete('fullPane');
+                    var visibleUrl = config.indexPath + (params.toString() ? ('?' + params.toString()) : '');
+                    window.history.pushState({ filterSearch: true }, '', visibleUrl);
 
-                // Scroll the pane into view so the user sees the new results
-                // even if their previous scroll position was far down.
-                pane.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    // Scroll the pane into view so the user sees the new results
+                    // even if their previous scroll position was far down. Skip
+                    // this on the initial auto-load — the user is presumed to
+                    // already be looking at the pane and a programmatic scroll
+                    // would be jarring.
+                    pane.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
             })
             .catch(function () {
                 // On failure, fall back to a real navigation — that way the
                 // user still gets results (or a real error page) instead of
-                // staring at stale content.
+                // staring at stale content. On the auto-initial-load path
+                // a hard reload would loop infinitely (same URL, same skip-
+                // upstream-fetch decision); leave the skeleton in place and
+                // log to the console so the user can manually refresh.
+                if (opts.initial) {
+                    console.warn('filter-search: initial load failed; skeletons remain visible');
+                    return;
+                }
                 window.location.href = form.action + '?' + buildQuery().toString();
             });
+    }
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        runSubmit();
     });
+
+    // Auto-fire the same submit pipeline on script load when the pane
+    // is rendered as skeletons — the server deferred the upstream fetch
+    // and this is what populates the page. The form's current state
+    // (active tab, any genre / search the user navigated into via a
+    // querystring) carries through buildQuery() unchanged, so a deep-
+    // link like /library?list=completed lands on the right list.
+    if (pane.getAttribute('data-needs-initial-load') === 'true') {
+        runSubmit({ initial: true });
+    }
 
     // Back / forward navigation: reload so the server-rendered state
     // matches the URL. Simpler than re-fetching + re-binding everything

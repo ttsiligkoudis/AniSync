@@ -93,9 +93,36 @@
 
 @* Submitting the .filter-bar form normally would full-reload the page;
    filter-search.js intercepts the submit, hits /library/page for just
-   the pane HTML, and swaps it into #library-results-pane. *@
-<div id="library-results-pane">
-    @await Html.PartialAsync("_LibraryPane", paneModel)
+   the pane HTML, and swaps it into #library-results-pane. The same
+   script also auto-fires the submit on script load when the pane
+   carries data-needs-initial-load — that's what populates the page on
+   the initial /library render now that the server skips the upstream
+   list fetch and renders skeletons instead. *@
+<div id="library-results-pane"
+     data-needs-initial-load="@(Model.NeedsClientLoad ? "true" : null)">
+    @if (Model.NeedsClientLoad)
+    {
+        @* Skeleton grid — same .library-grid shell + .library-card
+           layout the real cards use, so the row dimensions don't
+           shift when filter-search.js swaps the pane content. Twelve
+           placeholders fill above the fold on common viewports. *@
+        <div class="library-grid">
+            @for (var i = 0; i < 12; i++)
+            {
+                <div class="library-card library-card-skeleton">
+                    <div class="library-card-poster-wrap">
+                        <div class="library-card-poster skeleton-shimmer"></div>
+                    </div>
+                    <span class="library-card-skeleton-line"></span>
+                    <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        @await Html.PartialAsync("_LibraryPane", paneModel)
+    }
 </div>
 
 @section Scripts {

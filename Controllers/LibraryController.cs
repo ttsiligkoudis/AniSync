@@ -101,47 +101,13 @@ namespace AnimeList.Controllers
             // collapse to a single IMDb-id card across every list surface.
             var groupSeasonsForCall = configuration?.enableSeasonGrouping == true;
 
-            // No caching on the library path — each load reflects live state
-            // off the upstream service. Each per-service call returns the
-            // user's FULL list for the requested status; we don't paginate
-            // server-side and don't slice — render every card. Earlier code
-            // used a server-side scroll-fetch (sliced 50 entries per page,
-            // sentinel-driven), but each /library/page call had to re-fetch
-            // the entire list from upstream just to throw away everything
-            // outside the requested window, so the pagination saved no
-            // upstream work — only the HTML size. The browser handles a
-            // few-hundred-card grid fine.
-            var metas = tokenData.anime_service switch
-            {
-                AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                _                        => await _kitsuService.GetAnimeListAsync(tokenData, listForCall, genre: genre, groupSeasons: groupSeasonsForCall, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-            };
-
-            if (hasSearch && metas?.Count > 0)
-            {
-                var normalisedQuery = NormalizeTitle(search);
-                const double minScore = 0.4;
-                metas = metas
-                    .Select(m => (meta: m, score: ScoreMatch(normalisedQuery, m.name)))
-                    .Where(x => x.score >= minScore)
-                    .OrderByDescending(x => x.score)
-                    .Select(x => x.meta)
-                    .ToList();
-            }
-
-            metas ??= [];
-            // Alphabetical sort on non-search list views. Search keeps its
-            // relevance ranking (sorted by ScoreMatch above) since
-            // alphabetical ordering would bury the obvious matches under
-            // "Aharen-san" / "Akira" / etc.
-            if (!hasSearch)
-            {
-                metas = metas
-                    .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-            }
-
+            // Skip the upstream fetch on the initial /library render —
+            // filter-search.js auto-fires a submit on script load (the same
+            // pipeline a real Search-button click takes) which hits
+            // /library/page and drops the result into the pane. Avoids
+            // holding the initial paint behind AniList / MAL / Kitsu's
+            // list query. /library/page itself still does the live fetch
+            // verbatim; nothing about the per-service dispatch changes.
             return View(new LibraryViewModel
             {
                 ConfigUid = uid,
@@ -151,7 +117,8 @@ namespace AnimeList.Controllers
                 Search = hasSearch ? search.Trim() : null,
                 Genre = hasGenre ? genre.Trim() : null,
                 AvailableGenres = PopularGenres,
-                Items = metas,
+                Items = new List<Meta>(),
+                NeedsClientLoad = true,
             });
         }
 
@@ -265,5 +232,15 @@ namespace AnimeList.Controllers
         public string Genre { get; set; }
         public IReadOnlyList<string> AvailableGenres { get; set; } = [];
         public List<Meta> Items { get; set; } = [];
+
+        /// <summary>
+        /// Signals the view to skip the server-side render and emit skeleton
+        /// placeholders instead — filter-search.js then fires an immediate
+        /// submit on load (matching the same flow a real Search-button click
+        /// would take) and swaps the placeholders for /library/page's
+        /// response. Set on every initial render; only filter submits keep
+        /// rendering server-side.
+        /// </summary>
+        public bool NeedsClientLoad { get; set; }
     }
 }
