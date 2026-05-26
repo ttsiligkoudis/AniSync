@@ -1649,11 +1649,18 @@ namespace AnimeList.Services
             return (name, await BuildBrowseMetasAsync(nodes, translateTo, hideAdult, groupSeasons), hasNext);
         }
 
-        public async Task<(List<StudioSummary> Studios, bool HasNextPage)> GetStudiosListAsync(int page = 1)
+        public async Task<(List<StudioSummary> Studios, bool HasNextPage)> GetStudiosListAsync(int page = 1, string search = null)
         {
             if (page < 1) page = 1;
+            var trimmedSearch = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+            var hasSearch = trimmedSearch != null;
 
-            var cacheKey = $"anilist:studios-list:by-favourites:p{page}";
+            // Cache by (search, page) so the favourites default doesn't poison
+            // search results and vice versa. Search hits are rare per term, but
+            // the user paging through a single search benefits from caching.
+            var cacheKey = hasSearch
+                ? $"anilist:studios-list:search:{trimmedSearch.ToLowerInvariant()}:p{page}"
+                : $"anilist:studios-list:by-favourites:p{page}";
             if (_cache.TryGetValue<(List<StudioSummary>, bool)>(cacheKey, out var cached) && cached.Item1 != null)
             {
                 return cached;
@@ -1670,13 +1677,20 @@ namespace AnimeList.Services
             // Studio.media does NOT accept a `type` argument — passing
             // one 500s the whole query — so the anime/non-anime cut
             // happens via isAnimationStudio.
+            //
+            // Search branch: AniList's studios() page takes an optional
+            // `search` arg that does fuzzy name matching server-side.
+            // Sort is dropped in this branch — search results carry
+            // their own relevance ranking and re-sorting by favourites
+            // would dilute it.
+            var studiosArgs = hasSearch ? "search: $search" : "sort: FAVOURITES_DESC";
             var requestBody = SerializeObject(new
             {
                 query = @"
-                    query ($page: Int, $perPage: Int) {
+                    query ($page: Int, $perPage: Int, $search: String) {
                         Page(page: $page, perPage: $perPage) {
                             pageInfo { hasNextPage }
-                            studios(sort: FAVOURITES_DESC) {
+                            studios(" + studiosArgs + @") {
                                 id
                                 name
                                 isAnimationStudio
@@ -1684,7 +1698,7 @@ namespace AnimeList.Services
                             }
                         }
                     }",
-                variables = new { page, perPage = 50 },
+                variables = new { page, perPage = 50, search = trimmedSearch },
             });
 
             var data = await PostJsonAsync(requestBody);

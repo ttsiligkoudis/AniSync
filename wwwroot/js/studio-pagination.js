@@ -23,6 +23,12 @@
     var done = false;
     var observer = null;
 
+    // Forward the active server-side search term on every page fetch so
+    // infinite-scroll keeps working through search results instead of
+    // silently flipping back to the default favourites-sorted catalog
+    // when the sentinel re-arms.
+    var searchParam = new URLSearchParams(window.location.search).get('search') || '';
+
     // Cap on consecutive empty-but-hasNext pages we'll roll through in one
     // loadMore call. Guards against a runaway loop if AniList ever returns
     // hasNextPage=true forever (or a long stretch of all-filtered pages
@@ -76,7 +82,9 @@
         function step(p) {
             if (done) return Promise.resolve();
             attempts++;
-            return fetch('/discover/studio/page?page=' + p, {
+            var url = '/discover/studio/page?page=' + p;
+            if (searchParam) url += '&search=' + encodeURIComponent(searchParam);
+            return fetch(url, {
                 credentials: 'same-origin',
                 headers: { 'Accept': 'text/html' },
                 skipLoader: true

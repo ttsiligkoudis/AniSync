@@ -385,16 +385,17 @@ namespace AnimeList.Controllers
         // URL surface tracks the Browse By card on the home page.
 
         [Route("/discover/studio")]
-        public async Task<IActionResult> Studios()
+        public async Task<IActionResult> Studios(string search = null)
         {
-            var (studios, _) = await _anilistFallback.GetStudiosListAsync(page: 1);
+            var (studios, _) = await _anilistFallback.GetStudiosListAsync(page: 1, search: search);
+            ViewData["StudioSearch"] = search;
             return View("Studios", studios);
         }
 
         [Route("/discover/studio/page")]
-        public async Task<IActionResult> StudiosPage(int page = 1)
+        public async Task<IActionResult> StudiosPage(int page = 1, string search = null)
         {
-            var (studios, hasNext) = await _anilistFallback.GetStudiosListAsync(page);
+            var (studios, hasNext) = await _anilistFallback.GetStudiosListAsync(page, search);
             Response.Headers["X-Has-Next-Page"] = hasNext ? "true" : "false";
             return PartialView("_StudioTiles", studios ?? new List<StudioSummary>());
         }
