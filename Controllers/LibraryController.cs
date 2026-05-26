@@ -280,6 +280,26 @@ namespace AnimeList.Controllers
             // on their primary list shows on the card, not the linked
             // provider's potentially stale copy).
             var seen = new HashSet<string>(StringComparer.Ordinal);
+            // Title-based safety net for the case the cross-service mapping
+            // can't help with — same anime listed on both linked providers
+            // with no shared id (donghua, simulcast-only originals, recently
+            // licensed shows). For each kept entry we record a normalised
+            // title token set + year + format, then compare every new
+            // candidate against the kept ones before letting it through.
+            // Pairs collapse when:
+            //   - Jaccard token overlap is ≥ 0.7 (catches "World Trigger
+            //     Reboot" ↔ "World Trigger REBOOT Project (Provisional
+            //     Title)" — 3/4 = 0.75), AND
+            //   - either both entries agree on year OR at least one is
+            //     missing it (don't merge same-named different-year
+            //     entries like a 2018 OVA and its 2024 remake), AND
+            //   - same format guard (TV vs Movie remains distinct).
+            // Threshold + guards are deliberately conservative — false
+            // negatives (occasional duplicate slip-through) are way less
+            // user-hostile than false positives (a real anime getting
+            // hidden from the user's library).
+            const double TITLE_SIMILARITY_THRESHOLD = 0.7;
+            var titleSignatures = new List<(HashSet<string> Tokens, int? Year, string Format)>();
             var merged = new List<Meta>();
             var primaryService = primary.anime_service;
 
@@ -320,7 +340,43 @@ namespace AnimeList.Controllers
                     }
 
                     if (!seen.Add(dedupKey)) continue;
+
+                    // Mapping-dedup passed; run the title-similarity safety
+                    // net before keeping the entry.
+                    var normalized = NormalizeTitle(m.name ?? string.Empty);
+                    var tokens = string.IsNullOrEmpty(normalized)
+                        ? new HashSet<string>()
+                        : new HashSet<string>(normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+                    var fuzzyDup = false;
+                    if (tokens.Count > 0)
+                    {
+                        foreach (var prev in titleSignatures)
+                        {
+                            if (prev.Tokens.Count == 0) continue;
+                            // Year guard — same name, different year is almost
+                            // always different anime (OVA vs remake, original vs
+                            // sequel sharing a base title).
+                            if (m.year.HasValue && prev.Year.HasValue && m.year.Value != prev.Year.Value) continue;
+                            // Format guard — TV vs Movie sharing a name is
+                            // common (anime → theatrical recap) and the user
+                            // genuinely tracks them as separate entries.
+                            if (!string.IsNullOrEmpty(m.format) && !string.IsNullOrEmpty(prev.Format)
+                                && !string.Equals(m.format, prev.Format, StringComparison.OrdinalIgnoreCase)) continue;
+                            var intersectCount = tokens.Intersect(prev.Tokens).Count();
+                            if (intersectCount == 0) continue;
+                            var unionCount = tokens.Union(prev.Tokens).Count();
+                            var jaccard = (double)intersectCount / unionCount;
+                            if (jaccard >= TITLE_SIMILARITY_THRESHOLD)
+                            {
+                                fuzzyDup = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (fuzzyDup) continue;
+
                     merged.Add(m);
+                    titleSignatures.Add((tokens, m.year, m.format));
                 }
             }
             return merged;
