@@ -27,6 +27,25 @@ namespace AnimeList.Controllers
         private const string OauthFlowKey = "OauthFlow";
         private const string OauthFlowLogin = "Login";
         private const string OauthFlowLink = "Link";
+        // Survives the OAuth round-trip so /Auth/Callback can hand the user back to
+        // whichever AniSync page started the link flow (/configure or /stremio).
+        private const string OauthReturnUrlKey = "OauthReturnUrl";
+
+        /// <summary>
+        /// Returns a redirect to <paramref name="returnUrl"/> when it's a safe same-app
+        /// local URL, otherwise the standard /Home/Configure redirect. Every linked-
+        /// account action takes a returnUrl so the user lands back on whichever page
+        /// (/configure or /stremio) they triggered the action from — the partials are
+        /// rendered on both surfaces and would otherwise always bounce to /configure.
+        /// </summary>
+        private IActionResult RedirectToReturnUrlOrConfigure(string returnUrl)
+        {
+            if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+            {
+                return Redirect(returnUrl);
+            }
+            return RedirectToAction("Configure", "Home");
+        }
 
         public AuthController(ITokenService tokenService, IHttpContextAccessor httpContextAccessor,
             IConfigStore configStore, IConfiguration configuration, ISyncService syncService,
@@ -114,10 +133,15 @@ namespace AnimeList.Controllers
             var oauthService = HttpContext.Session.GetString(OauthServiceKey);
             var oauthFlow = HttpContext.Session.GetString(OauthFlowKey);
             var malVerifier = HttpContext.Session.GetString(MalCodeVerifierKey);
+            // Linked-account flow may carry a return URL (so /stremio-initiated links
+            // come back to /stremio rather than always bouncing to /configure). Read
+            // and clear in the same batch as the other OAuth-state keys.
+            var oauthReturnUrl = HttpContext.Session.GetString(OauthReturnUrlKey);
 
             HttpContext.Session.Remove(OauthServiceKey);
             HttpContext.Session.Remove(OauthFlowKey);
             HttpContext.Session.Remove(MalCodeVerifierKey);
+            HttpContext.Session.Remove(OauthReturnUrlKey);
 
             var isLink = oauthFlow == OauthFlowLink;
             // Capture the primary's session token *before* the login path clears it. The
@@ -136,7 +160,11 @@ namespace AnimeList.Controllers
             if (isLink && linkedTokenData != null && !string.IsNullOrEmpty(primarySession))
                 await PersistLinkedTokenAsync(primarySession, linkedTokenData);
 
-            return RedirectToAction("Configure", "Home");
+            // Primary-login flow always lands on /Home/Configure (that's the canonical
+            // post-signin destination); the link flow honours the stashed return URL.
+            return isLink
+                ? RedirectToReturnUrlOrConfigure(oauthReturnUrl)
+                : RedirectToAction("Configure", "Home");
         }
 
         /// <summary>
@@ -167,11 +195,24 @@ namespace AnimeList.Controllers
         /// rather than the primary login. Requires the user to already be logged in.
         /// </summary>
         [HttpGet]
-        public IActionResult LinkProvider(AnimeService service)
+        public IActionResult LinkProvider(AnimeService service, string returnUrl = null)
         {
             var primary = GetSessionPrimary();
             if (primary == null) return BadRequest("Log in with a primary provider first.");
             if (primary.anime_service == service) return BadRequest("This provider is already your primary account.");
+
+            // Stash the AniSync page that started the link so /Auth/Callback can
+            // hand the user back to it after the OAuth round-trip. Validated as a
+            // local URL here so a malformed / hostile value never even makes it
+            // into the session — the Callback can trust whatever it reads.
+            if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+            {
+                HttpContext.Session.SetString(OauthReturnUrlKey, returnUrl);
+            }
+            else
+            {
+                HttpContext.Session.Remove(OauthReturnUrlKey);
+            }
 
             if (service == AnimeService.Anilist)
             {
@@ -194,7 +235,7 @@ namespace AnimeList.Controllers
         /// from the inline form on the configure page.
         /// </summary>
         [HttpPost]
-        public async Task<IActionResult> LinkKitsu(string username, string password)
+        public async Task<IActionResult> LinkKitsu(string username, string password, string returnUrl = null)
         {
             var primary = GetSessionPrimary();
             if (primary == null) return BadRequest("Log in with a primary provider first.");
@@ -212,7 +253,7 @@ namespace AnimeList.Controllers
                 NeedsReauth = false,
             });
 
-            return RedirectToAction("Configure", "Home");
+            return RedirectToReturnUrlOrConfigure(returnUrl);
         }
 
         /// <summary>
@@ -221,7 +262,7 @@ namespace AnimeList.Controllers
         /// avoid CSRF-style triggers via image tags or prefetch.
         /// </summary>
         [HttpPost]
-        public async Task<IActionResult> SetPrimary(AnimeService service, bool force = false)
+        public async Task<IActionResult> SetPrimary(AnimeService service, bool force = false, string returnUrl = null)
         {
             var primary = GetSessionPrimary();
             if (primary == null) return BadRequest("Log in with a primary provider first.");
@@ -235,7 +276,7 @@ namespace AnimeList.Controllers
             // Push the new primary into the session so subsequent requests dispatch through
             // its service. The UID stayed the same, so install URLs continue to resolve.
             HttpContext.Session.SetString("AccessToken", SerializeObject(newPrimary));
-            return RedirectToAction("Configure", "Home");
+            return RedirectToReturnUrlOrConfigure(returnUrl);
         }
 
         private static string BuildSwapErrorMessage(string reason, AnimeService service)
@@ -257,14 +298,14 @@ namespace AnimeList.Controllers
         /// it can't be triggered by a CSRF-style image-tag GET.
         /// </summary>
         [HttpPost]
-        public async Task<IActionResult> UnlinkProvider(AnimeService service)
+        public async Task<IActionResult> UnlinkProvider(AnimeService service, string returnUrl = null)
         {
             var primary = GetSessionPrimary();
             if (primary == null) return BadRequest("Log in with a primary provider first.");
 
             var uid = await _configStore.UpsertAsync(primary);
             await _configStore.RemoveLinkedTokenAsync(uid, service);
-            return RedirectToAction("Configure", "Home");
+            return RedirectToReturnUrlOrConfigure(returnUrl);
         }
 
         /// <summary>

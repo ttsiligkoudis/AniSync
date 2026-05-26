@@ -1,6 +1,13 @@
 @model ConfigureViewModel
 @{
     var linkedByService = Model.LinkedByService;
+    // Threaded through every link/unlink/re-link action so the user lands
+    // back on the page they triggered the action from (/configure on the
+    // identity surface, /stremio when managing identity inline next to
+    // the addon config). AuthController.RedirectToReturnUrlOrConfigure
+    // validates via Url.IsLocalUrl so a hostile value just falls back to
+    // /configure rather than redirecting off-site.
+    var currentPath = Context.Request.Path + Context.Request.QueryString;
 }
 
 @* Shared linked-accounts card — same content on /configure and /stremio
@@ -49,11 +56,12 @@
                                 }
                                 else
                                 {
-                                    <a class="btn-ghost btn-ghost-sm" href="/Auth/LinkProvider?service=@svc">Re-link ↗</a>
+                                    <a class="btn-ghost btn-ghost-sm" href="/Auth/LinkProvider?service=@svc&returnUrl=@Uri.EscapeDataString(currentPath)">Re-link ↗</a>
                                 }
                             }
                             <form method="post" action="/Auth/UnlinkProvider" class="linked-account-form">
                                 <input type="hidden" name="service" value="@svc" />
+                                <input type="hidden" name="returnUrl" value="@currentPath" />
                                 <button type="submit" class="btn-ghost btn-ghost-sm">Unlink</button>
                             </form>
                         }
@@ -63,7 +71,7 @@
                         }
                         else
                         {
-                            <a class="btn-ghost btn-ghost-sm" href="/Auth/LinkProvider?service=@svc">Link ↗</a>
+                            <a class="btn-ghost btn-ghost-sm" href="/Auth/LinkProvider?service=@svc&returnUrl=@Uri.EscapeDataString(currentPath)">Link ↗</a>
                         }
                     </div>
                     @* The Kitsu inline credentials form covers both first-time link and *@
@@ -73,6 +81,7 @@
                         <form method="post" action="/Auth/LinkKitsu" class="linked-account-creds linked-kitsu-form">
                             <input type="text" name="username" placeholder="Kitsu username" required />
                             <input type="password" name="password" placeholder="Kitsu password" required />
+                            <input type="hidden" name="returnUrl" value="@currentPath" />
                             <button type="submit" class="btn-primary-action btn-login">Link Kitsu</button>
                             <p class="option-name-sub" style="margin: 0;">
                                 Used only to obtain an OAuth token from Kitsu — your password

@@ -248,6 +248,9 @@
         var params = new URLSearchParams();
         params.set('service', svcEnum);
         if (force) params.set('force', 'true');
+        // Stay on whichever page the user is on (/configure or /stremio) —
+        // the server validates the value as a local URL before honouring it.
+        params.set('returnUrl', window.location.pathname + window.location.search);
 
         var resp = await fetch('/Auth/SetPrimary', {
             method: 'POST',
