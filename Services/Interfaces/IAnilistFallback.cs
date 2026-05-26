@@ -22,7 +22,7 @@ namespace AnimeList.Services.Interfaces
         /// just sourced from <c>Media(status: RELEASING, genre: $genre)</c> instead of
         /// <c>airingSchedules</c>.
         /// </summary>
-        Task<List<Meta>> GetAiringScheduleAsync(AnimeService translateTo, string skip = null, string genre = null);
+        Task<List<Meta>> GetAiringScheduleAsync(AnimeService translateTo, string skip = null, string genre = null, bool hideAdult = false);
 
         /// <summary>
         /// Fetches up to 25 recommendations for an AniList anime id. Each recommendation is

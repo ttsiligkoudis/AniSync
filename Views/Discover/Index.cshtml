@@ -50,10 +50,14 @@
 @if (hasTag) { <!-- list tabs / filter form hidden in tag-browse mode --> }
 else
 {
-@* List-type tabs lead the page (Trending / Seasonal / Airing). Each is an
-   anchor — clicking refreshes the page with the selected list type. The
-   active filters (genre / season / search) flow through as query params so
-   switching tabs doesn't reset what the user has dialled in. *@
+@* List-type tabs lead the page (Trending / Seasonal / Airing / Studios
+   / Tags). The first three are anchors that refresh the page with the
+   matching list type — Studios and Tags pivot to dedicated browse
+   pages (separate routes, no list-query semantics), so they sit on
+   the same pill row but link out rather than re-running the catalog
+   query in place. The active filters (genre / season / search) flow
+   through as query params on the catalog tabs so switching between
+   Trending/Seasonal/Airing doesn't reset what the user has dialled in. *@
 <nav class="library-tabs" role="tablist" aria-label="Discover lists">
     @foreach (var t in Model.Tabs)
     {
@@ -72,6 +76,15 @@ else
             @labels[t]
         </a>
     }
+    @* Browse-by surfaces — separate routes, never active on this view.
+       Same pill chrome as the catalog tabs so the row reads as a
+       single coherent "ways to discover" strip. *@
+    <a class="library-tab" href="/discover/studio" role="tab" aria-selected="false">
+        Studios
+    </a>
+    <a class="library-tab" href="/discover/tag" role="tab" aria-selected="false">
+        Tags
+    </a>
 </nav>
 
 @* Combined filter form. Search input + genre dropdown + (when Seasonal)
