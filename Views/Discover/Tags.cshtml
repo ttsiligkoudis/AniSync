@@ -2,6 +2,7 @@
 @{
     ViewData["Title"] = "Tags";
     ViewData["BodyClass"] = "library-page";
+    ViewData["ActiveNav"] = "discover";
 
     // Group by AniList category for scannability — the unsorted list
     // would be a few hundred undifferentiated tiles. Tags with no
@@ -11,10 +12,14 @@
         .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
 }
 
-<header class="page-header">
-    <p class="page-subtitle">Browse by</p>
-    <h1 class="page-title">Tags</h1>
-</header>
+@* Shared Discover tab strip with the Tags pill active — keeps this
+   page inside the same five-pill nav as /discover and /discover/studio,
+   so users navigate between catalog views and Browse-by views without
+   the chrome flipping under them. *@
+@await Html.PartialAsync("_DiscoverTabs", new AnimeList.Controllers.DiscoverTabsViewModel
+{
+    ActiveBrowse = "tags",
+})
 
 @if (Model == null || Model.Count == 0)
 {

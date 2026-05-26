@@ -611,4 +611,24 @@ namespace AnimeList.Controllers
         public IReadOnlyList<string> AvailableSeasons { get; set; } = [];
         public List<Meta> Items { get; set; } = [];
     }
+
+    /// <summary>
+    /// Slim model for the shared _DiscoverTabs partial. The tab strip is rendered
+    /// on the catalog Index view (Trending / Seasonal / Airing) and on the
+    /// Browse-by-Studio / Browse-by-Tag list pages — same five pills, with the
+    /// active one varying by surface. Index passes through the genre / search /
+    /// season currently dialled in so the catalog tabs preserve filters across
+    /// clicks; Studios / Tags pages leave those null since they don't share the
+    /// filter surface.
+    /// </summary>
+    public class DiscoverTabsViewModel
+    {
+        // Active catalog tab, or null when the active surface is a Browse-by page.
+        public ListType? ActiveList { get; set; }
+        // Active Browse-by surface — "studios" / "tags" — null on the catalog view.
+        public string ActiveBrowse { get; set; }
+        public string Genre { get; set; }
+        public string Search { get; set; }
+        public string Season { get; set; }
+    }
 }

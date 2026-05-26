@@ -2,12 +2,17 @@
 @{
     ViewData["Title"] = "Studios";
     ViewData["BodyClass"] = "library-page";
+    ViewData["ActiveNav"] = "discover";
 }
 
-<header class="page-header">
-    <p class="page-subtitle">Browse by</p>
-    <h1 class="page-title">Studios</h1>
-</header>
+@* Shared Discover tab strip with the Studios pill active — keeps this
+   page inside the same five-pill nav as /discover and /discover/tag,
+   so users navigate between catalog views and Browse-by views without
+   the chrome flipping under them. *@
+@await Html.PartialAsync("_DiscoverTabs", new AnimeList.Controllers.DiscoverTabsViewModel
+{
+    ActiveBrowse = "studios",
+})
 
 @if (Model == null || Model.Count == 0)
 {
