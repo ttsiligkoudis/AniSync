@@ -457,7 +457,14 @@ public class HomeController : Controller
             ? new Configuration { showTrending = true, showSeasonal = true, discoverOnlySeasonal = true }
             : new Configuration();
 
-        return View(new ConfigureViewModel
+        // Default view is the Stremio addon page (catalogs / streams /
+        // install URL + the shared Account header) because /configure is
+        // the URL Stremio's "Configure" button appends to every addon
+        // manifest — landing the user on the addon panel directly avoids
+        // a redirect hop. The Account() and Advanced() actions below
+        // wrap this same logic and just swap the view name for the
+        // account-focused / advanced views respectively.
+        return View("Stremio", new ConfigureViewModel
         {
             TokenData = encodedTokenData,
             ConfigUid = configUid,
@@ -476,18 +483,27 @@ public class HomeController : Controller
     /// Stremio addon configuration page — split off from /configure so users
     /// editing their list account don't have to scroll past the catalogs /
     /// streams / install URL panel that's only relevant to the Stremio
-    /// integration. Reuses the Configure action's identity + flag resolution
-    /// verbatim and returns the same ConfigureViewModel; the Stremio.cshtml
-    /// view just renders a different subset of sections.
+    /// integration. /stremio is preserved as a permanent redirect so any
+    /// bookmark / external link from the previous URL still lands on the
+    /// canonical /configure endpoint.
     /// </summary>
     [Route("/stremio")]
-    public Task<IActionResult> Stremio() => RenderConfigure("Stremio", config: null);
+    public IActionResult Stremio() => RedirectPermanent("/configure");
+
+    /// <summary>
+    /// Account-focused settings page — Account picker, Linked Accounts,
+    /// Preferences. Carries the content that used to live at /configure
+    /// before Stremio's "Configure" URL convention claimed that path for
+    /// the addon panel; lives off /account now so users can still reach
+    /// the identity-focused view from the site nav.
+    /// </summary>
+    [Route("/account")]
+    public Task<IActionResult> Account() => RenderConfigure("Configure", config: null);
 
     /// <summary>
     /// Advanced settings page — Backups, Danger Zone, Home Server Sync.
-    /// Lives off /configure so the account page stays focused on identity
-    /// + linked accounts; reuses Configure's view-model so the JS handlers
-    /// in _ConfigurePageScript bind the same way regardless of which view
+    /// Reuses Configure's view-model so the JS handlers in
+    /// _ConfigurePageScript bind the same way regardless of which view
     /// rendered them.
     /// </summary>
     [Route("/advanced")]
