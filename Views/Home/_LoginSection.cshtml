@@ -45,8 +45,20 @@
        AniList / MAL we point the user at their own signup page from the
        Register view itself. The link mirrors #kitsuCreds' visibility so it
        only shows when Kitsu is the selected provider. *@
+    @* Per-provider "create account" affordance — visibility mirrors the
+       provider picker so only the active provider's signup link is on
+       screen. Kitsu has a public registration API and lands on our own
+       /Auth/Register flow (auto-login on success); AniList and MAL
+       don't expose signup APIs, so we point the user at their own
+       signup pages in a new tab and let them come back to log in. *@
     <div id="kitsuRegister" class="kitsu-register" style="display:@(Model.IsKitsu ? "block" : "none")">
         <a href='@Url.Action("Register", "Auth", new { returnUrl = loginReturnUrl })' class="hint-text">Don't have a Kitsu account? <span class="kitsu-register-link">Create one</span></a>
+    </div>
+    <div id="anilistRegister" class="kitsu-register" style="display:@(Model.IsAnilist ? "block" : "none")">
+        <a href="https://anilist.co/signup" target="_blank" rel="noopener noreferrer" class="hint-text">Don't have an AniList account? <span class="kitsu-register-link">Create one ↗</span></a>
+    </div>
+    <div id="malRegister" class="kitsu-register" style="display:@(Model.IsMal ? "block" : "none")">
+        <a href="https://myanimelist.net/register.php" target="_blank" rel="noopener noreferrer" class="hint-text">Don't have a MyAnimeList account? <span class="kitsu-register-link">Create one ↗</span></a>
     </div>
 </div>
 
