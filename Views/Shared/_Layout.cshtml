@@ -134,7 +134,7 @@
                 </svg>
                 <span class="nav-label">Home</span>
             </a>
-            @* My Library requires an authenticated non-anonymous session — the
+            @* Library requires an authenticated non-anonymous session — the
                page just bounces back to / for anonymous visitors, so we omit
                the link entirely rather than offering a dead-end navigation. *@
             @if (layoutLoggedIn)
@@ -143,7 +143,7 @@
                     <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
                     </svg>
-                    <span class="nav-label">My Library</span>
+                    <span class="nav-label">Library</span>
                 </a>
             }
             <a href="/discover" class="@(activeNav == "discover" ? "active" : "")">
@@ -172,7 +172,7 @@
                 <span class="nav-drawer-status">
                     @(layoutLoggedIn ? $"✓ Connected to {layoutConnectedLabel}" : "✓ Connected without account")
                 </span>
-                <a class="nav-drawer-cta nav-drawer-cta-secondary" href="@Url.Action("Logout", "Auth")">Disconnect</a>
+                <a class="nav-drawer-cta nav-drawer-cta-secondary" href="@Url.Action("Logout", "Auth")" data-disconnect>Disconnect</a>
             }
             else
             {
@@ -224,7 +224,7 @@
                             <svg class="nav-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
                             </svg>
-                            <span class="nav-label">My Library</span>
+                            <span class="nav-label">Library</span>
                         </a>
                     }
                     <a href="/discover" class="@(activeNav == "discover" ? "active" : "")">
@@ -313,7 +313,7 @@
                    showing Sign in alongside it would be misleading. *@
                 @if (layoutHasSession)
                 {
-                    <a class="site-header-cta site-header-cta-secondary" href="@Url.Action("Logout", "Auth")">Disconnect</a>
+                    <a class="site-header-cta site-header-cta-secondary" href="@Url.Action("Logout", "Auth")" data-disconnect>Disconnect</a>
                 }
                 else
                 {
@@ -438,7 +438,7 @@
         </button>
         @if (layoutHasSession)
         {
-            <a href="@Url.Action("Logout", "Auth")" class="bottom-nav-dome-item" aria-label="Disconnect">
+            <a href="@Url.Action("Logout", "Auth")" class="bottom-nav-dome-item" aria-label="Disconnect" data-disconnect>
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
                     <polyline points="16 17 21 12 16 7"></polyline>
@@ -677,6 +677,21 @@
                 }, 500);
             });
         })();
+
+        // Disconnect intercept — wipe localStorage on every Disconnect
+        // link click so the next session starts cold. Stats / continue-
+        // watching / stream caches / video resume positions etc. all
+        // live under anisync.* keys; for a clean disconnect the user
+        // wants none of the previous identity's data sticking around.
+        // Runs synchronously inside the click handler so the wipe is
+        // done before the browser begins navigation to /Auth/Logout.
+        // Doesn't preventDefault — the link still navigates as usual.
+        document.querySelectorAll('[data-disconnect]').forEach(function (el) {
+            el.addEventListener('click', function () {
+                try { localStorage.clear(); } catch (_) { /* quota / private mode — best-effort */ }
+                try { sessionStorage.clear(); } catch (_) { /* same */ }
+            });
+        });
     </script>
     @if (layoutLoggedIn)
     {
