@@ -144,7 +144,42 @@
                         wouldn't open and there's no "you" to talk about).
                    data-open-modal is the global hook intercepted by
                    manage-entry-modal.js. *@
-                @if (Model.IsMultiSeasonGroup && canEdit)
+                @{
+                    // Override info — non-null when the requested anime has no mapping
+                    // to the user's primary but lives on a linked secondary the user
+                    // has connected. The data-meta-service-override attribute is read
+                    // by manage-entry-modal.js and routes the GET / POST through that
+                    // linked token instead of the primary. titleTooltip surfaces a
+                    // discoverable hint so the user understands the save goes to
+                    // their linked provider, not the active primary picker.
+                    var overrideService = Model.EntryServiceOverride;
+                    var overrideAttr = overrideService.HasValue ? ((int)overrideService.Value).ToString() : null;
+                    var overrideLabel = overrideService.HasValue
+                        ? (overrideService.Value == AnimeService.MyAnimeList ? "MyAnimeList" : overrideService.Value.ToString())
+                        : null;
+                    var manageTitle = overrideLabel != null
+                        ? $"Saved to your linked {overrideLabel} account — this anime isn't in your {Model.AnimeService} catalog."
+                        : null;
+                    // The status label below should also reflect the override
+                    // service's vocabulary when the entry came via a linked
+                    // token; otherwise PrettyStatus uses the primary's labels.
+                    var statusService = overrideService ?? Model.AnimeService;
+                }
+                @if (Model.EntryUnavailable && canEdit)
+                {
+                    @* No mapping to the user's primary AND the source provider
+                       (anilist: / kitsu: / mal:) isn't linked as a secondary —
+                       there's literally nowhere for AniSync to write a save,
+                       so swap the button for an honest "Not on your list"
+                       badge. The user can still browse the meta + episodes;
+                       linking the source provider on /account would unlock
+                       Manage Entry retroactively. *@
+                    <span class="anime-detail-user-state anime-detail-user-state-unavailable"
+                          title="Not available on your account — this anime isn't on your @Model.AnimeService catalog. Link the source provider on Account to track it.">
+                        Not on your list
+                    </span>
+                }
+                else if (Model.IsMultiSeasonGroup && canEdit)
                 {
                     @* Multi-cour grouped (id is imdb:tt..., franchise spans
                        more than one season) → the user's per-cour entry can't
@@ -154,7 +189,9 @@
                        id so the modal can route any save through the
                        franchise-umbrella resolver. *@
                     <button type="button" class="anime-detail-user-state"
-                            data-open-modal data-meta-id="@a.id" data-meta-name="@a.name">
+                            data-open-modal data-meta-id="@a.id" data-meta-name="@a.name"
+                            data-meta-service-override="@overrideAttr"
+                            title="@manageTitle">
                         <span>Manage Entry</span>
                         <svg class="anime-detail-user-state-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
                              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -165,7 +202,7 @@
                 }
                 else if (Model.Entry != null)
                 {
-                    var statusLabel = PrettyStatus(Model.AnimeService, Model.Entry.Status);
+                    var statusLabel = PrettyStatus(statusService, Model.Entry.Status);
                     var userBits = new List<string>();
                     if (!string.IsNullOrEmpty(statusLabel)) userBits.Add(statusLabel);
                     if (Model.Entry.Progress > 0)
@@ -180,7 +217,9 @@
                         if (canEdit)
                         {
                             <button type="button" class="anime-detail-user-state"
-                                    data-open-modal data-meta-id="@a.id" data-meta-name="@a.name">
+                                    data-open-modal data-meta-id="@a.id" data-meta-name="@a.name"
+                                    data-meta-service-override="@overrideAttr"
+                                    title="@manageTitle">
                                 <span>@string.Join(" · ", userBits)</span>
                                 <svg class="anime-detail-user-state-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
                                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -198,8 +237,10 @@
                 else if (canEdit)
                 {
                     <button type="button" class="anime-detail-user-state"
-                            data-open-modal data-meta-id="@a.id" data-meta-name="@a.name">
-                        <span>Add to List</span>
+                            data-open-modal data-meta-id="@a.id" data-meta-name="@a.name"
+                            data-meta-service-override="@overrideAttr"
+                            title="@manageTitle">
+                        <span>@(overrideLabel != null ? $"Add to {overrideLabel}" : "Add to List")</span>
                         <svg class="anime-detail-user-state-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
                              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M12 5v14"></path>

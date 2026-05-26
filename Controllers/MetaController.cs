@@ -806,7 +806,7 @@ namespace AnimeList.Controllers
         // addon flow links to.
 
         [HttpGet("/api/library/entry")]
-        public async Task<JsonResult> GetEntryByApi(string id, int? season)
+        public async Task<JsonResult> GetEntryByApi(string id, int? season, int? service)
         {
             try
             {
@@ -815,7 +815,17 @@ namespace AnimeList.Controllers
                     string.IsNullOrWhiteSpace(tokenData.access_token))
                     return new JsonResult(new { success = false, error = "not-authenticated" });
 
-                var animeService = tokenData.anime_service;
+                // service: <int> override — the detail page stamps it on the
+                // Manage Entry button when the requested anime has no mapping
+                // to the user's primary but lives on a linked secondary
+                // (e.g. anilist:N viewed by an MAL-primary user with AniList
+                // linked). In that case the GET reads the entry through the
+                // linked token instead of the primary; everything else
+                // (status enum vocabulary returned, season picker behaviour)
+                // follows the override service.
+                var overrideToken = await ResolveServiceOverrideTokenAsync(tokenData, service);
+                var effectiveToken = overrideToken ?? tokenData;
+                var animeService = effectiveToken.anime_service;
 
                 // Resolve seasons + selected entry id when the click came from a card
                 // with a cross-service id (imdb:/tmdb:); for native ids (anilist: /
@@ -830,9 +840,9 @@ namespace AnimeList.Controllers
 
                 var entry = animeService switch
                 {
-                    AnimeService.Anilist     => await _anilistService.GetAnimeEntryAsync(tokenData, selectedEntryId, null),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, selectedEntryId, null),
-                    _                        => await _kitsuService.GetAnimeEntryAsync(tokenData, selectedEntryId, null),
+                    AnimeService.Anilist     => await _anilistService.GetAnimeEntryAsync(effectiveToken, selectedEntryId, null),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(effectiveToken, selectedEntryId, null),
+                    _                        => await _kitsuService.GetAnimeEntryAsync(effectiveToken, selectedEntryId, null),
                 };
 
                 // totalEpisodes comes from the entry itself when present; falls back
@@ -882,50 +892,69 @@ namespace AnimeList.Controllers
                     string.IsNullOrWhiteSpace(tokenData.access_token))
                     return new JsonResult(new { success = false, error = "not-authenticated" });
 
+                // service: <int> override — the modal sends it when the entry
+                // was loaded through a linked-secondary token (anime had no
+                // mapping to the user's primary, e.g. anilist:N for an
+                // MAL-primary user with AniList linked). Save then writes
+                // through the linked token instead of the primary, and we
+                // skip the fan-out — the primary can't accept this id, and
+                // fanning out to other linked providers would require an
+                // additional mapping translation that the override case
+                // doesn't currently support.
+                var overrideToken = await ResolveServiceOverrideTokenAsync(tokenData, request.Service);
+                var effectiveToken = overrideToken ?? tokenData;
+                var isOverride = overrideToken != null;
+
                 // Empty status = "remove from list" — same semantics as the page version.
                 if (string.IsNullOrEmpty(request.Status))
                 {
-                    switch (tokenData.anime_service)
+                    switch (effectiveToken.anime_service)
                     {
                         case AnimeService.Anilist:
-                            await _anilistService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                            await _anilistService.DeleteAnimeEntryAsync(effectiveToken, request.Id, request.Season);
                             break;
                         case AnimeService.MyAnimeList:
-                            await _malService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                            await _malService.DeleteAnimeEntryAsync(effectiveToken, request.Id, request.Season);
                             break;
                         default:
-                            await _kitsuService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                            await _kitsuService.DeleteAnimeEntryAsync(effectiveToken, request.Id, request.Season);
                             break;
                     }
-                    await _syncService.FanOutDeleteAsync(tokenData, request.Id, request.Season);
-                    _listCache.Invalidate(tokenData);
+                    if (!isOverride)
+                    {
+                        await _syncService.FanOutDeleteAsync(tokenData, request.Id, request.Season);
+                        _listCache.Invalidate(tokenData);
+                    }
                     return new JsonResult(new { success = true });
                 }
 
                 var startedAt = ParseDate(request.StartedAt);
                 var finishedAt = ParseDate(request.FinishedAt);
 
-                switch (tokenData.anime_service)
+                switch (effectiveToken.anime_service)
                 {
                     case AnimeService.Anilist:
-                        await _anilistService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                        await _anilistService.SaveAnimeEntryAsync(effectiveToken, request.Id, request.Season, request.Progress,
                             request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
                         break;
                     case AnimeService.MyAnimeList:
-                        await _malService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                        await _malService.SaveAnimeEntryAsync(effectiveToken, request.Id, request.Season, request.Progress,
                             request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
                         break;
                     default:
-                        await _kitsuService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                        await _kitsuService.SaveAnimeEntryAsync(effectiveToken, request.Id, request.Season, request.Progress,
                             request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
                         break;
                 }
 
-                // Same fan-out to linked secondary providers as the config-scoped path.
-                await _syncService.FanOutSaveAsync(tokenData, request.Id, request.Season, request.Progress,
-                    request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                if (!isOverride)
+                {
+                    // Same fan-out to linked secondary providers as the config-scoped path.
+                    await _syncService.FanOutSaveAsync(tokenData, request.Id, request.Season, request.Progress,
+                        request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
 
-                _listCache.Invalidate(tokenData);
+                    _listCache.Invalidate(tokenData);
+                }
                 return new JsonResult(new { success = true });
             }
             catch (Exception ex)
@@ -934,6 +963,29 @@ namespace AnimeList.Controllers
                     request?.Id, request?.Season, request?.Status);
                 return new JsonResult(new { success = false, error = "exception" });
             }
+        }
+
+        /// <summary>
+        /// Resolves a service-override int (the integer value of
+        /// <see cref="AnimeService"/>) to the user's matching linked-secondary
+        /// token. Returns null when the override is missing, points at the
+        /// primary itself (no override needed), or names a service the user
+        /// hasn't linked (or has linked but flagged for reauth). The caller
+        /// falls back to the primary token in any of those cases.
+        /// </summary>
+        private async Task<TokenData> ResolveServiceOverrideTokenAsync(TokenData primary, int? service)
+        {
+            if (!service.HasValue) return null;
+            if (primary == null || primary.anonymousUser) return null;
+            if (!Enum.IsDefined(typeof(AnimeService), service.Value)) return null;
+            var target = (AnimeService)service.Value;
+            if (target == primary.anime_service) return null;
+
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(primary);
+            if (string.IsNullOrEmpty(uid)) return null;
+            var linked = await _configStore.GetLinkedTokensAsync(uid);
+            var match = linked.FirstOrDefault(l => l.Service == target && !l.NeedsReauth && l.TokenData != null);
+            return match?.TokenData;
         }
     }
 
@@ -952,6 +1004,13 @@ namespace AnimeList.Controllers
         public int? RewatchCount { get; set; }
         public string? StartedAt { get; set; }
         public string? FinishedAt { get; set; }
+        // Optional service-override (integer value of AnimeService) — when set
+        // and the user has a healthy linked token for that service, the save
+        // routes through it instead of the primary. Used by the detail page
+        // for anime that have no mapping to the user's primary but live on a
+        // linked secondary (anilist:N viewed by an MAL-primary user with
+        // AniList linked).
+        public int? Service { get; set; }
     }
 }
 
