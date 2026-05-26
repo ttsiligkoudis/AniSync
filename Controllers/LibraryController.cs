@@ -357,11 +357,19 @@ namespace AnimeList.Controllers
                             // always different anime (OVA vs remake, original vs
                             // sequel sharing a base title).
                             if (m.year.HasValue && prev.Year.HasValue && m.year.Value != prev.Year.Value) continue;
-                            // Format guard — TV vs Movie sharing a name is
-                            // common (anime → theatrical recap) and the user
-                            // genuinely tracks them as separate entries.
-                            if (!string.IsNullOrEmpty(m.format) && !string.IsNullOrEmpty(prev.Format)
-                                && !string.Equals(m.format, prev.Format, StringComparison.OrdinalIgnoreCase)) continue;
+                            // Format guard — only blocks a merge across the
+                            // movie/not-movie line (a TV series and its
+                            // theatrical recap genuinely belong as separate
+                            // cards). Bucketed coarsely on purpose: providers
+                            // disagree on the fine-grained label for the SAME
+                            // show — Kitsu calls Monster Eater "TV" while
+                            // AniList calls it "TV Short" — and a strict string
+                            // compare let that duplicate slip through. TV / TV
+                            // Short / ONA / OVA / Special all bucket to
+                            // "series" so cross-provider label drift no longer
+                            // defeats the dedup.
+                            if (FormatBucket(m.format) is { } fb && FormatBucket(prev.Format) is { } pb
+                                && !string.Equals(fb, pb, StringComparison.Ordinal)) continue;
                             var intersectCount = tokens.Intersect(prev.Tokens).Count();
                             if (intersectCount == 0) continue;
                             var unionCount = tokens.Union(prev.Tokens).Count();
@@ -380,6 +388,23 @@ namespace AnimeList.Controllers
                 }
             }
             return merged;
+        }
+
+        /// <summary>
+        /// Collapses a per-provider format label into a coarse bucket for the
+        /// cross-provider dedup's format guard. Only the movie/not-movie line
+        /// matters there — a TV series and its theatrical recap are genuinely
+        /// separate cards — so everything that isn't a movie (TV, TV Short,
+        /// ONA, OVA, Special, …) buckets to "series". This is what stops
+        /// providers' fine-grained label disagreements (Kitsu "TV" vs AniList
+        /// "TV Short" for the same show) from defeating the dedup. Returns
+        /// null for an absent format so the guard treats "unknown" as
+        /// "could match anything".
+        /// </summary>
+        private static string FormatBucket(string format)
+        {
+            if (string.IsNullOrWhiteSpace(format)) return null;
+            return format.ToLowerInvariant().Contains("movie") ? "movie" : "series";
         }
     }
 
