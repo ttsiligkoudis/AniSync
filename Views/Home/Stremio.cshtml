@@ -218,10 +218,14 @@
 }
 else
 {
-    <div class="card-section">
-        <p class="hint-text">Sign in on the Account page first, then come back here to set up the Stremio addon.</p>
-        <a class="btn-primary-action btn-login" href="@Url.Action("Account", "Home")">Go to Account</a>
-    </div>
+    @* /configure exposes the same login surface /account does plus the
+       anonymous "Continue without account" CTA — Stremio users opening
+       the configure URL from a freshly-installed addon may not yet
+       have an AniList / MAL / Kitsu account, and the anonymous flow
+       lets them set up the addon with an inline-token install URL
+       before deciding whether to sign up. *@
+    @await Html.PartialAsync("_LoginSection", Model,
+        new ViewDataDictionary(ViewData) { ["AllowAnonymous"] = true })
 }
 
 @await Html.PartialAsync("_FloatingSaveBar", Model)

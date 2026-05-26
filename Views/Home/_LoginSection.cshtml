@@ -1,0 +1,52 @@
+@model ConfigureViewModel
+@{
+    // /configure exposes both authenticated and anonymous entry points
+    // (anonymous installs power the magic-link / no-account install URL
+    // flow used by Stremio users who don't want a real list service);
+    // /account only offers real sign-in since the account page has no
+    // anonymous use case. Caller flips this via the ViewData override
+    // when rendering the partial.
+    var allowAnonymous = ViewData["AllowAnonymous"] as bool? ?? false;
+}
+
+@* Shared login surface — provider picker lives in the _AccountSection
+   partial above this one; here we render the Kitsu inline credentials
+   form, the dispatch button, and (optionally) the anonymous fallback.
+   IDs match what _ConfigurePageScript binds to (#kitsuCreds, #loginUrl,
+   #username, #password, #kitsuRegister, #loginAnonymousUrl). *@
+<div class="card-section" id="loginCard">
+    <div id="kitsuCreds" style="display:@(Model.IsKitsu ? "block" : "none")">
+        <div class="cred-group">
+            <label for="username" class="required">Username</label>
+            <input type="text" id="username" />
+        </div>
+        <div class="cred-group">
+            <label for="password" class="required">Password</label>
+            <input type="password" id="password" />
+        </div>
+        <p class="option-name-sub" style="margin-top: 0.5rem;">
+            AniSync uses your password only for the initial sign-in to Kitsu — it is not stored
+            in the configuration. After login we keep just the OAuth tokens Kitsu issues, and
+            refresh them automatically when they expire.
+        </p>
+    </div>
+    <a id="loginUrl" class="btn-primary-action btn-login" href='@Url.Action("Login", "Auth", new { animeService = Model.AnimeService })'>
+        Login with <span id="loginServiceName">@Model.ServiceDisplay</span>
+    </a>
+    @* Kitsu is the only provider that exposes a public registration API — for
+       AniList / MAL we point the user at their own signup page from the
+       Register view itself. The link mirrors #kitsuCreds' visibility so it
+       only shows when Kitsu is the selected provider. *@
+    <div id="kitsuRegister" class="kitsu-register" style="display:@(Model.IsKitsu ? "block" : "none")">
+        <a href='@Url.Action("Register", "Auth")' class="hint-text">Don't have a Kitsu account? <span class="kitsu-register-link">Create one</span></a>
+    </div>
+</div>
+
+@if (allowAnonymous)
+{
+    <p class="hint-text">Login to your anime list provider to get started.</p>
+
+    <a id="loginAnonymousUrl" class="btn-primary-action btn-login" href='@Url.Action("Login", "Auth")'>
+       Or Continue without Account
+    </a>
+}
