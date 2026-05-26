@@ -1,0 +1,65 @@
+@model ConfigureViewModel
+@{
+    // Computed once here so the picker + the connected/disconnect badge
+    // share the same dictionary instance. The same partial renders on
+    // /configure and /stremio so both surfaces stay in lockstep when
+    // a user adds / drops / promotes a linked provider.
+    var linkedByService = Model.LinkedByService;
+}
+
+@* Account card — wraps the provider picker and the connected/disconnect
+   badge into the same .section-card surface every other group on the page
+   uses, so the page reads as a stack of cards rather than a stripe of
+   loose chrome above one. The picker doubles as a primary swap when the
+   user has linked accounts. *@
+@if (!Model.AnonymousUser || Model.IsLoggedIn)
+{
+    <section class="section-card">
+        <span class="section-title">Account</span>
+
+        @if (!Model.AnonymousUser)
+        {
+            @* Pre-login the picker shows all three providers — the user picks one to authenticate.
+               Post-login it shrinks to "primary + healthy linked accounts" so unlinked providers
+               don't tease as tappable. The HTML stays identical between states; the only thing
+               that changes is which pills render. *@
+            var kitsuLinked   = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.Kitsu,        out var kl) && !kl.NeedsReauth;
+            var anilistLinked = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.Anilist,      out var al) && !al.NeedsReauth;
+            var malLinked     = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.MyAnimeList, out var ml) && !ml.NeedsReauth;
+
+            var showKitsu   = !Model.IsLoggedIn || Model.IsKitsu   || kitsuLinked;
+            var showAnilist = !Model.IsLoggedIn || Model.IsAnilist || anilistLinked;
+            var showMal     = !Model.IsLoggedIn || Model.IsMal     || malLinked;
+
+            if (Model.HasSwappableLinks)
+            {
+                <p class="service-toggle-hint">Tap another account below to make it your primary.</p>
+            }
+
+            <div class="service-toggle" id="serviceToggle">
+                @if (showKitsu)
+                {
+                    <span class="label @(Model.IsKitsu ? "active" : "")" id="labelKitsu" data-service="0" data-service-name="Kitsu">Kitsu</span>
+                }
+                @if (showAnilist)
+                {
+                    <span class="label @(Model.IsAnilist ? "active" : "")" id="labelAnilist" data-service="1" data-service-name="Anilist">AniList</span>
+                }
+                @if (showMal)
+                {
+                    <span class="label @(Model.IsMal ? "active" : "")" id="labelMal" data-service="2" data-service-name="MyAnimeList">MyAnimeList</span>
+                }
+            </div>
+        }
+
+        @if (Model.IsLoggedIn)
+        {
+            <div class="account-status">
+                <span class="success-badge">
+                    @(!Model.AnonymousUser ? $"✓ Connected to {Model.AnimeService}" : "Connected without Account")
+                </span>
+                <button id="disconnectBtn" type="button" class="account-disconnect-btn">Disconnect</button>
+            </div>
+        }
+    </section>
+}

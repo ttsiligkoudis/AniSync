@@ -1,0 +1,91 @@
+@model ConfigureViewModel
+@{
+    var linkedByService = Model.LinkedByService;
+}
+
+@* Shared linked-accounts card — same content on /configure and /stremio
+   so the user can manage cross-provider sync targets from either
+   surface. Promotion to primary lives in the service picker pills in
+   the Account partial above this one; this section only handles
+   Link / Unlink / Re-link. *@
+@if (Model.IsLoggedIn && !Model.AnonymousUser)
+{
+    var allServices = new[] { AnimeService.Kitsu, AnimeService.Anilist, AnimeService.MyAnimeList };
+
+    <section class="section-card">
+        <span class="section-title">Linked Accounts</span>
+        <p class="section-description">
+            Optional sync targets. When you save or auto-track an entry, AniSync writes
+            to your primary account first and then mirrors the change to every linked
+            provider it can map the anime onto.
+        </p>
+
+        <div class="linked-accounts">
+            @foreach (var svc in allServices)
+            {
+                var label = svc == AnimeService.MyAnimeList ? "MyAnimeList" : svc.ToString();
+                var isPrimary = svc == Model.AnimeService;
+                var linked = linkedByService.GetValueOrDefault(svc);
+                <div class="linked-account-row" data-service="@((int)svc)" data-service-name="@svc">
+                    <div class="linked-account-name">@label</div>
+                    <div class="linked-account-actions">
+                        @if (isPrimary)
+                        {
+                            <span class="linked-account-badge linked-account-primary">Primary</span>
+                        }
+                        else if (linked != null)
+                        {
+                            var needsReauth = linked.NeedsReauth;
+                            <span class="linked-account-badge @(needsReauth ? "linked-account-warn" : "linked-account-connected")">
+                                @(needsReauth ? "Needs re-auth" : "Linked")
+                            </span>
+                            @* Promotion to primary is now driven by the service-picker pills at *@
+                            @* the top of the page; this row only handles re-link / unlink. *@
+                            @if (needsReauth)
+                            {
+                                if (svc == AnimeService.Kitsu)
+                                {
+                                    <button type="button" class="btn-ghost btn-ghost-sm linked-account-toggle">Re-link</button>
+                                }
+                                else
+                                {
+                                    <a class="btn-ghost btn-ghost-sm" href="/Auth/LinkProvider?service=@svc">Re-link ↗</a>
+                                }
+                            }
+                            <form method="post" action="/Auth/UnlinkProvider" class="linked-account-form">
+                                <input type="hidden" name="service" value="@svc" />
+                                <button type="submit" class="btn-ghost btn-ghost-sm">Unlink</button>
+                            </form>
+                        }
+                        else if (svc == AnimeService.Kitsu)
+                        {
+                            <button type="button" class="btn-ghost btn-ghost-sm linked-account-toggle">Link</button>
+                        }
+                        else
+                        {
+                            <a class="btn-ghost btn-ghost-sm" href="/Auth/LinkProvider?service=@svc">Link ↗</a>
+                        }
+                    </div>
+                    @* The Kitsu inline credentials form covers both first-time link and *@
+                    @* re-link after a needs-reauth transition (password rotated, etc.). *@
+                    @if (svc == AnimeService.Kitsu && !isPrimary && (linked == null || linked.NeedsReauth))
+                    {
+                        <form method="post" action="/Auth/LinkKitsu" class="linked-account-creds linked-kitsu-form">
+                            <input type="text" name="username" placeholder="Kitsu username" required />
+                            <input type="password" name="password" placeholder="Kitsu password" required />
+                            <button type="submit" class="btn-primary-action btn-login">Link Kitsu</button>
+                            <p class="option-name-sub" style="margin: 0;">
+                                Used only to obtain an OAuth token from Kitsu — your password
+                                is not stored in the configuration.
+                            </p>
+                        </form>
+                    }
+                </div>
+            }
+        </div>
+
+        @* Backfill-linked-accounts moved to /advanced — it's a one-shot
+           maintenance action, the configure surface stays focused on
+           identity. See Advanced.cshtml's "Sync" section. *@
+    </section>
+}
