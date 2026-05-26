@@ -105,6 +105,13 @@
     // handler diffs this against the new status to figure out which stat
     // counters to bump/decrement.
     var activeOriginalStatus = null;
+    // Integer AnimeService override (0=Kitsu / 1=Anilist / 2=MyAnimeList) the
+    // trigger element stamps via data-meta-service-override when the
+    // requested anime has no mapping to the user's primary but lives on a
+    // linked secondary — the GET / POST then route through the linked token
+    // server-side instead of the primary. null means "use primary" as
+    // before.
+    var activeServiceOverride = null;
     // The element that had focus before the modal opened — restored on
     // close so keyboard users return to where they left off.
     var lastFocused = null;
@@ -113,7 +120,10 @@
     // element type that should participate in Tab cycling inside the modal.
     var FOCUSABLE_SEL = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-    function openModal(id, name, card) {
+    function openModal(id, name, card, serviceOverride) {
+        activeServiceOverride = (typeof serviceOverride === 'number' && !isNaN(serviceOverride))
+            ? serviceOverride
+            : null;
         // Remember which element opened the modal so close can restore focus
         // there. Falls back to body if there's no active element (rare —
         // would require the modal to be triggered by something other than a
@@ -152,6 +162,7 @@
         activeService = null;
         activeCard = null;
         activeOriginalStatus = null;
+        activeServiceOverride = null;
         saveBtn.disabled = false;
         deleteBtn.hidden = true;
         deleteBtn.disabled = false;
@@ -199,7 +210,14 @@
             // fields refresh.
             saveBtn.disabled = true;
         }
-        return fetch('/api/library/entry?id=' + encodeURIComponent(id), {
+        // Service-override is appended as &service= when the trigger came from
+        // a detail page whose anime has no mapping to the user's primary; the
+        // server uses the corresponding linked token instead of the primary.
+        var entryUrl = '/api/library/entry?id=' + encodeURIComponent(id);
+        if (activeServiceOverride !== null) {
+            entryUrl += '&service=' + encodeURIComponent(activeServiceOverride);
+        }
+        return fetch(entryUrl, {
             credentials: 'same-origin',
             headers: { 'Accept': 'application/json' },
         })
@@ -601,9 +619,17 @@
         var modalTrigger = e.target.closest && e.target.closest('[data-open-modal][data-meta-id]');
         if (modalTrigger) {
             e.preventDefault();
+            // Trigger may stamp data-meta-service-override to route the GET /
+            // POST through a linked secondary token (anime has no mapping to
+            // the user's primary, but lives on a linked provider). parseInt
+            // returns NaN for missing / empty attributes — openModal coerces
+            // that back to null so the primary-token path stays the default.
+            var serviceAttr = modalTrigger.getAttribute('data-meta-service-override');
+            var serviceOverride = serviceAttr ? parseInt(serviceAttr, 10) : null;
             openModal(modalTrigger.getAttribute('data-meta-id'),
                       modalTrigger.getAttribute('data-meta-name'),
-                      /* card */ null);
+                      /* card */ null,
+                      serviceOverride);
         }
     });
 
@@ -638,7 +664,11 @@
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
             },
-            body: JSON.stringify({ id: activeEntryId, status: '' }),
+            // service: <int> when the modal opened via a linked-secondary
+            // override; omitted otherwise so the server defaults to primary.
+            body: JSON.stringify(activeServiceOverride !== null
+                ? { id: activeEntryId, status: '', service: activeServiceOverride }
+                : { id: activeEntryId, status: '' }),
         })
             .then(function (r) { return r.json(); })
             .then(function (data) {
@@ -742,6 +772,13 @@
             rewatchCount: rewatchInput.value ? parseInt(rewatchInput.value, 10) : null,
             notes: notesInput.value || null,
         };
+        // service: <int> routes the save through a linked-secondary token
+        // when set — the detail page stamps it on the trigger button for
+        // anime that don't map to the user's primary. Omitted otherwise so
+        // the server defaults to writing to the primary as before.
+        if (activeServiceOverride !== null) {
+            payload.service = activeServiceOverride;
+        }
 
         // Capture state for the optimistic update before closing the modal
         // (which clears activeCard / activeService / activeOriginalStatus).

@@ -5405,6 +5405,20 @@ button.anime-detail-user-state:hover {
     color: #93c5fd;
 }
 
+/* "Not on your list" variant — fired when the requested anime has no
+   mapping to the user's primary service AND the source provider it
+   came from isn't linked, so there's nowhere AniSync can write a
+   save. Muted slate look (no cobalt edit affordance, no hover lift)
+   so it reads as a status badge, not a tappable action. */
+.anime-detail-user-state-unavailable,
+.anime-detail-user-state-unavailable:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.55);
+    border-color: rgba(255, 255, 255, 0.08);
+    cursor: help;
+    transform: none;
+}
+
 /* "Continue · Ep N" / "Watch Ep N" jump-to-next-unseen CTA. Lives on
    its own centered row beneath the badges so it reads as the page's
    primary action without competing with the cobalt-tinted user-state

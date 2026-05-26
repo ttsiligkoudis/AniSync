@@ -122,6 +122,8 @@ namespace AnimeList.Controllers
             // shows a generic "Manage Entry" pill instead (driven by the
             // IsMultiSeasonGroup view-model flag below).
             EntryViewState entry = null;
+            AnimeService? entryServiceOverride = null;
+            var entryUnavailable = false;
             if (!tokenData.anonymousUser && !isMultiSeasonGroup)
             {
                 // Fetch the user's entry against the resolved per-service id so
@@ -130,24 +132,81 @@ namespace AnimeList.Controllers
                 // and the page renders without the user-state panel.
                 try
                 {
-                    var entryId = await _mappingService.GetIdWithPrefixAsync(anime.id, animeService) ?? anime.id;
-
-                    var raw = animeService switch
+                    // Primary path: translate the loaded anime's id into the
+                    // user's primary service id-space. Returns null when the
+                    // shared mapping table has no entry for that pair (e.g.
+                    // anilist:211495 with primary=MAL is genuinely absent
+                    // from the MAL catalog so the mapping has nothing to
+                    // give us).
+                    var primaryEntryId = await _mappingService.GetIdWithPrefixAsync(anime.id, animeService);
+                    if (!string.IsNullOrEmpty(primaryEntryId))
                     {
-                        AnimeService.Anilist     => await _anilistService.GetAnimeEntryAsync(tokenData, entryId, null),
-                        AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, entryId, null),
-                        _                        => await _kitsuService.GetAnimeEntryAsync(tokenData, entryId, null),
-                    };
-
-                    if (raw != null && !string.IsNullOrEmpty(raw.Status))
-                    {
-                        entry = new EntryViewState
+                        var raw = animeService switch
                         {
-                            Status = raw.Status,
-                            Progress = raw.Progress,
-                            TotalEpisodes = raw.TotalEpisodes,
-                            UserScore = raw.Score,
+                            AnimeService.Anilist     => await _anilistService.GetAnimeEntryAsync(tokenData, primaryEntryId, null),
+                            AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, primaryEntryId, null),
+                            _                        => await _kitsuService.GetAnimeEntryAsync(tokenData, primaryEntryId, null),
                         };
+
+                        if (raw != null && !string.IsNullOrEmpty(raw.Status))
+                        {
+                            entry = new EntryViewState
+                            {
+                                Status = raw.Status,
+                                Progress = raw.Progress,
+                                TotalEpisodes = raw.TotalEpisodes,
+                                UserScore = raw.Score,
+                            };
+                        }
+                    }
+                    else
+                    {
+                        // No primary mapping → try the source provider the URL came
+                        // from (e.g. anilist:211495 → AniList). If the user has that
+                        // provider linked as a secondary, fetch the entry via the
+                        // linked token so the page can still show + edit it. If the
+                        // source provider isn't linked, surface the unavailable badge
+                        // instead of a broken Manage Entry button that would 400 on
+                        // save against an id the primary doesn't know about.
+                        var sourceService = ParseServiceFromId(id) ?? ParseServiceFromId(anime.id);
+                        if (sourceService.HasValue && sourceService.Value != animeService && !string.IsNullOrEmpty(uid))
+                        {
+                            var linked = await _configStore.GetLinkedTokensAsync(uid);
+                            var linkedToken = linked.FirstOrDefault(l =>
+                                l.Service == sourceService.Value && !l.NeedsReauth && l.TokenData != null);
+                            if (linkedToken != null)
+                            {
+                                var sourceId = id.Contains(':') || id.StartsWith(imdbPrefix) ? id : anime.id;
+                                var raw = sourceService.Value switch
+                                {
+                                    AnimeService.Anilist     => await _anilistService.GetAnimeEntryAsync(linkedToken.TokenData, sourceId, null),
+                                    AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(linkedToken.TokenData, sourceId, null),
+                                    _                        => await _kitsuService.GetAnimeEntryAsync(linkedToken.TokenData, sourceId, null),
+                                };
+                                entryServiceOverride = sourceService.Value;
+                                if (raw != null && !string.IsNullOrEmpty(raw.Status))
+                                {
+                                    entry = new EntryViewState
+                                    {
+                                        Status = raw.Status,
+                                        Progress = raw.Progress,
+                                        TotalEpisodes = raw.TotalEpisodes,
+                                        UserScore = raw.Score,
+                                    };
+                                }
+                            }
+                            else
+                            {
+                                entryUnavailable = true;
+                            }
+                        }
+                        else if (sourceService.HasValue && sourceService.Value != animeService)
+                        {
+                            // Source provider known but no uid (e.g. session-token
+                            // hiccup) → still surface "not available" rather than
+                            // letting the save attempt blow up later.
+                            entryUnavailable = true;
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -196,11 +255,29 @@ namespace AnimeList.Controllers
                 AnonymousUser = tokenData.anonymousUser,
                 ConfigUid = uid,
                 Entry = entry,
+                EntryServiceOverride = entryServiceOverride,
+                EntryUnavailable = entryUnavailable,
                 SourceLinks = sourceLinks,
                 DeferredSupplementaryLinks = deferredSupplementaryLinks,
                 HasStreamSources = hasAddons || externalEnabled,
                 IsMultiSeasonGroup = isMultiSeasonGroup,
             });
+        }
+
+        /// <summary>
+        /// Maps a service-prefixed id (anilist:N / mal:N / kitsu:N) back to its
+        /// source <see cref="AnimeService"/>. Returns null for unknown / cross-
+        /// service prefixes (imdb:, tmdb:, …) where the source-provider
+        /// override doesn't apply — those routes through the mapping table for
+        /// the user's primary the same way they always have.
+        /// </summary>
+        private static AnimeService? ParseServiceFromId(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return null;
+            if (id.StartsWith(anilistPrefix, StringComparison.Ordinal)) return AnimeService.Anilist;
+            if (id.StartsWith(malPrefix, StringComparison.Ordinal)) return AnimeService.MyAnimeList;
+            if (id.StartsWith(kitsuPrefix, StringComparison.Ordinal)) return AnimeService.Kitsu;
+            return null;
         }
 
         private async Task<List<Meta>> TryGetRelatedAsync(int anilistId, AnimeService translateTo, bool groupSeasons = false)
@@ -1229,6 +1306,18 @@ namespace AnimeList.Controllers
         // not-yet-tracked entries, or transient fetch failures (the hero
         // gracefully omits the user-state panel when this is null).
         public EntryViewState Entry { get; set; }
+        // Set when the requested anime has no mapping to the user's primary
+        // service but DOES live on a linked secondary the user has connected
+        // (e.g. /anime/anilist:211495 viewed by an MAL-primary user who has
+        // AniList linked). The Manage Entry button + modal route through the
+        // linked token instead of the primary; null means "use primary" as
+        // before.
+        public AnimeService? EntryServiceOverride { get; set; }
+        // Set when the requested anime has no mapping to the user's primary
+        // service AND the source provider it came from isn't linked. The
+        // hero swaps the Manage Entry button for a "Not on your list" badge
+        // since there's no provider AniSync can write to.
+        public bool EntryUnavailable { get; set; }
         // Cross-service links surfaced in the hero so users can jump to the
         // anime's page on AniList / MAL / Kitsu / IMDb. Resolved from the
         // shared AnimeIdMapping dataset — entries missing from the mapping
