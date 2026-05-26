@@ -16,12 +16,11 @@ public class HomeController : Controller
     private readonly ITokenService _tokenService;
     private readonly IConfigStore _configStore;
     private readonly IAnilistService _anilistService;
-    private readonly IKitsuService _kitsuService;
-    private readonly IMalService _malService;
     private readonly IAnilistFallback _anilistFallback;
     private readonly IAddonStreamService _addonStreamService;
     private readonly IUserListCache _listCache;
     private readonly IMemoryCache _dashboardCache;
+    private readonly IMergedListService _mergedListService;
 
     // Day-stale rankings are indistinguishable from live ones for the
     // popularity shelves — same TTL the seasonal-stats cache uses inside
@@ -33,22 +32,20 @@ public class HomeController : Controller
         ITokenService tokenService,
         IConfigStore configStore,
         IAnilistService anilistService,
-        IKitsuService kitsuService,
-        IMalService malService,
         IAnilistFallback anilistFallback,
         IAddonStreamService addonStreamService,
         IUserListCache listCache,
-        IMemoryCache dashboardCache)
+        IMemoryCache dashboardCache,
+        IMergedListService mergedListService)
     {
         _tokenService = tokenService;
         _configStore = configStore;
         _anilistService = anilistService;
-        _kitsuService = kitsuService;
-        _malService = malService;
         _anilistFallback = anilistFallback;
         _addonStreamService = addonStreamService;
         _listCache = listCache;
         _dashboardCache = dashboardCache;
+        _mergedListService = mergedListService;
     }
 
     /// <summary>
@@ -233,22 +230,6 @@ public class HomeController : Controller
         });
     }
 
-    // Per-service GetAnimeListAsync dispatch — the same shape Library / Discover /
-    // Catalog all use, factored here so Index can fetch two list types in parallel
-    // without three nested switch expressions. groupSeasons is plumbed through so
-    // the dashboard's Continue Watching / stats slice respects the user's
-    // "Group anime seasons" toggle the same way the addon catalog does.
-    private async Task<List<Meta>> FetchListAsync(TokenData tokenData, ListType listType, bool groupSeasons = true, bool hideUnreleased = false, bool hideAdult = false)
-    {
-        var metas = tokenData.anime_service switch
-        {
-            AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-            AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-            _                        => await _kitsuService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-        };
-        return metas ?? [];
-    }
-
     // Cache-wrapping helper around the existing AnilistService catalog path.
     // Dispatches the same query the public Discover page uses — POPULARITY_DESC
     // sort over the season's media list — and slices to the top 15 for the
@@ -311,22 +292,6 @@ public class HomeController : Controller
             id = m.id, name = m.name, poster = m.poster, type = m.type,
             score = m.score, episodes = m.episodes, year = m.year, format = m.format,
         }).ToList(), translateTo, groupSeasons);
-    }
-
-    // Wraps FetchListAsync in a try/catch so a single provider rate-limiting
-    // or 5xx'ing doesn't abort the dashboard render — the empty result just
-    // collapses the Continue Watching shelf rather than crashing the page.
-    // bypassCache is retained for signature compatibility with existing
-    // call sites but is now a no-op; lists are no longer cached on the
-    // dashboard path (every load reflects live state).
-    private async Task<List<Meta>> SafeFetchListAsync(TokenData tokenData, ListType listType,
-        bool groupSeasons = true, bool bypassCache = false, bool hideUnreleased = false, bool hideAdult = false)
-    {
-        try
-        {
-            return await FetchListAsync(tokenData, listType, groupSeasons, hideUnreleased, hideAdult);
-        }
-        catch { return []; }
     }
 
     [Route("/configure")]
@@ -571,7 +536,16 @@ public class HomeController : Controller
         var hideUnreleased = dashboardConfig?.hideUnreleasedFromWatching == true;
         var hideAdult = dashboardConfig?.showAdultContent != true;
 
-        var metas = (await SafeFetchListAsync(token, ListType.Current, groupSeasons, /* nocache */ true, hideUnreleased, hideAdult))
+        // Fan out across primary + every healthy linked secondary so the
+        // shelf surfaces anime the user is watching on AniList / MAL / Kitsu
+        // even when it isn't on their primary — same merge + dedup the
+        // /library grid uses (MergedListService). Previously this fetched
+        // the primary only, so a linked-only Currently-Watching entry went
+        // missing from the dashboard.
+        var metas = (await _mergedListService.GetMergedListAsync(
+                token, uid, ListType.Current,
+                genre: null, groupSeasons: groupSeasons,
+                hideUnreleased: hideUnreleased, hideAdult: hideAdult))
             .Take(ContinueWatchingMaxItems)
             .ToList();
 
