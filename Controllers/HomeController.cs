@@ -152,55 +152,15 @@ public class HomeController : Controller
             // JS un-hides it once the HTML loads.
         }
 
-        // Seasonal stats + popularity shelves apply to every visitor
-        // (anonymous + logged-in) since they describe the whole AniList
-        // catalog, not the user's list. All three calls run in parallel —
-        // the popularity shelves hit a different sort/perPage of the same
-        // GraphQL endpoint as the stats query and are independently 24h-
-        // cached by AnilistFallback. Failures swallow into empty results
-        // and the view hides the corresponding shelves.
-        var seasonStatsTask = _anilistFallback.GetSeasonStatsAsync();
-        // Re-uses the same _anilistService.GetAnimeListAsync(ListType.Seasonal,
-        // genre: "This Season" / "Next Season") path the public Discover page
-        // and the /api/v1/discover endpoint serve — same upstream query, same
-        // POPULARITY_DESC default sort — wrapped in a 24h IMemoryCache here
-        // so the dashboard doesn't pay an AniList round-trip on every visit.
-        // Translate dashboard-shelf ids into the viewer's primary id space
-        // (mal:N / kitsu:N when mapped, anilist:N as fallback) so card
-        // clicks land on the user's primary's detail-page id rather than
-        // bouncing through a cross-service id resolve. Anonymous and
-        // AniList-primary viewers get an effective no-op translation.
-        var primaryService = tokenData?.anime_service ?? AnimeService.Anilist;
-        // Per-user grouping pref — read once and threaded through every
-        // dashboard shelf's translate step. The shelf data itself stays
-        // globally cached (anilist:N ids); the per-request transform picks
-        // between native-id and imdb-id resolvers so each viewer sees the
-        // ids their toggle expects without per-user cache fanout.
-        var dashboardGroupSeasons = false;
-        if (!string.IsNullOrEmpty(uid))
-        {
-            var dashboardConfig = await GetConfigByUidAsync(uid, _configStore);
-            dashboardGroupSeasons = dashboardConfig?.enableSeasonGrouping == true;
-        }
-        var popularThisSeasonTask = GetPopularBySeasonAsync(SeasonCurrent, primaryService, dashboardGroupSeasons);
-        var mostAnticipatedTask = GetPopularBySeasonAsync(SeasonNext, primaryService, dashboardGroupSeasons);
-        // Read the timezone-offset cookie stamped by the layout's inline
-        // script. Defaults to 0 (UTC) when the cookie isn't present yet
-        // (brand-new visitor's first request — the cookie is set during
-        // that render, so the next navigation picks up the right value).
-        var tzOffsetMinutes = 0;
-        var tzCookie = Request.Cookies["anisync_tz"];
-        if (!string.IsNullOrEmpty(tzCookie) && int.TryParse(tzCookie, out var parsed))
-        {
-            // JS getTimezoneOffset ranges from -840 (UTC+14) to +720
-            // (UTC-12). Clamp defensively so a malformed cookie can't
-            // make the cache key absurd.
-            tzOffsetMinutes = Math.Clamp(parsed, -840, 720);
-        }
-        var newEpisodesTodayTask = _anilistFallback.GetNewEpisodesTodayAsync(primaryService, tzOffsetMinutes, dashboardGroupSeasons);
-        await Task.WhenAll(seasonStatsTask, popularThisSeasonTask, mostAnticipatedTask, newEpisodesTodayTask);
-
-        var (seasonAiring, seasonNew, seasonTotal) = await seasonStatsTask;
+        // The "This Season" stat strip and the discovery shelves (New
+        // Episodes Today, Most Popular this Season, Most Anticipated) used to
+        // be fetched here and awaited via Task.WhenAll, which held the whole
+        // dashboard render behind AniList. They're now fetched client-side
+        // after first paint — each from its own /Home/*Data endpoint — so the
+        // page paints instantly with shimmer placeholders and every shelf
+        // (plus Continue Watching and Your-stats, already client-loaded)
+        // loads independently and in parallel. See the inline loaders in
+        // Views/Home/Index.cshtml and the shelf endpoints further down.
 
         // Surface the linked-secondary service names alongside the primary
         // so the dashboard hero pill can read "✓ Synced with AniList · MAL"
@@ -221,12 +181,6 @@ public class HomeController : Controller
             LinkedServices = linkedServiceNames,
             HasStats = hasStats,
             ContributingServices = contributingNames,
-            SeasonCurrentlyAiring = seasonAiring,
-            SeasonNewThis = seasonNew,
-            SeasonTotal = seasonTotal,
-            PopularThisSeason = popularThisSeasonTask.Result,
-            MostAnticipated = mostAnticipatedTask.Result,
-            NewEpisodesToday = newEpisodesTodayTask.Result,
         });
     }
 
@@ -559,6 +513,111 @@ public class HomeController : Controller
             ConfigUid = uid,
             Variant = "scroll",
         });
+    }
+
+    // ── Client-loaded dashboard shelves ──────────────────────────────────
+    // The discovery shelves and the "This Season" stat strip are fetched by
+    // the inline loaders in Index.cshtml once the page paints, so the dashboard
+    // render never blocks on AniList and each shelf loads independently / in
+    // parallel. Each poster shelf returns the same _PosterGrid scroll partial
+    // the rest of the app uses; an empty body tells the client to hide that
+    // shelf. The underlying data is still 24h / until-midnight cached inside
+    // AnilistFallback + GetPopularBySeasonAsync, so these endpoints are cheap
+    // on repeat hits.
+
+    [HttpGet("Home/NewEpisodesTodayData")]
+    public async Task<IActionResult> NewEpisodesTodayData()
+    {
+        var (primaryService, uid, groupSeasons) = await ResolveDashboardShelfContextAsync();
+        var metas = await _anilistFallback.GetNewEpisodesTodayAsync(primaryService, ReadTimezoneOffsetMinutes(), groupSeasons);
+        return ShelfPartial(metas, uid);
+    }
+
+    [HttpGet("Home/PopularThisSeasonData")]
+    public async Task<IActionResult> PopularThisSeasonData()
+    {
+        var (primaryService, uid, groupSeasons) = await ResolveDashboardShelfContextAsync();
+        var metas = await GetPopularBySeasonAsync(SeasonCurrent, primaryService, groupSeasons);
+        return ShelfPartial(metas, uid);
+    }
+
+    [HttpGet("Home/MostAnticipatedData")]
+    public async Task<IActionResult> MostAnticipatedData()
+    {
+        var (primaryService, uid, groupSeasons) = await ResolveDashboardShelfContextAsync();
+        var metas = await GetPopularBySeasonAsync(SeasonNext, primaryService, groupSeasons);
+        return ShelfPartial(metas, uid);
+    }
+
+    [HttpGet("Home/SeasonStatsData")]
+    public async Task<JsonResult> SeasonStatsData()
+    {
+        try
+        {
+            var (airing, newThis, total) = await _anilistFallback.GetSeasonStatsAsync();
+            return new JsonResult(new { success = true, airing, newThis, total });
+        }
+        catch
+        {
+            // Transient AniList failure — the client keeps its placeholders
+            // hidden rather than showing a row of zeros.
+            return new JsonResult(new { success = false });
+        }
+    }
+
+    // Shared _PosterGrid scroll-row partial for every client-loaded shelf.
+    // Empty Items + no EmptyMessage renders an empty body, which the shelf
+    // loader reads as "hide this section".
+    private PartialViewResult ShelfPartial(List<Meta> metas, string uid) =>
+        PartialView("_PosterGrid", new PosterGridViewModel
+        {
+            Items = metas ?? [],
+            ConfigUid = uid,
+            Variant = "scroll",
+        });
+
+    // Resolves the per-viewer context every dashboard shelf needs: the
+    // primary service (drives the id space card clicks land on), the resolved
+    // UID (per-card Manage Entry hand-off), and the season-grouping pref.
+    // Anonymous / not-logged-in viewers get (session-default-or-AniList, null,
+    // false) — the shelves still render, just without user-list context.
+    private async Task<(AnimeService primaryService, string uid, bool groupSeasons)> ResolveDashboardShelfContextAsync()
+    {
+        var primaryService = AnimeService.Anilist;
+        string uid = null;
+        var groupSeasons = false;
+
+        var sessionStr = HttpContext.Session.GetString("AccessToken");
+        if (!string.IsNullOrEmpty(sessionStr))
+        {
+            var tokenData = DeserializeObject<TokenData>(sessionStr);
+            if (tokenData != null)
+            {
+                primaryService = tokenData.anime_service;
+                if (!tokenData.anonymousUser)
+                {
+                    var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                    uid = resolved;
+                    if (!string.IsNullOrEmpty(uid))
+                    {
+                        var config = await GetConfigByUidAsync(uid, _configStore);
+                        groupSeasons = config?.enableSeasonGrouping == true;
+                    }
+                }
+            }
+        }
+        return (primaryService, uid, groupSeasons);
+    }
+
+    // Reads + clamps the timezone-offset cookie the layout stamps (JS
+    // getTimezoneOffset convention: minutes west of UTC). Defaults to 0 (UTC)
+    // when the cookie isn't present yet (brand-new visitor's first request).
+    private int ReadTimezoneOffsetMinutes()
+    {
+        var tzCookie = Request.Cookies["anisync_tz"];
+        if (!string.IsNullOrEmpty(tzCookie) && int.TryParse(tzCookie, out var parsed))
+            return Math.Clamp(parsed, -840, 720);
+        return 0;
     }
 
     /// <summary>
