@@ -1,6 +1,6 @@
 ﻿using AnimeList.Models;
 using AnimeList.Services.Interfaces;
-using System.Collections.Concurrent;
+using Microsoft.Extensions.Caching.Memory;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 
@@ -12,9 +12,17 @@ namespace AnimeList.Services
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly IConfigStore _configStore;
         private readonly IConfiguration _configuration;
-        private static readonly ConcurrentDictionary<string, TokenData> _kitsuTokenCache = new();
-        private static readonly ConcurrentDictionary<string, TokenData> _anilistTokenCache = new();
-        private static readonly ConcurrentDictionary<string, TokenData> _malTokenCache = new();
+        // In-process token caches keyed by user_id (AniList/MAL) or username (Kitsu). Backed by
+        // MemoryCache rather than a plain dictionary so they stay bounded: a 30-minute sliding
+        // window keeps only recently-active users (an AniList token lives ~1 year, so a
+        // dictionary would have pinned every user ever seen in memory for that whole time), and
+        // SizeLimit is a hard ceiling. Reads re-check IsTokenExpired and fall back to the
+        // store/refresh path on a miss, so eviction is always safe.
+        private static readonly MemoryCacheEntryOptions _tokenCacheEntry =
+            new() { Size = 1, SlidingExpiration = TimeSpan.FromMinutes(30) };
+        private static readonly MemoryCache _kitsuTokenCache = new(new MemoryCacheOptions { SizeLimit = 20_000 });
+        private static readonly MemoryCache _anilistTokenCache = new(new MemoryCacheOptions { SizeLimit = 20_000 });
+        private static readonly MemoryCache _malTokenCache = new(new MemoryCacheOptions { SizeLimit = 20_000 });
 
         public TokenService(IHttpClientFactory clientFactory, IHttpContextAccessor httpContextAccessor, IConfigStore configStore, IConfiguration configuration)
         {
@@ -102,7 +110,7 @@ namespace AnimeList.Services
 
                 var cacheKey = tokenData.user_id;
                 if (!string.IsNullOrEmpty(cacheKey)
-                    && _anilistTokenCache.TryGetValue(cacheKey, out var cached)
+                    && _anilistTokenCache.TryGetValue(cacheKey, out TokenData cached)
                     && !IsTokenExpired(cached.expiration_date))
                 {
                     tokenData = cached;
@@ -112,7 +120,7 @@ namespace AnimeList.Services
                     var refreshed = await RefreshAccessToken(tokenData.refresh_token);
                     if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
                     {
-                        _anilistTokenCache[cacheKey] = refreshed;
+                        _anilistTokenCache.Set(cacheKey, refreshed, _tokenCacheEntry);
                         // Write back to the config store so v5 install URLs survive token rotation.
                         await _configStore.UpdateByUserAsync(refreshed);
                     }
@@ -126,7 +134,7 @@ namespace AnimeList.Services
 
                 var cacheKey = tokenData.user_id;
                 if (!string.IsNullOrEmpty(cacheKey)
-                    && _malTokenCache.TryGetValue(cacheKey, out var cached)
+                    && _malTokenCache.TryGetValue(cacheKey, out TokenData cached)
                     && !IsTokenExpired(cached.expiration_date))
                 {
                     tokenData = cached;
@@ -139,7 +147,7 @@ namespace AnimeList.Services
                         // Preserve identity fields the refresh response doesn't echo back
                         refreshed.user_id ??= tokenData.user_id;
                         refreshed.username ??= tokenData.username;
-                        _malTokenCache[cacheKey] = refreshed;
+                        _malTokenCache.Set(cacheKey, refreshed, _tokenCacheEntry);
                         await _configStore.UpdateByUserAsync(refreshed);
                     }
                     tokenData = refreshed;
@@ -149,7 +157,7 @@ namespace AnimeList.Services
             {
                 var cacheKey = tokenData.username;
                 if (!string.IsNullOrEmpty(cacheKey)
-                    && _kitsuTokenCache.TryGetValue(cacheKey, out var cached)
+                    && _kitsuTokenCache.TryGetValue(cacheKey, out TokenData cached)
                     && !IsTokenExpired(cached.expiration_date))
                 {
                     tokenData = cached;
@@ -165,7 +173,7 @@ namespace AnimeList.Services
                     var refreshed = await RefreshKitsuAccessToken(tokenData.refresh_token, tokenData.username, tokenData.user_id);
                     if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
                     {
-                        _kitsuTokenCache[cacheKey] = refreshed;
+                        _kitsuTokenCache.Set(cacheKey, refreshed, _tokenCacheEntry);
                         await _configStore.UpdateByUserAsync(refreshed);
                     }
                     tokenData = refreshed;
@@ -185,15 +193,15 @@ namespace AnimeList.Services
 
             if (tokenData.anime_service == AnimeService.Anilist && !string.IsNullOrEmpty(tokenData.user_id))
             {
-                _anilistTokenCache.TryRemove(tokenData.user_id, out _);
+                _anilistTokenCache.Remove(tokenData.user_id);
             }
             else if (tokenData.anime_service == AnimeService.MyAnimeList && !string.IsNullOrEmpty(tokenData.user_id))
             {
-                _malTokenCache.TryRemove(tokenData.user_id, out _);
+                _malTokenCache.Remove(tokenData.user_id);
             }
             else if (tokenData.anime_service == AnimeService.Kitsu && !string.IsNullOrEmpty(tokenData.username))
             {
-                _kitsuTokenCache.TryRemove(tokenData.username, out _);
+                _kitsuTokenCache.Remove(tokenData.username);
             }
 
             _httpContextAccessor.HttpContext.Session.Remove("AccessToken");

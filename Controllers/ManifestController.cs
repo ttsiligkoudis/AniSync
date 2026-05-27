@@ -13,13 +13,11 @@ namespace AnimeList.Controllers
     [EnableRateLimiting("addon")]
     public class ManifestController : ControllerBase
     {
-        private readonly ITokenService _tokenService;
         private readonly IConfigStore _configStore;
         private readonly ILogger<ManifestController> _logger;
 
-        public ManifestController(ITokenService tokenService, IConfigStore configStore, ILogger<ManifestController> logger)
+        public ManifestController(IConfigStore configStore, ILogger<ManifestController> logger)
         {
-            _tokenService = tokenService;
             _configStore = configStore;
             _logger = logger;
         }
@@ -57,14 +55,22 @@ namespace AnimeList.Controllers
             // its flags inline so resolution is a no-op for that branch.
             var configuration = await ResolveConfigAsync(config, _configStore);
 
-            // For v3 (inline tokenData) the in-URL JSON is enough to tell us "logged in";
-            // for v5 we go through TokenService, which knows how to fetch from the store.
+            // For v3 (inline tokenData) the in-URL JSON is enough to tell us "logged in".
+            // For v5 we read the stored token directly rather than via
+            // GetAccessTokenAsync, which would force an upstream token refresh on every
+            // manifest poll — Stremio refetches the manifest on launch and after each
+            // revision bump, so a slow/unhealthy AniList/MAL/Kitsu would otherwise make the
+            // manifest itself lag and the addon look broken. The manifest only needs to know
+            // whether the user is authenticated and which service is primary, never a live
+            // token; the catalog / meta / stream endpoints still refresh lazily when they run.
             TokenData tokenData = null;
             if (configuration != null)
             {
                 tokenData = !string.IsNullOrEmpty(configuration.tokenData)
                     ? DeserializeObject<TokenData>(configuration.tokenData)
-                    : await _tokenService.GetAccessTokenAsync(config);
+                    : !string.IsNullOrEmpty(configuration.tokenUid)
+                        ? await _configStore.GetAsync(configuration.tokenUid)
+                        : null;
             }
             var isAuthenticated = tokenData != null && !tokenData.anonymousUser;
             var name = "AniSync";
