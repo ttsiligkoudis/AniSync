@@ -360,7 +360,7 @@ namespace AnimeList.Services
             // genre threads through so the Discover page's "Airing + Action" filter swaps
             // the upcoming-episode schedule for a currently-airing-in-genre listing.
             if (list == ListType.Airing)
-                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.Anilist, skip, genre, hideAdult);
+                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.Anilist, skip, genre, hideAdult, groupSeasons);
 
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Anilist);
             var requestBody = GetAnimeListQuery(tokenData, list, skip, resolvedAnimeId, genre, search, sort, season, hideAdult);

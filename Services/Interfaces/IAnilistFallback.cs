@@ -12,9 +12,12 @@ namespace AnimeList.Services.Interfaces
     public interface IAnilistFallback
     {
         /// <summary>
-        /// Fetches the next set of airing episodes (sorted by air time, ascending). Each result's
-        /// id is rewritten to the most stable form available for the requested service:
-        /// IMDb &gt; TMDB &gt; service-native &gt; AniList fallback.
+        /// Fetches the next set of airing episodes (sorted by air time, ascending). Each
+        /// result's id is rewritten per the caller's <paramref name="groupSeasons"/> pref:
+        /// when true (the default), the most stable franchise form — IMDb &gt; TMDB &gt;
+        /// service-native &gt; AniList fallback; when false, the user's primary's per-cour
+        /// native id (kitsu:/mal:/anilist:) so distinct cours stay distinct cards instead
+        /// of collapsing onto one IMDb umbrella.
         ///
         /// When <paramref name="genre"/> is non-empty, the upcoming-episode schedule query
         /// (which has no genre dimension on AniList) is swapped for a "currently airing
@@ -22,7 +25,7 @@ namespace AnimeList.Services.Interfaces
         /// just sourced from <c>Media(status: RELEASING, genre: $genre)</c> instead of
         /// <c>airingSchedules</c>.
         /// </summary>
-        Task<List<Meta>> GetAiringScheduleAsync(AnimeService translateTo, string skip = null, string genre = null, bool hideAdult = false);
+        Task<List<Meta>> GetAiringScheduleAsync(AnimeService translateTo, string skip = null, string genre = null, bool hideAdult = false, bool groupSeasons = true);
 
         /// <summary>
         /// Fetches up to 25 recommendations for an AniList anime id. Each recommendation is
