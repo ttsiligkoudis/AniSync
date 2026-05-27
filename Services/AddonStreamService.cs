@@ -1,6 +1,8 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Text.RegularExpressions;
 
 namespace AnimeList.Services
@@ -140,6 +142,62 @@ namespace AnimeList.Services
             _logger = logger;
         }
 
+        // ── SSRF guard ──────────────────────────────────────────────────────
+        // The manifest URL (and the addon root derived from it) is user-supplied and
+        // fetched server-side, so without a check a user could point AniSync at an
+        // internal service or the cloud metadata endpoint (169.254.169.254) and read
+        // the response back. Resolve the host and refuse if any resolved address is
+        // loopback / private / link-local / unique-local. A small TOCTOU window remains
+        // (HttpClient re-resolves on connect), but this blocks the direct-literal and
+        // resolves-to-internal cases the audit called out; it's re-checked on the runtime
+        // stream fetch too, so a host that later rebinds to a private IP is also caught.
+        private static async Task<bool> IsSafeOutboundUrlAsync(string url, CancellationToken ct)
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+            if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) return false;
+            try
+            {
+                var host = uri.DnsSafeHost;
+                var addresses = IPAddress.TryParse(host, out var literal)
+                    ? new[] { literal }
+                    : await Dns.GetHostAddressesAsync(host, ct);
+                if (addresses.Length == 0) return false;
+                foreach (var ip in addresses)
+                    if (IsDisallowedAddress(ip)) return false;
+                return true;
+            }
+            catch
+            {
+                // DNS failure / malformed host → treat as unsafe rather than fetch blind.
+                return false;
+            }
+        }
+
+        private static bool IsDisallowedAddress(IPAddress ip)
+        {
+            if (IPAddress.IsLoopback(ip)) return true;                  // 127.0.0.0/8, ::1
+            if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+            var b = ip.GetAddressBytes();
+            if (ip.AddressFamily == AddressFamily.InterNetwork)
+            {
+                return b[0] == 0                                        // 0.0.0.0/8
+                    || b[0] == 10                                       // 10/8
+                    || b[0] == 127                                      // loopback
+                    || (b[0] == 100 && b[1] >= 64 && b[1] <= 127)       // 100.64/10 CGNAT
+                    || (b[0] == 169 && b[1] == 254)                     // 169.254/16 (incl. metadata)
+                    || (b[0] == 172 && b[1] >= 16 && b[1] <= 31)        // 172.16/12
+                    || (b[0] == 192 && b[1] == 168);                    // 192.168/16
+            }
+            if (ip.AddressFamily == AddressFamily.InterNetworkV6)
+            {
+                return ip.IsIPv6LinkLocal                               // fe80::/10
+                    || ip.IsIPv6SiteLocal                              // fec0::/10
+                    || (b[0] & 0xFE) == 0xFC                            // fc00::/7 unique-local
+                    || b[0] == 0x00;                                    // ::/8 (unspecified / reserved)
+            }
+            return true; // unknown address family → refuse
+        }
+
         public async Task<StreamAddon> FetchManifestAsync(string manifestUrl, CancellationToken ct = default)
         {
             var trimmed = manifestUrl?.Trim();
@@ -149,6 +207,11 @@ namespace AnimeList.Services
                 return null;
             if (!trimmed.EndsWith("/manifest.json", StringComparison.OrdinalIgnoreCase))
                 return null;
+            if (!await IsSafeOutboundUrlAsync(trimmed, ct))
+            {
+                _logger.LogWarning("Refused addon manifest fetch for {Url}: host resolves to a disallowed (loopback/private/link-local) address.", trimmed);
+                return null;
+            }
 
             try
             {
@@ -255,6 +318,14 @@ namespace AnimeList.Services
             // user navigates back to the episode, so the duplicate-fetch
             // window is small in practice.
             var streamsUrl = $"{addonRoot}/stream/{idType}/{idPath}.json";
+
+            // SSRF re-check at fetch time: the addon root was validated when the user added
+            // it, but DNS can rebind to an internal address after the fact.
+            if (!await IsSafeOutboundUrlAsync(streamsUrl, ct))
+            {
+                _logger.LogWarning("Refused addon stream fetch via {Host}: host resolves to a disallowed address.", addonRoot);
+                return [];
+            }
 
             // Single retry against the addon when the first attempt
             // returns empty / errors. Stream addons (Torrentio,
