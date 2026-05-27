@@ -420,135 +420,182 @@
 }
 
 @* "This Season" stat strip — applies to every visitor since the counts
-   describe the whole AniList catalog, not the viewer's list. Skipped
-   silently when AniList returned zeros (transient failure / sandbox
-   blocks the upstream / etc.) so the dashboard doesn't show a placeholder
-   row of zeros. Each cell links to the relevant /discover filter so
-   tapping the count is a useful navigation, not just a number. *@
-@if (Model.SeasonTotal > 0)
-{
-    <section class="dashboard-section">
-        <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">This Season</h2>
-            <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(CurrentSeasonLabel())">
-                <span>View all</span>
-                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                    <polyline points="12 5 19 12 12 19"></polyline>
+   describe the whole AniList catalog, not the viewer's list. Numbers load
+   client-side from /Home/SeasonStatsData after first paint (so the
+   dashboard never blocks on AniList); the section starts with shimmer
+   placeholders ([data-stats-loading]) and the inline loader fills the
+   counts, or hides the whole section if the upstream returned zeros
+   (transient failure / sandbox blocks the upstream / etc.) so the
+   dashboard never shows a placeholder row of zeros. *@
+<section class="dashboard-section stats-section" data-season-stats data-stats-loading>
+    <div class="dashboard-section-header">
+        <h2 class="dashboard-section-title">This Season</h2>
+        <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(CurrentSeasonLabel())">
+            <span>View all</span>
+            <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+        </a>
+    </div>
+    <div class="stats-strip">
+        @* These tiles are informational only — no link target. The
+           equivalent navigation already lives in the Discover tab on
+           the bottom-nav / drawer, so making the tiles tap targets
+           just added an inconsistent path. *@
+        <div class="stats-cell" aria-label="Currently airing anime">
+            <span class="stats-icon stats-icon-blue">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect>
+                    <polyline points="17 2 12 7 7 2"></polyline>
                 </svg>
-            </a>
+            </span>
+            <div class="stats-number" data-season-stat="airing">—</div>
+            <div class="stats-label">Currently Airing</div>
         </div>
-        <div class="stats-strip">
-            @* These tiles are informational only — no link target. The
-               equivalent navigation already lives in the Discover tab on
-               the bottom-nav / drawer, so making the tiles tap targets
-               just added an inconsistent path. *@
-            <div class="stats-cell" aria-label="Currently airing anime">
-                <span class="stats-icon stats-icon-blue">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect>
-                        <polyline points="17 2 12 7 7 2"></polyline>
-                    </svg>
-                </span>
-                <div class="stats-number">@Model.SeasonCurrentlyAiring</div>
-                <div class="stats-label">Currently Airing</div>
-            </div>
-            <div class="stats-cell" aria-label="New this season">
-                <span class="stats-icon stats-icon-green">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 3 L13.5 9 L19 10.5 L13.5 12 L12 18 L10.5 12 L5 10.5 L10.5 9 Z"></path>
-                        <path d="M19 4 L19.6 5.5 L21 6 L19.6 6.5 L19 8 L18.4 6.5 L17 6 L18.4 5.5 Z"></path>
-                    </svg>
-                </span>
-                <div class="stats-number">@Model.SeasonNewThis</div>
-                <div class="stats-label">New This Season</div>
-            </div>
-            <div class="stats-cell" aria-label="Total this season">
-                <span class="stats-icon stats-icon-amber">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                    </svg>
-                </span>
-                <div class="stats-number">@Model.SeasonTotal</div>
-                <div class="stats-label">Total This Season</div>
-            </div>
-        </div>
-    </section>
-}
-
-@* New episodes airing today. Day-bounded slice of the AniList airing
-   schedule, deduped to one card per show. Cached server-side until the
-   next UTC midnight so the shelf rotates with the calendar day rather
-   than 24h-rolling. Hidden when the upstream returned empty (transient
-   AniList failure, or genuinely no episodes airing today in the AniList
-   schedule). *@
-@if (Model.NewEpisodesToday.Count > 0)
-{
-    <section class="dashboard-section">
-        <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">New Episodes Today</h2>
-            <span class="dashboard-section-link-muted">Refreshes daily</span>
-        </div>
-        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
-        {
-            Items = Model.NewEpisodesToday,
-            ConfigUid = Model.ConfigUid,
-            Variant = "scroll",
-        })
-    </section>
-}
-
-@* Popular-this-season + most-anticipated shelves. Same horizontal-scroll
-   _PosterGrid the anime detail page's Recommended carousel uses, so the
-   card chrome (poster + score + format / episodes / year info row) is
-   identical across surfaces. Rendered for every visitor — the underlying
-   AniList data is public; logged-in users get per-card Manage Entry
-   hand-off via ConfigUid the same way Continue Watching does. *@
-@if (Model.PopularThisSeason.Count > 0)
-{
-    var currentSeasonHref = $"/discover?list=seasonal&season={Uri.EscapeDataString(CurrentSeasonLabel())}";
-    <section class="dashboard-section">
-        <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">Most Popular this Season</h2>
-            <a class="dashboard-section-link" href="@currentSeasonHref">
-                <span>View all</span>
-                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                    <polyline points="12 5 19 12 12 19"></polyline>
+        <div class="stats-cell" aria-label="New this season">
+            <span class="stats-icon stats-icon-green">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3 L13.5 9 L19 10.5 L13.5 12 L12 18 L10.5 12 L5 10.5 L10.5 9 Z"></path>
+                    <path d="M19 4 L19.6 5.5 L21 6 L19.6 6.5 L19 8 L18.4 6.5 L17 6 L18.4 5.5 Z"></path>
                 </svg>
-            </a>
+            </span>
+            <div class="stats-number" data-season-stat="new">—</div>
+            <div class="stats-label">New This Season</div>
         </div>
-        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
-        {
-            Items = Model.PopularThisSeason,
-            ConfigUid = Model.ConfigUid,
-            Variant = "scroll",
-        })
-    </section>
-}
-
-@if (Model.MostAnticipated.Count > 0)
-{
-    var nextSeasonHref = $"/discover?list=seasonal&season={Uri.EscapeDataString(NextSeasonLabel())}";
-    <section class="dashboard-section">
-        <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">Most Anticipated</h2>
-            <a class="dashboard-section-link" href="@nextSeasonHref">
-                <span>View all</span>
-                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                    <polyline points="12 5 19 12 12 19"></polyline>
+        <div class="stats-cell" aria-label="Total this season">
+            <span class="stats-icon stats-icon-amber">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
                 </svg>
-            </a>
+            </span>
+            <div class="stats-number" data-season-stat="total">—</div>
+            <div class="stats-label">Total This Season</div>
         </div>
-        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
-        {
-            Items = Model.MostAnticipated,
-            ConfigUid = Model.ConfigUid,
-            Variant = "scroll",
-        })
-    </section>
-}
+    </div>
+</section>
+<script>
+    (function () {
+        var section = document.querySelector('[data-season-stats]');
+        if (!section) return;
+        function setNum(key, val) {
+            var el = section.querySelector('[data-season-stat="' + key + '"]');
+            if (el) el.textContent = Number(val).toLocaleString();
+        }
+        fetch('/Home/SeasonStatsData', { credentials: 'same-origin', skipLoader: true })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                // total === 0 means AniList hasn't populated the season yet
+                // or the call blipped — hide rather than show a row of zeros.
+                if (!data || !data.success || !data.total) { section.hidden = true; return; }
+                setNum('airing', data.airing);
+                setNum('new', data.newThis);
+                setNum('total', data.total);
+                section.removeAttribute('data-stats-loading');
+            })
+            .catch(function () { section.hidden = true; });
+    })();
+</script>
+
+@* Discovery shelves — New Episodes Today + Most Popular this Season +
+   Most Anticipated. Same horizontal-scroll _PosterGrid the anime detail
+   page's Recommended carousel uses, so the card chrome (poster + score +
+   format / episodes / year info row) is identical across surfaces.
+   Rendered for every visitor — the underlying AniList data is public;
+   logged-in users get per-card Manage Entry hand-off via the resolved UID
+   the endpoint stamps the same way Continue Watching does.
+
+   Each shelf is fetched client-side after first paint from its own
+   /Home/*Data endpoint (so the dashboard never blocks on AniList and every
+   shelf loads in parallel). The section renders with shimmer poster cards;
+   the loader below swaps in the real _PosterGrid response, or hides the
+   section when the upstream returns nothing (transient failure, or
+   genuinely no entries — e.g. no episodes airing today, or next season
+   not yet populated). *@
+<section class="dashboard-section" data-shelf data-shelf-src="/Home/NewEpisodesTodayData">
+    <div class="dashboard-section-header">
+        <h2 class="dashboard-section-title">New Episodes Today</h2>
+        <span class="dashboard-section-link-muted">Refreshes daily</span>
+    </div>
+    <div data-shelf-container>
+        @await Html.PartialAsync("_PosterScrollSkeleton")
+    </div>
+</section>
+
+<section class="dashboard-section" data-shelf data-shelf-src="/Home/PopularThisSeasonData">
+    <div class="dashboard-section-header">
+        <h2 class="dashboard-section-title">Most Popular this Season</h2>
+        <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(CurrentSeasonLabel())">
+            <span>View all</span>
+            <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+        </a>
+    </div>
+    <div data-shelf-container>
+        @await Html.PartialAsync("_PosterScrollSkeleton")
+    </div>
+</section>
+
+<section class="dashboard-section" data-shelf data-shelf-src="/Home/MostAnticipatedData">
+    <div class="dashboard-section-header">
+        <h2 class="dashboard-section-title">Most Anticipated</h2>
+        <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(NextSeasonLabel())">
+            <span>View all</span>
+            <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+        </a>
+    </div>
+    <div data-shelf-container>
+        @await Html.PartialAsync("_PosterScrollSkeleton")
+    </div>
+</section>
+
+<script>
+    (function () {
+        var shelves = document.querySelectorAll('[data-shelf]');
+        if (!shelves.length) return;
+
+        // Server-rendered _PosterGrid partials carry an inline <script> (the
+        // airing-time localisation + clock-order reorder used by New Episodes
+        // Today). innerHTML-inserted scripts don't execute, so re-create each
+        // one after the swap to make it run.
+        function runScripts(container) {
+            container.querySelectorAll('script').forEach(function (old) {
+                var s = document.createElement('script');
+                if (old.src) { s.src = old.src; }
+                else { s.textContent = old.textContent; }
+                old.parentNode.replaceChild(s, old);
+            });
+        }
+
+        shelves.forEach(function (section) {
+            var src = section.getAttribute('data-shelf-src');
+            var container = section.querySelector('[data-shelf-container]');
+            if (!src || !container) return;
+
+            // No await between iterations → every shelf fetch fires together
+            // and resolves independently.
+            fetch(src, { credentials: 'same-origin', skipLoader: true })
+                .then(function (resp) { return resp.ok ? resp.text() : null; })
+                .then(function (html) {
+                    if (html == null || !html.trim()) {
+                        // Upstream error or empty result — drop the skeleton
+                        // shelf rather than leaving it loading forever.
+                        section.hidden = true;
+                        return;
+                    }
+                    container.innerHTML = html;
+                    runScripts(container);
+                    section.hidden = false;
+                })
+                .catch(function () { section.hidden = true; });
+        });
+    })();
+</script>
 
 @* Browse By: secondary discovery surfaces. Replaces the previous three nav
    tiles now that the layout's bottom-nav + hamburger drawer cover primary

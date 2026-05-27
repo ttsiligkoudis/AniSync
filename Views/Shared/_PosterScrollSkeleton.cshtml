@@ -1,0 +1,20 @@
+@{
+    // Placeholder cards for a horizontal poster shelf while its real data
+    // loads client-side. Enough cards to fill the visible portion of the
+    // scroll row on common mobile viewports so the shelf reads as "loading",
+    // not "empty"; the dashboard's shelf loader replaces the whole
+    // container's HTML once the _PosterGrid response lands.
+    var count = ViewData["SkeletonCount"] is int n && n > 0 ? n : 6;
+}
+<div class="poster-scroll-row">
+    @for (var i = 0; i < count; i++)
+    {
+        <div class="library-card library-card-skeleton">
+            <div class="library-card-poster-wrap">
+                <div class="library-card-poster skeleton-shimmer"></div>
+            </div>
+            <span class="library-card-skeleton-line"></span>
+            <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+        </div>
+    }
+</div>

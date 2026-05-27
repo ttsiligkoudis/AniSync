@@ -36,26 +36,13 @@ namespace AnimeList.Models
         // multi-source aggregation without breaking the view contract.
         public List<string> ContributingServices { get; set; } = [];
 
-        // Seasonal aggregate counts surfaced on the dashboard's "This Season"
-        // strip — same numbers regardless of the viewer's auth state, since
-        // they describe the whole AniList catalog rather than the user's list.
-        public int SeasonCurrentlyAiring { get; set; }
-        public int SeasonNewThis { get; set; }
-        public int SeasonTotal { get; set; }
-
-        // Top-15 popular slices for the current and next seasons, sorted by
-        // AniList's POPULARITY_DESC. Same poster-grid Meta shape the
-        // detail-page Recommended carousel uses, so the view can drop them
-        // into the existing _PosterGrid scroll-row partial. Empty list means
-        // the upstream blip'd or the season has no entries yet — view hides
-        // the shelf in that case.
-        public List<Meta> PopularThisSeason { get; set; } = [];
-        public List<Meta> MostAnticipated { get; set; } = [];
-
-        // Anime with at least one episode airing during today's UTC window.
-        // One row per show (multi-cour drops collapse into a single card).
-        // Cached server-side until the next UTC midnight so the shelf only
-        // hits AniList once per calendar day.
-        public List<Meta> NewEpisodesToday { get; set; } = [];
+        // The "This Season" stat strip and the discovery shelves (New
+        // Episodes Today, Most Popular this Season, Most Anticipated) are no
+        // longer rendered server-side — they're fetched client-side after
+        // first paint from /Home/SeasonStatsData and the *Data shelf
+        // endpoints, so the dashboard never blocks on AniList. The view
+        // emits shimmer placeholders and the inline loader swaps them for
+        // the real content (or hides the section when the upstream returns
+        // nothing).
     }
 }
