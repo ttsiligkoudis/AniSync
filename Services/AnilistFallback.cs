@@ -29,7 +29,7 @@ namespace AnimeList.Services
             _cache = cache;
         }
 
-        public async Task<List<Meta>> GetAiringScheduleAsync(AnimeService translateTo, string skip = null, string genre = null, bool hideAdult = false)
+        public async Task<List<Meta>> GetAiringScheduleAsync(AnimeService translateTo, string skip = null, string genre = null, bool hideAdult = false, bool groupSeasons = true)
         {
             // Genre branch: AniList's airingSchedules query has no genre
             // filter, so when the caller wants to slice "airing" by genre we
@@ -41,7 +41,7 @@ namespace AnimeList.Services
             // still carry the show's full metadata.
             if (!string.IsNullOrEmpty(genre))
             {
-                return await GetCurrentlyAiringByGenreAsync(translateTo, skip, genre, hideAdult);
+                return await GetCurrentlyAiringByGenreAsync(translateTo, skip, genre, hideAdult, groupSeasons);
             }
 
             var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
@@ -90,7 +90,7 @@ namespace AnimeList.Services
 
                 if (hideAdult && (bool?)media.isAdult == true) continue;
 
-                var externalId = await ResolveExternalIdAsync(anilistId.Value, translateTo);
+                var externalId = await ResolveStremioIdAsync(anilistId.Value, translateTo, groupSeasons);
                 if (!seen.Add(externalId)) continue;
 
                 var name = string.IsNullOrEmpty((string)media.title.english)
@@ -118,7 +118,7 @@ namespace AnimeList.Services
         // so the most-watched currently-airing shows in the genre lead. Media()
         // accepts an isAdult arg directly so the 18+ gate is server-side here,
         // unlike the schedule branch which has to post-filter.
-        private async Task<List<Meta>> GetCurrentlyAiringByGenreAsync(AnimeService translateTo, string skip, string genre, bool hideAdult)
+        private async Task<List<Meta>> GetCurrentlyAiringByGenreAsync(AnimeService translateTo, string skip, string genre, bool hideAdult, bool groupSeasons)
         {
             var page = int.TryParse(skip, out var skipInt) ? (skipInt / PageSize) + 1 : 1;
 
@@ -153,7 +153,7 @@ namespace AnimeList.Services
                 var anilistId = (int?)media.id;
                 if (!anilistId.HasValue) continue;
 
-                var externalId = await ResolveExternalIdAsync(anilistId.Value, translateTo);
+                var externalId = await ResolveStremioIdAsync(anilistId.Value, translateTo, groupSeasons);
                 if (!seen.Add(externalId)) continue;
 
                 var name = string.IsNullOrEmpty((string)media.title?.english)

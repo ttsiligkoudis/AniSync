@@ -38,7 +38,7 @@ namespace AnimeList.Services
             // and translate ids back to Kitsu for downstream meta/manage flows. genre
             // threads through so Airing-by-genre swaps to the RELEASING+genre query.
             if (list == ListType.Airing)
-                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.Kitsu, skip, genre, hideAdult);
+                return await _anilistFallback.GetAiringScheduleAsync(AnimeService.Kitsu, skip, genre, hideAdult, groupSeasons);
 
             var resolvedAnimeId = await _mappingService.GetIdByService(animeId, AnimeService.Kitsu);
             var isUserList = !list.HasValue || _userLists.Contains(list.Value);
