@@ -115,6 +115,7 @@ namespace AnimeList.Controllers
             {
                 HttpContext.Session.SetString(OauthServiceKey, AnimeService.Anilist.ToString());
                 HttpContext.Session.SetString(OauthFlowKey, OauthFlowLogin);
+                var clientId = _configuration["Anilist:ClientId"];
                 var state = BeginOauthState();
                 return Redirect($"https://anilist.co/api/v2/oauth/authorize?client_id={clientId}&response_type=code&state={Uri.EscapeDataString(state)}");
             }
@@ -284,6 +285,7 @@ namespace AnimeList.Controllers
             {
                 HttpContext.Session.SetString(OauthServiceKey, AnimeService.Anilist.ToString());
                 HttpContext.Session.SetString(OauthFlowKey, OauthFlowLink);
+                var clientId = _configuration["Anilist:ClientId"];
                 var state = BeginOauthState();
                 return Redirect($"https://anilist.co/api/v2/oauth/authorize?client_id={clientId}&response_type=code&state={Uri.EscapeDataString(state)}");
             }

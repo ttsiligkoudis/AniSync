@@ -305,16 +305,6 @@ namespace AnimeList
             return $"{name} {year}";
         }
 
-#if DEBUG
-        public static readonly string clientId = "20853";
-        public static readonly string clientSecret = "za9WKI03QY3icX3S4EvsSUuE0VB1b5MZelcT2S8m";
-        public static readonly string redirectUri = "https://tools.myportofolio.eu/Auth/Callback";
-#else
-        public static readonly string clientId = "20850";
-        public static readonly string clientSecret = "bAgns7Q0rGxXnhGRRoq84slYleN4NIe2SkoSDOZ1";
-        public static readonly string redirectUri = "https://anisync.fly.dev/Auth/Callback";
-#endif
-
         /// <summary>
         /// Generates a PKCE code-verifier — 64 random bytes, base64url-encoded. MAL only
         /// supports <c>code_challenge_method=plain</c>, so the same string is sent as the
