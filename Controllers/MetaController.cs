@@ -1,6 +1,8 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
+using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Newtonsoft.Json.Linq;
 
 namespace AnimeList.Controllers
@@ -420,7 +422,12 @@ namespace AnimeList.Controllers
             }
         }
 
+        // Stremio addon protocol meta route. CORS + the per-UID addon rate limit are
+        // scoped to this action only — the controller's other endpoints (GetEntry /
+        // SaveEntry / ManageEntry) are same-origin web-app surfaces and must stay closed.
         [HttpGet("{config}/[controller]/{metaType}/{id}.json")]
+        [EnableCors("AddonCors")]
+        [EnableRateLimiting("addon")]
         public async Task<IActionResult> GetByID(string config, MetaType metaType, string id)
         {
             try

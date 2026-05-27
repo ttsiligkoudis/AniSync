@@ -1,9 +1,15 @@
 using AnimeList.Services.Interfaces;
+using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace AnimeList.Controllers
 {
+    // Stremio addon protocol route — open CORS (Stremio fetches it cross-origin)
+    // and a generous per-UID rate limit (see the "addon" policy in Program.cs).
     [ApiController]
+    [EnableCors("AddonCors")]
+    [EnableRateLimiting("addon")]
     public class SubtitlesController : ControllerBase
     {
         private readonly ITokenService _tokenService;

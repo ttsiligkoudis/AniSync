@@ -65,6 +65,17 @@ namespace AnimeList.Services.Interfaces
         Task DeleteAsync(string uid);
 
         /// <summary>
+        /// Rotates the install identifier: assigns the row a fresh random UID, preserving
+        /// all of its data (tokens, linked accounts, flags, scrobble token, stream addons)
+        /// and cascading the change to the per-user notification / watching-cache / push
+        /// tables so those keep working under the new UID. Every old Stremio install URL,
+        /// X-AniSync-Config header, and persisted UID cookie that referenced the previous
+        /// UID immediately stops resolving — the rotation path for a leaked UID. Returns the
+        /// new UID, or null when no row matched <paramref name="oldUid"/>.
+        /// </summary>
+        Task<string> RotateUidAsync(string oldUid);
+
+        /// <summary>
         /// Reads the additional (non-primary) provider tokens linked to a UID. Empty list if
         /// the UID is unknown or has no links. Used by the multi-provider sync feature.
         /// </summary>

@@ -847,6 +847,66 @@ public class HomeController : Controller
         return new JsonResult(new { success = true });
     }
 
+    /// <summary>
+    /// Resolves the current session's install UID the same way the configure page does —
+    /// from the authenticated primary identity, never from a client-supplied value — so
+    /// the destructive UID actions below can only ever target the caller's own row.
+    /// Returns null for anonymous or signed-out callers.
+    /// </summary>
+    private async Task<string> ResolveCurrentUidAsync()
+    {
+        var sessionStr = HttpContext.Session.GetString("AccessToken");
+        if (string.IsNullOrEmpty(sessionStr)) return null;
+        var token = DeserializeObject<TokenData>(sessionStr);
+        if (token == null || token.anonymousUser) return null;
+        var (uid, _) = await _configStore.FindUidByIdentityAsync(token);
+        return uid;
+    }
+
+    /// <summary>
+    /// Rotates the install UID for the signed-in user, keeping all of their data. Every
+    /// old Stremio install URL and X-AniSync-Config header that carried the previous UID
+    /// stops resolving — the recovery path for a leaked UID — while this browser stays
+    /// signed in (the persistent UID cookie is rewritten to the new value). The client
+    /// reloads so the install URL and the rest of the UID-derived UI re-render. The target
+    /// UID comes from the session, so a bare leaked UID can't drive this on its own.
+    /// </summary>
+    [HttpPost("Home/RegenerateUid")]
+    public async Task<JsonResult> RegenerateUid()
+    {
+        var uid = await ResolveCurrentUidAsync();
+        if (string.IsNullOrEmpty(uid))
+            return new JsonResult(new { success = false, error = "not signed in" });
+
+        var newUid = await _configStore.RotateUidAsync(uid);
+        if (string.IsNullOrEmpty(newUid))
+            return new JsonResult(new { success = false, error = "unknown uid" });
+
+        // The session AccessToken carries no UID, so only the rehydration cookie needs
+        // rewriting to keep this browser resolving against the freshly-rotated row.
+        _tokenService.SetPrimaryUidCookie(newUid);
+        return new JsonResult(new { success = true, uid = newUid });
+    }
+
+    /// <summary>
+    /// Rotates the UID (invalidating every existing install URL, header, and persisted
+    /// cookie everywhere) and then clears this browser's session + cookie too, signing the
+    /// user out on all devices at once. The row's data is preserved under the new UID, so
+    /// signing back in with the same provider lands on the same configuration.
+    /// </summary>
+    [HttpPost("Home/SignOutEverywhere")]
+    public async Task<JsonResult> SignOutEverywhere()
+    {
+        var uid = await ResolveCurrentUidAsync();
+        if (string.IsNullOrEmpty(uid))
+            return new JsonResult(new { success = false, error = "not signed in" });
+
+        await _configStore.RotateUidAsync(uid);
+        await _tokenService.RemoveCachedUser();   // drops in-memory token cache + session + cookie
+        HttpContext.Session.Clear();
+        return new JsonResult(new { success = true });
+    }
+
 }
 
 public class SaveConfigRequest

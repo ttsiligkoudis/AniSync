@@ -623,6 +623,47 @@ namespace AnimeList.Services
             await cmd.ExecuteNonQueryAsync();
         }
 
+        public async Task<string> RotateUidAsync(string oldUid)
+        {
+            if (string.IsNullOrEmpty(oldUid)) return null;
+
+            var newUid = GenerateUid();
+
+            using var conn = new SqliteConnection(_connectionString);
+            await conn.OpenAsync();
+            using var tx = (SqliteTransaction)await conn.BeginTransactionAsync();
+
+            // Repoint the primary row first. Zero rows updated means the UID is unknown —
+            // roll back and report the miss so the caller doesn't hand out a dangling UID.
+            using (var cfg = conn.CreateCommand())
+            {
+                cfg.Transaction = tx;
+                cfg.CommandText = "UPDATE configs SET uid = $new WHERE uid = $old";
+                cfg.Parameters.AddWithValue("$new", newUid);
+                cfg.Parameters.AddWithValue("$old", oldUid);
+                if (await cfg.ExecuteNonQueryAsync() == 0)
+                {
+                    await tx.RollbackAsync();
+                    return null;
+                }
+            }
+
+            // Cascade to the uid-keyed satellite tables so the user keeps their existing
+            // notifications, watching snapshot, and push subscriptions under the new UID.
+            foreach (var table in new[] { "notifications", "user_watching_cache", "push_subscriptions" })
+            {
+                using var upd = conn.CreateCommand();
+                upd.Transaction = tx;
+                upd.CommandText = $"UPDATE {table} SET uid = $new WHERE uid = $old";
+                upd.Parameters.AddWithValue("$new", newUid);
+                upd.Parameters.AddWithValue("$old", oldUid);
+                await upd.ExecuteNonQueryAsync();
+            }
+
+            await tx.CommitAsync();
+            return newUid;
+        }
+
         public async Task<List<LinkedToken>> GetLinkedTokensAsync(string uid)
         {
             if (string.IsNullOrEmpty(uid)) return [];
