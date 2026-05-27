@@ -131,26 +131,41 @@
         lastFocused = document.activeElement;
 
         titleEl.textContent = name || 'Manage entry';
-        loadingEl.hidden = false;
-        formEl.hidden = true;
+        // Pre-arrange the modal's internal state to "form shown, no spinner"
+        // so that when we reveal it after the fetch it shows the populated
+        // form rather than the empty-then-filled flash the in-modal spinner
+        // used to produce. The wait itself is covered by the global loader-
+        // overlay (loader.js wraps loadEntry's fetch — it doesn't pass
+        // skipLoader), so the user sees the page-level spinner while the
+        // modal stays hidden, then the populated modal appears in one step.
+        loadingEl.hidden = true;
+        formEl.hidden = false;
         errorEl.hidden = true;
+        seasonField.hidden = true;
+        activeCard = card || null;
+
+        // Fetch first; reveal the modal only once the data's in (or the
+        // error's set), so it never opens empty. revealModal runs on both
+        // the success and the error branch because loadEntry's .catch
+        // resolves rather than rethrows — a failed load still gets a modal,
+        // just with the error message instead of fields.
+        loadEntry(id, /* isInitial */ true).then(revealModal);
+    }
+
+    // Shows the modal + backdrop, traps focus, and inerts the background.
+    // Split out of openModal so it can run after the initial fetch settles
+    // rather than before it.
+    function revealModal() {
         modal.hidden = false;
         backdrop.hidden = false;
         document.body.classList.add('modal-open');
         setBackgroundInert(true);
 
-        // Reset season picker; will be re-populated by loadEntry if applicable.
-        seasonField.hidden = true;
-        activeCard = card || null;
-
         // Focus the close (×) button so keyboard / screen-reader users land
-        // somewhere predictable inside the dialog. The form is still loading
-        // — once it appears, the user can Tab into the inputs naturally.
-        // Wrapped in setTimeout to give the browser a paint cycle so the
-        // .focus() call doesn't race the modal's reveal transition.
+        // somewhere predictable inside the dialog. Wrapped in setTimeout to
+        // give the browser a paint cycle so the .focus() call doesn't race
+        // the modal's reveal transition.
         setTimeout(function () { closeBtn.focus(); }, 30);
-
-        loadEntry(id, /* isInitial */ true);
     }
 
     function closeModal() {
