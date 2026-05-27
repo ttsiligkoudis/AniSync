@@ -672,7 +672,7 @@ namespace AnimeList.Services
             // linked_tokens array is serialised against a concurrent link / unlink / login-time
             // linked-token refresh for the same uid. A deferred txn would let two callers both
             // read the old array and the second commit would clobber the first's entry.
-            using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(deferred: false);
+            using var tx = conn.BeginTransaction(deferred: false);
 
             var existing = await ReadLinkedTokensAsync(conn, tx, uid);
             var idx = existing.FindIndex(t => t.Service == linked.Service);
@@ -694,7 +694,7 @@ namespace AnimeList.Services
             if (string.IsNullOrEmpty(uid)) return;
 
             using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
-            using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(deferred: false);
+            using var tx = conn.BeginTransaction(deferred: false);
 
             var existing = await ReadLinkedTokensAsync(conn, tx, uid);
             var removed = existing.RemoveAll(t => t.Service == service);
