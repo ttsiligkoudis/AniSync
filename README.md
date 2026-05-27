@@ -402,21 +402,23 @@ The `RedirectUri` must match the URL registered on the MAL developer dashboard e
 
 ### AniList configuration
 
-AniList OAuth uses a registered client too. The `ClientId` and `RedirectUri` are public and ship as defaults in `appsettings.json` (with local overrides in `appsettings.Development.json`); the confidential `ClientSecret` is **not** committed — supply it as an environment variable / Fly secret using the `Anilist__ClientSecret` form:
+AniList OAuth uses a registered client too. Only the `RedirectUri` ships as a committed default; the `ClientId` and the confidential `ClientSecret` are **not** committed — supply both as environment variables / Fly secrets using the `Anilist__ClientId` form:
 
 ```bash
-fly secrets set Anilist__ClientSecret="<your AniList client secret>"
+fly secrets set \
+  Anilist__ClientId="<your AniList client id>" \
+  Anilist__ClientSecret="<your AniList client secret>"
 ```
 
 ```json
 "Anilist": {
-  "ClientId":     "<your AniList client id>",
+  "ClientId":     "<set via env var / Fly secret, not committed>",
   "ClientSecret": "<set via env var / Fly secret, not committed>",
   "RedirectUri":  "https://your-deployment.example.com/Auth/Callback"
 }
 ```
 
-Register the app at AniList → Settings → Developer; its redirect URL must match `Anilist:RedirectUri` exactly. Override `ClientId` / `RedirectUri` if you run your own AniList app.
+Register the app at AniList → Settings → Developer; its redirect URL must match `Anilist:RedirectUri` exactly.
 
 ### Storage
 

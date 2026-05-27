@@ -32,9 +32,9 @@ namespace AnimeList.Services
         private string MalRedirectUri => _configuration["Mal:RedirectUri"];
 
         // AniList OAuth client config. Moved out of source (it used to be compiled-in
-        // constants in Utils) so the confidential client_secret isn't committed — supply
-        // it via Anilist__ClientSecret as a Fly secret / env var. ClientId and RedirectUri
-        // are public and ship as defaults in appsettings(.Development).json. Coalesced to
+        // constants in Utils) so neither the client_id nor the confidential client_secret
+        // is committed — supply both via Anilist__ClientId / Anilist__ClientSecret as Fly
+        // secrets / env vars. Only RedirectUri ships as a committed default. Coalesced to
         // empty so a missing value degrades to a failed exchange rather than a null arg.
         private string AnilistClientId => _configuration["Anilist:ClientId"] ?? string.Empty;
         private string AnilistClientSecret => _configuration["Anilist:ClientSecret"] ?? string.Empty;
