@@ -25,8 +25,7 @@ namespace AnimeList.Services
             var json = JsonConvert.SerializeObject(mediaIds ?? []);
             var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO user_watching_cache
@@ -50,8 +49,7 @@ namespace AnimeList.Services
         public async Task<WatchingCacheEntry> GetAsync(string uid)
         {
             if (string.IsNullOrEmpty(uid)) return null;
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 SELECT uid, service, media_ids_json, refreshed_at
@@ -68,8 +66,7 @@ namespace AnimeList.Services
         public async Task<List<string>> GetStaleUidsAsync(TimeSpan maxAge, int limit)
         {
             var cutoff = DateTimeOffset.UtcNow.Subtract(maxAge).ToUnixTimeSeconds();
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             // LEFT JOIN configs so users with no cache row yet (first-run case)
             // are returned and prioritised — and so explicitly-invalidated rows
@@ -93,8 +90,7 @@ namespace AnimeList.Services
 
         public async Task<List<WatchingCacheEntry>> GetAllAsync()
         {
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 SELECT uid, service, media_ids_json, refreshed_at
@@ -110,8 +106,7 @@ namespace AnimeList.Services
         public async Task MarkErrorAsync(string uid, string error)
         {
             if (string.IsNullOrEmpty(uid)) return;
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             // Upsert error into a row even if the user has never had a
             // successful refresh — keeps a record so we don't retry the same
@@ -137,8 +132,7 @@ namespace AnimeList.Services
         public async Task MarkStaleAsync(string uid)
         {
             if (string.IsNullOrEmpty(uid)) return;
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             // Zero out refreshed_at so GetStaleUidsAsync surfaces this row
             // immediately on the next refresh pass. No-op if the row doesn't
