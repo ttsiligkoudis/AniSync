@@ -127,20 +127,37 @@ namespace AnimeList.Services
                 {
                     if (m == null || string.IsNullOrEmpty(m.id)) continue;
 
-                    var primaryId = await _mappingService.GetIdWithPrefixAsync(m.id, primaryService);
-
                     string dedupKey;
-                    if (!string.IsNullOrEmpty(primaryId))
+                    // With season-grouping on, the per-service fetch already
+                    // collapsed this card onto its franchise group id (IMDb,
+                    // then TMDB) via ResolveGroupedId — same precedence the
+                    // Discover surfaces use. Keep that id so multi-cour
+                    // franchises stay one card and the click-through lands on
+                    // the franchise umbrella page; rewriting it to the
+                    // primary's native id (what the ungrouped path does) would
+                    // undo the grouping. Cards the mapping couldn't group fall
+                    // through to the native id, so they take the primary-
+                    // provider rewrite below — giving the IMDb → primary →
+                    // original chain the request asked for.
+                    if (groupSeasons && IsGroupedId(m.id))
                     {
-                        dedupKey = primaryId;
-                        if (primaryId != m.id) m.id = primaryId;
+                        dedupKey = m.id;
                     }
                     else
                     {
-                        var anilistId = primaryService == AnimeService.Anilist
-                            ? null
-                            : await _mappingService.GetIdWithPrefixAsync(m.id, AnimeService.Anilist);
-                        dedupKey = anilistId ?? m.id;
+                        var primaryId = await _mappingService.GetIdWithPrefixAsync(m.id, primaryService);
+                        if (!string.IsNullOrEmpty(primaryId))
+                        {
+                            dedupKey = primaryId;
+                            if (primaryId != m.id) m.id = primaryId;
+                        }
+                        else
+                        {
+                            var anilistId = primaryService == AnimeService.Anilist
+                                ? null
+                                : await _mappingService.GetIdWithPrefixAsync(m.id, AnimeService.Anilist);
+                            dedupKey = anilistId ?? m.id;
+                        }
                     }
 
                     if (!seen.Add(dedupKey)) continue;
@@ -193,5 +210,17 @@ namespace AnimeList.Services
             if (string.IsNullOrWhiteSpace(format)) return null;
             return format.ToLowerInvariant().Contains("movie") ? "movie" : "series";
         }
+
+        /// <summary>
+        /// True when the id is a cross-service franchise group id (IMDb tt…
+        /// or tmdb:…) rather than a service-native id. Used to tell the
+        /// season-grouping path "this card is already grouped, leave its id
+        /// alone" from the native-fallback case that still needs rewriting
+        /// into the primary's id space.
+        /// </summary>
+        private static bool IsGroupedId(string id) =>
+            !string.IsNullOrEmpty(id)
+            && (id.StartsWith(imdbPrefix, StringComparison.Ordinal)
+                || id.StartsWith(tmdbPrefix, StringComparison.Ordinal));
     }
 }
