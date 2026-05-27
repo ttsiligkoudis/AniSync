@@ -35,8 +35,7 @@ namespace AnimeList.Services
                 }
             }
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
 
             // Dynamic IN-list of equivalent ids. Param count is bounded by
@@ -95,8 +94,7 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(uid)) return [];
             if (skip < 0) skip = 0;
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 SELECT id, uid, service, anime_id, anime_title, episode_number,
@@ -135,8 +133,7 @@ namespace AnimeList.Services
         public async Task<int> GetUnreadCountAsync(string uid)
         {
             if (string.IsNullOrEmpty(uid)) return 0;
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             // Hits the partial index idx_notifications_unread.
             cmd.CommandText = "SELECT COUNT(*) FROM notifications WHERE uid = $uid AND read_at IS NULL;";
@@ -148,8 +145,7 @@ namespace AnimeList.Services
         public async Task<bool> MarkReadAsync(string uid, long id)
         {
             if (string.IsNullOrEmpty(uid)) return false;
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             // uid gate is the authorization boundary — a notification id alone
             // mustn't be enough to mark another user's row as read.
@@ -168,8 +164,7 @@ namespace AnimeList.Services
         public async Task<int> MarkAllReadAsync(string uid)
         {
             if (string.IsNullOrEmpty(uid)) return 0;
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 UPDATE notifications
@@ -184,8 +179,7 @@ namespace AnimeList.Services
         public async Task<int> MarkManyReadAsync(string uid, IReadOnlyCollection<long> ids)
         {
             if (string.IsNullOrEmpty(uid) || ids == null || ids.Count == 0) return 0;
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var tx = conn.BeginTransaction();
             using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
@@ -210,8 +204,7 @@ namespace AnimeList.Services
         public async Task<bool> DeleteAsync(string uid, long id)
         {
             if (string.IsNullOrEmpty(uid)) return false;
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             // UID gate so user A can't delete user B's rows.
             cmd.CommandText = "DELETE FROM notifications WHERE id = $id AND uid = $uid;";
@@ -223,8 +216,7 @@ namespace AnimeList.Services
         public async Task<int> DeleteManyAsync(string uid, IReadOnlyCollection<long> ids)
         {
             if (string.IsNullOrEmpty(uid) || ids == null || ids.Count == 0) return 0;
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var tx = conn.BeginTransaction();
             using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;

@@ -22,8 +22,7 @@ namespace AnimeList.Services
 
         private void EnsureSchema()
         {
-            using var conn = new SqliteConnection(_connectionString);
-            conn.Open();
+            using var conn = SqliteConnectionFactory.OpenConnection(_connectionString);
 
             // Single canonical schema — pre-launch, so we don't carry an ALTER ladder for
             // existing DBs. If a dev has an older anisync.db lying around they should
@@ -189,61 +188,58 @@ namespace AnimeList.Services
             var json = SerializeObject(tokenData);
             var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
-
-            // Try to update an existing row that already lists this identity in its primary
-            // slot. Gated on `service = $s` so an identity that's currently a *linked*
-            // secondary on some row stays primary-vs-linked-distinct: HomeController routes
-            // those through FindUidByIdentityAsync + the linked-merge path instead.
-            // Anonymous (no user_key) always creates a new row — rare, no dedup.
-            if (!string.IsNullOrEmpty(userKey) && identityCol != null)
-            {
-                using var update = conn.CreateCommand();
-                update.CommandText = $"""
-                    UPDATE configs
-                       SET token_json = $j, updated_at = $u
-                     WHERE service = $s AND {identityCol} = $k
-                    RETURNING uid
-                    """;
-                update.Parameters.AddWithValue("$j", json);
-                update.Parameters.AddWithValue("$u", now);
-                update.Parameters.AddWithValue("$s", serviceInt);
-                update.Parameters.AddWithValue("$k", userKey);
-                var existing = await update.ExecuteScalarAsync() as string;
-                if (!string.IsNullOrEmpty(existing)) return existing;
-            }
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
 
             var newUid = GenerateUid();
-            using var insert = conn.CreateCommand();
-            // Anonymous rows leave all three identity columns NULL; authenticated rows fill
-            // exactly the one matching their service. The UNIQUE partial indexes mean an
-            // INSERT here will throw if another row already owns this identity — that's
-            // a real conflict (two different UIDs both claiming the same AniList account),
-            // not a silent overwrite, and bubbles to the caller.
+            using var cmd = conn.CreateCommand();
             if (string.IsNullOrEmpty(userKey) || identityCol == null)
             {
-                insert.CommandText = """
+                // Anonymous rows leave all three identity columns NULL — nothing to dedup on,
+                // and the random 128-bit uid can't collide, so a plain INSERT never conflicts.
+                cmd.CommandText = """
                     INSERT INTO configs (uid, service, token_json, created_at, updated_at, flags)
                     VALUES ($uid, $s, $j, $c, $u, $f)
+                    RETURNING uid
                     """;
             }
             else
             {
-                insert.CommandText = $"""
+                // Single atomic upsert keyed on the per-service identity column. The old
+                // read-(UPDATE)-then-INSERT design raced: two concurrent logins for the same
+                // identity (double-clicked "Allow", or an OAuth callback landing alongside a
+                // session-rehydration write) both found no row and both INSERTed, and the
+                // loser tripped the UNIQUE partial index and surfaced a 500. Folding it into
+                // one INSERT … ON CONFLICT makes the loser refresh the winner's row instead.
+                //
+                // The DO UPDATE WHERE keeps the old `service = $s` gate: we only refresh a row
+                // that owns this identity as its *primary*. If the identity is a linked
+                // secondary on a different row (service differs) the update no-ops — callers
+                // are meant to route those through FindUidByIdentityAsync + the linked-merge
+                // path, so reaching here is a rare race, and a no-op is far safer than letting
+                // a bare DO UPDATE overwrite that row's primary token. The conflict-target
+                // WHERE textually matches the partial index so SQLite accepts it as the target.
+                cmd.CommandText = $"""
                     INSERT INTO configs (uid, service, {identityCol}, token_json, created_at, updated_at, flags)
                     VALUES ($uid, $s, $k, $j, $c, $u, $f)
+                    ON CONFLICT({identityCol}) WHERE {identityCol} IS NOT NULL
+                    DO UPDATE SET token_json = excluded.token_json, updated_at = excluded.updated_at
+                          WHERE configs.service = excluded.service
+                    RETURNING uid
                     """;
-                insert.Parameters.AddWithValue("$k", userKey);
+                cmd.Parameters.AddWithValue("$k", userKey);
             }
-            insert.Parameters.AddWithValue("$uid", newUid);
-            insert.Parameters.AddWithValue("$s", serviceInt);
-            insert.Parameters.AddWithValue("$j", json);
-            insert.Parameters.AddWithValue("$c", now);
-            insert.Parameters.AddWithValue("$u", now);
-            insert.Parameters.AddWithValue("$f", DefaultFlagsPacked);
-            await insert.ExecuteNonQueryAsync();
-            return newUid;
+            cmd.Parameters.AddWithValue("$uid", newUid);
+            cmd.Parameters.AddWithValue("$s", serviceInt);
+            cmd.Parameters.AddWithValue("$j", json);
+            cmd.Parameters.AddWithValue("$c", now);
+            cmd.Parameters.AddWithValue("$u", now);
+            cmd.Parameters.AddWithValue("$f", DefaultFlagsPacked);
+
+            // RETURNING yields newUid on a fresh INSERT and the existing uid when the conflict
+            // refreshed a primary row. It yields nothing only when the conflicting row owns the
+            // identity as a *linked* secondary (DO UPDATE WHERE was false) — the rare race noted
+            // above, where no row was written and null is the honest answer.
+            return await cmd.ExecuteScalarAsync() as string;
         }
 
         // Default packed flags for a freshly-linked account. flags1 byte enables
@@ -268,8 +264,7 @@ namespace AnimeList.Services
             // matched is the row's primary; otherwise the candidate is currently a
             // linked secondary on this row and the caller should route through the
             // linked-merge path instead of the refresh-primary path.
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = $"SELECT uid, service FROM configs WHERE {identityCol} = $k LIMIT 1";
             cmd.Parameters.AddWithValue("$k", userKey);
@@ -284,8 +279,7 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(uid)) return null;
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
 
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT token_json FROM configs WHERE uid = $uid LIMIT 1";
@@ -302,8 +296,7 @@ namespace AnimeList.Services
             var identityCol = IdentityColumnFor(tokenData.anime_service);
             if (string.IsNullOrEmpty(userKey) || identityCol == null) return; // anonymous: can't locate by identity
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
 
             // Primary-only update — gated on `service = $s` so a token refresh for an
             // identity that's currently a *linked* secondary doesn't accidentally
@@ -326,8 +319,7 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(uid)) return (0, 0, 0, 0);
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT flags, revision FROM configs WHERE uid = $uid LIMIT 1";
             cmd.Parameters.AddWithValue("$uid", uid);
@@ -347,8 +339,7 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(uid)) return 0;
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT revision FROM configs WHERE uid = $uid LIMIT 1";
             cmd.Parameters.AddWithValue("$uid", uid);
@@ -361,8 +352,7 @@ namespace AnimeList.Services
             if (string.IsNullOrEmpty(uid)) return 0;
             var packed = ((long)flags1 << 16) | ((long)flags2 << 8) | flags3;
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             // Bump revision atomically with the flag write so the new install URL is
             // guaranteed to differ from the URL Stremio currently has cached.
@@ -383,8 +373,7 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(uid)) return null;
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
 
             using (var read = conn.CreateCommand())
             {
@@ -435,8 +424,7 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(uid)) return null;
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
 
             for (var attempt = 0; attempt < 4; attempt++)
             {
@@ -464,8 +452,7 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(token)) return null;
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT uid FROM configs WHERE scrobble_token = $t LIMIT 1";
             cmd.Parameters.AddWithValue("$t", token);
@@ -476,8 +463,7 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(uid)) return;
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 UPDATE configs
@@ -495,8 +481,7 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(uid)) return null;
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT plex_username FROM configs WHERE uid = $uid LIMIT 1";
             cmd.Parameters.AddWithValue("$uid", uid);
@@ -507,8 +492,7 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(uid)) return new List<StreamAddon>();
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT stream_addons FROM configs WHERE uid = $uid LIMIT 1";
             cmd.Parameters.AddWithValue("$uid", uid);
@@ -587,8 +571,7 @@ namespace AnimeList.Services
 
         private async Task WriteStreamAddonsAsync(string uid, List<StreamAddon> addons)
         {
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 UPDATE configs
@@ -615,8 +598,7 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(uid)) return;
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "DELETE FROM configs WHERE uid = $uid";
             cmd.Parameters.AddWithValue("$uid", uid);
@@ -629,8 +611,7 @@ namespace AnimeList.Services
 
             var newUid = GenerateUid();
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var tx = (SqliteTransaction)await conn.BeginTransactionAsync();
 
             // Repoint the primary row first. Zero rows updated means the UID is unknown —
@@ -668,9 +649,14 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(uid)) return [];
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
+            return await ReadLinkedTokensAsync(conn, null, uid);
+        }
+
+        private static async Task<List<LinkedToken>> ReadLinkedTokensAsync(SqliteConnection conn, SqliteTransaction tx, string uid)
+        {
             using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
             cmd.CommandText = "SELECT linked_tokens FROM configs WHERE uid = $uid LIMIT 1";
             cmd.Parameters.AddWithValue("$uid", uid);
             var json = await cmd.ExecuteScalarAsync() as string;
@@ -681,10 +667,14 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(uid) || linked == null) return;
 
-            // Read-modify-write — link/unlink is rare so we don't bother with row-level locking.
-            // Concurrent links for the same UID could lose one update, but the linking flow is
-            // user-driven (one click per provider) so the chance of collision is negligible.
-            var existing = await GetLinkedTokensAsync(uid);
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
+            // BEGIN IMMEDIATE: grab the write lock up front so this read-modify-write of the
+            // linked_tokens array is serialised against a concurrent link / unlink / login-time
+            // linked-token refresh for the same uid. A deferred txn would let two callers both
+            // read the old array and the second commit would clobber the first's entry.
+            using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(deferred: false);
+
+            var existing = await ReadLinkedTokensAsync(conn, tx, uid);
             var idx = existing.FindIndex(t => t.Service == linked.Service);
             if (idx >= 0) existing[idx] = linked;
             else existing.Add(linked);
@@ -695,29 +685,37 @@ namespace AnimeList.Services
             // identity (shouldn't happen in practice, every provider returns one), the
             // column stays at whatever it was — JSON is the source of truth and the index
             // is a denormalised helper.
-            await WriteLinkedTokensAsync(uid, existing, linked.Service, GetUserKey(linked.TokenData));
+            await WriteLinkedTokensAsync(conn, tx, uid, existing, linked.Service, GetUserKey(linked.TokenData));
+            await tx.CommitAsync();
         }
 
         public async Task RemoveLinkedTokenAsync(string uid, AnimeService service)
         {
             if (string.IsNullOrEmpty(uid)) return;
 
-            var existing = await GetLinkedTokensAsync(uid);
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
+            using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(deferred: false);
+
+            var existing = await ReadLinkedTokensAsync(conn, tx, uid);
             var removed = existing.RemoveAll(t => t.Service == service);
-            if (removed == 0) return;
+            if (removed == 0)
+            {
+                await tx.RollbackAsync();
+                return;
+            }
 
             // Clear the per-service identity column alongside the JSON rewrite so the
             // user can immediately re-link the same provider with a different account
             // without tripping the unique partial index.
-            await WriteLinkedTokensAsync(uid, existing, service, null);
+            await WriteLinkedTokensAsync(conn, tx, uid, existing, service, null);
+            await tx.CommitAsync();
         }
 
         public async Task<(TokenData newPrimary, string reason)> SwapPrimaryAsync(string uid, AnimeService newPrimaryService, bool resolveCollision = false)
         {
             if (string.IsNullOrEmpty(uid)) return (null, "uid-missing");
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
 
             // Read the current row so we can reshuffle primary <-> linked atomically below.
             string oldPrimaryJson = null;
@@ -817,13 +815,12 @@ namespace AnimeList.Services
             return (newPrimary, null);
         }
 
-        private async Task WriteLinkedTokensAsync(string uid, List<LinkedToken> tokens, AnimeService changedService, string changedUserKey)
+        private static async Task WriteLinkedTokensAsync(SqliteConnection conn, SqliteTransaction tx, string uid, List<LinkedToken> tokens, AnimeService changedService, string changedUserKey)
         {
             var identityCol = IdentityColumnFor(changedService);
 
-            using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
             // One UPDATE writes both the JSON array and the affected per-service identity
             // column so the index never disagrees with the JSON. NULL'ing the column when
             // changedUserKey is null doubles as the unlink path. If the service didn't
