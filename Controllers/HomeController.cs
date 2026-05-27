@@ -446,12 +446,12 @@ public class HomeController : Controller
     /// URLs. Returns the new token so the JS can update the displayed URL without a reload.
     /// </summary>
     [HttpPost("Home/RotateScrobbleToken")]
-    public async Task<JsonResult> RotateScrobbleToken([FromBody] UidRequest request)
+    public async Task<JsonResult> RotateScrobbleToken()
     {
-        if (string.IsNullOrEmpty(request?.uid))
-            return new JsonResult(new { success = false, error = "missing uid" });
+        var (uid, error) = await ResolveOwnUidOrErrorAsync();
+        if (error != null) return error;
 
-        var token = await _configStore.RotateScrobbleTokenAsync(request.uid);
+        var token = await _configStore.RotateScrobbleTokenAsync(uid);
         if (string.IsNullOrEmpty(token))
             return new JsonResult(new { success = false, error = "unknown uid" });
 
@@ -673,10 +673,10 @@ public class HomeController : Controller
     [HttpPost("Home/SetPlexUsername")]
     public async Task<JsonResult> SetPlexUsername([FromBody] PlexUsernameRequest request)
     {
-        if (string.IsNullOrEmpty(request?.uid))
-            return new JsonResult(new { success = false, error = "missing uid" });
+        var (uid, error) = await ResolveOwnUidOrErrorAsync();
+        if (error != null) return error;
 
-        await _configStore.SetPlexUsernameAsync(request.uid, request.username);
+        await _configStore.SetPlexUsernameAsync(uid, request?.username);
         return new JsonResult(new { success = true });
     }
 
@@ -690,9 +690,9 @@ public class HomeController : Controller
     [HttpPost("Home/AddStreamAddon")]
     public async Task<JsonResult> AddStreamAddon([FromBody] StreamAddonRequest request)
     {
-        if (string.IsNullOrEmpty(request?.uid))
-            return new JsonResult(new { success = false, error = "missing uid" });
-        var manifestUrl = (request.manifestUrl ?? string.Empty).Trim();
+        var (uid, error) = await ResolveOwnUidOrErrorAsync();
+        if (error != null) return error;
+        var manifestUrl = (request?.manifestUrl ?? string.Empty).Trim();
         if (string.IsNullOrEmpty(manifestUrl))
             return new JsonResult(new { success = false, error = "manifest URL required" });
 
@@ -703,7 +703,7 @@ public class HomeController : Controller
                 error = "couldn't fetch a Stremio stream-addon manifest at that URL" });
         }
 
-        var added = await _configStore.AddStreamAddonAsync(request.uid, addon);
+        var added = await _configStore.AddStreamAddonAsync(uid, addon);
         // The matching stream cache lives in the user's browser
         // (localStorage anisync.streams.{uid}.*) and is wiped client-
         // side by the same handler that hit this endpoint — see
@@ -719,13 +719,13 @@ public class HomeController : Controller
     [HttpPost("Home/RemoveStreamAddon")]
     public async Task<JsonResult> RemoveStreamAddon([FromBody] StreamAddonRequest request)
     {
-        if (string.IsNullOrEmpty(request?.uid))
-            return new JsonResult(new { success = false, error = "missing uid" });
-        var manifestUrl = (request.manifestUrl ?? string.Empty).Trim();
+        var (uid, error) = await ResolveOwnUidOrErrorAsync();
+        if (error != null) return error;
+        var manifestUrl = (request?.manifestUrl ?? string.Empty).Trim();
         if (string.IsNullOrEmpty(manifestUrl))
             return new JsonResult(new { success = false, error = "manifest URL required" });
 
-        var removed = await _configStore.RemoveStreamAddonAsync(request.uid, manifestUrl);
+        var removed = await _configStore.RemoveStreamAddonAsync(uid, manifestUrl);
         // Client-side localStorage cache wipe happens in
         // _ConfigurePageScript.cshtml's remove handler.
         return new JsonResult(new { success = true, removed });
@@ -739,12 +739,12 @@ public class HomeController : Controller
     [HttpPost("Home/ReorderStreamAddons")]
     public async Task<JsonResult> ReorderStreamAddons([FromBody] ReorderStreamAddonsRequest request)
     {
-        if (string.IsNullOrEmpty(request?.uid))
-            return new JsonResult(new { success = false, error = "missing uid" });
-        if (request.urls == null || request.urls.Count == 0)
+        var (uid, error) = await ResolveOwnUidOrErrorAsync();
+        if (error != null) return error;
+        if (request?.urls == null || request.urls.Count == 0)
             return new JsonResult(new { success = false, error = "urls required" });
 
-        var changed = await _configStore.ReorderStreamAddonsAsync(request.uid, request.urls);
+        var changed = await _configStore.ReorderStreamAddonsAsync(uid, request.urls);
         // Client-side localStorage cache wipe happens in
         // _ConfigurePageScript.cshtml's save handler.
         return new JsonResult(new { success = true, changed });
@@ -759,10 +759,12 @@ public class HomeController : Controller
     [HttpPost("Home/SaveConfig")]
     public async Task<JsonResult> SaveConfig([FromBody] SaveConfigRequest request)
     {
-        if (string.IsNullOrEmpty(request?.uid))
-            return new JsonResult(new { success = false, error = "missing uid" });
+        var (uid, error) = await ResolveOwnUidOrErrorAsync();
+        if (error != null) return error;
+        if (request == null)
+            return new JsonResult(new { success = false, error = "missing body" });
 
-        var revision = await _configStore.SetFlagsAsync(request.uid, request.flags1, request.flags2, request.flags3);
+        var revision = await _configStore.SetFlagsAsync(uid, request.flags1, request.flags2, request.flags3);
         return new JsonResult(new { success = true, revision });
     }
 
@@ -823,12 +825,12 @@ public class HomeController : Controller
     /// so Stremio sees a different install URL.
     /// </summary>
     [HttpPost("Home/ResetConfig")]
-    public async Task<JsonResult> ResetConfig([FromBody] UidRequest request)
+    public async Task<JsonResult> ResetConfig()
     {
-        if (string.IsNullOrEmpty(request?.uid))
-            return new JsonResult(new { success = false, error = "missing uid" });
+        var (uid, error) = await ResolveOwnUidOrErrorAsync();
+        if (error != null) return error;
 
-        var revision = await _configStore.SetFlagsAsync(request.uid, 0, 0, 0);
+        var revision = await _configStore.SetFlagsAsync(uid, 0, 0, 0);
         return new JsonResult(new { success = true, revision });
     }
 
@@ -837,10 +839,11 @@ public class HomeController : Controller
     /// user is fully signed out and any old install URLs they had become dead links.
     /// </summary>
     [HttpPost("Home/DeleteConfig")]
-    public async Task<JsonResult> DeleteConfig([FromBody] UidRequest request)
+    public async Task<JsonResult> DeleteConfig()
     {
-        if (!string.IsNullOrEmpty(request?.uid))
-            await _configStore.DeleteAsync(request.uid);
+        var uid = await ResolveCurrentUidAsync();
+        if (!string.IsNullOrEmpty(uid))
+            await _configStore.DeleteAsync(uid);
 
         await _tokenService.RemoveCachedUser();
         HttpContext.Session.Clear();
@@ -861,6 +864,21 @@ public class HomeController : Controller
         if (token == null || token.anonymousUser) return null;
         var (uid, _) = await _configStore.FindUidByIdentityAsync(token);
         return uid;
+    }
+
+    /// <summary>
+    /// Session-derived UID for a state-changing Home/* endpoint, or a JSON error when the
+    /// caller isn't a signed-in non-anonymous user. Every mutation keys off this instead of
+    /// a body-supplied UID: the UID travels in the Stremio install URL (and screenshots,
+    /// logs, support threads), so trusting a body value would let anyone who has merely seen
+    /// a UID flip toggles, rewrite settings, or harvest the scrobble token of that row.
+    /// </summary>
+    private async Task<(string uid, JsonResult error)> ResolveOwnUidOrErrorAsync()
+    {
+        var uid = await ResolveCurrentUidAsync();
+        if (string.IsNullOrEmpty(uid))
+            return (null, new JsonResult(new { success = false, error = "not signed in" }));
+        return (uid, null);
     }
 
     /// <summary>
@@ -915,11 +933,6 @@ public class SaveConfigRequest
     public byte flags1 { get; set; }
     public byte flags2 { get; set; }
     public byte flags3 { get; set; }
-}
-
-public class UidRequest
-{
-    public string uid { get; set; }
 }
 
 public class PlexUsernameRequest

@@ -154,12 +154,14 @@ namespace AnimeList.Services
                 {
                     tokenData = cached;
                 }
-                else
+                else if (IsTokenExpired(tokenData.expiration_date) && !string.IsNullOrEmpty(tokenData.refresh_token))
                 {
-                    // Kitsu refresh now uses the refresh_token Kitsu issued during the
-                    // initial password grant, not a re-run of the password grant. Returns
-                    // null when the refresh_token is missing or has been revoked, which
-                    // bubbles up to the caller as a needs-reauth signal.
+                    // Only refresh when the stored token is actually expired — mirrors the
+                    // AniList / MAL branches above. The previous code refreshed on every cache
+                    // miss (cold start, redeploy, eviction of the in-process cache), so a
+                    // transient Kitsu 5xx / rate-limit made RefreshKitsuAccessToken return null
+                    // and logged the user out despite holding a still-valid token. Uses the
+                    // refresh_token Kitsu issued during the initial password grant.
                     var refreshed = await RefreshKitsuAccessToken(tokenData.refresh_token, tokenData.username, tokenData.user_id);
                     if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
                     {
@@ -168,6 +170,8 @@ namespace AnimeList.Services
                     }
                     tokenData = refreshed;
                 }
+                // else: cache miss but the stored token is still valid — use it as-is, no
+                // refresh round-trip (and no risk of nulling out a good token).
             }
 
             return tokenData?.Clone();
