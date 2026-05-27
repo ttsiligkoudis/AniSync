@@ -398,7 +398,25 @@ MAL requires the deployment to register an API client. Set these in `appsettings
 }
 ```
 
-The `RedirectUri` must match the URL registered on the MAL developer dashboard exactly. AniList credentials are baked into the build for the canonical deployment; Kitsu doesn't need any.
+The `RedirectUri` must match the URL registered on the MAL developer dashboard exactly. Kitsu doesn't need any credentials.
+
+### AniList configuration
+
+AniList OAuth uses a registered client too. The `ClientId` and `RedirectUri` are public and ship as defaults in `appsettings.json` (with local overrides in `appsettings.Development.json`); the confidential `ClientSecret` is **not** committed — supply it as an environment variable / Fly secret using the `Anilist__ClientSecret` form:
+
+```bash
+fly secrets set Anilist__ClientSecret="<your AniList client secret>"
+```
+
+```json
+"Anilist": {
+  "ClientId":     "<your AniList client id>",
+  "ClientSecret": "<set via env var / Fly secret, not committed>",
+  "RedirectUri":  "https://your-deployment.example.com/Auth/Callback"
+}
+```
+
+Register the app at AniList → Settings → Developer; its redirect URL must match `Anilist:RedirectUri` exactly. Override `ClientId` / `RedirectUri` if you run your own AniList app.
 
 ### Storage
 

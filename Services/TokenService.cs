@@ -31,6 +31,15 @@ namespace AnimeList.Services
         private string MalClientSecret => _configuration["Mal:ClientSecret"];
         private string MalRedirectUri => _configuration["Mal:RedirectUri"];
 
+        // AniList OAuth client config. Moved out of source (it used to be compiled-in
+        // constants in Utils) so the confidential client_secret isn't committed — supply
+        // it via Anilist__ClientSecret as a Fly secret / env var. ClientId and RedirectUri
+        // are public and ship as defaults in appsettings(.Development).json. Coalesced to
+        // empty so a missing value degrades to a failed exchange rather than a null arg.
+        private string AnilistClientId => _configuration["Anilist:ClientId"] ?? string.Empty;
+        private string AnilistClientSecret => _configuration["Anilist:ClientSecret"] ?? string.Empty;
+        private string AnilistRedirectUri => _configuration["Anilist:RedirectUri"] ?? string.Empty;
+
         public async Task<TokenData> GetAccessTokenAsync(string config = null)
         {
             TokenData tokenData = null;
@@ -249,9 +258,9 @@ namespace AnimeList.Services
             var response = await client.PostAsync("https://anilist.co/api/v2/oauth/token", new FormUrlEncodedContent(new[]
             {
             new KeyValuePair<string, string>("grant_type", "authorization_code"),
-            new KeyValuePair<string, string>("client_id", clientId),
-            new KeyValuePair<string, string>("client_secret", clientSecret),
-            new KeyValuePair<string, string>("redirect_uri", redirectUri),
+            new KeyValuePair<string, string>("client_id", AnilistClientId),
+            new KeyValuePair<string, string>("client_secret", AnilistClientSecret),
+            new KeyValuePair<string, string>("redirect_uri", AnilistRedirectUri),
             new KeyValuePair<string, string>("code", code)
             }));
 
@@ -263,8 +272,8 @@ namespace AnimeList.Services
             var requestData = new FormUrlEncodedContent(new[]
             {
             new KeyValuePair<string, string>("grant_type", "refresh_token"),
-            new KeyValuePair<string, string>("client_id", clientId),
-            new KeyValuePair<string, string>("client_secret", clientSecret),
+            new KeyValuePair<string, string>("client_id", AnilistClientId),
+            new KeyValuePair<string, string>("client_secret", AnilistClientSecret),
             new KeyValuePair<string, string>("refresh_token", refreshToken)
         });
 
