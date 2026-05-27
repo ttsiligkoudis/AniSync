@@ -50,6 +50,18 @@ builder.Services.AddSession(options =>
     options.Cookie.Name = ".AniSync.Session";
     options.Cookie.HttpOnly = true;
     options.Cookie.IsEssential = true;
+    // Secure + SameSite set explicitly rather than leaning on framework
+    // defaults. Behind Fly's TLS-terminating proxy the app sees the inbound
+    // request as HTTP until UseForwardedHeaders rewrites the scheme, so the
+    // "auto-Secure-when-HTTPS" default is order-sensitive; pin Always in prod
+    // (SameAsRequest locally so plain-http dev still gets a cookie). SameSite
+    // stays Lax — the intended value — but explicit so a framework upgrade
+    // can't silently change it. Lax still attaches on the OAuth callback because
+    // that return is a top-level navigation, not a cross-site embed.
+    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+        ? Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest
+        : Microsoft.AspNetCore.Http.CookieSecurePolicy.Always;
+    options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
     options.Cookie.MaxAge = TimeSpan.FromDays(30);
     options.IdleTimeout = TimeSpan.FromDays(30);
 });
@@ -100,17 +112,42 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
     options.KnownNetworks.Clear();
     options.KnownProxies.Clear();
+    // Trust exactly one hop. With the known-proxy allowlist cleared (Fly's edge
+    // IPs aren't enumerable) the middleware would otherwise walk an arbitrarily
+    // long, fully client-supplied X-Forwarded-For chain; capping at 1 means only
+    // the entry Fly's proxy appends is ever consumed for Request scheme/host. The
+    // per-IP rate limiter does NOT rely on this — it keys off Fly-Client-IP, which
+    // Fly's edge sets and overwrites (so it can't be spoofed). See AddRateLimiter.
+    options.ForwardLimit = 1;
 });
 
+// Open CORS is applied *only* to the Stremio addon protocol routes (manifest /
+// catalog / meta / stream / subtitles) via [EnableCors("AddonCors")] on those
+// controllers. Stremio fetches them cross-origin from app.strem.io, the desktop
+// app, and assorted web players, so AllowAnyOrigin is genuinely required there.
+// It is deliberately NOT applied globally any more: the /api/v1/me/* surface and
+// the web-app endpoints are same-origin only, so a malicious site can't read or
+// write a user's library cross-origin even if it has somehow learned their
+// Config UID. The browser extension talks to /api/v1 from its MV3 background
+// context under host_permissions, which is exempt from CORS, so it is unaffected.
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAllOrigins",
-        builder =>
+    options.AddPolicy("AddonCors",
+        policy =>
         {
-            builder.AllowAnyOrigin()
-                   .AllowAnyMethod()
-                   .AllowAnyHeader();
+            policy.AllowAnyOrigin()
+                  .AllowAnyMethod()
+                  .AllowAnyHeader();
         });
+});
+
+// HSTS preload eligibility: long max-age + includeSubDomains + the preload flag.
+// UseHsts() (non-dev, in the pipeline below) is what actually emits the header.
+builder.Services.AddHsts(options =>
+{
+    options.Preload = true;
+    options.IncludeSubDomains = true;
+    options.MaxAge = TimeSpan.FromDays(365);
 });
 
 // OpenAPI / Swagger for the /api/v1 surface. The doc-comments on ApiController
@@ -186,22 +223,20 @@ builder.Services.AddSwaggerGen(options =>
 
 // Per-IP fixed-window rate limit on /api/v1/*. Conservative defaults — enough
 // for an interactive client, low enough that an abuser can't pin the upstream
-// providers' rate limits. The Stremio addon endpoints aren't gated since
-// Stremio retries are bounded and the user is the rate limit there.
+// providers' rate limits. The Stremio addon endpoints get their own generous
+// per-UID "addon" policy below (legitimate Stremio traffic is self-limiting, but
+// the routes shouldn't be unmetered once a UID is known).
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.AddPolicy("api", httpContext =>
-    {
-        var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
-        return RateLimitPartition.GetFixedWindowLimiter(ip, _ => new FixedWindowRateLimiterOptions
+        RateLimitPartition.GetFixedWindowLimiter(RateLimitKeys.ClientIp(httpContext), _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = 60,
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0,
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-        });
-    });
+        }));
     // Webhook ingestion (/api/v1/scrobble/{token}). Partitioned by token, not IP — bingers
     // behind a NAT / VPN exit shouldn't share a budget. Higher cap and a small queue because
     // event delivery from Plex/Jellyfin can be bursty (catch-up sessions, server restarts
@@ -217,6 +252,26 @@ builder.Services.AddRateLimiter(options =>
             PermitLimit = 240,
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 60,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+        });
+    });
+    // Stremio addon protocol routes (manifest / catalog / meta / stream / subtitles),
+    // applied via [EnableRateLimiting("addon")] on those controllers. Partitioned by
+    // the {config} UID in the path, not by IP: legitimate Stremio traffic for one
+    // install is self-limiting, but once a UID is known the routes are otherwise
+    // unmetered, so a generous per-UID cap stops a leaked/known UID from being
+    // hammered. Falls back to the client IP if a route ever lacks a {config} segment.
+    options.AddPolicy("addon", httpContext =>
+    {
+        var key = httpContext.Request.RouteValues.TryGetValue("config", out var cfg)
+                  && cfg is string s && !string.IsNullOrEmpty(s)
+            ? s
+            : RateLimitKeys.ClientIp(httpContext);
+        return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 300,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
         });
     });
@@ -305,6 +360,23 @@ var app = builder.Build();
 // HttpsRedirection, the Razor view that builds the Stremio install URL, …).
 app.UseForwardedHeaders();
 
+// Baseline security headers on every response — set before next() so they ride
+// even on static files and the re-executed error pages. Referrer-Policy keeps the
+// Config UID, which can appear in /{uid}/configure URLs, from leaking to third
+// parties through the Referer header when a user follows an external link. The CSP
+// is intentionally narrow: it locks down <base> hijacking, plugin/object embedding,
+// and form targets (none of which the app uses) without constraining script / style
+// / img / connect sources, so the existing inline scripts and remote poster CDNs
+// keep working untouched.
+app.Use(async (ctx, next) =>
+{
+    var headers = ctx.Response.Headers;
+    headers["X-Content-Type-Options"] = "nosniff";
+    headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    headers["Content-Security-Policy"] = "base-uri 'self'; object-src 'none'; form-action 'self'";
+    await next();
+});
+
 // Pre-warm the anime ID mapping cache at startup. Wrapped in
 // try/catch + timeout because the upstream is raw.githubusercontent.com
 // and its availability / Fly-IP rate limiting is out of our control —
@@ -347,7 +419,9 @@ app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
 app.UseRateLimiter();
-app.UseCors("AllowAllOrigins");
+// Parameterless: activates CORS for endpoints carrying [EnableCors("AddonCors")]
+// metadata (the Stremio addon controllers) and leaves everything else same-origin.
+app.UseCors();
 app.UseSession();
 
 // Rehydrate the Session "AccessToken" entry from the persistent UID cookie
@@ -390,3 +464,20 @@ app.MapControllerRoute(
     pattern: "{controller=Home}/{action=Index}/{id?}");
 
 app.Run();
+
+static class RateLimitKeys
+{
+    /// <summary>
+    /// Partition key for per-client rate limits. Prefers Fly's <c>Fly-Client-IP</c>
+    /// header: Fly's edge proxy sets and overwrites it with the real peer address,
+    /// so unlike <c>X-Forwarded-For</c> a client can't spoof it to mint unlimited
+    /// rate-limit buckets. Falls back to the connection remote IP (local dev /
+    /// non-Fly front edges) and finally a constant so the limiter always has a key.
+    /// </summary>
+    public static string ClientIp(HttpContext ctx)
+    {
+        var fly = ctx.Request.Headers["Fly-Client-IP"].ToString();
+        if (!string.IsNullOrWhiteSpace(fly)) return fly.Trim();
+        return ctx.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+    }
+}

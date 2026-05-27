@@ -148,6 +148,17 @@
                 <button id="resetConfigBtn" class="btn-danger-pill" type="button">Reset Configuration</button>
                 <button id="deleteConfigBtn" class="btn-danger-pill" type="button">Delete Configuration</button>
             </div>
+
+            <div class="btn-action-row" style="margin-top: 0.75rem;">
+                <button id="regenerateUidBtn" class="btn-danger-pill" type="button">Regenerate install URL</button>
+                <button id="signOutEverywhereBtn" class="btn-danger-pill" type="button">Sign out everywhere</button>
+            </div>
+            <p class="option-name-sub" style="margin-top: 0.5rem;">
+                <strong>Regenerate install URL</strong> issues a new UID — use it if your current install URL has leaked.
+                Every existing Stremio install and API link using the old URL stops working immediately and you'll need to
+                re-add the addon with the new URL. <strong>Sign out everywhere</strong> does the same and also signs you out
+                on every device. Your library, linked accounts, and settings are kept either way.
+            </p>
         </section>
     }
 }

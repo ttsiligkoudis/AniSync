@@ -1081,6 +1081,41 @@
         else alert('Delete failed.');
     });
 
+    // Rotate the install UID. The server resolves the target UID from the session, so no
+    // body is sent. On success we reload so the install URL + every UID-derived field
+    // re-render against the freshly-rotated row (this browser stays signed in).
+    $('#regenerateUidBtn').on('click', async function () {
+        if (!configUid) return;
+        if (!confirm('Generate a new install URL? Your current Stremio install(s) and any API links using the old URL stop working immediately — you will need to re-add the addon with the new URL. Your library and settings are kept.')) return;
+        try {
+            var resp = await fetch('/Home/RegenerateUid', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            if (!resp.ok) throw new Error('regenerate failed: ' + resp.status);
+            var data = await resp.json();
+            if (!data.success) throw new Error(data.error || 'regenerate failed');
+            window.location.reload();
+        } catch (e) {
+            alert('Could not regenerate the install URL: ' + e.message);
+        }
+    });
+
+    $('#signOutEverywhereBtn').on('click', async function () {
+        if (!configUid) return;
+        if (!confirm('Sign out on every device and issue a new install URL? All existing Stremio installs and API links stop working and every device is signed out. Your library and settings are kept — sign back in to restore them.')) return;
+        try {
+            var resp = await fetch('/Home/SignOutEverywhere', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            if (!resp.ok) throw new Error('sign-out failed: ' + resp.status);
+            window.location.href = '/';
+        } catch (e) {
+            alert('Could not sign out everywhere: ' + e.message);
+        }
+    });
+
     // ── Login form (anonymous / Kitsu credentials) ────────────────────
     // Post-login destination — /configure stays on /configure, /account
     // sends to home. Rendered into the data-return-url attribute by the

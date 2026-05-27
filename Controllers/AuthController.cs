@@ -30,6 +30,12 @@ namespace AnimeList.Controllers
         // Survives the OAuth round-trip so /Auth/Callback can hand the user back to
         // whichever AniSync page started the link flow (/configure or /stremio).
         private const string OauthReturnUrlKey = "OauthReturnUrl";
+        // CSRF defence for the OAuth flows. A cryptographically-random value is minted
+        // on every authorize redirect, stashed in the session, and echoed back by the
+        // provider on /Auth/Callback. A missing or mismatched value means the callback
+        // wasn't initiated by this session (login-CSRF / account-fixation), so we refuse
+        // to exchange the code. Both AniList and MAL support the standard `state` param.
+        private const string OauthStateKey = "OauthState";
 
         /// <summary>
         /// Returns a redirect to <paramref name="returnUrl"/> when it's a safe same-app
@@ -109,7 +115,8 @@ namespace AnimeList.Controllers
             {
                 HttpContext.Session.SetString(OauthServiceKey, AnimeService.Anilist.ToString());
                 HttpContext.Session.SetString(OauthFlowKey, OauthFlowLogin);
-                return Redirect($"https://anilist.co/api/v2/oauth/authorize?client_id={clientId}&response_type=code");
+                var state = BeginOauthState();
+                return Redirect($"https://anilist.co/api/v2/oauth/authorize?client_id={clientId}&response_type=code&state={Uri.EscapeDataString(state)}");
             }
             else if (animeService == AnimeService.MyAnimeList)
             {
@@ -121,6 +128,20 @@ namespace AnimeList.Controllers
 
                 return RedirectToReturnUrlOrHome(returnUrl);
             }
+        }
+
+        /// <summary>
+        /// Mints a fresh cryptographically-random OAuth <c>state</c> value, stashes it on
+        /// the session, and returns it for embedding in the authorize redirect.
+        /// <see cref="Callback"/> validates the echoed value before exchanging the code.
+        /// Reuses <see cref="Utils.GenerateCodeVerifier"/> (64 bytes of CSPRNG, base64url)
+        /// since a random URL-safe token is exactly what a state value needs to be.
+        /// </summary>
+        private string BeginOauthState()
+        {
+            var state = GenerateCodeVerifier();
+            HttpContext.Session.SetString(OauthStateKey, state);
+            return state;
         }
 
         /// <summary>
@@ -142,18 +163,20 @@ namespace AnimeList.Controllers
             HttpContext.Session.SetString(OauthServiceKey, AnimeService.MyAnimeList.ToString());
             HttpContext.Session.SetString(OauthFlowKey, flow);
             HttpContext.Session.SetString(MalCodeVerifierKey, verifier);
+            var state = BeginOauthState();
 
             var url =
                 "https://myanimelist.net/v1/oauth2/authorize" +
                 $"?response_type=code&client_id={Uri.EscapeDataString(malClientId)}" +
                 $"&code_challenge={Uri.EscapeDataString(verifier)}" +
                 "&code_challenge_method=plain" +
+                $"&state={Uri.EscapeDataString(state)}" +
                 $"&redirect_uri={Uri.EscapeDataString(malRedirectUri)}";
             return Redirect(url);
         }
 
         [HttpGet]
-        public async Task<IActionResult> Callback(string code)
+        public async Task<IActionResult> Callback(string code, string state = null)
         {
             // Read flow + provider before clearing — both AniList and MAL share this URL,
             // and the link-additional-provider flow lands here too.
@@ -164,11 +187,24 @@ namespace AnimeList.Controllers
             // come back to /stremio rather than always bouncing to /configure). Read
             // and clear in the same batch as the other OAuth-state keys.
             var oauthReturnUrl = HttpContext.Session.GetString(OauthReturnUrlKey);
+            var expectedState = HttpContext.Session.GetString(OauthStateKey);
 
             HttpContext.Session.Remove(OauthServiceKey);
             HttpContext.Session.Remove(OauthFlowKey);
             HttpContext.Session.Remove(MalCodeVerifierKey);
             HttpContext.Session.Remove(OauthReturnUrlKey);
+            HttpContext.Session.Remove(OauthStateKey);
+
+            // CSRF gate: the state we minted on the authorize redirect must round-trip
+            // intact. A missing or mismatched value means this callback wasn't started by
+            // this session — refuse before touching the authorization code so an attacker
+            // can't graft their provider account onto a victim's session (account fixation).
+            if (string.IsNullOrEmpty(expectedState)
+                || !string.Equals(expectedState, state, StringComparison.Ordinal))
+            {
+                _logger.LogWarning("OAuth callback rejected: state mismatch (service={Service}).", oauthService);
+                return RedirectToAction("Index", "Home");
+            }
 
             var isLink = oauthFlow == OauthFlowLink;
             // Capture the primary's session token *before* the login path clears it. The
@@ -248,7 +284,8 @@ namespace AnimeList.Controllers
             {
                 HttpContext.Session.SetString(OauthServiceKey, AnimeService.Anilist.ToString());
                 HttpContext.Session.SetString(OauthFlowKey, OauthFlowLink);
-                return Redirect($"https://anilist.co/api/v2/oauth/authorize?client_id={clientId}&response_type=code");
+                var state = BeginOauthState();
+                return Redirect($"https://anilist.co/api/v2/oauth/authorize?client_id={clientId}&response_type=code&state={Uri.EscapeDataString(state)}");
             }
 
             if (service == AnimeService.MyAnimeList)
