@@ -22,7 +22,9 @@
         <div class="register-error" role="alert">@error</div>
     }
 
-    <form method="post" action="@Url.Action("Register", "Auth")" autocomplete="on">
+    <form method="post" action="@Url.Action("Register", "Auth")" autocomplete="on"
+          onsubmit="(function (f) { var b = f.querySelector('button[type=&quot;submit&quot;]'); if (b) { b.disabled = true; b.textContent = 'Creating account…'; } })(this);">
+        @Html.AntiForgeryToken()
         @if (!string.IsNullOrEmpty(returnUrl))
         {
             <input type="hidden" name="returnUrl" value="@returnUrl" />

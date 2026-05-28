@@ -70,7 +70,11 @@ public class HomeController : Controller
     {
         var code = statusCode ?? 500;
         Response.StatusCode = code;
-        return View(code == 404 ? "NotFound" : "ServerError");
+        // 404 has its own dedicated copy (browse-anime CTA, distinct headline).
+        // Everything else routes through StatusPage, which switches its message
+        // based on Response.StatusCode so a rate-limited (429) or unauthorised
+        // (401/403) user doesn't see a generic "server crashed" page.
+        return View(code == 404 ? "NotFound" : "StatusPage");
     }
 
     public async Task<IActionResult> Index(bool nocache = false)

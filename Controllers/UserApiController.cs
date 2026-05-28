@@ -31,6 +31,11 @@ namespace AnimeList.Controllers
     [ProducesResponseType(typeof(ApiError), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiError), StatusCodes.Status429TooManyRequests)]
     [ProducesResponseType(typeof(ApiError), StatusCodes.Status500InternalServerError)]
+    // X-AniSync-Config (the per-user UID) is the auth — not the session cookie — so
+    // CSRF doesn't apply: a third party with the UID is authorised by design (SDK
+    // generators, browser extension MV3 background, external scripting). The cookie-
+    // based site UI uses /api/library/* (MVC) routes that DO go through the filter.
+    [IgnoreAntiforgeryToken]
     public class UserApiController : ControllerBase
     {
         private readonly ITokenService _tokenService;

@@ -25,6 +25,10 @@ namespace AnimeList.Controllers
     [Produces("application/json")]
     [ProducesResponseType(typeof(ApiError), StatusCodes.Status429TooManyRequests)]
     [ProducesResponseType(typeof(ApiError), StatusCodes.Status500InternalServerError)]
+    // Anonymous read API: no cookie auth, no per-user state, no CSRF surface. Documented
+    // surface for non-Stremio clients (scripting, SDK generators), which can't be expected
+    // to mint an antiforgery token.
+    [IgnoreAntiforgeryToken]
     public class ApiController : ControllerBase
     {
         private readonly IAnilistService _anilistService;

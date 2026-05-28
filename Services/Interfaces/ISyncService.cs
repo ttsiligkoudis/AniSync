@@ -13,9 +13,13 @@ namespace AnimeList.Services.Interfaces
         /// <summary>
         /// Mirrors a save against the linked providers attached to <paramref name="primary"/>.
         /// Status is translated to each target's vocabulary; score is normalised to a 0-10
-        /// scale before hand-off. Fan-out is concurrent; per-target failures are swallowed.
+        /// scale before hand-off. Fan-out is concurrent; per-target failures don't throw,
+        /// they're returned in <see cref="FanOutSaveResult.Failed"/> so foreground callers
+        /// (Manage Entry save) can surface a partial-success warning. Background callers
+        /// (scrobble webhook, sync backfill) discard the result and rely on the per-target
+        /// log lines this method emits internally.
         /// </summary>
-        Task FanOutSaveAsync(TokenData primary, string animeId, int? season, int progress,
+        Task<FanOutSaveResult> FanOutSaveAsync(TokenData primary, string animeId, int? season, int progress,
             string status = null, double? score = null, string notes = null, int? rewatchCount = null,
             DateTime? startedAt = null, DateTime? finishedAt = null);
 

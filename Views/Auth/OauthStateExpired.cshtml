@@ -1,0 +1,29 @@
+@{
+    ViewData["Title"] = "Sign-in link expired";
+    ViewData["BodyClass"] = "library-page";
+
+    // Rendered when /Auth/Callback finds no matching session state. Two paths
+    // get here in practice:
+    //   1. The user followed an expired or already-used callback URL (back
+    //      button onto a /Auth/Callback that's been consumed, refresh of a
+    //      stale tab, a bookmarked callback URL).
+    //   2. A genuine CSRF / account-fixation attempt — the callback didn't
+    //      originate from this session.
+    // Either way the right next step is the same: start a fresh sign-in.
+    // Silent redirect to the dashboard (the previous behaviour) was confusing
+    // — users would see "logged out" with no explanation.
+}
+
+<header class="page-header" style="text-align: center;">
+    <h1 class="page-title">Sign-in link expired</h1>
+    <p class="page-subtitle">
+        This sign-in link can only be used once and has already been consumed —
+        usually from a back-button or a refreshed callback tab. Start a fresh
+        sign-in to continue.
+    </p>
+</header>
+
+<div class="hero-ctas" style="justify-content: center;">
+    <a class="hero-cta hero-cta-primary" href="/account">Sign in again</a>
+    <a class="hero-cta hero-cta-secondary" href="/">Dashboard</a>
+</div>

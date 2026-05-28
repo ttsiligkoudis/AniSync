@@ -954,15 +954,26 @@ namespace AnimeList.Controllers
                         break;
                 }
 
+                FanOutSaveResult fanOut = FanOutSaveResult.Empty;
                 if (!isOverride)
                 {
                     // Same fan-out to linked secondary providers as the config-scoped path.
-                    await _syncService.FanOutSaveAsync(tokenData, request.Id, request.Season, request.Progress,
+                    fanOut = await _syncService.FanOutSaveAsync(tokenData, request.Id, request.Season, request.Progress,
                         request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
 
                     _listCache.Invalidate(tokenData);
                 }
-                return new JsonResult(new { success = true });
+                // success = true even when a linked secondary failed — the primary save
+                // landed, which is what the user really cares about. `failedProviders`
+                // surfaces the partial-failure so the modal toast can say "Saved on AniList,
+                // MAL failed" rather than uniformly green and hiding the breakage.
+                return new JsonResult(new
+                {
+                    success = true,
+                    failedProviders = fanOut.HasFailures
+                        ? fanOut.Failed.Select(s => s.ToString()).ToList()
+                        : null,
+                });
             }
             catch (Exception ex)
             {

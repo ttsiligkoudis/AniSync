@@ -309,11 +309,43 @@ namespace AnimeList.Services
                 var handler = new JwtSecurityTokenHandler();
                 var jwtToken = handler.ReadJwtToken(tokenData.access_token);
                 tokenData.user_id = jwtToken.Claims.FirstOrDefault(c => c.Type == "sub")?.Value;
+                // One-off Viewer query for the user's score scale so cross-service score
+                // fan-out doesn't have to guess whether a "10" means 10/10 or 10/100 (the
+                // heuristic before this branched at >10, which silently mis-shipped a
+                // 100-scale user's exact 10/100 rating as 10/10). Best-effort: a transient
+                // network blip leaves score_format null and the normaliser falls back to
+                // the heuristic, so login isn't blocked on this.
+                tokenData.score_format = await FetchAnilistScoreFormatAsync(tokenData.access_token);
                 if (setSession)
                     _httpContextAccessor.HttpContext?.Session.SetString("AccessToken", SerializeObject(tokenData));
             }
 
             return tokenData;
+        }
+
+        private async Task<string> FetchAnilistScoreFormatAsync(string accessToken)
+        {
+            try
+            {
+                var body = SerializeObject(new
+                {
+                    query = "{ Viewer { mediaListOptions { scoreFormat } } }",
+                });
+                using var request = new HttpRequestMessage(HttpMethod.Post, "https://graphql.anilist.co")
+                {
+                    Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+                };
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                using var resp = await _clientFactory.CreateClient().SendAsync(request);
+                if (!resp.IsSuccessStatusCode) return null;
+                var json = await resp.Content.ReadAsStringAsync();
+                dynamic parsed = DeserializeObject<dynamic>(json);
+                return parsed?.data?.Viewer?.mediaListOptions?.scoreFormat;
+            }
+            catch
+            {
+                return null;
+            }
         }
         #endregion Anilist
 

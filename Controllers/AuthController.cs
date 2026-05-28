@@ -1,6 +1,7 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
+using System.Collections.Concurrent;
 
 namespace AnimeList.Controllers
 {
@@ -36,6 +37,16 @@ namespace AnimeList.Controllers
         // wasn't initiated by this session (login-CSRF / account-fixation), so we refuse
         // to exchange the code. Both AniList and MAL support the standard `state` param.
         private const string OauthStateKey = "OauthState";
+
+        // Per-(IP, email) in-flight guard for the Kitsu signup. Two browser tabs
+        // submitting the same form within a few ms could otherwise both pass Kitsu's
+        // duplicate-email check (their write hasn't propagated yet) and both try to
+        // password-grant; one would land in a broken state. TryAdd is atomic, the
+        // finally below clears the slot so a retry after a real failure isn't blocked.
+        // ConcurrentDictionary doesn't need a TTL — bounded by the network round-trip
+        // to Kitsu, ~1s, and the worst case is a stale entry held by a crashed worker
+        // (one process restart later it's gone).
+        private static readonly ConcurrentDictionary<string, byte> _registerInFlight = new();
 
         /// <summary>
         /// Returns a redirect to <paramref name="returnUrl"/> when it's a safe same-app
@@ -200,11 +211,16 @@ namespace AnimeList.Controllers
             // intact. A missing or mismatched value means this callback wasn't started by
             // this session — refuse before touching the authorization code so an attacker
             // can't graft their provider account onto a victim's session (account fixation).
+            // In practice the legitimate way to land here is the back-button / refresh
+            // landing on an already-consumed callback URL; surfacing an explicit "link
+            // expired" view is friendlier than silently redirecting to the dashboard where
+            // the user sees the logged-out shell with no explanation.
             if (string.IsNullOrEmpty(expectedState)
                 || !string.Equals(expectedState, state, StringComparison.Ordinal))
             {
                 _logger.LogWarning("OAuth callback rejected: state mismatch (service={Service}).", oauthService);
-                return RedirectToAction("Index", "Home");
+                Response.StatusCode = StatusCodes.Status400BadRequest;
+                return View("OauthStateExpired");
             }
 
             var isLink = oauthFlow == OauthFlowLink;
@@ -599,24 +615,60 @@ namespace AnimeList.Controllers
                 return View();
             }
 
-            var (ok, kitsuError) = await _kitsuService.RegisterAsync(name, email, password);
-            if (!ok)
+            // Atomic (IP, email) lock for the Kitsu signup -> password-grant pair. The
+            // submit button has a JS disable too, but a second tab on the same page (or a
+            // misconfigured browser-extension form-filler) can still fire two concurrent
+            // POSTs that both pass Kitsu's duplicate-email check before either lands.
+            // TryAdd is the cheap atomic claim; the slot drops in `finally` so a real
+            // signup failure doesn't block the user's retry.
+            var lockKey = RegisterLockKey(HttpContext, email);
+            if (!_registerInFlight.TryAdd(lockKey, 0))
             {
-                ViewBag.Error = kitsuError;
+                ViewBag.Error = "A signup is already in progress for this email. Wait a moment and try again.";
                 ViewBag.Name = name;
                 ViewBag.Email = email;
                 ViewBag.ReturnUrl = returnUrl;
                 return View();
             }
 
-            // Account exists — drop straight into the same password-grant flow Login uses
-            // so the user lands authenticated. Kitsu's OAuth password grant only resolves
-            // identities by email, not by the freshly-created username, so the email is
-            // what we hand it. returnUrl lets the caller pick the post-signup destination
-            // (defaults to the home dashboard) — Stremio-initiated signups land on
-            // /configure, identity-page signups land on home.
-            await _tokenService.GetAccessTokenByCredsAsync(email, password, setContext: true);
-            return RedirectToReturnUrlOrHome(returnUrl);
+            try
+            {
+                var (ok, kitsuError) = await _kitsuService.RegisterAsync(name, email, password);
+                if (!ok)
+                {
+                    ViewBag.Error = kitsuError;
+                    ViewBag.Name = name;
+                    ViewBag.Email = email;
+                    ViewBag.ReturnUrl = returnUrl;
+                    return View();
+                }
+
+                // Account exists — drop straight into the same password-grant flow Login uses
+                // so the user lands authenticated. Kitsu's OAuth password grant only resolves
+                // identities by email, not by the freshly-created username, so the email is
+                // what we hand it. returnUrl lets the caller pick the post-signup destination
+                // (defaults to the home dashboard) — Stremio-initiated signups land on
+                // /configure, identity-page signups land on home.
+                await _tokenService.GetAccessTokenByCredsAsync(email, password, setContext: true);
+                return RedirectToReturnUrlOrHome(returnUrl);
+            }
+            finally
+            {
+                _registerInFlight.TryRemove(lockKey, out _);
+            }
+        }
+
+        private static string RegisterLockKey(HttpContext ctx, string email)
+        {
+            // Fly-Client-IP is set + overwritten by Fly's edge (can't be spoofed); fall
+            // back to the connection peer for local dev / non-Fly hosting. Email is
+            // lowercased so Foo@bar.com and foo@bar.com share a lock slot the way Kitsu's
+            // duplicate-email check does.
+            var fly = ctx.Request.Headers["Fly-Client-IP"].ToString();
+            var ip = !string.IsNullOrWhiteSpace(fly)
+                ? fly.Trim()
+                : ctx.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+            return $"{ip}|{(email ?? string.Empty).Trim().ToLowerInvariant()}";
         }
 
         public async Task<IActionResult> Logout(string returnUrl = null)
