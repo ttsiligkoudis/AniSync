@@ -170,6 +170,89 @@
   color-scheme: light;
 }
 
+/* ──────────────────────────────────────────────────────────────────────
+   Minimal reset (replaces Bootstrap's reboot/normalize)
+
+   AniSync's UI is built almost entirely from its own class names — an audit
+   found the ONLY genuine Bootstrap class in use is .container (defined just
+   below). Bootstrap was therefore pulling its weight here purely as a CSS
+   reset, so this compact reset reproduces exactly the reboot defaults the
+   layout leans on (global border-box, body line-height, zeroed heading /
+   paragraph / list margins, form-control font inheritance, media vertical
+   alignment) and nothing more. Dropping bootstrap.min.css is then visually
+   inert while removing the app's single largest blocking stylesheet.
+   ────────────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  /* font-family / colors are set in the main body rule below; the reset
+     only owns the reboot-equivalent baseline. */
+  margin: 0;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+p {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+ul, ol {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+/* Bare content links (e.g. AniList synopsis HTML, external link-outs) —
+   class-styled links override both properties; this just gives un-classed
+   anchors the brand accent instead of the UA's default link colour. */
+a {
+  color: var(--accent);
+}
+
+/* Form controls don't inherit font/colour by default — the reboot fixed
+   this, and many of the app's inputs/buttons depend on it to render in the
+   Inter/system stack rather than the browser's default form font. */
+button, input, optgroup, select, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  margin: 0;
+}
+
+img, svg, video, canvas {
+  vertical-align: middle;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+/* The single genuine Bootstrap class the markup uses. Centres the page
+   column and matches the layout's main max-width so the sticky header's
+   inner content stays aligned with the page body. The 0.75rem inline
+   padding reproduces Bootstrap's container gutter so spacing is unchanged. */
+.container {
+  width: 100%;
+  max-width: 1280px;
+  margin-right: auto;
+  margin-left: auto;
+  padding-right: 0.75rem;
+  padding-left: 0.75rem;
+}
+
 html {
   font-size: 14px;
 }

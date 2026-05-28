@@ -23,7 +23,6 @@ const SHELL_ASSETS = [
     '/',
     OFFLINE_URL,
     '/css/site.css',
-    '/lib/bootstrap/dist/css/bootstrap.min.css',
     '/lib/jquery/dist/jquery.min.js',
     '/js/loader.js',
     '/js/toast.js',
