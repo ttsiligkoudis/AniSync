@@ -177,6 +177,9 @@
     function closeModal() {
         modal.hidden = true;
         backdrop.hidden = true;
+        // Clear any leftover drag transform so the next open isn't offset.
+        modal.style.transform = '';
+        modal.classList.remove('is-dragging');
         document.body.classList.remove('modal-open');
         setBackgroundInert(false);
         activeEntryId = null;
@@ -684,6 +687,49 @@
     closeBtn.addEventListener('click', closeModal);
     cancelBtn.addEventListener('click', closeModal);
     backdrop.addEventListener('click', closeModal);
+
+    // Bottom-sheet swipe-down dismiss (mobile only — the modal renders as a
+    // bottom sheet under 640px, see site.css). A downward drag past the
+    // threshold dismisses; anything short springs back. The drag only
+    // initiates from the header/handle area or when the sheet is scrolled to
+    // the top, so it never fights the form's own inner scrolling.
+    (function () {
+        var SHEET_MQ = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
+        var startY = 0, delta = 0, dragging = false;
+
+        function isSheet() { return SHEET_MQ ? SHEET_MQ.matches : false; }
+
+        modal.addEventListener('touchstart', function (e) {
+            if (!isSheet() || e.touches.length !== 1) { dragging = false; return; }
+            var fromHeader = e.target.closest && e.target.closest('.entry-modal-header');
+            if (!fromHeader && modal.scrollTop > 0) { dragging = false; return; }
+            startY = e.touches[0].clientY;
+            delta = 0;
+            dragging = true;
+            modal.classList.add('is-dragging');
+        }, { passive: true });
+
+        modal.addEventListener('touchmove', function (e) {
+            if (!dragging) return;
+            delta = e.touches[0].clientY - startY;
+            if (delta < 0) delta = 0; // downward only
+            modal.style.transform = 'translateY(' + delta + 'px)';
+        }, { passive: true });
+
+        function endDrag() {
+            if (!dragging) return;
+            dragging = false;
+            modal.classList.remove('is-dragging');
+            modal.style.transform = '';
+            if (delta > 110) {
+                if (window.AniSyncHaptics) window.AniSyncHaptics.tick();
+                closeModal();
+            }
+            delta = 0;
+        }
+        modal.addEventListener('touchend', endDrag, { passive: true });
+        modal.addEventListener('touchcancel', endDrag, { passive: true });
+    })();
 
     // Delete button — short-circuits to a save with empty status (the
     // server-side semantic for "remove from list" — same code path the
