@@ -68,7 +68,7 @@
                 <div class="library-card-poster-wrap">
                     @if (!string.IsNullOrEmpty(meta.poster))
                     {
-                        <img class="library-card-poster" src="@meta.poster" alt="@meta.name" loading="lazy" />
+                        <img class="library-card-poster" src="@meta.poster" alt="@meta.name" loading="lazy" decoding="async" />
                     }
                     else
                     {

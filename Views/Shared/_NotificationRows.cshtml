@@ -29,7 +29,7 @@
         </span>
         @if (!string.IsNullOrEmpty(n.ThumbnailUrl))
         {
-            <img class="notif-page-thumb" src="@n.ThumbnailUrl" alt="" loading="lazy" />
+            <img class="notif-page-thumb" src="@n.ThumbnailUrl" alt="" loading="lazy" decoding="async" />
         }
         else
         {

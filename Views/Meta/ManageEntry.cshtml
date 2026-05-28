@@ -16,7 +16,7 @@
         <div class="manage-entry-header">
             @if (!string.IsNullOrEmpty(Model.Poster))
             {
-                <img src="@Model.Poster" alt="@Model.Name" class="manage-entry-poster" />
+                <img src="@Model.Poster" alt="@Model.Name" class="manage-entry-poster" decoding="async" />
             }
             <div class="manage-entry-title-area">
                 <h2 class="manage-entry-title">@Model.Name</h2>

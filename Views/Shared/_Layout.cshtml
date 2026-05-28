@@ -705,6 +705,27 @@
         // doesn't budge the URL within 500ms — covers the cold-load
         // case where the webview's history doesn't contain a previous
         // entry, so the click still resolves to something useful.
+        // Shared-element view transition: name the tapped poster so
+        // Chromium morphs it into the detail-page hero (which carries the
+        // matching name in CSS). A single fixed name applied to ONLY the
+        // clicked element guarantees uniqueness, so multi-shelf pages don't
+        // trip the duplicate-name abort. Feature-gated and reduced-motion
+        // aware; on browsers without view transitions the assignment is an
+        // inert unknown-property write. Capture phase so the name is set
+        // before any navigation begins.
+        (function () {
+            if (!('startViewTransition' in document)) return;
+            try {
+                if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+            } catch (_) { /* matchMedia unavailable — proceed */ }
+            document.addEventListener('click', function (e) {
+                var card = e.target.closest ? e.target.closest('a.library-card') : null;
+                if (!card) return;
+                var img = card.querySelector('.library-card-poster');
+                if (img) img.style.viewTransitionName = 'vt-shared-poster';
+            }, true);
+        })();
+
         (function () {
             var btn = document.querySelector('[data-site-back]');
             if (!btn) return;

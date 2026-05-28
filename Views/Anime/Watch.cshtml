@@ -104,12 +104,12 @@
                    - Pill: "Pick a source below" overlay regardless. *@
                 @if (!string.IsNullOrEmpty(a.background))
                 {
-                    <img class="watch-player-backdrop" src="@a.background" alt="" loading="lazy"
+                    <img class="watch-player-backdrop" src="@a.background" alt="" loading="lazy" decoding="async"
                          onerror="this.classList.add('is-missing');" />
                 }
                 @if (!string.IsNullOrEmpty(ep.thumbnail))
                 {
-                    <img class="watch-player-poster" src="@ep.thumbnail" alt="" loading="lazy"
+                    <img class="watch-player-poster" src="@ep.thumbnail" alt="" loading="lazy" decoding="async"
                          onerror="this.classList.add('is-missing');" />
                 }
                 <span class="watch-player-prompt">Pick a source below to start watching.</span>
