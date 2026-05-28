@@ -40,17 +40,21 @@ namespace AnimeList.Services
                     await _kitsuService.SaveAnimeEntryAsync(primary, animeId, season, episode);
                     break;
             }
-            await FanOutSaveAsync(primary, animeId, season, episode);
+            // Scrobble auto-track: the episode IS the progress (every webhook fires at the
+            // end of an episode), so it lines up with FanOutSaveAsync's `progress` slot. The
+            // parameter naming below would otherwise mislead the next reader into "fixing"
+            // this to a separate variable and breaking the scrobble path.
+            await FanOutSaveAsync(primary, animeId, season, progress: episode);
         }
 
-        public async Task FanOutSaveAsync(TokenData primary, string animeId, int? season, int progress,
+        public async Task<FanOutSaveResult> FanOutSaveAsync(TokenData primary, string animeId, int? season, int progress,
             string status = null, double? score = null, string notes = null, int? rewatchCount = null,
             DateTime? startedAt = null, DateTime? finishedAt = null)
         {
-            if (primary == null || primary.anonymousUser) return;
+            if (primary == null || primary.anonymousUser) return FanOutSaveResult.Empty;
             var uid = await _configStore.UpsertAsync(primary);
             var linkedTokens = await GetActiveLinkedTokensAsync(uid);
-            if (linkedTokens.Count == 0) return;
+            if (linkedTokens.Count == 0) return FanOutSaveResult.Empty;
 
             // Normalise the source-side ListType once so each per-target call doesn't have
             // to re-parse it, and normalise the score to 0-10 since AniList primaries can
@@ -62,7 +66,15 @@ namespace AnimeList.Services
                 SaveToProviderAsync(uid, linked, sourceListType, animeId, season, progress,
                     normalisedScore, notes, rewatchCount, startedAt, finishedAt));
 
-            await Task.WhenAll(tasks);
+            var outcomes = await Task.WhenAll(tasks);
+
+            var result = new FanOutSaveResult();
+            for (int i = 0; i < linkedTokens.Count; i++)
+            {
+                if (outcomes[i]) result.Succeeded.Add(linkedTokens[i].Service);
+                else result.Failed.Add(linkedTokens[i].Service);
+            }
+            return result;
         }
 
         public async Task FanOutDeleteAsync(TokenData primary, string animeId, int? season)
@@ -147,7 +159,7 @@ namespace AnimeList.Services
             catch { return null; }
         }
 
-        private async Task SaveToProviderAsync(string uid, LinkedToken target, ListType? sourceListType,
+        private async Task<bool> SaveToProviderAsync(string uid, LinkedToken target, ListType? sourceListType,
             string animeId, int? season, int progress, double? score, string notes,
             int? rewatchCount, DateTime? startedAt, DateTime? finishedAt)
         {
@@ -176,6 +188,7 @@ namespace AnimeList.Services
                 // write. Scrobble-only paths route through here, so this is the
                 // sole invalidation point that covers webhook writes.
                 _listCache.Invalidate(target.TokenData);
+                return true;
             }
             catch (UnauthorizedAccessException ex)
             {
@@ -184,6 +197,7 @@ namespace AnimeList.Services
                 // UI surfaces it and future fan-outs skip the link.
                 _logger.LogWarning(ex, "Sync {Service} save 401 — flagging for re-auth.", target.Service);
                 await TryRefreshAsync(uid, target);
+                return false;
             }
             catch (Exception ex)
             {
@@ -191,6 +205,7 @@ namespace AnimeList.Services
                 // save fell over (mapping gap, transient 5xx, etc.) without failing the
                 // primary save the user is actually waiting on.
                 _logger.LogError(ex, "Sync {Service} save failed.", target.Service);
+                return false;
             }
         }
 

@@ -112,6 +112,12 @@
     // server-side instead of the primary. null means "use primary" as
     // before.
     var activeServiceOverride = null;
+    // Bumped on every loadEntry() call; the in-flight response checks its
+    // captured value against this and bails when a newer load has started.
+    // Stops the Season dropdown's two-fetches-in-flight race from rendering
+    // the older response on top of the newer (whichever wins is unrelated
+    // to which the user actually picked last).
+    var loadSeq = 0;
     // The element that had focus before the modal opened — restored on
     // close so keyboard users return to where they left off.
     var lastFocused = null;
@@ -232,12 +238,17 @@
         if (activeServiceOverride !== null) {
             entryUrl += '&service=' + encodeURIComponent(activeServiceOverride);
         }
+        var mySeq = ++loadSeq;
         return fetch(entryUrl, {
             credentials: 'same-origin',
             headers: { 'Accept': 'application/json' },
         })
             .then(function (r) { return r.json(); })
             .then(function (data) {
+                // A newer load started while this one was in flight — drop the
+                // stale response on the floor so it can't overwrite the form
+                // with the wrong season's data.
+                if (mySeq !== loadSeq) return;
                 if (!data || !data.success) {
                     showError('Failed to load entry. Try again.');
                     return;
@@ -393,6 +404,18 @@
         }
     }
 
+    // Build the post-save toast label from the API response. When the primary
+    // landed but one or more linked-secondary providers rejected the write,
+    // the server returns failedProviders: ["MAL", "Kitsu"] and we surface
+    // that as "Saved — failed on MAL, Kitsu" so the user knows what to retry
+    // (instead of the uniform green "Saved" that hid the breakage).
+    function buildSaveToast(data, baseLabel) {
+        if (data && data.failedProviders && data.failedProviders.length) {
+            return baseLabel + ' — failed on ' + data.failedProviders.join(', ');
+        }
+        return baseLabel;
+    }
+
     // Drop the dashboard's Continue-Watching localStorage cache so the
     // next dashboard load re-fetches /Home/ContinueWatchingData. Any
     // user-list write (modal save, +1 quick-action, delete) potentially
@@ -482,6 +505,13 @@
 
         var newProgress = currentProgress + 1;
         plusBtn.disabled = true;
+        // Bump data-meta-progress synchronously so a second click that fires
+        // before the in-flight save completes (touch/click race, sticky-press
+        // accessibility tooling, programmatic dispatch) reads the optimistic
+        // value rather than the stale one and increments past it instead of
+        // re-sending the same number. The disabled flag is the primary guard;
+        // this is the belt-and-braces backstop.
+        card.setAttribute('data-meta-progress', String(newProgress));
 
         fetch('/api/library/entry/save', {
             method: 'POST',
@@ -502,18 +532,19 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data && data.success) {
-                    if (window.AniSyncToast) window.AniSyncToast.show('+1 ep');
+                    if (window.AniSyncToast) window.AniSyncToast.show(buildSaveToast(data, '+1 ep'));
                     refreshCardProgress(card, newProgress, totalEpisodes);
-                    // Persist on the card itself so subsequent clicks see the
-                    // updated value (data attr is the source of truth here).
-                    card.setAttribute('data-meta-progress', String(newProgress));
                     invalidateContinueWatchingCache();
                 } else {
                     if (window.AniSyncToast) window.AniSyncToast.show('Save failed');
+                    // Roll the optimistic data-attr back so a retry click
+                    // computes from the real server-known progress.
+                    card.setAttribute('data-meta-progress', String(currentProgress));
                 }
             })
             .catch(function () {
                 if (window.AniSyncToast) window.AniSyncToast.show('Network error');
+                card.setAttribute('data-meta-progress', String(currentProgress));
             })
             .finally(function () {
                 plusBtn.disabled = false;
@@ -567,7 +598,7 @@
                     }
                 });
                 refreshDetailUserState(newProgress);
-                if (window.AniSyncToast) window.AniSyncToast.show('Watched ep ' + newProgress);
+                if (window.AniSyncToast) window.AniSyncToast.show(buildSaveToast(data, 'Watched ep ' + newProgress));
             })
             .catch(function () {
                 if (window.AniSyncToast) window.AniSyncToast.show('Network error');
@@ -814,10 +845,11 @@
             .then(function (data) {
                 if (data && data.success) {
                     invalidateContinueWatchingCache();
+                    var savedToast = buildSaveToast(data, 'Saved');
                     if (cardForUpdate) {
                         // Card-context save — optimistic in-place update +
                         // toast inline. Scroll position preserved.
-                        showToast('Saved');
+                        showToast(savedToast);
                         var filter = getPageListFilter();
                         var stays = statusBelongsHere(serviceForUpdate, newStatus, filter);
                         if (!stays) {
@@ -834,7 +866,7 @@
                         // go stale if we just close. Reload so it catches
                         // up with server state; queue the toast through
                         // sessionStorage so it survives the navigation.
-                        try { sessionStorage.setItem('anisync-toast', 'Saved'); }
+                        try { sessionStorage.setItem('anisync-toast', savedToast); }
                         catch (e) { /* private-browsing — toast is best-effort */ }
                         window.location.reload();
                     }

@@ -1,0 +1,72 @@
+@{
+    ViewData["Title"] = "Something went wrong";
+    ViewData["BodyClass"] = "library-page";
+
+    // Driven by HomeController.ErrorPage which sets Response.StatusCode before
+    // rendering. One view covers everything except 404 (NotFound has its own
+    // copy) so a 429-rate-limited user doesn't see "Something went wrong"
+    // wording and assume the server crashed.
+    var code = Context.Response.StatusCode;
+    string title;
+    string subtitle;
+    string primaryCtaLabel = "Dashboard";
+    string primaryCtaHref = "/";
+    string secondaryCtaLabel = null;
+    string secondaryCtaHref = null;
+    var canRetry = false;
+
+    switch (code)
+    {
+        case 401:
+            title = "You're signed out";
+            subtitle = "This page needs a signed-in session. Sign in to continue, or head back to the dashboard.";
+            primaryCtaLabel = "Sign in";
+            primaryCtaHref = "/account";
+            secondaryCtaLabel = "Dashboard";
+            secondaryCtaHref = "/";
+            break;
+        case 403:
+            title = "Access denied";
+            subtitle = "Your account isn't authorised for this page. If you reached it from a shared link, the owner may have unlinked or rotated their config.";
+            break;
+        case 405:
+            title = "Method not allowed";
+            subtitle = "This URL doesn't accept the kind of request that was sent. If you got here from a link, try refreshing the source page.";
+            break;
+        case 429:
+            title = "Slow down a moment";
+            subtitle = "You've hit AniSync's per-minute request limit. Wait about a minute and try again — bursts above the cap are dropped to keep the upstream trackers responsive for everyone.";
+            ViewData["Title"] = "Too many requests";
+            break;
+        case >= 500:
+            title = "Something went wrong";
+            subtitle = "An error occurred while processing your request. Try again in a moment — if the problem keeps happening, the upstream service may be down.";
+            canRetry = true;
+            break;
+        default:
+            title = code >= 400 ? "That request couldn't be processed" : "Unexpected response";
+            subtitle = "Your request didn't complete. Head back to the dashboard, or try again.";
+            canRetry = true;
+            break;
+    }
+}
+
+<div class="page-header" style="text-align: center;">
+    <h1 class="page-title">@title</h1>
+    <p class="page-subtitle">@subtitle</p>
+</div>
+<div class="hero-ctas" style="justify-content: center;">
+    @if (canRetry)
+    {
+        <a class="hero-cta hero-cta-primary" href="javascript:location.reload()">Retry</a>
+        <a class="hero-cta hero-cta-secondary" href="/">Dashboard</a>
+    }
+    else
+    {
+        <a class="hero-cta hero-cta-primary" href="@primaryCtaHref">@primaryCtaLabel</a>
+        @if (!string.IsNullOrEmpty(secondaryCtaLabel))
+        {
+            <a class="hero-cta hero-cta-secondary" href="@secondaryCtaHref">@secondaryCtaLabel</a>
+        }
+    }
+</div>

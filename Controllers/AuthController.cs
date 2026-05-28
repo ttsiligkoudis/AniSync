@@ -200,11 +200,16 @@ namespace AnimeList.Controllers
             // intact. A missing or mismatched value means this callback wasn't started by
             // this session — refuse before touching the authorization code so an attacker
             // can't graft their provider account onto a victim's session (account fixation).
+            // In practice the legitimate way to land here is the back-button / refresh
+            // landing on an already-consumed callback URL; surfacing an explicit "link
+            // expired" view is friendlier than silently redirecting to the dashboard where
+            // the user sees the logged-out shell with no explanation.
             if (string.IsNullOrEmpty(expectedState)
                 || !string.Equals(expectedState, state, StringComparison.Ordinal))
             {
                 _logger.LogWarning("OAuth callback rejected: state mismatch (service={Service}).", oauthService);
-                return RedirectToAction("Index", "Home");
+                Response.StatusCode = StatusCodes.Status400BadRequest;
+                return View("OauthStateExpired");
             }
 
             var isLink = oauthFlow == OauthFlowLink;

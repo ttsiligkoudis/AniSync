@@ -118,6 +118,11 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     // the entry Fly's proxy appends is ever consumed for Request scheme/host. The
     // per-IP rate limiter does NOT rely on this — it keys off Fly-Client-IP, which
     // Fly's edge sets and overwrites (so it can't be spoofed). See AddRateLimiter.
+    //
+    // TODO: bump to 2 if Cloudflare ever sits in front of Fly. With CF + Fly the
+    // chain becomes [client, CF, Fly] and a limit of 1 would peel off Fly's entry
+    // and read Cloudflare's IP as the client, breaking Referrer-based per-IP logs
+    // (the rate limiter would still be fine — it keys off Fly-Client-IP).
     options.ForwardLimit = 1;
 });
 

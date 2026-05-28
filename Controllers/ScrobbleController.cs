@@ -113,8 +113,13 @@ namespace AnimeList.Controllers
                 return Ok();
             }
 
-            // Dedup. Key = uid + tracker id + season + episode; one entry per unique playback.
-            var dedupKey = $"scrobble:{uid}:{animeId}:{normalized.Season}:{normalized.Episode}";
+            // Dedup. Key = uid + source + tracker id + season + episode; one entry per unique
+            // playback. Source is in the key (rather than collapsed to a single bucket) so we
+            // can tell Plex-via-Plex apart from Plex-via-Jellyfin when both are configured
+            // against the same library — a 60s coincidence between the two no longer silently
+            // hides the second event from logs / observability, while still deduping within
+            // a source for retries.
+            var dedupKey = $"scrobble:{uid}:{normalized.Source}:{animeId}:{normalized.Season}:{normalized.Episode}";
             if (_dedupCache.TryGetValue(dedupKey, out _))
             {
                 _logger.LogDebug("Scrobble dropped (dedup) uid={Uid} anime={Anime} S{S}E{E}.",
