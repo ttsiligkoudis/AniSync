@@ -1,3 +1,258 @@
+/* ──────────────────────────────────────────────────────────────────────
+   Design tokens (single source of truth)
+
+   Colors, surfaces, overlays, radii, shadows, spacing and the type scale
+   all live here as custom properties so the rest of the sheet references
+   var(--…) instead of scattered literals. This is the prerequisite for
+   the light theme (the [data-theme] / prefers-color-scheme blocks below
+   only re-declare this token set — no other rule changes) and it enforces
+   palette consistency. The dark values are the app's originals, so the
+   default rendering is byte-for-byte identical to before tokenisation.
+
+   Overlay tokens (--overlay-*) are translucent whites used for hairline
+   borders and subtly-raised surfaces over the dark background; the light
+   theme flips them to translucent blacks so the same rules read correctly
+   on a light canvas.
+   ────────────────────────────────────────────────────────────────────── */
+:root {
+  /* Base surfaces */
+  --bg: #0A0A0A;
+  --surface: #141414;
+  --surface-raised: #1a1a1a;
+  --surface-overlay: #161616;
+
+  /* Text */
+  --text: #e0e0e0;
+  --text-strong: #fff;
+  --text-dim: #999;
+
+  /* Accent (brand blue) */
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-light: #93c5fd;
+
+  /* Semantic */
+  --danger: #ef4444;
+  --success: #2ecc71;
+  --warning: #fbbf24;
+
+  /* Translucent overlays (borders / raised fills over the dark canvas) */
+  --overlay-04: rgba(255, 255, 255, 0.04);
+  --overlay-05: rgba(255, 255, 255, 0.05);
+  --overlay-06: rgba(255, 255, 255, 0.06);
+  --overlay-07: rgba(255, 255, 255, 0.07);
+  --overlay-08: rgba(255, 255, 255, 0.08);
+  --overlay-10: rgba(255, 255, 255, 0.1);
+  --overlay-12: rgba(255, 255, 255, 0.12);
+  --overlay-15: rgba(255, 255, 255, 0.15);
+  --overlay-18: rgba(255, 255, 255, 0.18);
+  /* Default hairline border alias — the most common overlay weight. */
+  --border: var(--overlay-08);
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* Elevation */
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+
+  /* Spacing scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  /* Type scale */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+
+  /* Minimum comfortable touch target */
+  --tap: 44px;
+
+  /* Surface used by chrome that paints over the page (header, drawer,
+     bottom-nav, modals). Kept as its own token so the light theme can
+     give chrome a slightly different tint from page surfaces if needed. */
+  color-scheme: dark;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   Light theme
+
+   Re-declares ONLY the token set — every downstream rule already reads
+   var(--…), so nothing else changes. Resolution order:
+     • :root:not([data-theme])  + prefers-color-scheme: light
+         → follow the OS when the user hasn't picked a theme manually
+     • [data-theme="light"]     → manual light, overrides the OS
+     • :root (default, dark)    → applies for OS-dark and manual dark
+       ([data-theme="dark"] simply leaves the dark defaults in place and
+        suppresses the prefers-color-scheme block via the :not guard)
+
+   The white overlays flip to translucent blacks so the same hairline
+   borders / raised fills read correctly on a light canvas. theme-toggle.js
+   stamps data-theme on <html> before first paint to avoid a flash. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg: #ffffff;
+    --surface: #f4f4f6;
+    --surface-raised: #ffffff;
+    --surface-overlay: #eeeef1;
+
+    --text: #2b2b2b;
+    --text-strong: #0a0a0a;
+    --text-dim: #5f6368;
+
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-light: #1d4ed8;
+
+    --danger: #dc2626;
+    --success: #15a34a;
+    --warning: #b45309;
+
+    --overlay-04: rgba(0, 0, 0, 0.04);
+    --overlay-05: rgba(0, 0, 0, 0.05);
+    --overlay-06: rgba(0, 0, 0, 0.06);
+    --overlay-07: rgba(0, 0, 0, 0.07);
+    --overlay-08: rgba(0, 0, 0, 0.09);
+    --overlay-10: rgba(0, 0, 0, 0.11);
+    --overlay-12: rgba(0, 0, 0, 0.13);
+    --overlay-15: rgba(0, 0, 0, 0.16);
+    --overlay-18: rgba(0, 0, 0, 0.2);
+    --border: var(--overlay-08);
+
+    --shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+
+    color-scheme: light;
+  }
+}
+
+[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #f4f4f6;
+  --surface-raised: #ffffff;
+  --surface-overlay: #eeeef1;
+
+  --text: #2b2b2b;
+  --text-strong: #0a0a0a;
+  --text-dim: #5f6368;
+
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-light: #1d4ed8;
+
+  --danger: #dc2626;
+  --success: #15a34a;
+  --warning: #b45309;
+
+  --overlay-04: rgba(0, 0, 0, 0.04);
+  --overlay-05: rgba(0, 0, 0, 0.05);
+  --overlay-06: rgba(0, 0, 0, 0.06);
+  --overlay-07: rgba(0, 0, 0, 0.07);
+  --overlay-08: rgba(0, 0, 0, 0.09);
+  --overlay-10: rgba(0, 0, 0, 0.11);
+  --overlay-12: rgba(0, 0, 0, 0.13);
+  --overlay-15: rgba(0, 0, 0, 0.16);
+  --overlay-18: rgba(0, 0, 0, 0.2);
+  --border: var(--overlay-08);
+
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+
+  color-scheme: light;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   Minimal reset (replaces Bootstrap's reboot/normalize)
+
+   AniSync's UI is built almost entirely from its own class names — an audit
+   found the ONLY genuine Bootstrap class in use is .container (defined just
+   below). Bootstrap was therefore pulling its weight here purely as a CSS
+   reset, so this compact reset reproduces exactly the reboot defaults the
+   layout leans on (global border-box, body line-height, zeroed heading /
+   paragraph / list margins, form-control font inheritance, media vertical
+   alignment) and nothing more. Dropping bootstrap.min.css is then visually
+   inert while removing the app's single largest blocking stylesheet.
+   ────────────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  /* font-family / colors are set in the main body rule below; the reset
+     only owns the reboot-equivalent baseline. */
+  margin: 0;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+p {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+ul, ol {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+/* Bare content links (e.g. AniList synopsis HTML, external link-outs) —
+   class-styled links override both properties; this just gives un-classed
+   anchors the brand accent instead of the UA's default link colour. */
+a {
+  color: var(--accent);
+}
+
+/* Form controls don't inherit font/colour by default — the reboot fixed
+   this, and many of the app's inputs/buttons depend on it to render in the
+   Inter/system stack rather than the browser's default form font. */
+button, input, optgroup, select, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  margin: 0;
+}
+
+img, svg, video, canvas {
+  vertical-align: middle;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+/* The single genuine Bootstrap class the markup uses. Centres the page
+   column and matches the layout's main max-width so the sticky header's
+   inner content stays aligned with the page body. The 0.75rem inline
+   padding reproduces Bootstrap's container gutter so spacing is unchanged. */
+.container {
+  width: 100%;
+  max-width: 1280px;
+  margin-right: auto;
+  margin-left: auto;
+  padding-right: 0.75rem;
+  padding-left: 0.75rem;
+}
+
 html {
   font-size: 14px;
 }
@@ -9,7 +264,7 @@ html {
 }
 
 .btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
-  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem #258cfb;
+  box-shadow: 0 0 0 0.1rem var(--text-strong), 0 0 0 0.25rem var(--accent);
 }
 
 html {
@@ -32,8 +287,8 @@ body {
        viewport, which made the sticky bar un-stick as soon as the user
        scrolled past the first screenful. */
     min-height: 100vh;
-    background-color: #0A0A0A;
-    color: #e0e0e0;
+    background-color: var(--bg);
+    color: var(--text);
 }
 
 main {
@@ -86,7 +341,7 @@ body.anime-detail-page .anime-detail-hero {
 .page-title {
     font-size: 1.5rem;
     font-weight: 700;
-    color: #fff;
+    color: var(--text-strong);
     margin: 0 0 0.2rem;
     letter-spacing: -0.01em;
 }
@@ -97,7 +352,7 @@ body.anime-detail-page .anime-detail-hero {
    per-page subtitle just needs to read as standalone descriptive text. */
 .page-subtitle {
     font-size: 0.85rem;
-    color: #999;
+    color: var(--text-dim);
     margin: 0 0 0.4rem;
     text-align: center;
 }
@@ -158,14 +413,14 @@ body.anime-detail-page .anime-detail-hero {
 
     .site-header-nav a:hover,
     .site-header-nav a:focus {
-        background: rgba(255, 255, 255, 0.05);
-        color: #fff;
+        background: var(--overlay-05);
+        color: var(--text-strong);
         text-decoration: none;
     }
 
     .site-header-nav a.active {
-        color: #fff;
-        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-strong);
+        background: var(--overlay-06);
     }
 
     .site-header-cta {
@@ -182,14 +437,14 @@ body.anime-detail-page .anime-detail-hero {
     .site-header-cta-primary,
     .site-header-cta-primary:link,
     .site-header-cta-primary:visited {
-        background: #3B82F6;
-        color: #fff;
+        background: var(--accent);
+        color: var(--text-strong);
     }
 
     .site-header-cta-primary:hover,
     .site-header-cta-primary:focus {
-        background: #2563eb;
-        color: #fff;
+        background: var(--accent-hover);
+        color: var(--text-strong);
         text-decoration: none;
     }
 
@@ -197,14 +452,14 @@ body.anime-detail-page .anime-detail-hero {
     .site-header-cta-secondary:link,
     .site-header-cta-secondary:visited {
         background: transparent;
-        border: 1px solid rgba(255, 255, 255, 0.18);
+        border: 1px solid var(--overlay-18);
         color: #ccc;
     }
 
     .site-header-cta-secondary:hover,
     .site-header-cta-secondary:focus {
         border-color: rgba(255, 255, 255, 0.3);
-        color: #fff;
+        color: var(--text-strong);
         text-decoration: none;
     }
 }
@@ -250,8 +505,8 @@ body.anime-detail-page .anime-detail-hero {
     right: 0;
     bottom: 0;
     width: min(85vw, 320px);
-    background: #0A0A0A;
-    border-left: 1px solid rgba(255, 255, 255, 0.06);
+    background: var(--bg);
+    border-left: 1px solid var(--overlay-06);
     z-index: 100;
     display: flex;
     flex-direction: column;
@@ -286,13 +541,13 @@ body.drawer-open .drawer-backdrop {
     justify-content: space-between;
     margin-bottom: 1.5rem;
     padding-bottom: 0.75rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--overlay-06);
 }
 
 .drawer-close {
     background: transparent;
     border: 0;
-    color: #999;
+    color: var(--text-dim);
     font-size: 1.6rem;
     line-height: 1;
     cursor: pointer;
@@ -301,7 +556,7 @@ body.drawer-open .drawer-backdrop {
 }
 
 .drawer-close:hover {
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .nav-drawer-nav {
@@ -340,14 +595,14 @@ body.drawer-open .drawer-backdrop {
 
 .nav-drawer-nav a:hover,
 .nav-drawer-nav a:focus {
-    background: rgba(255, 255, 255, 0.05);
-    color: #fff;
+    background: var(--overlay-05);
+    color: var(--text-strong);
     text-decoration: none;
 }
 
 .nav-drawer-nav a.active {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-strong);
+    background: var(--overlay-06);
 }
 
 .nav-drawer-footer {
@@ -355,13 +610,13 @@ body.drawer-open .drawer-backdrop {
     flex-direction: column;
     gap: 0.6rem;
     padding-top: 1rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-top: 1px solid var(--overlay-06);
     margin-top: 1rem;
 }
 
 .nav-drawer-status {
     font-size: 0.8rem;
-    color: #93c5fd;
+    color: var(--accent-light);
     text-align: center;
 }
 
@@ -385,28 +640,28 @@ body.drawer-open .drawer-backdrop {
 .nav-drawer-cta-primary,
 .nav-drawer-cta-primary:link,
 .nav-drawer-cta-primary:visited {
-    background: #3B82F6;
-    color: #fff;
+    background: var(--accent);
+    color: var(--text-strong);
 }
 
 .nav-drawer-cta-primary:hover,
 .nav-drawer-cta-primary:focus {
-    background: #2563eb;
-    color: #fff;
+    background: var(--accent-hover);
+    color: var(--text-strong);
 }
 
 .nav-drawer-cta-secondary,
 .nav-drawer-cta-secondary:link,
 .nav-drawer-cta-secondary:visited {
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    border: 1px solid var(--overlay-18);
     color: #ccc;
 }
 
 .nav-drawer-cta-secondary:hover,
 .nav-drawer-cta-secondary:focus {
     border-color: rgba(255, 255, 255, 0.3);
-    color: #fff;
+    color: var(--text-strong);
 }
 
 /* ── Bottom nav (mobile) ── */
@@ -416,8 +671,8 @@ body.drawer-open .drawer-backdrop {
     right: 0;
     bottom: 0;
     display: flex;
-    background: #0A0A0A;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    background: var(--bg);
+    border-top: 1px solid var(--overlay-06);
     padding: 0.4rem 0 calc(0.4rem + env(safe-area-inset-bottom, 0));
     z-index: 50;
 }
@@ -452,7 +707,7 @@ body.drawer-open .drawer-backdrop {
 }
 
 .bottom-nav-item.active {
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .bottom-nav-label {
@@ -496,7 +751,7 @@ body.drawer-open .drawer-backdrop {
 }
 
 .bottom-nav-more.is-open {
-    color: #fff;
+    color: var(--text-strong);
 }
 
 /* ── Bottom-nav More dome ──
@@ -564,7 +819,7 @@ body.drawer-open .drawer-backdrop {
 
 /* Each row is a full-width tap target — comfortable 44px hit area (Apple
    HIG minimum), 0.92rem label, 20px icon. No background of their own;
-   hover / active picks up the same rgba(255,255,255,0.06) token the
+   hover / active picks up the same var(--overlay-06) token the
    drawer + dome already used so the sheet inherits the established
    visual vocabulary. */
 .bottom-nav-more-sheet .bottom-nav-more-row,
@@ -597,14 +852,14 @@ body.drawer-open .drawer-backdrop {
 
 .bottom-nav-more-sheet .bottom-nav-more-row:hover,
 .bottom-nav-more-sheet .bottom-nav-more-row:focus {
-    background: rgba(255, 255, 255, 0.06);
-    color: #fff;
+    background: var(--overlay-06);
+    color: var(--text-strong);
     text-decoration: none;
     outline: none;
 }
 
 .bottom-nav-more-sheet .bottom-nav-more-row.active {
-    color: #93c5fd;
+    color: var(--accent-light);
 }
 
 .bottom-nav-more-sheet .bottom-nav-more-row-icon {
@@ -614,7 +869,7 @@ body.drawer-open .drawer-backdrop {
 
 .bottom-nav-more-sheet .bottom-nav-more-row:hover .bottom-nav-more-row-icon,
 .bottom-nav-more-sheet .bottom-nav-more-row:focus .bottom-nav-more-row-icon {
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .bottom-nav-more-sheet .bottom-nav-more-row-label {
@@ -629,7 +884,7 @@ body.drawer-open .drawer-backdrop {
     display: block;
     height: 1px;
     margin: 6px 12px;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--overlay-08);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -682,7 +937,7 @@ body.drawer-open .drawer-backdrop {
     max-height: 90vh;
     overflow-y: auto;
     background: #111;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--overlay-10);
     border-radius: 1rem;
     z-index: 201;
     display: flex;
@@ -704,13 +959,13 @@ body.modal-open {
     justify-content: space-between;
     gap: 0.5rem;
     padding: 1rem 1.1rem 0.6rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--overlay-06);
 }
 
 .entry-modal-title {
     font-size: 1.05rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--text-strong);
     margin: 0;
     line-height: 1.3;
     flex: 1;
@@ -719,7 +974,7 @@ body.modal-open {
 .entry-modal-close {
     background: transparent;
     border: 0;
-    color: #999;
+    color: var(--text-dim);
     font-size: 1.6rem;
     line-height: 1;
     cursor: pointer;
@@ -728,7 +983,7 @@ body.modal-open {
 }
 
 .entry-modal-close:hover {
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .entry-modal-body {
@@ -739,7 +994,7 @@ body.modal-open {
 }
 
 .entry-modal-loading {
-    color: #999;
+    color: var(--text-dim);
     text-align: center;
     padding: 1rem;
     font-size: 0.9rem;
@@ -759,7 +1014,7 @@ body.modal-open {
 
 .entry-modal-label {
     font-size: 0.78rem;
-    color: #999;
+    color: var(--text-dim);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     margin: 0;
@@ -769,10 +1024,10 @@ body.modal-open {
 .entry-modal-input,
 .entry-modal-textarea {
     padding: 0.55rem 0.75rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-10);
     border-radius: 0.5rem;
-    color: #e0e0e0;
+    color: var(--text);
     font-size: 0.95rem;
     font-family: inherit;
     outline: none;
@@ -805,14 +1060,14 @@ body.modal-open {
 
 .entry-modal-select option {
     background: #111;
-    color: #e0e0e0;
+    color: var(--text);
 }
 
 .entry-modal-select:focus,
 .entry-modal-input:focus,
 .entry-modal-textarea:focus {
-    border-color: #3B82F6;
-    background-color: rgba(255, 255, 255, 0.07);
+    border-color: var(--accent);
+    background-color: var(--overlay-07);
 }
 
 .entry-modal-progress-row {
@@ -880,7 +1135,7 @@ body.modal-open {
 .entry-modal-delete:hover {
     background: #ef4444;
     border-color: #ef4444;
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .entry-modal-delete:disabled {
@@ -890,24 +1145,24 @@ body.modal-open {
 
 .entry-modal-cancel {
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    border: 1px solid var(--overlay-18);
     color: #ccc;
 }
 
 .entry-modal-cancel:hover {
     border-color: rgba(255, 255, 255, 0.3);
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .entry-modal-save {
-    background: #3B82F6;
-    border: 1px solid #3B82F6;
-    color: #fff;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: var(--text-strong);
 }
 
 .entry-modal-save:hover {
-    background: #2563eb;
-    border-color: #2563eb;
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
 }
 
 .entry-modal-save:disabled {
@@ -938,7 +1193,7 @@ body.modal-open {
 
 .toast {
     background: rgba(59, 130, 246, 0.95);
-    color: #fff;
+    color: var(--text-strong);
     padding: 0.55rem 1.1rem;
     border-radius: 999px;
     font-size: 0.85rem;
@@ -958,6 +1213,39 @@ body.modal-open {
 
 @keyframes toast-out {
     to { opacity: 0; transform: translateY(8px); }
+}
+
+/* Actionable / persistent toast (e.g. the SW "New version available"
+   prompt). Drops the auto fade-out animation — it sticks until the user
+   taps the action or dismisses — and lays the message + action button out
+   in a row with a hairline divider between them. */
+.toast-actionable {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding-right: 0.5rem;
+    animation: toast-in 0.2s ease-out;
+}
+
+.toast-action {
+    flex: none;
+    min-height: 32px;
+    padding: 0 0.8rem;
+    border: none;
+    border-radius: var(--radius-pill);
+    background: rgba(255, 255, 255, 0.18);
+    color: var(--text-strong);
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.toast-action:hover,
+.toast-action:focus-visible {
+    background: rgba(255, 255, 255, 0.3);
+    outline: none;
 }
 
 /* ── Reduced-motion respect ── */
@@ -1002,17 +1290,17 @@ body.modal-open {
     font-size: 2.2rem;
     font-weight: 700;
     letter-spacing: 0.05em;
-    color: #fff;
+    color: var(--text-strong);
     margin: 0;
 }
 
 .app-logo .accent {
-    color: #3B82F6;
+    color: var(--accent);
 }
 
 .app-subtitle {
     font-size: 0.85rem;
-    color: #999;
+    color: var(--text-dim);
     margin-top: 0.2rem;
 }
 
@@ -1030,7 +1318,7 @@ body.modal-open {
     top: 0;
     z-index: 50;
     width: 100%;
-    background: #0A0A0A;
+    background: var(--bg);
     padding-top: 0.5rem;
     padding-bottom: 0.5rem;
     margin-bottom: 0.5rem;
@@ -1071,7 +1359,7 @@ body.modal-open {
     padding: 0;
     margin-right: 0.25rem;
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--overlay-08);
     border-radius: 0.6rem;
     color: rgba(255, 255, 255, 0.7);
     cursor: pointer;
@@ -1081,9 +1369,9 @@ body.modal-open {
 
 .site-back-btn:hover,
 .site-back-btn:focus {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.18);
-    color: #fff;
+    background: var(--overlay-06);
+    border-color: var(--overlay-18);
+    color: var(--text-strong);
     outline: none;
 }
 
@@ -1123,7 +1411,7 @@ body.modal-open {
     border-radius: 999px;
     background: rgba(59, 130, 246, 0.15);
     border: 1px solid rgba(59, 130, 246, 0.4);
-    color: #93c5fd;
+    color: var(--accent-light);
     font-size: 0.82rem;
     font-weight: 600;
     cursor: pointer;
@@ -1132,9 +1420,9 @@ body.modal-open {
 }
 
 .pwa-install-btn:hover {
-    background: #3B82F6;
-    border-color: #3B82F6;
-    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--text-strong);
 }
 
 /* iOS Safari install instructions toast — appended to body by
@@ -1169,13 +1457,13 @@ body.modal-open {
 }
 
 .pwa-ios-hint-body strong {
-    color: #fff;
+    color: var(--text-strong);
     font-size: 0.9rem;
 }
 
 .pwa-ios-hint-body em {
     font-style: normal;
-    color: #93c5fd;
+    color: var(--accent-light);
 }
 
 .pwa-ios-hint-close {
@@ -1184,7 +1472,7 @@ body.modal-open {
     height: 28px;
     border-radius: 999px;
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    border: 1px solid var(--overlay-18);
     color: #ccc;
     font-size: 1.05rem;
     line-height: 1;
@@ -1192,8 +1480,8 @@ body.modal-open {
 }
 
 .pwa-ios-hint-close:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: #fff;
+    background: var(--overlay-08);
+    color: var(--text-strong);
 }
 
 /* ── Global anime search (site-header) ── */
@@ -1223,10 +1511,10 @@ body.modal-open {
 .site-search-input {
     width: 100%;
     padding: 0.45rem 0.85rem 0.45rem 2.25rem;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--overlay-05);
+    border: 1px solid var(--overlay-10);
     border-radius: 999px;
-    color: #e0e0e0;
+    color: var(--text);
     font-size: 0.85rem;
     font-family: inherit;
     outline: none;
@@ -1249,7 +1537,7 @@ body.modal-open {
 
 .site-search-input:focus {
     border-color: rgba(59, 130, 246, 0.5);
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--overlay-08);
 }
 
 .site-search-input:focus + .site-search-results,
@@ -1268,7 +1556,7 @@ body.modal-open {
     left: 0;
     right: 0;
     background: #161616;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--overlay-08);
     border-radius: 0.75rem;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
     max-height: 360px;
@@ -1287,9 +1575,9 @@ body.modal-open {
     align-items: center;
     gap: 0.6rem;
     padding: 0.5rem 0.75rem;
-    color: #e0e0e0;
+    color: var(--text);
     text-decoration: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--overlay-05);
     font-size: 0.85rem;
     transition: background 0.1s, color 0.1s;
 }
@@ -1300,8 +1588,8 @@ body.modal-open {
 
 .site-search-result:hover,
 .site-search-result:focus {
-    background: rgba(255, 255, 255, 0.05);
-    color: #fff;
+    background: var(--overlay-05);
+    color: var(--text-strong);
     text-decoration: none;
 }
 
@@ -1311,7 +1599,7 @@ body.modal-open {
     border-radius: 0.25rem;
     object-fit: cover;
     flex-shrink: 0;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--overlay-04);
 }
 
 .site-search-result-poster-placeholder {
@@ -1355,7 +1643,7 @@ body.modal-open {
 
 .site-search-status {
     padding: 0.75rem 0.85rem;
-    color: #999;
+    color: var(--text-dim);
     font-size: 0.85rem;
     text-align: center;
 }
@@ -1413,16 +1701,16 @@ body.modal-open {
         height: 36px;
         padding: 0;
         gap: 0;
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: var(--overlay-04);
+        border: 1px solid var(--overlay-12);
         color: #ccc;
         justify-content: center;
     }
 
     .pwa-install-btn:hover {
-        background: rgba(255, 255, 255, 0.08);
+        background: var(--overlay-08);
         border-color: rgba(255, 255, 255, 0.22);
-        color: #fff;
+        color: var(--text-strong);
     }
 
     .pwa-install-btn > span {
@@ -1454,14 +1742,14 @@ body.modal-open {
     background: rgba(59, 130, 246, 0.12);
     border: 1px solid rgba(59, 130, 246, 0.3);
     border-radius: 999px;
-    color: #93c5fd;
+    color: var(--accent-light);
     font-size: 0.75rem;
     font-weight: 500;
     white-space: nowrap;
 }
 
 .site-header-badge-action {
-    color: #93c5fd;
+    color: var(--accent-light);
     text-decoration: none;
     font-size: 0.85rem;
     line-height: 1;
@@ -1471,7 +1759,7 @@ body.modal-open {
 }
 
 .site-header-badge-action:hover {
-    color: #fff;
+    color: var(--text-strong);
     opacity: 1;
     text-decoration: none;
 }
@@ -1486,7 +1774,7 @@ body.modal-open {
     background:
         radial-gradient(circle at top right, rgba(59, 130, 246, 0.08), transparent 60%),
         rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--overlay-06);
     border-radius: 1.25rem;
     display: flex;
     flex-direction: column;
@@ -1502,7 +1790,7 @@ body.modal-open {
     background: rgba(59, 130, 246, 0.12);
     border: 1px solid rgba(59, 130, 246, 0.3);
     border-radius: 999px;
-    color: #93c5fd;
+    color: var(--accent-light);
     font-size: 0.78rem;
     font-weight: 500;
     margin-bottom: 0.15rem;
@@ -1512,13 +1800,13 @@ body.modal-open {
     font-size: 1.65rem;
     font-weight: 700;
     line-height: 1.15;
-    color: #fff;
+    color: var(--text-strong);
     margin: 0;
     letter-spacing: -0.01em;
 }
 
 .hero-title-accent {
-    color: #3B82F6;
+    color: var(--accent);
 }
 
 .hero-tagline {
@@ -1551,27 +1839,27 @@ body.modal-open {
 }
 
 .hero-cta-primary {
-    background: #3B82F6;
-    color: #fff;
-    border: 1px solid #3B82F6;
+    background: var(--accent);
+    color: var(--text-strong);
+    border: 1px solid var(--accent);
 }
 
 .hero-cta-primary:hover {
-    background: #2563eb;
-    border-color: #2563eb;
-    color: #fff;
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+    color: var(--text-strong);
 }
 
 .hero-cta-secondary {
     background: transparent;
-    color: #fff;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: var(--text-strong);
+    border: 1px solid var(--overlay-18);
 }
 
 .hero-cta-secondary:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--overlay-06);
     border-color: rgba(255, 255, 255, 0.3);
-    color: #fff;
+    color: var(--text-strong);
 }
 
 /* ── Service toggle ── */
@@ -1581,8 +1869,8 @@ body.modal-open {
     gap: 0.4rem;
     padding: 0.3rem;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--overlay-05);
+    border: 1px solid var(--overlay-08);
 }
 
 .service-toggle .label {
@@ -1599,14 +1887,14 @@ body.modal-open {
 }
 
 .service-toggle .label:hover {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-strong);
+    background: var(--overlay-06);
 }
 
 .service-toggle .label.active,
 .service-toggle .label.active:hover {
-    color: #fff;
-    background: #3B82F6;
+    color: var(--text-strong);
+    background: var(--accent);
 }
 
 /* Account-card chrome: the connected-pill + disconnect button row that
@@ -1624,7 +1912,7 @@ body.modal-open {
 
 .account-disconnect-btn {
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    border: 1px solid var(--overlay-18);
     color: #ccc;
     padding: 0.4rem 0.95rem;
     border-radius: 999px;
@@ -1646,7 +1934,7 @@ body.modal-open {
    one healthy linked account, telling them the pills now double as a swap UI. */
 .service-toggle-hint {
     font-size: 0.78rem;
-    color: #999;
+    color: var(--text-dim);
     text-align: center;
     margin: 0 0 0.4rem;
 }
@@ -1687,8 +1975,8 @@ body.modal-open {
 /* ── Cards ── */
 .card-section {
     width: 100%;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.08);
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-08);
     border-radius: 12px;
     padding: 1.25rem;
 }
@@ -1705,8 +1993,8 @@ body.modal-open {
    Used for Catalogs / Installation Options / Backups / Danger Zone. */
 .section-card {
     width: 100%;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.08);
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-08);
     border-radius: 14px;
     padding: 1.5rem 1.25rem 1.25rem;
     position: relative;
@@ -1717,14 +2005,14 @@ body.modal-open {
     top: -0.85rem;
     left: 1rem;
     background: #161616;
-    border: 1px solid rgba(255,255,255,0.1);
+    border: 1px solid var(--overlay-10);
     border-radius: 10px;
     padding: 0.4rem 0.85rem;
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.1em;
     font-weight: 700;
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .section-card .section-description {
@@ -1755,7 +2043,7 @@ body.modal-open {
 }
 
 .stream-option + .stream-option {
-    border-top: 1px solid rgba(255,255,255,0.06);
+    border-top: 1px solid var(--overlay-06);
 }
 
 .option-name-wrap {
@@ -1786,7 +2074,7 @@ body.modal-open {
 }
 
 .kitsu-register .kitsu-register-link {
-    color: #93c5fd;
+    color: var(--accent-light);
     text-decoration: underline;
 }
 
@@ -1813,10 +2101,10 @@ body.modal-open {
 .cred-group input {
     width: 100%;
     padding: 0.55rem 0.75rem;
-    background: rgba(255,255,255,0.07);
-    border: 1px solid rgba(255,255,255,0.12);
+    background: var(--overlay-07);
+    border: 1px solid var(--overlay-12);
     border-radius: 8px;
-    color: #fff;
+    color: var(--text-strong);
     font-size: 0.9rem;
     outline: none;
     transition: border-color 0.2s;
@@ -1824,7 +2112,7 @@ body.modal-open {
 }
 
 .cred-group input:focus {
-    border-color: #3B82F6;
+    border-color: var(--accent);
 }
 
 /* ── Catalog toggles ── */
@@ -1875,7 +2163,7 @@ body.modal-open {
     grid-column: 1 / -1;
     width: 100%;
     border: none;
-    border-top: 1px solid rgba(255,255,255,0.06);
+    border-top: 1px solid var(--overlay-06);
     margin: 0;
 }
 
@@ -1933,7 +2221,7 @@ body.modal-open {
 }
 
 .switch input:checked + .slider {
-    background: #3B82F6;
+    background: var(--accent);
 }
 
 .switch input:checked + .slider::before {
@@ -1958,12 +2246,12 @@ body.modal-open {
     text-decoration: none;
     cursor: pointer;
     transition: opacity 0.2s, transform 0.1s;
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .btn-primary-action:hover {
     opacity: 0.9;
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .btn-primary-action:active {
@@ -1971,11 +2259,11 @@ body.modal-open {
 }
 
 .btn-login {
-    background: linear-gradient(135deg, #3B82F6, #6341d4);
+    background: linear-gradient(135deg, var(--accent), #6341d4);
 }
 
 .btn-install {
-    background: linear-gradient(135deg, #3B82F6, #6341d4);
+    background: linear-gradient(135deg, var(--accent), #6341d4);
 }
 
 /* Outline / secondary button — same shape as primary but transparent so the primary CTA
@@ -1986,9 +2274,9 @@ body.modal-open {
     padding: 0.75rem;
     margin-top: 0.6rem;
     background: transparent;
-    border: 1px solid rgba(255,255,255,0.18);
+    border: 1px solid var(--overlay-18);
     border-radius: 10px;
-    color: #e0e0e0;
+    color: var(--text);
     font-size: 0.95rem;
     font-weight: 600;
     text-align: center;
@@ -1999,9 +2287,9 @@ body.modal-open {
 }
 
 .btn-secondary-action:hover {
-    background: rgba(255,255,255,0.05);
+    background: var(--overlay-05);
     border-color: rgba(255,255,255,0.28);
-    color: #fff;
+    color: var(--text-strong);
     text-decoration: none;
 }
 
@@ -2009,7 +2297,7 @@ body.modal-open {
    outer section card. */
 .install-inner-card {
     background: rgba(0,0,0,0.28);
-    border: 1px solid rgba(255,255,255,0.05);
+    border: 1px solid var(--overlay-05);
     border-radius: 12px;
     padding: 1.1rem 1rem;
 }
@@ -2031,7 +2319,7 @@ body.modal-open {
     font-size: 1rem;
     font-weight: 700;
     margin: 0 0 0.15rem;
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .install-header-text p {
@@ -2043,7 +2331,7 @@ body.modal-open {
 
 .install-divider {
     border: none;
-    border-top: 1px solid rgba(255,255,255,0.06);
+    border-top: 1px solid var(--overlay-06);
     margin: 1rem 0;
 }
 
@@ -2080,7 +2368,7 @@ body.modal-open {
     align-items: center;
     padding: 0.55rem 0.75rem;
     background: rgba(0,0,0,0.4);
-    border: 1px solid rgba(255,255,255,0.08);
+    border: 1px solid var(--overlay-08);
     border-radius: 8px;
     transition: border-color 0.15s, background 0.15s, opacity 0.15s;
 }
@@ -2151,8 +2439,8 @@ body.modal-open {
     width: 2rem;
     height: 2rem;
     padding: 0;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--overlay-05);
+    border: 1px solid var(--overlay-10);
     border-radius: 0.5rem;
     color: rgba(255, 255, 255, 0.7);
     cursor: pointer;
@@ -2163,9 +2451,9 @@ body.modal-open {
 
 .stream-addon-icon-btn:hover,
 .stream-addon-icon-btn:focus {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--overlay-10);
     border-color: rgba(255, 255, 255, 0.2);
-    color: #fff;
+    color: var(--text-strong);
     text-decoration: none;
 }
 
@@ -2217,7 +2505,7 @@ body.modal-open {
     min-width: 0;
     padding: 0.55rem 0.75rem;
     background: rgba(0,0,0,0.4);
-    border: 1px solid rgba(255,255,255,0.08);
+    border: 1px solid var(--overlay-08);
     border-radius: 8px;
     color: #c4b8ff;
     font-family: 'SFMono-Regular', Menlo, Monaco, 'Courier New', monospace;
@@ -2228,10 +2516,10 @@ body.modal-open {
 .btn-icon-copy {
     width: 42px;
     flex-shrink: 0;
-    background: linear-gradient(135deg, #3B82F6, #6341d4);
+    background: linear-gradient(135deg, var(--accent), #6341d4);
     border: none;
     border-radius: 8px;
-    color: #fff;
+    color: var(--text-strong);
     cursor: pointer;
     display: inline-flex;
     align-items: center;
@@ -2253,8 +2541,8 @@ body.modal-open {
 .btn-ghost {
     flex: 1 1 8rem;
     padding: 0.6rem 1rem;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.12);
+    background: var(--overlay-05);
+    border: 1px solid var(--overlay-12);
     border-radius: 10px;
     color: #ddd;
     font-size: 0.88rem;
@@ -2272,7 +2560,7 @@ body.modal-open {
 .btn-ghost:hover {
     background: rgba(255,255,255,0.09);
     border-color: rgba(255,255,255,0.2);
-    color: #fff;
+    color: var(--text-strong);
     text-decoration: none;
 }
 
@@ -2302,7 +2590,7 @@ body.modal-open {
     gap: 0.75rem;
     padding: 0.6rem 0.9rem;
     background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.06);
+    border: 1px solid var(--overlay-06);
     border-radius: 10px;
 }
 
@@ -2334,7 +2622,7 @@ body.modal-open {
 
 .linked-account-primary {
     color: #aaa;
-    background: rgba(255,255,255,0.06);
+    background: var(--overlay-06);
 }
 
 .linked-account-connected {
@@ -2362,8 +2650,8 @@ body.modal-open {
 .linked-account-creds input[type="text"],
 .linked-account-creds input[type="password"] {
     padding: 0.5rem 0.75rem;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.12);
+    background: var(--overlay-05);
+    border: 1px solid var(--overlay-12);
     border-radius: 8px;
     color: #eee;
     font-family: inherit;
@@ -2378,7 +2666,7 @@ body.modal-open {
     gap: 0.75rem;
     margin-top: 0.9rem;
     padding-top: 0.9rem;
-    border-top: 1px solid rgba(255,255,255,0.06);
+    border-top: 1px solid var(--overlay-06);
 }
 
 .full-sync-text {
@@ -2418,7 +2706,7 @@ body.modal-open {
 
 .sync-modal-card {
     background: #1a1a1a;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--overlay-08);
     border-radius: 14px;
     padding: 1.5rem;
     width: min(92vw, 420px);
@@ -2453,7 +2741,7 @@ body.modal-open {
 }
 
 .sync-modal-close:hover {
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .episode-stream-section-title {
@@ -2495,8 +2783,8 @@ body.modal-open {
     flex: 1;
     min-width: 0;
     text-align: left;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-08);
     border-radius: 0.6rem;
     padding: 0.6rem 0.8rem;
     color: #ddd;
@@ -2521,8 +2809,8 @@ body.modal-open {
     align-items: center;
     justify-content: center;
     width: 2.4rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-08);
     border-radius: 0.6rem;
     color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
@@ -2531,9 +2819,9 @@ body.modal-open {
 
 .episode-stream-action:hover,
 .episode-stream-action:focus {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: rgba(255, 255, 255, 0.15);
-    color: #fff;
+    background: var(--overlay-07);
+    border-color: var(--overlay-15);
+    color: var(--text-strong);
 }
 
 /* External-launch button while a click is mid-resolve. The
@@ -2574,9 +2862,9 @@ body.modal-open {
 
 .episode-stream-pick:hover,
 .episode-stream-pick:focus {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: rgba(255, 255, 255, 0.15);
-    color: #fff;
+    background: var(--overlay-07);
+    border-color: var(--overlay-15);
+    color: var(--text-strong);
     text-decoration: none;
 }
 
@@ -2676,7 +2964,7 @@ body.modal-open {
     display: inline-flex;
     align-items: center;
     padding: 0.05rem 0.4rem;
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--overlay-06);
     border-radius: 0.35rem;
     color: rgba(255, 255, 255, 0.75);
     font-size: 0.72rem;
@@ -2723,7 +3011,7 @@ body.modal-open {
     display: inline-flex;
     align-items: center;
     padding: 0.05rem 0.4rem;
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--overlay-06);
     border-radius: 0.35rem;
     color: rgba(255, 255, 255, 0.65);
     font-size: 0.72rem;
@@ -2756,7 +3044,7 @@ body.modal-open {
 }
 
 .watch-back:hover {
-    color: #fff;
+    color: var(--text-strong);
     text-decoration: none;
 }
 
@@ -2764,7 +3052,7 @@ body.modal-open {
     font-size: 1.5rem;
     font-weight: 700;
     margin: 0;
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .watch-meta {
@@ -2791,7 +3079,7 @@ body.modal-open {
        reading as a hole in the page. A thin highlighted border + a
        soft outer shadow gives the surface enough lift to register as
        a distinct element without competing with the video content. */
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--overlay-10);
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
     overflow: hidden;
     display: flex;
@@ -2858,8 +3146,8 @@ body.modal-open {
 .watch-player-fallback {
     margin-top: 0.75rem;
     padding: 1rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-08);
     border-radius: 0.75rem;
 }
 
@@ -2932,8 +3220,8 @@ body.modal-open {
     flex-direction: column;
     gap: 0.2rem;
     padding: 0.75rem 1rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-08);
     border-radius: 0.75rem;
     color: #ddd;
     text-decoration: none;
@@ -2942,9 +3230,9 @@ body.modal-open {
 }
 
 .watch-nav-btn:hover {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: rgba(255, 255, 255, 0.15);
-    color: #fff;
+    background: var(--overlay-07);
+    border-color: var(--overlay-15);
+    color: var(--text-strong);
     text-decoration: none;
     transform: translateY(-1px);
 }
@@ -3020,7 +3308,7 @@ body.modal-open {
     margin-left: 0.5rem;
     padding: 0.05rem 0.4rem;
     border-radius: 0.6rem;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--overlay-08);
     color: rgba(255, 255, 255, 0.55);
     font-size: 0.7rem;
     font-weight: 500;
@@ -3056,7 +3344,7 @@ body.modal-open {
     background: rgba(0, 0, 0, 0.75);
     border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 0.5rem;
-    color: #fff;
+    color: var(--text-strong);
     font-size: 0.85rem;
     font-weight: 600;
     cursor: pointer;
@@ -3113,8 +3401,8 @@ body.modal-open {
     align-items: center;
     gap: 0.5rem;
     padding: 0.4rem 0.75rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-10);
     border-radius: 999px;
     color: rgba(255, 255, 255, 0.7);
     font-size: 0.8rem;
@@ -3123,7 +3411,7 @@ body.modal-open {
 }
 
 .watch-toggle:hover {
-    color: #fff;
+    color: var(--text-strong);
     border-color: rgba(255, 255, 255, 0.2);
 }
 
@@ -3138,7 +3426,7 @@ body.modal-open {
 .watch-toggle.is-active {
     background: rgba(99, 102, 241, 0.18);
     border-color: rgba(99, 102, 241, 0.4);
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .watch-toggle.is-active .watch-toggle-dot {
@@ -3155,8 +3443,8 @@ body.modal-open {
     align-items: center;
     padding: 0.4rem 0.75rem;
     margin-left: 0.5rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-10);
     border-radius: 999px;
     color: rgba(255, 255, 255, 0.7);
     font-size: 0.78rem;
@@ -3197,7 +3485,7 @@ body.modal-open {
    stroke) so the legibility holds on Firefox + Safari too. */
 ::cue {
     background-color: transparent;
-    color: #fff;
+    color: var(--text-strong);
     /* Slightly bolder than browser default — caption text reads
        better at typical video viewing distances when it's heavier
        than the surrounding ASS / Cinemeta UI text, and the heavier
@@ -3320,7 +3608,7 @@ body.modal-open {
 .sync-modal-title {
     font-size: 1.05rem;
     margin: 0 0 0.6rem;
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .sync-modal-message {
@@ -3332,7 +3620,7 @@ body.modal-open {
 
 .sync-modal-bar {
     height: 8px;
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--overlay-06);
     border-radius: 999px;
     overflow: hidden;
 }
@@ -3340,7 +3628,7 @@ body.modal-open {
 .sync-modal-bar-fill {
     height: 100%;
     width: 0%;
-    background: linear-gradient(90deg, #3B82F6, #6341d4);
+    background: linear-gradient(90deg, var(--accent), #6341d4);
     transition: width 0.25s ease-out;
 }
 
@@ -3361,7 +3649,7 @@ body.modal-open {
     background: linear-gradient(135deg, #f04e40, #d83b3b);
     border: none;
     border-radius: 999px;
-    color: #fff;
+    color: var(--text-strong);
     font-size: 0.88rem;
     font-weight: 600;
     cursor: pointer;
@@ -3430,7 +3718,7 @@ body.modal-open {
 }
 
 .hint-text a {
-    color: #3B82F6;
+    color: var(--accent);
     text-decoration: underline;
 }
 
@@ -3444,7 +3732,7 @@ body.modal-open {
 
 .hint-copy-btn {
     background: transparent;
-    color: #3B82F6;
+    color: var(--accent);
     border: 1px solid rgba(59, 130, 246, 0.5);
     border-radius: 999px;
     padding: 0.15rem 0.55rem;
@@ -3509,7 +3797,7 @@ body.modal-open {
 .manage-entry-title {
     font-size: 1.05rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--text-strong);
     margin: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3522,8 +3810,8 @@ body.modal-open {
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: #999;
-    background: rgba(255,255,255,0.06);
+    color: var(--text-dim);
+    background: var(--overlay-06);
     padding: 0.15rem 0.5rem;
     border-radius: 4px;
     width: fit-content;
@@ -3531,7 +3819,7 @@ body.modal-open {
 
 .manage-entry-sep {
     border: none;
-    border-top: 1px solid rgba(255,255,255,0.06);
+    border-top: 1px solid var(--overlay-06);
     margin: 1rem 0;
 }
 
@@ -3542,7 +3830,7 @@ body.modal-open {
 .manage-entry-label {
     display: block;
     font-size: 0.78rem;
-    color: #3B82F6;
+    color: var(--accent);
     margin-bottom: 0.35rem;
     font-weight: 600;
 }
@@ -3551,10 +3839,10 @@ body.modal-open {
 .manage-entry-input {
     width: 100%;
     padding: 0.55rem 0.75rem;
-    background: rgba(255,255,255,0.07);
-    border: 1px solid rgba(255,255,255,0.12);
+    background: var(--overlay-07);
+    border: 1px solid var(--overlay-12);
     border-radius: 8px;
-    color: #fff;
+    color: var(--text-strong);
     font-size: 0.9rem;
     outline: none;
     transition: border-color 0.2s;
@@ -3572,12 +3860,12 @@ body.modal-open {
 
 .manage-entry-select:focus,
 .manage-entry-input:focus {
-    border-color: #3B82F6;
+    border-color: var(--accent);
 }
 
 .manage-entry-select option {
     background: #1a1a1a;
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .manage-entry-progress-row {
@@ -3597,7 +3885,7 @@ body.modal-open {
 }
 
 .btn-save {
-    background: linear-gradient(135deg, #3B82F6, #6341d4);
+    background: linear-gradient(135deg, var(--accent), #6341d4);
     margin-top: 0.5rem;
 }
 
@@ -3636,7 +3924,7 @@ body.modal-open {
     background: rgba(20, 20, 20, 0.92);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--overlay-10);
     border-radius: 999px;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
     transition: border-color 0.18s, box-shadow 0.18s, background 0.18s;
@@ -3672,7 +3960,7 @@ body.modal-open {
    flag bytes (cheap, idempotent) so the affordance never feels dead. */
 .floating-save-btn {
     padding: 0.5rem 1.1rem;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--overlay-08);
     color: rgba(255, 255, 255, 0.85);
     border: 0;
     border-radius: 999px;
@@ -3684,7 +3972,7 @@ body.modal-open {
 
 .floating-save-bar.is-dirty .floating-save-btn {
     background: linear-gradient(135deg, #4f46e5, #7c3aed);
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .floating-save-btn:hover {
@@ -3736,8 +4024,8 @@ body.modal-open {
 .loader-spinner {
     width: 52px;
     height: 52px;
-    border: 4px solid rgba(255, 255, 255, 0.12);
-    border-top-color: #3B82F6;
+    border: 4px solid var(--overlay-12);
+    border-top-color: var(--accent);
     border-radius: 50%;
     animation: loader-spin 0.8s linear infinite;
 }
@@ -3769,9 +4057,9 @@ body.modal-open {
     width: 44px;
     height: 44px;
     border-radius: 999px;
-    background: #3B82F6;
-    border: 1px solid #3B82F6;
-    color: #fff;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: var(--text-strong);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -3786,7 +4074,7 @@ body.modal-open {
 
 .scroll-top-btn:hover,
 .scroll-top-btn:focus {
-    background: #2563eb;
+    background: var(--accent-hover);
     box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
 }
 
@@ -3814,8 +4102,8 @@ body.modal-open {
 .dashboard-tile {
     display: block;
     padding: 1.25rem 1.5rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-08);
     border-radius: 1rem;
     color: inherit;
     text-decoration: none;
@@ -3823,8 +4111,8 @@ body.modal-open {
 }
 
 .dashboard-tile:hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: #3B82F6;
+    background: var(--overlay-08);
+    border-color: var(--accent);
     color: inherit;
     text-decoration: none;
     transform: translateY(-1px);
@@ -3833,13 +4121,13 @@ body.modal-open {
 .dashboard-tile-title {
     font-size: 1.15rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--text-strong);
     margin: 0 0 0.35rem;
 }
 
 .dashboard-tile-text {
     font-size: 0.9rem;
-    color: #999;
+    color: var(--text-dim);
     margin: 0;
     line-height: 1.4;
 }
@@ -3852,8 +4140,8 @@ body.modal-open {
 }
 
 .dashboard-tile-disabled:hover {
-    background: rgba(255, 255, 255, 0.04);
-    border-color: rgba(255, 255, 255, 0.08);
+    background: var(--overlay-04);
+    border-color: var(--overlay-08);
     transform: none;
 }
 
@@ -3889,8 +4177,8 @@ body.modal-open {
     gap: 0.2rem;
     min-height: 80px;
     padding: 0.9rem 1rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-08);
     border-radius: 1rem;
     color: #ddd;
     text-decoration: none;
@@ -3899,9 +4187,9 @@ body.modal-open {
 
 .studio-tile:hover,
 .studio-tile:focus {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: rgba(255, 255, 255, 0.15);
-    color: #fff;
+    background: var(--overlay-07);
+    border-color: var(--overlay-15);
+    color: var(--text-strong);
     text-decoration: none;
     transform: translateY(-1px);
 }
@@ -3984,8 +4272,8 @@ body.modal-open {
     text-align: center;
     min-height: 48px;
     padding: 0.5rem 0.75rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-08);
     border-radius: 0.75rem;
     color: #ddd;
     text-decoration: none;
@@ -3994,9 +4282,9 @@ body.modal-open {
 
 .tag-tile:hover,
 .tag-tile:focus {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: rgba(255, 255, 255, 0.15);
-    color: #fff;
+    background: var(--overlay-07);
+    border-color: var(--overlay-15);
+    color: var(--text-strong);
     text-decoration: none;
     transform: translateY(-1px);
 }
@@ -4012,8 +4300,8 @@ body.modal-open {
     align-items: flex-start;
     gap: 0.75rem;
     padding: 1rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-08);
     border-radius: 1rem;
     color: inherit;
     text-decoration: none;
@@ -4021,8 +4309,8 @@ body.modal-open {
 }
 
 .browse-tile:hover {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: rgba(255, 255, 255, 0.15);
+    background: var(--overlay-07);
+    border-color: var(--overlay-15);
     color: inherit;
     text-decoration: none;
     transform: translateY(-1px);
@@ -4034,8 +4322,8 @@ body.modal-open {
 }
 
 .browse-tile-disabled:hover {
-    background: rgba(255, 255, 255, 0.04);
-    border-color: rgba(255, 255, 255, 0.08);
+    background: var(--overlay-04);
+    border-color: var(--overlay-08);
     transform: none;
 }
 
@@ -4064,13 +4352,13 @@ body.modal-open {
 .browse-tile-title {
     font-size: 0.95rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--text-strong);
     margin: 0 0 0.15rem;
 }
 
 .browse-tile-text {
     font-size: 0.78rem;
-    color: #999;
+    color: var(--text-dim);
     margin: 0;
     line-height: 1.3;
 }
@@ -4109,7 +4397,7 @@ body.modal-open {
 .dashboard-section-title {
     font-size: 1rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--text-strong);
     margin: 0;
 }
 
@@ -4127,14 +4415,14 @@ body.modal-open {
     align-items: center;
     gap: 0.35rem;
     font-size: 0.85rem;
-    color: #999;
+    color: var(--text-dim);
     text-decoration: none;
     transition: color 0.15s;
 }
 
 .dashboard-section-link:hover,
 .dashboard-section-link:focus {
-    color: #fff;
+    color: var(--text-strong);
     text-decoration: none;
 }
 
@@ -4155,7 +4443,7 @@ body.modal-open {
    Shares the same grey as the active link so the row reads consistently. */
 .dashboard-section-link-muted {
     font-size: 0.8rem;
-    color: #999;
+    color: var(--text-dim);
 }
 
 /* Grouping wrapper around the muted attribution + the refresh icon so they
@@ -4189,7 +4477,7 @@ body.modal-open {
     border-radius: 999px;
     color: #777;
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--overlay-10);
     cursor: pointer;
     padding: 0;
     text-decoration: none;
@@ -4198,7 +4486,7 @@ body.modal-open {
 
 .dashboard-stats-info-btn:hover,
 .dashboard-stats-info-btn:focus {
-    color: #fff;
+    color: var(--text-strong);
     border-color: rgba(59, 130, 246, 0.4);
     background: rgba(59, 130, 246, 0.12);
     outline: none;
@@ -4216,7 +4504,7 @@ body.modal-open {
     max-width: calc(100vw - 2rem);
     padding: 0.65rem 0.75rem;
     background: #181818;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid var(--overlay-12);
     border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
     color: #ccc;
@@ -4257,7 +4545,7 @@ body.modal-open {
 
 .dashboard-stats-info-tooltip a:hover,
 .dashboard-stats-info-tooltip a:focus {
-    color: #fff;
+    color: var(--text-strong);
 }
 
 /* Library variant sits inline inside the page-subtitle line; nudge it up a
@@ -4282,8 +4570,8 @@ body.modal-open {
 .stats-cell {
     flex: 1 1 130px;
     padding: 0.75rem 0.85rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-08);
     border-radius: 1rem;
     display: flex;
     flex-direction: column;
@@ -4302,8 +4590,8 @@ a.stats-cell-link {
 }
 
 a.stats-cell-link:hover {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: rgba(255, 255, 255, 0.18);
+    background: var(--overlay-07);
+    border-color: var(--overlay-18);
     text-decoration: none;
     color: inherit;
     transform: translateY(-1px);
@@ -4327,7 +4615,7 @@ a.stats-cell-link:hover {
 .stats-number {
     font-size: 1.4rem;
     font-weight: 700;
-    color: #fff;
+    color: var(--text-strong);
     line-height: 1.1;
 }
 
@@ -4350,11 +4638,11 @@ a.stats-cell-link:hover {
 }
 
 .skeleton-shimmer {
-    background-color: rgba(255, 255, 255, 0.05);
+    background-color: var(--overlay-05);
     background-image: linear-gradient(
         90deg,
         rgba(255, 255, 255, 0) 0%,
-        rgba(255, 255, 255, 0.08) 50%,
+        var(--overlay-08) 50%,
         rgba(255, 255, 255, 0) 100%);
     background-size: 200% 100%;
     background-repeat: no-repeat;
@@ -4380,11 +4668,11 @@ a.stats-cell-link:hover {
     border-radius: 5px;
     min-width: 4.2rem;
     height: 1.4rem;
-    background-color: rgba(255, 255, 255, 0.05);
+    background-color: var(--overlay-05);
     background-image: linear-gradient(
         90deg,
         rgba(255, 255, 255, 0) 0%,
-        rgba(255, 255, 255, 0.08) 50%,
+        var(--overlay-08) 50%,
         rgba(255, 255, 255, 0) 100%);
     background-size: 200% 100%;
     background-repeat: no-repeat;
@@ -4423,11 +4711,11 @@ a.stats-cell-link:hover {
     height: 0.8rem;
     margin-top: 0.5rem;
     border-radius: 4px;
-    background-color: rgba(255, 255, 255, 0.05);
+    background-color: var(--overlay-05);
     background-image: linear-gradient(
         90deg,
         rgba(255, 255, 255, 0) 0%,
-        rgba(255, 255, 255, 0.08) 50%,
+        var(--overlay-08) 50%,
         rgba(255, 255, 255, 0) 100%);
     background-size: 200% 100%;
     background-repeat: no-repeat;
@@ -4448,7 +4736,7 @@ a.stats-cell-link:hover {
 
 .stats-label {
     font-size: 0.72rem;
-    color: #999;
+    color: var(--text-dim);
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
@@ -4491,7 +4779,7 @@ a.stats-cell-link:hover {
 }
 
 .library-back a {
-    color: #3B82F6;
+    color: var(--accent);
     text-decoration: none;
 }
 
@@ -4500,7 +4788,7 @@ a.stats-cell-link:hover {
 }
 
 .library-empty {
-    color: #999;
+    color: var(--text-dim);
     text-align: center;
     margin-top: 2rem;
     font-size: 0.95rem;
@@ -4520,7 +4808,7 @@ a.stats-cell-link:hover {
 .library-tab {
     padding: 0.45rem 0.95rem;
     border-radius: 1.5rem;
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--overlay-06);
     color: #ccc;
     font-size: 0.85rem;
     font-weight: 500;
@@ -4529,15 +4817,15 @@ a.stats-cell-link:hover {
 }
 
 .library-tab:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
+    background: var(--overlay-12);
+    color: var(--text-strong);
     text-decoration: none;
 }
 
 .library-tab-active,
 .library-tab-active:hover {
-    background: #3B82F6;
-    color: #fff;
+    background: var(--accent);
+    color: var(--text-strong);
 }
 
 /* Search bar above the tabs / grid. Submits via GET to the same page so the
@@ -4553,10 +4841,10 @@ a.stats-cell-link:hover {
 .library-search-input {
     flex: 1;
     padding: 0.55rem 0.95rem;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--overlay-06);
+    border: 1px solid var(--overlay-10);
     border-radius: 1.5rem;
-    color: #e0e0e0;
+    color: var(--text);
     font-size: 0.9rem;
     outline: none;
     transition: border-color 0.15s, background 0.15s;
@@ -4567,19 +4855,19 @@ a.stats-cell-link:hover {
 }
 
 .library-search-input:focus {
-    border-color: #3B82F6;
-    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--accent);
+    background: var(--overlay-08);
 }
 
 .library-search-clear {
-    color: #999;
+    color: var(--text-dim);
     font-size: 0.85rem;
     text-decoration: none;
     flex-shrink: 0;
 }
 
 .library-search-clear:hover {
-    color: #fff;
+    color: var(--text-strong);
     text-decoration: underline;
 }
 
@@ -4598,10 +4886,10 @@ a.stats-cell-link:hover {
 .genre-picker-select {
     flex: 1;
     padding: 0.5rem 0.95rem;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--overlay-06);
+    border: 1px solid var(--overlay-10);
     border-radius: 1.5rem;
-    color: #e0e0e0;
+    color: var(--text);
     font-size: 0.9rem;
     font-family: inherit;
     outline: none;
@@ -4617,13 +4905,13 @@ a.stats-cell-link:hover {
 }
 
 .genre-picker-select:focus {
-    border-color: #3B82F6;
-    background-color: rgba(255, 255, 255, 0.08);
+    border-color: var(--accent);
+    background-color: var(--overlay-08);
 }
 
 .genre-picker-select option {
-    background: #0A0A0A;
-    color: #e0e0e0;
+    background: var(--bg);
+    color: var(--text);
 }
 
 /* Combined filter bar — replaces the old separate .library-search + .genre-
@@ -4645,10 +4933,10 @@ a.stats-cell-link:hover {
     flex: 1 1 240px;
     min-width: 0;
     padding: 0.55rem 0.95rem;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--overlay-06);
+    border: 1px solid var(--overlay-10);
     border-radius: 1.5rem;
-    color: #e0e0e0;
+    color: var(--text);
     font-size: 0.9rem;
     outline: none;
     transition: border-color 0.15s, background 0.15s;
@@ -4657,17 +4945,17 @@ a.stats-cell-link:hover {
 .filter-bar-search::placeholder { color: #777; }
 
 .filter-bar-search:focus {
-    border-color: #3B82F6;
-    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--accent);
+    background: var(--overlay-08);
 }
 
 .filter-bar-select {
     flex: 0 0 auto;
     padding: 0.5rem 2.5rem 0.5rem 0.95rem;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--overlay-06);
+    border: 1px solid var(--overlay-10);
     border-radius: 1.5rem;
-    color: #e0e0e0;
+    color: var(--text);
     font-size: 0.9rem;
     font-family: inherit;
     outline: none;
@@ -4683,13 +4971,13 @@ a.stats-cell-link:hover {
 }
 
 .filter-bar-select:focus {
-    border-color: #3B82F6;
-    background-color: rgba(255, 255, 255, 0.08);
+    border-color: var(--accent);
+    background-color: var(--overlay-08);
 }
 
 .filter-bar-select option {
-    background: #0A0A0A;
-    color: #e0e0e0;
+    background: var(--bg);
+    color: var(--text);
 }
 
 /* Primary submit — cobalt-filled pill so it reads as the commit affordance
@@ -4697,10 +4985,10 @@ a.stats-cell-link:hover {
 .filter-bar-submit {
     flex: 0 0 auto;
     padding: 0.55rem 1.2rem;
-    background: #3B82F6;
+    background: var(--accent);
     border: 0;
     border-radius: 1.5rem;
-    color: #fff;
+    color: var(--text-strong);
     font-size: 0.9rem;
     font-weight: 600;
     cursor: pointer;
@@ -4709,18 +4997,18 @@ a.stats-cell-link:hover {
 
 .filter-bar-submit:hover,
 .filter-bar-submit:focus {
-    background: #2563eb;
+    background: var(--accent-hover);
 }
 
 .filter-bar-clear {
-    color: #999;
+    color: var(--text-dim);
     font-size: 0.85rem;
     text-decoration: none;
     flex-shrink: 0;
 }
 
 .filter-bar-clear:hover {
-    color: #fff;
+    color: var(--text-strong);
     text-decoration: underline;
 }
 
@@ -4772,8 +5060,8 @@ a.stats-cell-link:hover {
 .paginator-loader-spinner {
     width: 28px;
     height: 28px;
-    border: 3px solid rgba(255, 255, 255, 0.12);
-    border-top-color: #3B82F6;
+    border: 3px solid var(--overlay-12);
+    border-top-color: var(--accent);
     border-radius: 50%;
     animation: loader-spin 0.8s linear infinite;
 }
@@ -4795,7 +5083,7 @@ a.stats-cell-link:hover {
     padding-bottom: 0.4rem;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+    scrollbar-color: var(--overlay-15) transparent;
 }
 
 .poster-scroll-row::-webkit-scrollbar {
@@ -4807,7 +5095,7 @@ a.stats-cell-link:hover {
 }
 
 .poster-scroll-row::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--overlay-12);
     border-radius: 3px;
 }
 
@@ -4857,11 +5145,11 @@ a.stats-cell-link:hover {
     aspect-ratio: 2 / 3;
     object-fit: cover;
     display: block;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--overlay-04);
 }
 
 .library-card-poster-placeholder {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--overlay-04);
 }
 
 /* Score badge overlay — bottom-left of the poster, ★ + 0-10 with one decimal.
@@ -4897,7 +5185,7 @@ a.stats-cell-link:hover {
     padding: 0.15rem 0.45rem;
     background: rgba(59, 130, 246, 0.9);
     border-radius: 999px;
-    color: #fff;
+    color: var(--text-strong);
     font-size: 0.7rem;
     font-weight: 600;
     line-height: 1.2;
@@ -4942,7 +5230,7 @@ a.stats-cell-link:hover {
     background: rgba(59, 130, 246, 0.95);
     border: 0;
     border-radius: 50%;
-    color: #fff;
+    color: var(--text-strong);
     font-size: 0.78rem;
     font-weight: 700;
     cursor: pointer;
@@ -4962,7 +5250,7 @@ a.stats-cell-link:hover {
 
 .library-card-plus:hover,
 .library-card-plus:focus-visible {
-    background: #2563eb;
+    background: var(--accent-hover);
 }
 
 .library-card-plus:disabled {
@@ -4987,14 +5275,14 @@ a.stats-cell-link:hover {
     border-radius: 1.25rem;
     overflow: hidden;
     background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--overlay-06);
     isolation: isolate; /* establish a stacking context for the backdrop layers */
 }
 
 .anime-detail-hero-flat {
     /* No banner image — keep the dark card-surface background instead of the
        gradient overlay so the hero doesn't read as "missing image". */
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--overlay-04);
 }
 
 .anime-detail-backdrop {
@@ -5017,7 +5305,7 @@ a.stats-cell-link:hover {
     position: absolute;
     inset: 0;
     background:
-        linear-gradient(180deg, rgba(10, 10, 10, 0.55) 0%, rgba(10, 10, 10, 0.92) 65%, #0A0A0A 100%);
+        linear-gradient(180deg, rgba(10, 10, 10, 0.55) 0%, rgba(10, 10, 10, 0.92) 65%, var(--bg) 100%);
     z-index: -1;
 }
 
@@ -5048,7 +5336,7 @@ a.stats-cell-link:hover {
     object-fit: cover;
     border-radius: 0.75rem;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--overlay-05);
     flex-shrink: 0;
 }
 
@@ -5059,7 +5347,7 @@ a.stats-cell-link:hover {
 }
 
 .anime-detail-poster-placeholder {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--overlay-04);
 }
 
 .anime-detail-meta {
@@ -5089,7 +5377,7 @@ a.stats-cell-link:hover {
 .anime-detail-title {
     font-size: 1.5rem;
     font-weight: 700;
-    color: #fff;
+    color: var(--text-strong);
     margin: 0;
     line-height: 1.15;
     letter-spacing: -0.015em;
@@ -5136,8 +5424,8 @@ a.stats-cell-link:hover {
     align-items: center;
     gap: 0.4rem;
     padding: 0.2rem 0.7rem;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: var(--overlay-06);
+    border: 1px solid var(--overlay-12);
     border-radius: 999px;
     color: #ccc;
     font-size: 0.82rem;
@@ -5147,12 +5435,12 @@ a.stats-cell-link:hover {
 .anime-detail-status-airing {
     background: rgba(59, 130, 246, 0.15);
     border-color: rgba(59, 130, 246, 0.4);
-    color: #93c5fd;
+    color: var(--accent-light);
 }
 
 .anime-detail-status-finished {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.12);
+    background: var(--overlay-05);
+    border-color: var(--overlay-12);
     color: #aaa;
 }
 
@@ -5176,7 +5464,7 @@ a.stats-cell-link:hover {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #3B82F6;
+    background: var(--accent);
     animation: airing-pulse 2s ease-in-out infinite;
 }
 
@@ -5283,7 +5571,7 @@ a.stats-cell-link:hover {
 .source-chip-anilist:link,
 .source-chip-anilist:visited {
     background: #02A9FF;
-    color: #fff;
+    color: var(--text-strong);
 }
 
 /* MyAnimeList — official brand navy. */
@@ -5291,7 +5579,7 @@ a.stats-cell-link:hover {
 .source-chip-mal:link,
 .source-chip-mal:visited {
     background: #2E51A2;
-    color: #fff;
+    color: var(--text-strong);
 }
 
 /* Kitsu — official brand orange-red (their "Kitsu" wordmark colour). */
@@ -5299,7 +5587,7 @@ a.stats-cell-link:hover {
 .source-chip-kitsu:link,
 .source-chip-kitsu:visited {
     background: #F75239;
-    color: #fff;
+    color: var(--text-strong);
 }
 
 /* IMDb — signature gold/yellow. Dark text on yellow matches IMDb's own
@@ -5318,7 +5606,7 @@ a.stats-cell-link:hover {
 .source-chip-stremio:link,
 .source-chip-stremio:visited {
     background: #7B5BF5;
-    color: #fff;
+    color: var(--text-strong);
 }
 
 /* Stremio chip while the deep-link probe is running. The chip's
@@ -5429,7 +5717,7 @@ button.anime-detail-user-state:hover {
    competing with the status text. */
 .anime-detail-user-state-icon {
     flex-shrink: 0;
-    color: #93c5fd;
+    color: var(--accent-light);
 }
 
 /* "Not on your list" variant — fired when the requested anime has no
@@ -5439,9 +5727,9 @@ button.anime-detail-user-state:hover {
    so it reads as a status badge, not a tappable action. */
 .anime-detail-user-state-unavailable,
 .anime-detail-user-state-unavailable:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--overlay-04);
     color: rgba(255, 255, 255, 0.55);
-    border-color: rgba(255, 255, 255, 0.08);
+    border-color: var(--overlay-08);
     cursor: help;
     transform: none;
 }
@@ -5465,8 +5753,8 @@ button.anime-detail-user-state:hover {
     align-items: center;
     gap: 0.5rem;
     padding: 0.55rem 1.4rem;
-    background: #3B82F6;
-    color: #fff;
+    background: var(--accent);
+    color: var(--text-strong);
     border-radius: 999px;
     font-size: 0.92rem;
     font-weight: 600;
@@ -5477,8 +5765,8 @@ button.anime-detail-user-state:hover {
 
 .anime-detail-watch-next:hover,
 .anime-detail-watch-next:focus {
-    background: #2563eb;
-    color: #fff;
+    background: var(--accent-hover);
+    color: var(--text-strong);
     text-decoration: none;
 }
 
@@ -5507,7 +5795,7 @@ button.anime-detail-user-state:hover {
     border-radius: 0.6rem;
     background: #2a2a2a;
     color: #f0f0f0;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--overlay-08);
     font-size: 0.95rem;
     font-weight: 600;
     text-decoration: none;
@@ -5518,14 +5806,14 @@ button.anime-detail-user-state:hover {
 .anime-detail-movie-cta:focus {
     background: #353535;
     border-color: rgba(255, 255, 255, 0.16);
-    color: #fff;
+    color: var(--text-strong);
     text-decoration: none;
 }
 
 .anime-detail-section-title {
     font-size: 1.05rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--text-strong);
     margin: 0 0 0.6rem;
 }
 
@@ -5575,7 +5863,7 @@ button.anime-detail-user-state:hover {
 }
 
 .anime-detail-synopsis-toggle:hover {
-    color: #93c5fd;
+    color: var(--accent-light);
     text-decoration: underline;
 }
 
@@ -5596,7 +5884,7 @@ button.anime-detail-user-state:hover {
     background: transparent;
     border: 0;
     border-radius: 999px;
-    color: #999;
+    color: var(--text-dim);
     font-size: 0.9rem;
     font-weight: 600;
     cursor: pointer;
@@ -5605,14 +5893,14 @@ button.anime-detail-user-state:hover {
 }
 
 .season-tab:hover {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-strong);
+    background: var(--overlay-06);
 }
 
 .season-tab-active,
 .season-tab-active:hover {
-    background: #3B82F6;
-    color: #fff;
+    background: var(--accent);
+    color: var(--text-strong);
 }
 
 /* Episode-section header with the collapse / expand control. The
@@ -5643,7 +5931,7 @@ button.anime-detail-user-state:hover {
     padding: 0.25rem 0.5rem;
     background: transparent;
     border: 0;
-    color: #999;
+    color: var(--text-dim);
     font-size: 0.82rem;
     font-weight: 500;
     cursor: pointer;
@@ -5653,8 +5941,8 @@ button.anime-detail-user-state:hover {
 
 .anime-detail-episodes-toggle:hover,
 .anime-detail-episodes-toggle:focus-visible {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-strong);
+    background: var(--overlay-05);
 }
 
 .anime-detail-episodes-toggle-icon {
@@ -5686,7 +5974,7 @@ button.anime-detail-user-state:hover {
        second OS chrome glued onto the page. Falls back to the platform
        default on browsers without -webkit-scrollbar support. */
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+    scrollbar-color: var(--overlay-15) transparent;
 }
 
 .anime-detail-episodes-body::-webkit-scrollbar {
@@ -5698,7 +5986,7 @@ button.anime-detail-user-state:hover {
 }
 
 .anime-detail-episodes-body::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--overlay-12);
     border-radius: 4px;
 }
 
@@ -5741,7 +6029,7 @@ button.anime-detail-user-state:hover {
     padding: 0.75rem 0.5rem;
     align-items: flex-start;
     width: 100%;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--overlay-05);
     overflow: hidden;
 }
 
@@ -5778,10 +6066,10 @@ button.anime-detail-user-state:hover {
     min-width: 0;
     max-width: 280px;
     padding: 0.4rem 0.75rem;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--overlay-04);
     border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 0.5rem;
-    color: #e0e0e0;
+    color: var(--text);
     font-size: 0.85rem;
     font-family: inherit;
     transition: border-color 0.15s, background 0.15s;
@@ -5796,7 +6084,7 @@ button.anime-detail-user-state:hover {
 .anime-detail-episodes-filter:focus {
     outline: none;
     border-color: rgba(255, 255, 255, 0.22);
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--overlay-06);
 }
 
 /* Strip the browser's default search-input "x" decoration. The Escape
@@ -5852,7 +6140,7 @@ button.anime-detail-user-state:hover {
 
 .notif-page-action {
     background: none;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid var(--overlay-12);
     color: #cfcfcf;
     padding: 0.4rem 0.85rem;
     border-radius: 999px;
@@ -5865,9 +6153,9 @@ button.anime-detail-user-state:hover {
 
 .notif-page-action:hover:not(:disabled),
 .notif-page-action:focus:not(:disabled) {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--overlay-05);
     border-color: rgba(255, 255, 255, 0.22);
-    color: #fff;
+    color: var(--text-strong);
     outline: none;
 }
 
@@ -5894,7 +6182,7 @@ button.anime-detail-user-state:hover {
 .notif-page-list {
     display: flex;
     flex-direction: column;
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--overlay-06);
     border-radius: 0.65rem;
     overflow: hidden;
     background: #141414;
@@ -5907,9 +6195,9 @@ button.anime-detail-user-state:hover {
     align-items: center;
     gap: 0.75rem;
     padding: 0.65rem 0.9rem;
-    color: #e0e0e0;
+    color: var(--text);
     text-decoration: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--overlay-05);
 }
 
 .notif-page-item:last-child {
@@ -5918,8 +6206,8 @@ button.anime-detail-user-state:hover {
 
 .notif-page-item:hover,
 .notif-page-item:focus {
-    background: rgba(255, 255, 255, 0.04);
-    color: #fff;
+    background: var(--overlay-04);
+    color: var(--text-strong);
     text-decoration: none;
 }
 
@@ -5928,7 +6216,7 @@ button.anime-detail-user-state:hover {
 }
 
 .notif-page-item-unread .notif-page-title {
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .notif-page-item-selected {
@@ -5951,7 +6239,7 @@ button.anime-detail-user-state:hover {
 .notif-page-checkbox-input {
     width: 16px;
     height: 16px;
-    accent-color: #3B82F6;
+    accent-color: var(--accent);
     cursor: pointer;
     margin: 0;
 }
@@ -5962,11 +6250,11 @@ button.anime-detail-user-state:hover {
     flex-shrink: 0;
     object-fit: cover;
     border-radius: 0.3rem;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--overlay-05);
 }
 
 .notif-page-thumb-placeholder {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--overlay-05);
 }
 
 .notif-page-body {
@@ -5978,7 +6266,7 @@ button.anime-detail-user-state:hover {
     font-size: 0.95rem;
     font-weight: 500;
     line-height: 1.3;
-    color: #e0e0e0;
+    color: var(--text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -6041,7 +6329,7 @@ button.anime-detail-user-state:hover {
     gap: 0.6rem;
     margin: 0.4rem 0 0.6rem;
     padding: 0.55rem 0.85rem;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--overlay-08);
     border-radius: 0.55rem;
     background: rgba(255, 255, 255, 0.02);
     color: #cfcfcf;
@@ -6054,7 +6342,7 @@ button.anime-detail-user-state:hover {
 }
 
 .notif-push-toggle-disable .notif-push-toggle-label {
-    color: #93c5fd;
+    color: var(--accent-light);
     font-weight: 600;
 }
 
@@ -6071,8 +6359,8 @@ button.anime-detail-user-state:hover {
 
 .notif-push-toggle-btn {
     flex-shrink: 0;
-    background: #3B82F6;
-    color: #fff;
+    background: var(--accent);
+    color: var(--text-strong);
     border: 0;
     padding: 0.4rem 0.95rem;
     border-radius: 999px;
@@ -6085,7 +6373,7 @@ button.anime-detail-user-state:hover {
 
 .notif-push-toggle-btn:hover:not(:disabled),
 .notif-push-toggle-btn:focus:not(:disabled) {
-    background: #2563eb;
+    background: var(--accent-hover);
     outline: none;
 }
 
@@ -6097,12 +6385,12 @@ button.anime-detail-user-state:hover {
 .notif-push-toggle-disable .notif-push-toggle-btn {
     background: transparent;
     color: #cfcfcf;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    border: 1px solid var(--overlay-18);
 }
 
 .notif-push-toggle-disable .notif-push-toggle-btn:hover:not(:disabled),
 .notif-push-toggle-disable .notif-push-toggle-btn:focus:not(:disabled) {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--overlay-05);
     border-color: rgba(255, 255, 255, 0.3);
 }
 
@@ -6115,7 +6403,7 @@ button.anime-detail-user-state:hover {
     aspect-ratio: 16 / 9;
     border-radius: 0.55rem;
     overflow: hidden;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--overlay-04);
 }
 
 @media (min-width: 600px) {
@@ -6143,7 +6431,7 @@ button.anime-detail-user-state:hover {
         repeating-linear-gradient(
             135deg,
             rgba(255, 255, 255, 0.025) 0 6px,
-            rgba(255, 255, 255, 0.05) 6px 12px),
+            var(--overlay-05) 6px 12px),
         rgba(255, 255, 255, 0.03);
 }
 
@@ -6197,7 +6485,7 @@ button.anime-detail-user-state:hover {
 .anime-detail-episode-title {
     font-size: 0.92rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--text-strong);
     /* Title can clamp to one line — the description below carries detail. */
     overflow: hidden;
     text-overflow: ellipsis;
@@ -6209,7 +6497,7 @@ button.anime-detail-user-state:hover {
 .anime-detail-episode-date {
     flex-shrink: 0;
     font-size: 0.78rem;
-    color: #999;
+    color: var(--text-dim);
 }
 
 /* Future episodes — date renders amber to telegraph "not aired yet",
@@ -6245,7 +6533,7 @@ ol.anime-detail-episodes[data-can-edit="true"] .anime-detail-episode {
 }
 
 ol.anime-detail-episodes[data-can-edit="true"] .anime-detail-episode:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--overlay-04);
 }
 
 /* Watched rows: thumbnail is fully opaque (the eye badge marks them) but
@@ -6277,7 +6565,7 @@ ol.anime-detail-episodes-busy {
     aspect-ratio: 16 / 9;
     border-radius: 0.85rem;
     overflow: hidden;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--overlay-04);
     text-decoration: none;
     isolation: isolate;
     transition: transform 0.15s, box-shadow 0.15s;
@@ -6343,7 +6631,7 @@ ol.anime-detail-episodes-busy {
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #fff;
+    color: var(--text-strong);
     pointer-events: none;
 }
 
@@ -6360,7 +6648,7 @@ ol.anime-detail-episodes-busy {
 }
 
 .anime-detail-trailer-card:hover .anime-detail-trailer-play::before {
-    background: #3B82F6;
+    background: var(--accent);
     transform: scale(1.05);
 }
 
@@ -6381,7 +6669,7 @@ ol.anime-detail-episodes-busy {
     background: rgba(59, 130, 246, 0.12);
     border: 1px solid rgba(59, 130, 246, 0.25);
     border-radius: 999px;
-    color: #93c5fd;
+    color: var(--accent-light);
     font-size: 0.82rem;
     font-weight: 500;
     text-decoration: none;
@@ -6391,7 +6679,7 @@ ol.anime-detail-episodes-busy {
 .anime-detail-link:hover {
     background: rgba(59, 130, 246, 0.2);
     border-color: rgba(59, 130, 246, 0.5);
-    color: #fff;
+    color: var(--text-strong);
     text-decoration: none;
 }
 
@@ -6407,16 +6695,16 @@ ol.anime-detail-episodes-busy {
 }
 
 .anime-detail-genre-list .anime-detail-link {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.18);
+    background: var(--overlay-06);
+    border-color: var(--overlay-18);
     color: #d4d4d8;
 }
 
 .anime-detail-genre-list .anime-detail-link:hover,
 .anime-detail-genre-list .anime-detail-link:focus {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--overlay-10);
     border-color: rgba(255, 255, 255, 0.3);
-    color: #fff;
+    color: var(--text-strong);
 }
 
 /* Title under the poster — the whole point of building this UI rather than
@@ -6429,7 +6717,7 @@ ol.anime-detail-episodes-busy {
     padding: 0.5rem 0.25rem 0;
     font-size: 0.85rem;
     font-weight: 500;
-    color: #e0e0e0;
+    color: var(--text);
     line-height: 1.3;
     min-height: 2.5em;
 }
@@ -6452,9 +6740,9 @@ ol.anime-detail-episodes-busy {
     width: 36px;
     height: 36px;
     padding: 0;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid var(--overlay-12);
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--overlay-04);
     color: #ccc;
     cursor: pointer;
     transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -6463,9 +6751,35 @@ ol.anime-detail-episodes-busy {
 .notif-bell-btn:hover,
 .notif-bell-btn:focus,
 .notif-bell-open .notif-bell-btn {
-    background: rgba(255, 255, 255, 0.08);
-    color: #fff;
+    background: var(--overlay-08);
+    color: var(--text-strong);
     border-color: rgba(255, 255, 255, 0.22);
+    outline: none;
+}
+
+/* Theme toggle — same circular icon-button shape as the notification bell
+   so the two sit as a matched pair in the header chrome. */
+.theme-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--overlay-12);
+    border-radius: var(--radius-pill);
+    background: var(--overlay-04);
+    color: #ccc;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.theme-toggle-btn:hover,
+.theme-toggle-btn:focus-visible {
+    background: var(--overlay-08);
+    color: var(--text-strong);
+    border-color: var(--overlay-18);
     outline: none;
 }
 
@@ -6484,13 +6798,13 @@ ol.anime-detail-episodes-busy {
     height: 18px;
     padding: 0 2px;
     background: #ef4444;
-    color: #fff;
+    color: var(--text-strong);
     font-size: 0.62rem;
     font-weight: 700;
     line-height: 14px;
     text-align: center;
     border-radius: 999px;
-    border: 2px solid #0A0A0A;
+    border: 2px solid var(--bg);
     box-sizing: border-box;
     pointer-events: none;
 }
@@ -6509,7 +6823,7 @@ ol.anime-detail-episodes-busy {
     width: 360px;
     max-height: 55vh;
     background: #141414;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid var(--overlay-12);
     border-radius: 0.65rem;
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
     /* Above the iOS install hint (1100), below the global loader (9999). */
@@ -6541,19 +6855,19 @@ ol.anime-detail-episodes-busy {
     align-items: center;
     justify-content: space-between;
     padding: 0.7rem 0.9rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--overlay-08);
 }
 
 .notif-panel-title {
     font-weight: 600;
-    color: #fff;
+    color: var(--text-strong);
     font-size: 0.95rem;
 }
 
 .notif-read-all {
     background: none;
     border: none;
-    color: #93c5fd;
+    color: var(--accent-light);
     font-size: 0.78rem;
     padding: 0.15rem 0.3rem;
     cursor: pointer;
@@ -6585,15 +6899,15 @@ ol.anime-detail-episodes-busy {
     align-items: flex-start;
     gap: 0.7rem;
     padding: 0.65rem 0.9rem;
-    color: #e0e0e0;
+    color: var(--text);
     text-decoration: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--overlay-05);
 }
 
 .notif-item:hover,
 .notif-item:focus {
-    background: rgba(255, 255, 255, 0.04);
-    color: #fff;
+    background: var(--overlay-04);
+    color: var(--text-strong);
     text-decoration: none;
 }
 
@@ -6602,7 +6916,7 @@ ol.anime-detail-episodes-busy {
 }
 
 .notif-item-unread .notif-title {
-    color: #fff;
+    color: var(--text-strong);
 }
 
 .notif-thumb {
@@ -6611,11 +6925,11 @@ ol.anime-detail-episodes-busy {
     flex-shrink: 0;
     object-fit: cover;
     border-radius: 0.3rem;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--overlay-05);
 }
 
 .notif-thumb-placeholder {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--overlay-05);
 }
 
 .notif-body {
@@ -6627,7 +6941,7 @@ ol.anime-detail-episodes-busy {
     font-size: 0.9rem;
     font-weight: 500;
     line-height: 1.3;
-    color: #e0e0e0;
+    color: var(--text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -6650,17 +6964,17 @@ ol.anime-detail-episodes-busy {
     padding: 0.6rem 0.9rem;
     text-align: center;
     text-decoration: none;
-    color: #93c5fd;
+    color: var(--accent-light);
     font-size: 0.84rem;
     font-weight: 600;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid var(--overlay-08);
     background: rgba(255, 255, 255, 0.02);
     transition: background 0.15s, color 0.15s;
 }
 
 .notif-panel-footer:hover,
 .notif-panel-footer:focus {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--overlay-04);
     color: #bfdbfe;
     text-decoration: none;
 }

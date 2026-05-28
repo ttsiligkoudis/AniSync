@@ -69,7 +69,30 @@
        the page so the seam disappears. apple-touch-icon is iOS Safari's
        fallback "Add to Home Screen" icon (it ignores the manifest). *@
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#0A0A0A" />
+    @* Per-scheme theme-color so the OS chrome (Android address bar /
+       standalone title bar, iOS status bar tint) matches whichever theme
+       is showing. These cover the system-follows case and the no-JS /
+       pre-paint case; theme-toggle.js appends an authoritative media-less
+       <meta name="theme-color"> when the user makes a MANUAL light/dark
+       choice that overrides the OS (a media-less meta always matches and,
+       being last in DOM order, wins). *@
+    <meta name="theme-color" content="#0A0A0A" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    @* Pre-paint theme stamp — runs synchronously in <head> before the
+       stylesheet applies so a stored light/dark preference is honoured
+       without a flash of the default (dark) theme. "system" / unset leaves
+       no attribute, letting the prefers-color-scheme CSS follow the OS.
+       Mirrors the timezone-cookie stamp pattern below. *@
+    <script>
+        (function () {
+            try {
+                var t = localStorage.getItem('anisync-theme');
+                if (t === 'light' || t === 'dark') {
+                    document.documentElement.setAttribute('data-theme', t);
+                }
+            } catch (_) { /* storage blocked — fall back to OS preference */ }
+        })();
+    </script>
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -84,7 +107,6 @@
         var fullTitle = string.IsNullOrEmpty(pageTitle) ? "AniSync" : $"{pageTitle} · AniSync";
     }
     <title>@fullTitle</title>
-    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/AniSync.styles.css" asp-append-version="true" />
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
@@ -316,6 +338,26 @@
                         </div>
                     </div>
                 }
+                @* Theme toggle — cycles System → Light → Dark. Lives in the
+                   header so it's reachable on every viewport (the header is
+                   never hidden; only the inline nav collapses on mobile).
+                   theme-toggle.js owns the icon swap, persistence, and the
+                   theme-color meta sync; the three icons below are toggled
+                   via [data-theme-icon] so no markup is rebuilt at runtime. *@
+                <button type="button" class="theme-toggle-btn" data-theme-toggle
+                        aria-label="Theme: system" title="Theme: system">
+                    <svg data-theme-icon="system" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="2" y="4" width="20" height="13" rx="2"></rect>
+                        <path d="M8 21h8M12 17v4"></path>
+                    </svg>
+                    <svg data-theme-icon="light" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+                        <circle cx="12" cy="12" r="4"></circle>
+                        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                    </svg>
+                    <svg data-theme-icon="dark" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                </button>
                 @* Desktop-only auth CTA — replaces what the drawer footer
                    exposes on mobile (Sign in / Disconnect). Hidden under
                    992px; the drawer keeps surfacing it on mobile. Treats
@@ -649,6 +691,7 @@
     </button>
 
     <script src="~/js/toast.js" asp-append-version="true" defer></script>
+    <script src="~/js/theme-toggle.js" asp-append-version="true" defer></script>
     <script src="~/js/pwa-install.js" asp-append-version="true" defer></script>
     <script src="~/js/scroll-top.js" asp-append-version="true" defer></script>
     <script src="~/js/site-search.js" asp-append-version="true" defer></script>
@@ -708,7 +751,6 @@
     {
         <script src="~/js/notifications.js" asp-append-version="true" defer></script>
     }
-    <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

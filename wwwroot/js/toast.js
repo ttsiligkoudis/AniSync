@@ -15,22 +15,56 @@
 
     var DEFAULT_DURATION_MS = 3000;
 
-    function showToast(text, durationMs) {
+    // showToast(text)                       — confirmation, auto-dismiss
+    // showToast(text, 6000)                 — legacy: custom duration in ms
+    // showToast(text, { action, onAction,   — actionable / sticky toast:
+    //                   persist, duration })    a tappable "action" affordance,
+    //                                           optionally never auto-dismissing
+    //                                           (persist) until tapped.
+    function showToast(text, opts) {
         var container = document.getElementById('toast-container');
-        if (!container || !text) return;
+        if (!container || !text) return null;
+
+        // Normalise the overloaded second argument.
+        var o = (typeof opts === 'object' && opts !== null) ? opts
+              : { duration: (typeof opts === 'number' ? opts : undefined) };
+
         var el = document.createElement('div');
         el.className = 'toast';
         el.setAttribute('role', 'status');
-        el.textContent = text;
+
+        var msg = document.createElement('span');
+        msg.className = 'toast-msg';
+        msg.textContent = text;
+        el.appendChild(msg);
+
+        function dismiss() { el.remove(); }
+
+        if (o.action && typeof o.onAction === 'function') {
+            el.classList.add('toast-actionable');
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'toast-action';
+            btn.textContent = o.action;
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                o.onAction();
+                dismiss();
+            });
+            el.appendChild(btn);
+        }
+
         container.appendChild(el);
-        // CSS animation handles the fade-in/fade-out; the JS just removes the
-        // element after the animation finishes so DOM stays tidy. Caller can
-        // pass a longer duration for messages that carry multi-step
-        // instructions and need actual reading time.
-        var lifespan = typeof durationMs === 'number' && durationMs > 0
-            ? durationMs
-            : DEFAULT_DURATION_MS;
-        setTimeout(function () { el.remove(); }, lifespan);
+
+        // Persisted toasts stay until tapped/actioned; everything else auto-
+        // dismisses. CSS handles the fade; JS just tidies the DOM afterwards.
+        if (!o.persist) {
+            var lifespan = typeof o.duration === 'number' && o.duration > 0
+                ? o.duration
+                : DEFAULT_DURATION_MS;
+            setTimeout(dismiss, lifespan);
+        }
+        return { dismiss: dismiss };
     }
 
     // Pop a queued toast from the previous page render, if any.
