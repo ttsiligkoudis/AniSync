@@ -650,7 +650,7 @@ namespace AnimeList.Controllers
         /// /anime/{*id} which would otherwise swallow any literal sub-path.
         /// </summary>
         [HttpGet("/anime/episode-streams")]
-        public async Task<IActionResult> EpisodeStreams(string id, int? season, int episode, string type = null)
+        public async Task<IActionResult> EpisodeStreams(string id, int? season, int episode, string type = null, int? addonIndex = null)
         {
             if (string.IsNullOrWhiteSpace(id))
             {
@@ -677,109 +677,41 @@ namespace AnimeList.Controllers
                 ? await _configStore.GetStreamAddonsAsync(uid)
                 : new List<StreamAddon>();
 
-            var debridStreams = Array.Empty<object>() as IReadOnlyList<object>;
-            if (addons.Count > 0)
+            // Per-addon mode: the watch page fans out one request
+            // per configured addon (client-side) so streams from the
+            // fastest source surface immediately instead of waiting
+            // on the slowest addon to complete. This branch skips
+            // every bootstrap-only field (externalLinks, skipTimes,
+            // addon list) since the client already has them from
+            // its initial /anime/episode-streams call. The index is
+            // taken against the same addon list the bootstrap
+            // returned moments earlier; if the user added/removed
+            // an addon mid-load we'd silently return an empty list
+            // for the out-of-range slot.
+            if (addonIndex.HasValue)
             {
-                // The 10-minute fan-out reuse window lives in the
-                // browser now — the watch page checks
-                // localStorage["anisync.streams.{uid}.{episodeKey}"]
-                // before calling this endpoint and skips the fetch on a
-                // warm hit. Reasoning: the rate-limit signal that the
-                // server-side cache was meant to dampen is upstream-
-                // side per-id, not pure per-IP, so a shared sqlite row
-                // wouldn't actually have helped two users picking the
-                // same episode at the same time anyway — only the one
-                // who fetched first would benefit. Browser storage
-                // keeps the cache personal (no shared lock, no DB
-                // round-trip on each render) at the cost of not
-                // surviving a different-device refresh — which is the
-                // right trade because the addon URL is IP-signed and
-                // wouldn't have played from a different device anyway.
+                if (addonIndex.Value < 0 || addonIndex.Value >= addons.Count)
+                {
+                    return Json(new { debridStreams = Array.Empty<object>() });
+                }
+
                 var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
 
-                // Override sourceLinks.ImdbSeason with the per-call
-                // value ONLY when the JS supplied a >1 season. The
-                // signal disambiguates two opposite Cinemeta data
-                // shapes:
-                //
-                //   • Multi-season Cinemeta (Naruto): one IMDb id
-                //     spans every cour as S1 / S2 / S3 with the cours'
-                //     episodes correctly bucketed.
-                //     NormaliseCourEpisodeNumbering preserves the
-                //     original Cinemeta season (e.g. 3) on each video,
-                //     so the JS supplies streamSeason=3. Fribb's
-                //     mapping.Season for these shows is often 1 (the
-                //     mapping points to the franchise's head cour
-                //     rather than the specific cour), so without this
-                //     override the query goes to tt0409591:1:100
-                //     instead of the correct tt0409591:3:28.
-                //
-                //   • Single-season Cinemeta with cour-specific IMDb
-                //     id (Bookworm S3): Cinemeta serves only the S3
-                //     cour's 12 episodes under its IMDb id, all
-                //     labelled season=1. After Normalise, imdbSeason=1,
-                //     so the JS supplies streamSeason=1. Fribb's
-                //     mapping.Season for this MAL/AniList cour is the
-                //     authoritative franchise pointer (3) and
-                //     BuildSourceLinksAsync already wrote it into
-                //     sourceLinks.ImdbSeason. Skipping the override
-                //     here keeps the query at :3:2 (matches the
-                //     addon's torrent-name index for the S3 cour)
-                //     instead of routing to :1:2 — which the user
-                //     reported finds streams of S1E2 from the
-                //     franchise instead.
-                //
-                // streamSeason==1 is also the harmless single-cour
-                // default — for a genuine S1 cour the mapping.Season
-                // is 1 too, so no-op either way.
+                // Same ImdbSeason override that the legacy bundled
+                // path used — see the multi-cour vs single-cour
+                // disambiguation note below for the full rationale.
                 if (!isMovie && lookupSeason.HasValue && lookupSeason.Value > 1)
                 {
                     sourceLinks.ImdbSeason = lookupSeason.Value;
                 }
 
-                // The user's real client IP — forwarded to each addon
-                // so playback URLs that bind to the requesting IP (e.g.
-                // MediaFusion) sign tokens for the user's IP rather
-                // than ours. ForwardedHeaders middleware (Program.cs)
-                // already populates RemoteIpAddress from X-Forwarded-
-                // For when AniSync sits behind a CDN / load balancer.
                 var clientIp = ResolveClientIp(HttpContext);
+                var addon = addons[addonIndex.Value];
+                var streams = await _addonStreamService.GetStreamsAsync(
+                    addon.Url, sourceLinks, lookupSeason, lookupEpisode,
+                    tokenData.anime_service, clientIp);
 
-                // Fan out in parallel — addons are independent
-                // endpoints with no shared rate-limit, so total latency
-                // floors at max(addon latency) rather than summing.
-                // tokenData.anime_service feeds BuildStremioId's
-                // third-tier fallback (IMDb → Kitsu → primary tracker
-                // id-space) so a show missing both an IMDb and a Kitsu
-                // mapping still produces a request the user's addons
-                // might know about under mal:N / anilist:N.
-                var primaryService = tokenData.anime_service;
-                var fetchTasks = addons
-                    .Select(a => _addonStreamService.GetStreamsAsync(
-                        a.Url, sourceLinks, lookupSeason, lookupEpisode, primaryService, clientIp))
-                    .ToArray();
-                await Task.WhenAll(fetchTasks);
-
-                // Override each stream's URL-host-derived Provider
-                // fallback with the addon's persisted display name
-                // (pulled from manifest.name on save), since the
-                // addon doesn't echo its name on the /stream
-                // response. Preserve the addon's emit order — no
-                // post-fetch dedupe, no per-quality cap. Whatever
-                // the user's configured addons return (in the
-                // order they returned it) is what the source
-                // picker shows; filtering / ordering belongs in
-                // each addon's own config URL.
-                var labelledStreams = new List<AddonStream>();
-                for (int i = 0; i < addons.Count; i++)
-                {
-                    foreach (var s in fetchTasks[i].Result)
-                    {
-                        labelledStreams.Add(s with { Provider = addons[i].Name });
-                    }
-                }
-
-                debridStreams = labelledStreams.Select(s => (object)new
+                var labelled = streams.Select(s => (object)new
                 {
                     name = s.Name,
                     title = s.Title,
@@ -789,13 +721,27 @@ namespace AnimeList.Controllers
                     playable = s.Playable,
                     seeders = s.Seeders,
                     language = s.Language,
-                    provider = s.Provider,
+                    provider = addon.Name,
                     isHevc = s.IsHevc,
                     source = s.Source,
                     hdr = s.Hdr,
                     audio = s.Audio,
                 }).ToList();
+
+                return Json(new { debridStreams = labelled });
             }
+
+            // Bootstrap mode: hand the client the list of configured
+            // addons (so it can fan out its own per-addon fetches)
+            // plus the addon-independent extras (external links,
+            // AniSkip markers). The 10-minute fan-out reuse window
+            // lives in the browser — the watch page checks
+            // localStorage["anisync.streams.{uid}.{episodeKey}"]
+            // before calling this endpoint and skips the bootstrap
+            // entirely on a warm hit.
+            var addonList = addons
+                .Select((a, i) => new { index = i, name = a.Name })
+                .ToList();
 
             // External streaming destinations — same per-service dispatch
             // StreamController uses. Series-level (no episode deep-link), so
@@ -878,7 +824,7 @@ namespace AnimeList.Controllers
             {
                 anonymous = tokenData.anonymousUser,
                 addonsConfigured = addons.Count > 0,
-                debridStreams,
+                addons = addonList,
                 externalLinks,
                 skipTimes,
             });

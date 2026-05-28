@@ -3011,6 +3011,24 @@ body.modal-open {
     margin-top: 0;
 }
 
+/* "N / M" progress badge appended to the Debrid streams subtitle
+   while the per-addon fan-out is still in flight. Drops out of the
+   DOM once every addon has settled (the JS re-renders without it),
+   so no need to style a finished state. */
+.watch-section-progress {
+    display: inline-block;
+    margin-left: 0.5rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 0.6rem;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    vertical-align: middle;
+}
+
 .watch-sources-body {
     display: flex;
     flex-direction: column;

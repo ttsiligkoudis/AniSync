@@ -3496,6 +3496,12 @@
 
                 var debrid = (data && data.debridStreams) || [];
                 var external = (data && data.externalLinks) || [];
+                // Fan-out progress while the per-addon requests are
+                // still in flight — { completed, total }. Drives the
+                // "Debrid streams · N / M" badge and the
+                // "Looking for streams…" placeholder so the section
+                // shows up immediately on the first addon's response.
+                var progress = data && data.progress;
 
                 // When HEVC is risky on this browser, push HEVC /
                 // 10-bit sources to the bottom so the default picks
@@ -3514,9 +3520,19 @@
                         .map(function (x) { return x.s; });
                 }
 
-                if (debrid.length > 0) {
-                    var h = el('h3', { class: 'watch-section-subtitle' }, 'Debrid streams');
+                var pendingAddons = !!(progress && progress.completed < progress.total);
+                var showDebrid = debrid.length > 0 || pendingAddons;
+                if (showDebrid) {
+                    var h = el('h3', { class: 'watch-section-subtitle' });
+                    h.appendChild(document.createTextNode('Debrid streams'));
+                    if (pendingAddons) {
+                        h.appendChild(el('span', { class: 'watch-section-progress' },
+                            progress.completed + ' / ' + progress.total));
+                    }
                     sourcesBody.appendChild(h);
+                }
+
+                if (debrid.length > 0) {
                     var list = el('ul', { class: 'episode-stream-list' });
                     debrid.forEach(function (s) {
                         var li = el('li', { class: 'episode-stream-row' });
@@ -3623,7 +3639,13 @@
                     sourcesBody.appendChild(ul);
                 }
 
-                if (debrid.length === 0 && external.length === 0) {
+                if (pendingAddons && debrid.length === 0) {
+                    // No streams from any settled addon yet — keep
+                    // the placeholder visible so the user sees the
+                    // section is alive while the slower addons are
+                    // still in flight.
+                    sourcesBody.appendChild(el('p', { class: 'hint-text' }, 'Looking for streams…'));
+                } else if (!pendingAddons && debrid.length === 0 && external.length === 0) {
                     var msg = data && data.anonymous
                         ? "Sign in and add a Stremio stream addon (Torrentio, MediaFusion, …) in Settings to find streaming sources for this episode."
                         : (data && !data.addonsConfigured
@@ -3728,6 +3750,21 @@
                     refreshBtn.disabled = true;
                     refreshBtn.classList.add('is-loading');
                 }
+
+                function finish() {
+                    streamsLoading = false;
+                    if (refreshBtn) {
+                        refreshBtn.disabled = false;
+                        refreshBtn.classList.remove('is-loading');
+                    }
+                }
+
+                // Bootstrap: addon list + the addon-independent
+                // extras (external links, AniSkip markers). The
+                // per-addon debrid fetches fan out from the client
+                // after this returns so the fastest addon's results
+                // render the moment they arrive instead of being
+                // gated on the slowest addon's response.
                 fetch('/anime/episode-streams?' + qs, {
                     credentials: 'same-origin',
                     headers: { 'Accept': 'application/json' },
@@ -3738,23 +3775,93 @@
                     skipLoader: true,
                 })
                     .then(function (r) { return r.ok ? r.json() : null; })
-                    .then(function (data) {
-                        if (!data) {
+                    .then(function (bootstrap) {
+                        if (!bootstrap) {
                             sourcesBody.innerHTML = '<p class="hint-text">Couldn\'t load sources. Try refreshing.</p>';
+                            finish();
                             return;
                         }
-                        writeCachedStreamData(data);
-                        applyStreamData(data);
+
+                        var addons = (bootstrap.addons) || [];
+                        var combined = {
+                            anonymous: bootstrap.anonymous,
+                            addonsConfigured: bootstrap.addonsConfigured,
+                            debridStreams: [],
+                            externalLinks: bootstrap.externalLinks || [],
+                            skipTimes: bootstrap.skipTimes,
+                        };
+
+                        if (addons.length === 0) {
+                            // Nothing to fan out — render the
+                            // external-links / empty-state path
+                            // straight away. No cache write here:
+                            // writeCachedStreamData skips empty
+                            // debrid lists deliberately so the
+                            // negative scenario stays re-attemptable
+                            // (matches the legacy behaviour).
+                            applyStreamData(combined);
+                            finish();
+                            return;
+                        }
+
+                        // Initial paint with the "0 / N" badge —
+                        // gives the user immediate feedback that
+                        // the addons are being queried while the
+                        // first per-addon response is still
+                        // arriving. external links + skip times are
+                        // already populated so the AniSkip toggle
+                        // and "Other sites" block render now too.
+                        var progress = { completed: 0, total: addons.length };
+                        applyStreamData(Object.assign({ progress: progress }, combined));
+
+                        var settled = 0;
+                        addons.forEach(function (a) {
+                            fetch('/anime/episode-streams?' + qs + '&addonIndex=' + encodeURIComponent(a.index), {
+                                credentials: 'same-origin',
+                                headers: { 'Accept': 'application/json' },
+                                skipLoader: true,
+                            })
+                                .then(function (r) { return r.ok ? r.json() : null; })
+                                .then(function (resp) {
+                                    var streams = (resp && resp.debridStreams) || [];
+                                    if (streams.length > 0) {
+                                        // Append in completion
+                                        // order — fastest addon's
+                                        // streams stay at the top
+                                        // so the user can pick one
+                                        // and start watching while
+                                        // the slower addons are
+                                        // still resolving.
+                                        Array.prototype.push.apply(combined.debridStreams, streams);
+                                    }
+                                })
+                                .catch(function () { /* swallow — empty addon, move on */ })
+                                .then(function () {
+                                    settled++;
+                                    progress.completed = settled;
+                                    var done = settled === addons.length;
+                                    applyStreamData(Object.assign(
+                                        { progress: done ? null : progress },
+                                        combined));
+                                    if (done) {
+                                        // Cache the final combined
+                                        // shape — same record the
+                                        // legacy bundled endpoint
+                                        // used to return, so cache
+                                        // reads continue to work
+                                        // unchanged across the
+                                        // upgrade. writeCached
+                                        // skips empty debrid lists
+                                        // on its own.
+                                        writeCachedStreamData(combined);
+                                        finish();
+                                    }
+                                });
+                        });
                     })
                     .catch(function () {
                         sourcesBody.innerHTML = '<p class="hint-text">Couldn\'t load sources. Try refreshing.</p>';
-                    })
-                    .then(function () {
-                        streamsLoading = false;
-                        if (refreshBtn) {
-                            refreshBtn.disabled = false;
-                            refreshBtn.classList.remove('is-loading');
-                        }
+                        finish();
                     });
             }
 
