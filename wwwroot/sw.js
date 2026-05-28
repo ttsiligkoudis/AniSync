@@ -29,6 +29,7 @@ const SHELL_ASSETS = [
     '/js/theme-toggle.js',
     '/js/pwa-install.js',
     '/js/scroll-top.js',
+    '/js/pull-to-refresh.js',
     '/manifest.webmanifest',
     '/logo.png',
     '/icons/icon-192.png',
