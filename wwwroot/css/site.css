@@ -255,6 +255,17 @@ table {
   border-collapse: collapse;
 }
 
+/* Restore Bootstrap's `[hidden] { display: none !important }`. The app has
+   many elements that carry the `hidden` attribute AND a `display:` rule
+   (.notif-panel, the sync modal, status pills, …); an author `display`
+   beats the UA's `[hidden]` rule, so without this they'd render visible —
+   Bootstrap's reboot was the thing forcing them hidden. The bottom-nav
+   "More" sheet is exempted: it intentionally stays `display:block` while
+   `[hidden]` (opacity/transform 0) so its open/close animation can run. */
+[hidden]:not(.bottom-nav-more-sheet) {
+  display: none !important;
+}
+
 /* The single genuine Bootstrap class the markup uses. Centres the page
    column and matches the layout's main max-width so the sticky header's
    inner content stays aligned with the page body. The 0.75rem inline
