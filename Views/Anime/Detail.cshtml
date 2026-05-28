@@ -91,7 +91,7 @@
     <div class="anime-detail-hero-body">
         @if (!string.IsNullOrEmpty(a.poster))
         {
-            <img class="anime-detail-poster" src="@a.poster" alt="@a.name" />
+            <img class="anime-detail-poster" src="@a.poster" alt="@a.name" decoding="async" />
         }
         else
         {
@@ -700,7 +700,7 @@
                                URL before art exists), drop the broken-image
                                glyph and let the wrap fall back to the placeholder
                                treatment (play-diamond on dark). *@
-                            <img class="anime-detail-episode-thumb" src="@v.thumbnail" alt="" loading="lazy"
+                            <img class="anime-detail-episode-thumb" src="@v.thumbnail" alt="" loading="lazy" decoding="async"
                                  onerror="this.parentNode.classList.add('anime-detail-episode-thumb-failed');this.remove();" />
                         }
                         else

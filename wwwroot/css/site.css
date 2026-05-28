@@ -253,6 +253,95 @@ table {
   padding-left: 0.75rem;
 }
 
+/* ──────────────────────────────────────────────────────────────────────
+   View Transitions (item 10)
+
+   Cross-document (MPA) transitions for same-origin Razor navigations:
+   Chromium crossfades between pages for free, other browsers ignore the
+   at-rule and navigate normally. The detail-page hero poster carries a
+   shared transition name; _Layout's inline script stamps the SAME name on
+   the tapped grid poster just before navigation (a single fixed name on
+   only the clicked element keeps it unique, so multi-shelf pages don't
+   trip Chromium's duplicate-name abort) — the poster then morphs into the
+   hero. Reduced-motion users get an instant cut instead of the animation.
+   ────────────────────────────────────────────────────────────────────── */
+@view-transition {
+  navigation: auto;
+}
+
+.anime-detail-poster {
+  view-transition-name: vt-shared-poster;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   Micro-interactions (item 9) — all gated on no-preference so the OS-level
+   "Reduce motion" setting strips them. (Several buttons — copy/save/danger
+   pills — already carry their own :active scale; this fills the gaps:
+   poster cards, the bottom-nav cells, and the header icon buttons, plus a
+   gentle staggered entrance for poster grids.)
+   ────────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: no-preference) {
+  /* Tap feedback — a subtle press-down that reads as "app-like". */
+  .library-card:active {
+    transform: scale(0.97);
+  }
+  .library-card-inert:active {
+    transform: none;
+  }
+
+  .bottom-nav-item,
+  .bottom-nav-more-row {
+    transition: color 0.15s, background 0.15s, transform 0.12s ease;
+  }
+  .bottom-nav-item:active,
+  .bottom-nav-more-row:active {
+    transform: scale(0.95);
+  }
+
+  .theme-toggle-btn,
+  .notif-bell-btn,
+  .site-back-btn,
+  .scroll-top-btn {
+    transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.12s ease;
+  }
+  .theme-toggle-btn:active,
+  .notif-bell-btn:active,
+  .site-back-btn:active,
+  .scroll-top-btn:active {
+    transform: scale(0.9);
+  }
+
+  /* Staggered fade-in for poster grids. Capped ramp (first 10 cells) so
+     infinite-scroll batches and reordered shelves don't accrue runaway
+     delays; later / appended cards just fade in immediately. */
+  .library-grid > .library-card {
+    animation: card-enter 0.34s ease both;
+  }
+  .library-grid > .library-card:nth-child(1) { animation-delay: 0.02s; }
+  .library-grid > .library-card:nth-child(2) { animation-delay: 0.05s; }
+  .library-grid > .library-card:nth-child(3) { animation-delay: 0.08s; }
+  .library-grid > .library-card:nth-child(4) { animation-delay: 0.11s; }
+  .library-grid > .library-card:nth-child(5) { animation-delay: 0.14s; }
+  .library-grid > .library-card:nth-child(6) { animation-delay: 0.17s; }
+  .library-grid > .library-card:nth-child(7) { animation-delay: 0.2s; }
+  .library-grid > .library-card:nth-child(8) { animation-delay: 0.23s; }
+  .library-grid > .library-card:nth-child(9) { animation-delay: 0.26s; }
+  .library-grid > .library-card:nth-child(10) { animation-delay: 0.29s; }
+}
+
+@keyframes card-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
 html {
   font-size: 14px;
 }
