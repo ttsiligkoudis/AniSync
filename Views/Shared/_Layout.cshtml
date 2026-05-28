@@ -598,7 +598,15 @@
                 <button class="entry-modal-close" type="button" aria-label="Close">×</button>
             </header>
             <div class="entry-modal-body">
-                <div class="entry-modal-loading" aria-live="polite">Loading…</div>
+                @* Skeleton field placeholders while the entry loads; the
+                   sr-only text keeps the state announced for screen readers. *@
+                <div class="entry-modal-loading" aria-live="polite" aria-busy="true">
+                    <span class="sr-only">Loading…</span>
+                    <span class="entry-modal-skeleton-field skeleton-shimmer"></span>
+                    <span class="entry-modal-skeleton-field skeleton-shimmer"></span>
+                    <span class="entry-modal-skeleton-field skeleton-shimmer entry-modal-skeleton-field-wide"></span>
+                    <span class="entry-modal-skeleton-field skeleton-shimmer"></span>
+                </div>
                 <form class="entry-modal-form" hidden>
                     @* Season selector — hidden by default, shown only when the
                        opened anime is a franchise split across multiple service
