@@ -99,7 +99,7 @@ namespace AnimeList.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> Login(AnimeService? animeService = null, string username = null, string password = null, bool anonymous = false, string returnUrl = null)
+        public IActionResult Login(AnimeService? animeService = null, bool anonymous = false, string returnUrl = null)
         {
             // Already-authenticated short-circuit. Re-running the OAuth dance for a logged-in
             // user would either silently replace their primary (login flow with `state` round-
@@ -131,7 +131,7 @@ namespace AnimeList.Controllers
 
                 return RedirectToReturnUrlOrHome(returnUrl);
             }
-            else if (animeService == AnimeService.Anilist)
+            if (animeService == AnimeService.Anilist)
             {
                 HttpContext.Session.SetString(OauthServiceKey, AnimeService.Anilist.ToString());
                 HttpContext.Session.SetString(OauthFlowKey, OauthFlowLogin);
@@ -139,16 +139,36 @@ namespace AnimeList.Controllers
                 var state = BeginOauthState();
                 return Redirect($"https://anilist.co/api/v2/oauth/authorize?client_id={clientId}&response_type=code&state={Uri.EscapeDataString(state)}");
             }
-            else if (animeService == AnimeService.MyAnimeList)
+            if (animeService == AnimeService.MyAnimeList)
             {
                 return BeginMalOauth(OauthFlowLogin) ?? RedirectToReturnUrlOrHome(returnUrl);
             }
-            else
-            {
-                await _tokenService.GetAccessTokenByCredsAsync(username, password, true);
+            // Kitsu uses the password grant — the form on /configure (and /account)
+            // POSTs straight to /Auth/LoginKitsu so the credentials never appear in
+            // a URL (where they'd otherwise leak into access logs, browser history,
+            // and Referer headers). A bare GET here (typed URL, refreshed callback)
+            // just lands the user back on a sensible page.
+            return RedirectToReturnUrlOrHome(returnUrl);
+        }
 
+        /// <summary>
+        /// Kitsu credential login. Lives as a POST so the username + password ride
+        /// in the request body rather than the URL — GET credential params leak
+        /// into proxy access logs, browser history, and the Referer header on the
+        /// next outbound navigation. The session-cookie-bound antiforgery filter
+        /// (Program.cs) enforces same-origin via the form's __RequestVerificationToken.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> LoginKitsu([FromForm] string username, [FromForm] string password, [FromForm] string returnUrl = null)
+        {
+            // Mirror the Login short-circuit: a stale tab posting these creds after
+            // the user signed in elsewhere shouldn't replace their primary.
+            if (GetSessionPrimary() != null)
                 return RedirectToReturnUrlOrHome(returnUrl);
-            }
+
+            await _tokenService.GetAccessTokenByCredsAsync(username, password, true);
+
+            return RedirectToReturnUrlOrHome(returnUrl);
         }
 
         /// <summary>

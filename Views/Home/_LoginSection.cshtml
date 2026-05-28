@@ -18,26 +18,43 @@
 @* Shared login surface — provider picker lives in the _AccountSection
    partial above this one; here we render the Kitsu inline credentials
    form, the dispatch button, and (optionally) the anonymous fallback.
-   IDs match what _ConfigurePageScript binds to (#kitsuCreds, #loginUrl,
-   #username, #password, #kitsuRegister, #loginAnonymousUrl). *@
+   IDs match what _ConfigurePageScript binds to (#kitsuLoginForm,
+   #kitsuCreds, #loginUrl, #username, #password, #kitsuRegister,
+   #loginAnonymousUrl).
+   The Kitsu credentials POST to /Auth/LoginKitsu rather than riding in
+   the URL — query-string passwords leak into access logs, browser
+   history, and Referer headers. AniList / MAL still use the GET
+   /Auth/Login redirect-start because their credentials live on the
+   provider's own site. *@
 <div class="card-section" id="loginCard">
-    <div id="kitsuCreds" style="display:@(Model.IsKitsu ? "block" : "none")">
-        <div class="cred-group">
-            <label for="username" class="required">Username</label>
-            <input type="text" id="username" />
+    <form id="kitsuLoginForm" method="post"
+          action='@Url.Action("LoginKitsu", "Auth")'
+          autocomplete="on"
+          style="display:@(Model.IsKitsu ? "block" : "none")">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="returnUrl" value="@loginReturnUrl" />
+        <div id="kitsuCreds">
+            <div class="cred-group">
+                <label for="username" class="required">Username</label>
+                <input type="text" id="username" name="username" autocomplete="username" required />
+            </div>
+            <div class="cred-group">
+                <label for="password" class="required">Password</label>
+                <input type="password" id="password" name="password" autocomplete="current-password" required />
+            </div>
+            <p class="option-name-sub" style="margin-top: 0.5rem;">
+                AniSync uses your password only for the initial sign-in to Kitsu — it is not stored
+                in the configuration. After login we keep just the OAuth tokens Kitsu issues, and
+                refresh them automatically when they expire.
+            </p>
         </div>
-        <div class="cred-group">
-            <label for="password" class="required">Password</label>
-            <input type="password" id="password" />
-        </div>
-        <p class="option-name-sub" style="margin-top: 0.5rem;">
-            AniSync uses your password only for the initial sign-in to Kitsu — it is not stored
-            in the configuration. After login we keep just the OAuth tokens Kitsu issues, and
-            refresh them automatically when they expire.
-        </p>
-    </div>
+        <button type="submit" id="kitsuLoginBtn" class="btn-primary-action btn-login">
+            Login with Kitsu
+        </button>
+    </form>
     <a id="loginUrl" class="btn-primary-action btn-login"
        data-return-url="@loginReturnUrl"
+       style="display:@(Model.IsKitsu ? "none" : "block")"
        href='@Url.Action("Login", "Auth", new { animeService = Model.AnimeService, returnUrl = loginReturnUrl })'>
         Login with <span id="loginServiceName">@Model.ServiceDisplay</span>
     </a>

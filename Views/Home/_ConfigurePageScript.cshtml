@@ -311,12 +311,15 @@
         $('#serviceToggle .label').removeClass('active');
         $pill.addClass('active');
         $('#loginServiceName').text(serviceLabel(svc));
-        // Only the Kitsu password-grant flow needs the username/password fields visible.
-        // The per-provider "Create account" affordance follows the picker so only the
-        // active provider's signup link is on screen — Kitsu lands on /Auth/Register
-        // (public registration API + auto-login); AniList / MAL kick out to the
-        // providers' own signup pages in a new tab.
-        $('#kitsuCreds').toggle(svc === 0);
+        // Kitsu uses the password grant — show its POST form (kitsuLoginForm)
+        // and hide the OAuth redirect link. AniList / MAL flip it: show the
+        // redirect-start link, hide the credential form. The per-provider
+        // "Create account" affordance follows the same picker so only the
+        // active provider's signup link is on screen — Kitsu lands on
+        // /Auth/Register (public registration API + auto-login); AniList /
+        // MAL kick out to the providers' own signup pages in a new tab.
+        $('#kitsuLoginForm').toggle(svc === 0);
+        $('#loginUrl').toggle(svc !== 0);
         $('#kitsuRegister').toggle(svc === 0);
         $('#anilistRegister').toggle(svc === 1);
         $('#malRegister').toggle(svc === 2);
@@ -1123,18 +1126,11 @@
     // page still sends the user somewhere sensible.
     var loginReturnUrl = $('#loginUrl').attr('data-return-url') || '/';
 
-    $('#username, #password').on('input', updateLoginUrl);
-
     function updateLoginUrl() {
+        // Only AniList / MAL go through the redirect-start GET — Kitsu has
+        // its own POST form (#kitsuLoginForm) so no URL building needed.
         var href = loginBaseUrl + '?animeService=' + selectedService
             + '&returnUrl=' + encodeURIComponent(loginReturnUrl);
-        // Kitsu uses the password grant — credentials are typed into the form and
-        // posted to /Auth/Login. The other providers are OAuth-redirected.
-        if (selectedService === 0) {
-            var username = $('#username').val();
-            var password = encodeURIComponent($('#password').val());
-            href += '&username=' + username + '&password=' + password;
-        }
         $('#loginUrl').attr('href', href);
     }
 
@@ -1142,7 +1138,10 @@
 
     $('#loginUrl').on('click', function (e) {
         e.preventDefault();
-        if (selectedService === 0 && ($('#username').val() == '' || $('#password').val() == '')) return;
+        // Kitsu's credentials submit via #kitsuLoginForm — the link is hidden
+        // in that branch, but guard defensively in case the visibility toggle
+        // is bypassed by other code.
+        if (selectedService === 0) return;
         window.location.href = $('#loginUrl').attr('href');
     });
 

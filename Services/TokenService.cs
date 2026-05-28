@@ -1,6 +1,7 @@
 ﻿using AnimeList.Models;
 using AnimeList.Services.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
+using System.Collections.Concurrent;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 
@@ -23,6 +24,22 @@ namespace AnimeList.Services
         private static readonly MemoryCache _kitsuTokenCache = new(new MemoryCacheOptions { SizeLimit = 20_000 });
         private static readonly MemoryCache _anilistTokenCache = new(new MemoryCacheOptions { SizeLimit = 20_000 });
         private static readonly MemoryCache _malTokenCache = new(new MemoryCacheOptions { SizeLimit = 20_000 });
+
+        // Per-(service, cache-key) refresh lock. AniList and MAL rotate the
+        // refresh_token on every successful exchange — two concurrent callers
+        // refreshing the same expired token would both submit the same
+        // refresh_token, only the first succeeds, and the second comes back
+        // with an invalid_grant that surfaces to the user as "logged out".
+        // The semaphore serialises the refresh; after acquiring it, callers
+        // re-check the cache so the second one reuses the first's result
+        // instead of doing a redundant network round-trip.
+        // The dictionary accumulates entries forever, but cardinality is
+        // bounded by the number of unique users (one SemaphoreSlim each is
+        // tiny) so we don't bother evicting.
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> _refreshLocks = new();
+
+        private static SemaphoreSlim LockFor(string key) =>
+            _refreshLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
 
         public TokenService(IHttpClientFactory clientFactory, IHttpContextAccessor httpContextAccessor, IConfigStore configStore, IConfiguration configuration)
         {
@@ -117,14 +134,37 @@ namespace AnimeList.Services
                 }
                 else if (IsTokenExpired(tokenData.expiration_date) && !string.IsNullOrEmpty(tokenData.refresh_token))
                 {
-                    var refreshed = await RefreshAccessToken(tokenData.refresh_token);
-                    if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
+                    // AniList rotates the refresh_token on every exchange; concurrent
+                    // refreshes for the same user would race and the loser comes back
+                    // logged out. Serialise per user (see _refreshLocks above), and
+                    // re-check the cache after acquiring so the second caller reuses
+                    // the first's freshly-rotated token.
+                    var sem = LockFor("anilist:" + (cacheKey ?? string.Empty));
+                    await sem.WaitAsync();
+                    try
                     {
-                        _anilistTokenCache.Set(cacheKey, refreshed, _tokenCacheEntry);
-                        // Write back to the config store so v5 install URLs survive token rotation.
-                        await _configStore.UpdateByUserAsync(refreshed);
+                        if (!string.IsNullOrEmpty(cacheKey)
+                            && _anilistTokenCache.TryGetValue(cacheKey, out TokenData freshly)
+                            && !IsTokenExpired(freshly.expiration_date))
+                        {
+                            tokenData = freshly;
+                        }
+                        else
+                        {
+                            var refreshed = await RefreshAccessToken(tokenData.refresh_token);
+                            if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
+                            {
+                                _anilistTokenCache.Set(cacheKey, refreshed, _tokenCacheEntry);
+                                // Write back to the config store so v5 install URLs survive token rotation.
+                                await _configStore.UpdateByUserAsync(refreshed);
+                            }
+                            tokenData = refreshed;
+                        }
                     }
-                    tokenData = refreshed;
+                    finally
+                    {
+                        sem.Release();
+                    }
                 }
             }
             else if (tokenData.anime_service == AnimeService.MyAnimeList)
@@ -141,16 +181,36 @@ namespace AnimeList.Services
                 }
                 else if (IsTokenExpired(tokenData.expiration_date) && !string.IsNullOrEmpty(tokenData.refresh_token))
                 {
-                    var refreshed = await RefreshMalAccessToken(tokenData.refresh_token);
-                    if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
+                    // Same rotated-refresh_token race as AniList — MAL also issues a
+                    // fresh refresh_token on each exchange.
+                    var sem = LockFor("mal:" + (cacheKey ?? string.Empty));
+                    await sem.WaitAsync();
+                    try
                     {
-                        // Preserve identity fields the refresh response doesn't echo back
-                        refreshed.user_id ??= tokenData.user_id;
-                        refreshed.username ??= tokenData.username;
-                        _malTokenCache.Set(cacheKey, refreshed, _tokenCacheEntry);
-                        await _configStore.UpdateByUserAsync(refreshed);
+                        if (!string.IsNullOrEmpty(cacheKey)
+                            && _malTokenCache.TryGetValue(cacheKey, out TokenData freshly)
+                            && !IsTokenExpired(freshly.expiration_date))
+                        {
+                            tokenData = freshly;
+                        }
+                        else
+                        {
+                            var refreshed = await RefreshMalAccessToken(tokenData.refresh_token);
+                            if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
+                            {
+                                // Preserve identity fields the refresh response doesn't echo back
+                                refreshed.user_id ??= tokenData.user_id;
+                                refreshed.username ??= tokenData.username;
+                                _malTokenCache.Set(cacheKey, refreshed, _tokenCacheEntry);
+                                await _configStore.UpdateByUserAsync(refreshed);
+                            }
+                            tokenData = refreshed;
+                        }
                     }
-                    tokenData = refreshed;
+                    finally
+                    {
+                        sem.Release();
+                    }
                 }
             }
             else
@@ -170,13 +230,33 @@ namespace AnimeList.Services
                     // transient Kitsu 5xx / rate-limit made RefreshKitsuAccessToken return null
                     // and logged the user out despite holding a still-valid token. Uses the
                     // refresh_token Kitsu issued during the initial password grant.
-                    var refreshed = await RefreshKitsuAccessToken(tokenData.refresh_token, tokenData.username, tokenData.user_id);
-                    if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
+                    // Kitsu (Doorkeeper) also invalidates the prior refresh_token on a
+                    // successful exchange, so the same per-user serialisation applies.
+                    var sem = LockFor("kitsu:" + (cacheKey ?? string.Empty));
+                    await sem.WaitAsync();
+                    try
                     {
-                        _kitsuTokenCache.Set(cacheKey, refreshed, _tokenCacheEntry);
-                        await _configStore.UpdateByUserAsync(refreshed);
+                        if (!string.IsNullOrEmpty(cacheKey)
+                            && _kitsuTokenCache.TryGetValue(cacheKey, out TokenData freshly)
+                            && !IsTokenExpired(freshly.expiration_date))
+                        {
+                            tokenData = freshly;
+                        }
+                        else
+                        {
+                            var refreshed = await RefreshKitsuAccessToken(tokenData.refresh_token, tokenData.username, tokenData.user_id);
+                            if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
+                            {
+                                _kitsuTokenCache.Set(cacheKey, refreshed, _tokenCacheEntry);
+                                await _configStore.UpdateByUserAsync(refreshed);
+                            }
+                            tokenData = refreshed;
+                        }
                     }
-                    tokenData = refreshed;
+                    finally
+                    {
+                        sem.Release();
+                    }
                 }
                 // else: cache miss but the stored token is still valid — use it as-is, no
                 // refresh round-trip (and no risk of nulling out a good token).

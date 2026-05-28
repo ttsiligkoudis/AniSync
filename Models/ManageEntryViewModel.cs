@@ -27,7 +27,7 @@ namespace AnimeList.Models
         /// The resolved entry id for the season auto-selected on page load. Matches one of
         /// <see cref="Seasons"/>'s ids (or equals <see cref="Id"/> when there's no season
         /// dropdown). The dropdown's &lt;option value="…"&gt; carries the same shape so the
-        /// JS can send it straight to GetEntry/SaveEntry.
+        /// JS can send it straight to StremioGetEntry/StremioSaveEntry.
         /// </summary>
         public string SelectedEntryId { get; set; }
 

@@ -115,8 +115,14 @@ namespace AnimeList.Services
         public async Task<AnimeIdMapping> GetAnilistMapping(string anilistId)
         {
             await EnsureMappingsLoadedAsync();
-            if (!_anilistMapping.TryGetValue(int.Parse(anilistId.Replace(anilistPrefix, "")), out var mapping))
-                return null;
+            if (string.IsNullOrEmpty(anilistId)) return null;
+            // Match GetMalMapping below: return null on non-numeric input rather
+            // than throwing — callers fan this out across catalog ids that may
+            // include malformed values, and an uncaught FormatException would
+            // surface as a 500 instead of "no mapping found".
+            var raw = anilistId.Replace(anilistPrefix, "");
+            if (!int.TryParse(raw, out var parsed)) return null;
+            if (!_anilistMapping.TryGetValue(parsed, out var mapping)) return null;
 
             await TryEnrichImdbAsync(mapping);
             return mapping;
@@ -125,8 +131,10 @@ namespace AnimeList.Services
         public async Task<AnimeIdMapping> GetKitsuMapping(string kitsuId)
         {
             await EnsureMappingsLoadedAsync();
-            if (!_kitsuMapping.TryGetValue(int.Parse(kitsuId.Replace(kitsuPrefix, "")), out var mapping))
-                return null;
+            if (string.IsNullOrEmpty(kitsuId)) return null;
+            var raw = kitsuId.Replace(kitsuPrefix, "");
+            if (!int.TryParse(raw, out var parsed)) return null;
+            if (!_kitsuMapping.TryGetValue(parsed, out var mapping)) return null;
 
             await TryEnrichImdbAsync(mapping);
             return mapping;
@@ -533,16 +541,31 @@ namespace AnimeList.Services
 
                 mappings.ForEach(f => f.ImdbId = imdbId);
 
-                var imdbMappings = await GetImdbMapping(imdbId);
-
-                mappings.AddRange(imdbMappings.ExceptBy(
-                    mappings.Select(w => (w.AnilistId, w.KitsuId, w.MalId)),
-                    w => (w.AnilistId, w.KitsuId, w.MalId)));
-
                 mapping.ImdbId = imdbId;
+                // Merge with whatever's actually in the bucket at update time.
+                // The previous implementation pre-merged with a snapshot from
+                // GetImdbMapping(imdbId) and then replaced the bucket wholesale —
+                // the same anti-pattern fixed in EnrichImdbMappings above
+                // (lines 182-219). A concurrent enrichment that wrote to this
+                // bucket between our read and our update would have its entries
+                // silently dropped, which then collapsed a multi-cour franchise
+                // to a single mapping in the manage-entry modal on the next
+                // open. The update factory closes that window by always merging
+                // against the current value.
                 _imdbMapping.AddOrUpdate(imdbId,
                     _ => mappings,
-                    (_, list) => mappings);
+                    (_, existing) =>
+                    {
+                        var merged = new List<AnimeIdMapping>(existing);
+                        foreach (var m in mappings)
+                        {
+                            if (!merged.Any(e => e.AnilistId == m.AnilistId && e.KitsuId == m.KitsuId))
+                            {
+                                merged.Add(m);
+                            }
+                        }
+                        return merged;
+                    });
             }
         }
 
