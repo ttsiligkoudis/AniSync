@@ -352,13 +352,21 @@ namespace AnimeList.Services
             // lives on opensubtitles-v3.strem.io. Both call through the
             // strem.io suffix anyway, but listing the specific subs
             // host first documents the chain explicitly.
+            //
+            // Domain match is `host == domain || host endswith "." + domain`
+            // rather than a bare suffix check — a bare `EndsWith("strem.io")`
+            // would also match an attacker-controlled `evilstrem.io`, which is
+            // exactly the substring trap a host allowlist must not fall into.
             return host == "subs5.strem.io"
-                || host.EndsWith("opensubtitles.org")
-                || host.EndsWith("opensubtitles.com")
-                || host.EndsWith("opensubtitles-v3.strem.io")
-                || host.EndsWith("strem.io")
-                || host.EndsWith("subdl.com");
+                || MatchesDomain(host, "opensubtitles.org")
+                || MatchesDomain(host, "opensubtitles.com")
+                || MatchesDomain(host, "opensubtitles-v3.strem.io")
+                || MatchesDomain(host, "strem.io")
+                || MatchesDomain(host, "subdl.com");
         }
+
+        private static bool MatchesDomain(string host, string domain) =>
+            host == domain || host.EndsWith("." + domain, StringComparison.Ordinal);
 
         /// <summary>
         /// Inserts subs5.strem.io's <c>subencoding-stremio-utf8</c>

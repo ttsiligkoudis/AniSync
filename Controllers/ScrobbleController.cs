@@ -108,6 +108,24 @@ namespace AnimeList.Controllers
                 return Ok();
             }
 
+            // Honour the per-user "Auto-track progress" toggle. The web-app
+            // mark-watched (AnimeController.MarkWatched) and the Stremio
+            // subtitle-fetch path (SubtitlesController.GetSubtitles) already
+            // gate on this flag — scrobble was silently ignoring it, so an
+            // opted-out user's Plex/Jellyfin/Emby webhooks still wrote to
+            // the tracker. Read the flag bits via the shared helper so we
+            // pick up the same packed-bit layout the other entry points use.
+            try
+            {
+                var cfg = await GetConfigByUidAsync(uid, _configStore);
+                if (cfg?.disableAutoTrack == true)
+                {
+                    _logger.LogDebug("Scrobble dropped (auto-track disabled) uid={Uid}.", uid);
+                    return Ok();
+                }
+            }
+            catch { /* flag read failed — proceed; better to over-track than miss */ }
+
             var animeId = await _mappingService.ResolveExternalAsync(
                 normalized.ExternalIds, primary.anime_service, normalized.Season);
             if (string.IsNullOrEmpty(animeId))

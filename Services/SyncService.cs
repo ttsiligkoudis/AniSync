@@ -1,10 +1,23 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
+using System.Collections.Concurrent;
 
 namespace AnimeList.Services
 {
     public class SyncService : ISyncService
     {
+        // Per-(uid, service) lock for linked-token refreshes. Linked tokens
+        // never go through TokenService.GetAccessTokenAsync, so they need
+        // their own serialisation against the same rotated-refresh_token
+        // race (AniList/MAL/Kitsu all rotate). A concurrent fan-out for the
+        // same user would otherwise see both callers fire RefreshLinkedTokenAsync
+        // with an identical refresh_token, the loser flips NeedsReauth = true,
+        // and the linked account silently disconnects. Entries accumulate
+        // bounded by unique (uid, service) pairs — tiny.
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> _linkedRefreshLocks = new();
+
+        private static SemaphoreSlim LinkedLockFor(string key) =>
+            _linkedRefreshLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
         private readonly IConfigStore _configStore;
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
@@ -100,6 +113,29 @@ namespace AnimeList.Services
             };
         }
 
+        public async Task<int?> GetCurrentProgressAsync(TokenData primary, string animeId, int? season)
+        {
+            if (primary == null || primary.anonymousUser) return null;
+            try
+            {
+                var entry = primary.anime_service switch
+                {
+                    AnimeService.Anilist => await _anilistService.GetAnimeEntryAsync(primary, animeId, season),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(primary, animeId, season),
+                    AnimeService.Kitsu => await _kitsuService.GetAnimeEntryAsync(primary, animeId, season),
+                    _ => null,
+                };
+                return entry?.Progress;
+            }
+            catch (Exception ex)
+            {
+                // Best-effort read — a transient provider blip shouldn't block the
+                // caller from writing (callers fall through to the unconditional save).
+                _logger.LogDebug(ex, "GetCurrentProgressAsync failed for {Anime} S{Season}.", animeId, season);
+                return null;
+            }
+        }
+
         private async Task<List<LinkedToken>> GetActiveLinkedTokensAsync(string uid)
         {
             if (string.IsNullOrEmpty(uid)) return [];
@@ -118,15 +154,53 @@ namespace AnimeList.Services
                 // fan-out skips this provider cleanly.
                 if (IsTokenExpired(l.TokenData.expiration_date))
                 {
-                    var refreshed = await TryRefreshAsync(l.TokenData);
-                    if (refreshed == null || string.IsNullOrEmpty(refreshed.access_token))
+                    // Per-(uid, service) lock so two concurrent fan-outs for the same
+                    // user don't both try to redeem the same refresh_token. After we
+                    // own the lock we re-read the persistent linked-token row — if a
+                    // concurrent caller already refreshed (or already flipped
+                    // NeedsReauth), use their outcome instead of duplicating the work.
+                    var sem = LinkedLockFor($"linked:{uid}:{(int)l.Service}");
+                    await sem.WaitAsync();
+                    bool needsReauth = false;
+                    try
                     {
-                        l.NeedsReauth = true;
-                        await _configStore.SetLinkedTokenAsync(uid, l);
-                        continue;
+                        var current = (await _configStore.GetLinkedTokensAsync(uid))
+                            .FirstOrDefault(x => x.Service == l.Service);
+
+                        if (current != null && current.NeedsReauth)
+                        {
+                            // Another concurrent caller concluded refresh isn't possible.
+                            needsReauth = true;
+                        }
+                        else if (current?.TokenData != null
+                            && !IsTokenExpired(current.TokenData.expiration_date))
+                        {
+                            // First caller already refreshed — reuse their token.
+                            l.TokenData = current.TokenData;
+                            l.NeedsReauth = false;
+                        }
+                        else
+                        {
+                            var refreshed = await TryRefreshAsync(l.TokenData);
+                            if (refreshed == null || string.IsNullOrEmpty(refreshed.access_token))
+                            {
+                                l.NeedsReauth = true;
+                                await _configStore.SetLinkedTokenAsync(uid, l);
+                                needsReauth = true;
+                            }
+                            else
+                            {
+                                l.TokenData = refreshed;
+                                await _configStore.SetLinkedTokenAsync(uid, l);
+                            }
+                        }
                     }
-                    l.TokenData = refreshed;
-                    await _configStore.SetLinkedTokenAsync(uid, l);
+                    finally
+                    {
+                        sem.Release();
+                    }
+
+                    if (needsReauth) continue;
                 }
 
                 active.Add(l);

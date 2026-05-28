@@ -157,8 +157,8 @@
     var selectedEntryId = '@Html.Raw(Model.SelectedEntryId ?? Model.Id)';
     var hasSeasons = @Html.Raw(hasSeasons.ToString().ToLower());
 
-    // Returns the id we should send to GetEntry/SaveEntry — the dropdown value when it
-    // exists (multi-mapping franchises), otherwise the single resolved id.
+    // Returns the id we should send to StremioGetEntry/StremioSaveEntry — the dropdown
+    // value when it exists (multi-mapping franchises), otherwise the single resolved id.
     function currentEntryId() {
         return hasSeasons ? $('#seasonSelect').val() : selectedEntryId;
     }
@@ -170,7 +170,7 @@
         var totalFromOption = parseInt($opt.attr('data-total'), 10) || 0;
 
         $.ajax({
-            url: '/' + config + '/Meta/GetEntry',
+            url: '/' + config + '/Meta/StremioGetEntry',
             data: { id: $(this).val() },
             success: function (data) {
                 if (!data.success) return;
@@ -215,7 +215,7 @@
         $btn.prop('disabled', true).text('Saving...');
 
         $.ajax({
-            url: '/' + config + '/Meta/SaveEntry',
+            url: '/' + config + '/Meta/StremioSaveEntry',
             method: 'POST',
             contentType: 'application/json',
             data: JSON.stringify(payload),

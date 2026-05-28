@@ -50,5 +50,14 @@ namespace AnimeList.Services.Interfaces
         /// per-service GetUserListEntriesAsync based on <see cref="TokenData.anime_service"/>.
         /// </summary>
         Task<List<AnimeEntry>> GetPrimaryEntriesAsync(TokenData primary);
+
+        /// <summary>
+        /// Reads the primary's current progress for a single entry. Returns null when the
+        /// entry doesn't exist yet on the primary, or when the lookup fails. Used by
+        /// auto-track entry points (e.g. the Stremio subtitle hook) to enforce a
+        /// monotone-progress guard — a rewatch of an earlier episode shouldn't rewind the
+        /// tracker to that earlier number.
+        /// </summary>
+        Task<int?> GetCurrentProgressAsync(TokenData primary, string animeId, int? season);
     }
 }

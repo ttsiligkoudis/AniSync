@@ -423,8 +423,9 @@ namespace AnimeList.Controllers
         }
 
         // Stremio addon protocol meta route. CORS + the per-UID addon rate limit are
-        // scoped to this action only — the controller's other endpoints (GetEntry /
-        // SaveEntry / ManageEntry) are same-origin web-app surfaces and must stay closed.
+        // scoped to this action only — the controller's other endpoints
+        // (StremioGetEntry / StremioSaveEntry / ManageEntry) are same-origin web-app
+        // surfaces (or Stremio-loaded HTML pages) and must stay closed.
         [HttpGet("{config}/[controller]/{metaType}/{id}.json")]
         [EnableCors("AddonCors")]
         [EnableRateLimiting("addon")]
@@ -692,8 +693,26 @@ namespace AnimeList.Controllers
             return (null, null);
         }
 
-        [HttpGet("{config}/[controller]/GetEntry")]
-        public async Task<JsonResult> GetEntry(string config, string id, int? season)
+        // ── Stremio-loaded Manage Entry page endpoints ─────────────────────────
+        // These two endpoints back the standalone Manage Entry page rendered by
+        // ManageEntry above (Views/Meta/ManageEntry.cshtml). They authenticate by
+        // the same encoded config blob the Stremio addon uses everywhere —
+        // explicitly NOT a session cookie — because the page is reached via the
+        // Stremio meta detail "Manage Entry" chip and may load in a browser
+        // context that doesn't share a session with this origin (different
+        // profile, private window, mobile Stremio handing off to the system
+        // browser).
+        //
+        // For same-origin JS (the in-app Manage Entry modal, /library actions,
+        // anywhere a session cookie IS guaranteed) use GetEntryByApi /
+        // SaveEntryByApi below. Don't call these from same-origin JS — passing
+        // the config UID in the URL is the anti-pattern UserApiController.cs
+        // warns about: a leak gives full read+write on the user's tracker.
+        // The "Stremio" prefix on the route makes the intent surface in access
+        // logs so reviewers see at a glance which endpoints carry the UID.
+
+        [HttpGet("{config}/[controller]/StremioGetEntry")]
+        public async Task<JsonResult> StremioGetEntry(string config, string id, int? season)
         {
             try
             {
@@ -724,13 +743,13 @@ namespace AnimeList.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "GetEntry failed (id={Id}, season={Season}).", id, season);
+                _logger.LogError(ex, "StremioGetEntry failed (id={Id}, season={Season}).", id, season);
                 return new JsonResult(new { success = false });
             }
         }
 
-        [HttpPost("{config}/[controller]/SaveEntry")]
-        public async Task<JsonResult> SaveEntry(string config, [FromBody] SaveEntryRequest request)
+        [HttpPost("{config}/[controller]/StremioSaveEntry")]
+        public async Task<JsonResult> StremioSaveEntry(string config, [FromBody] SaveEntryRequest request)
         {
             try
             {
@@ -794,7 +813,7 @@ namespace AnimeList.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "SaveEntry failed (id={Id}, season={Season}, status={Status}).",
+                _logger.LogError(ex, "StremioSaveEntry failed (id={Id}, season={Season}, status={Status}).",
                     request?.Id, request?.Season, request?.Status);
                 return new JsonResult(new { success = false });
             }
@@ -803,14 +822,14 @@ namespace AnimeList.Controllers
         private static DateTime? ParseDate(string s) =>
             DateTime.TryParse(s, out var dt) ? dt : null;
 
-        // Session-based variants of GetEntry / SaveEntry used by the web-app's
-        // inline Manage Entry modal. Identical body to the config-scoped routes
-        // above — just resolve the user from the session cookie instead of the
-        // path-segment config UID. The modal renders on /library / /discover /
-        // dashboard, none of which carry a config in their URL, so a session-
-        // auth variant is the natural fit. The existing config-scoped routes
-        // stay intact for the standalone Manage Entry page that Stremio's
-        // addon flow links to.
+        // Session-based variants of StremioGetEntry / StremioSaveEntry used by the
+        // web-app's inline Manage Entry modal. Identical body to the config-scoped
+        // routes above — just resolve the user from the session cookie instead of
+        // the path-segment config UID. The modal renders on /library / /discover /
+        // dashboard, none of which carry a config in their URL, so a session-auth
+        // variant is the natural fit. The Stremio*-prefixed config-scoped routes
+        // stay intact for the standalone Manage Entry page that Stremio's addon
+        // flow links to (different browser context, no shared session cookie).
 
         [HttpGet("/api/library/entry")]
         public async Task<JsonResult> GetEntryByApi(string id, int? season, int? service)
