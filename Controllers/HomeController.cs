@@ -60,9 +60,11 @@ public class HomeController : Controller
     ///      can return View("NotFound") directly, sidestepping the
     ///      re-execute round-trip.
     /// 404 gets the NotFound view; everything else falls through to
-    /// ServerError. The original status code is restored on the response so
-    /// crawlers / share-link previewers see the real code even though we're
-    /// returning a full HTML body.
+    /// StatusPage, which switches its copy on the status code so 401 /
+    /// 403 / 405 / 429 / 5xx each get distinct messaging. The original
+    /// status code is restored on the response so crawlers / share-link
+    /// previewers see the real code even though we're returning a full
+    /// HTML body.
     /// </summary>
     [Route("/error/{statusCode:int?}")]
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
