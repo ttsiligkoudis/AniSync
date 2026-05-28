@@ -31,6 +31,10 @@ namespace AnimeList.Controllers
     [EnableRateLimiting("scrobble")]
     [Tags("Scrobble")]
     [ApiExplorerSettings(IgnoreApi = true)]
+    // Webhook authenticates via the URL-path scrobble token, not the session cookie,
+    // so the CSRF filter doesn't apply. Plex / Jellyfin / Emby fire these from server
+    // contexts that won't and can't present an antiforgery token.
+    [IgnoreAntiforgeryToken]
     public class ScrobbleController : ControllerBase
     {
         private readonly IConfigStore _configStore;

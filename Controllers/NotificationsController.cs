@@ -173,6 +173,9 @@ namespace AnimeList.Controllers
     [ApiController]
     [Route("api/v1/cron")]
     [ApiExplorerSettings(IgnoreApi = true)]
+    // Cloudflare Worker hits this with X-Cron-Secret — shared-secret auth, not cookies,
+    // so antiforgery would mistakenly block a legitimate trigger and isn't applicable.
+    [IgnoreAntiforgeryToken]
     public class CronController : ControllerBase
     {
         private readonly IEpisodeNotificationScheduler _scheduler;

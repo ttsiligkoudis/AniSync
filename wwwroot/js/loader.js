@@ -69,6 +69,27 @@
         }
     }
 
+    // Stamp X-Requested-With on every same-origin non-GET request so the
+    // server-side CsrfOrAjaxFilter accepts it without an antiforgery token
+    // round-trip. Browsers refuse to attach custom headers cross-origin
+    // without a CORS preflight, and the in-app endpoints don't allow that
+    // preflight, so an attacker can't forge this header from outside —
+    // it's effectively a same-origin marker and equivalent to an antiforgery
+    // token for CSRF defence. Cross-origin opt-outs (manifest URLs typed
+    // into Stremio web, etc.) pass init.crossOrigin = true.
+    function stampCsrfHeader(init) {
+        var method = (init && init.method ? String(init.method) : 'GET').toUpperCase();
+        if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return init;
+        if (init && init.crossOrigin === true) {
+            var cleaned = Object.assign({}, init);
+            delete cleaned.crossOrigin;
+            return cleaned;
+        }
+        var headers = new Headers(init && init.headers ? init.headers : undefined);
+        if (!headers.has('X-Requested-With')) headers.set('X-Requested-With', 'XMLHttpRequest');
+        return Object.assign({}, init || {}, { headers: headers });
+    }
+
     // fetch wrap. Capture the original via .bind so calls keep the
     // expected `this` (window). The .finally hook fires for both
     // fulfilled and rejected promises so we never leak the counter.
@@ -87,10 +108,10 @@
                 // without mutating the caller's options object.
                 var cleaned = Object.assign({}, init);
                 delete cleaned.skipLoader;
-                return origFetch(input, cleaned);
+                return origFetch(input, stampCsrfHeader(cleaned));
             }
             beginRequest();
-            var p = origFetch(input, init);
+            var p = origFetch(input, stampCsrfHeader(init));
             // .finally is supported everywhere we care about (Chromium 63+,
             // Safari 11.1+, Firefox 58+) — well below our PWA install base.
             p.finally(endRequest);
@@ -101,7 +122,9 @@
     // jQuery ajax hooks. jQuery's own ajaxStart/ajaxStop are coarse
     // (only fire on the first/last in a batch), so we use ajaxSend /
     // ajaxComplete instead — those fire per-request and feed the same
-    // counter as the fetch wrap.
+    // counter as the fetch wrap. The X-Requested-With header is set
+    // automatically by jQuery on every $.ajax call, so the CSRF filter
+    // accepts these without further work.
     if (window.jQuery) {
         window.jQuery(document).on('ajaxSend', beginRequest);
         window.jQuery(document).on('ajaxComplete', endRequest);

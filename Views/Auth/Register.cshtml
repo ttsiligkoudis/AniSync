@@ -23,6 +23,7 @@
     }
 
     <form method="post" action="@Url.Action("Register", "Auth")" autocomplete="on">
+        @Html.AntiForgeryToken()
         @if (!string.IsNullOrEmpty(returnUrl))
         {
             <input type="hidden" name="returnUrl" value="@returnUrl" />

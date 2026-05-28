@@ -1,4 +1,5 @@
 using AnimeList.Services;
+using AnimeList.Services.Filters;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
@@ -75,7 +76,14 @@ builder.Services.AddSession(options =>
 // (we ToString() most enums explicitly anyway), but matters for Swagger: the
 // schema generator picks up the converter and emits string-typed enum
 // dropdowns in /api/docs instead of "Available values: 0, 1, 2".
-builder.Services.AddControllersWithViews()
+builder.Services.AddControllersWithViews(options =>
+    {
+        // Global anti-CSRF: every unsafe-method endpoint must present either an
+        // antiforgery token (HTML forms) or X-Requested-With: XMLHttpRequest
+        // (same-origin AJAX). External-trust endpoints opt out via
+        // [IgnoreAntiforgeryToken] — see CsrfOrAjaxFilter for the details.
+        options.Filters.Add<CsrfOrAjaxFilter>();
+    })
     .AddJsonOptions(options =>
     {
         options.JsonSerializerOptions.DefaultIgnoreCondition =
@@ -83,6 +91,19 @@ builder.Services.AddControllersWithViews()
         options.JsonSerializerOptions.Converters.Add(
             new System.Text.Json.Serialization.JsonStringEnumConverter());
     });
+// IAntiforgery + its DI plumbing. The token name `__RequestVerificationToken` is
+// the framework default; setting Cookie.* explicitly so a future framework change
+// can't silently drop the Secure / SameSite hardening we rely on.
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = "RequestVerificationToken";
+    options.Cookie.Name = ".AniSync.Antiforgery";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+        ? Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest
+        : Microsoft.AspNetCore.Http.CookieSecurePolicy.Always;
+});
 builder.Services.AddHttpContextAccessor();
 
 // Brotli + Gzip on outgoing responses. Catalog / meta JSON is the bulk of bandwidth

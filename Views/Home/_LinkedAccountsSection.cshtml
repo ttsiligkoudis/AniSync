@@ -60,6 +60,7 @@
                                 }
                             }
                             <form method="post" action="/Auth/UnlinkProvider" class="linked-account-form">
+                                @Html.AntiForgeryToken()
                                 <input type="hidden" name="service" value="@svc" />
                                 <input type="hidden" name="returnUrl" value="@currentPath" />
                                 <button type="submit" class="btn-ghost btn-ghost-sm">Unlink</button>
@@ -79,6 +80,7 @@
                     @if (svc == AnimeService.Kitsu && !isPrimary && (linked == null || linked.NeedsReauth))
                     {
                         <form method="post" action="/Auth/LinkKitsu" class="linked-account-creds linked-kitsu-form">
+                            @Html.AntiForgeryToken()
                             <input type="text" name="username" placeholder="Kitsu username" required />
                             <input type="password" name="password" placeholder="Kitsu password" required />
                             <input type="hidden" name="returnUrl" value="@currentPath" />
