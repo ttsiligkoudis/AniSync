@@ -2757,13 +2757,20 @@
                 // last frame.
                 art.on('video:ended', clearResumePosition);
 
-                // Move the skip-intro overlay button into the player
-                // host now that ArtPlayer has mounted its DOM there.
-                // playerHost is position:relative; the button is
-                // position:absolute, so this gives the button a stable
-                // corner-anchor over the video frame regardless of
-                // ArtPlayer's internal chrome size.
-                if (skipButton) playerHost.appendChild(skipButton);
+                // Move the skip-intro overlay button into ArtPlayer's
+                // own .art-video-player container ($player) rather
+                // than the outer #watchPlayer host. Both elements are
+                // position:relative; the button is position:absolute,
+                // so corner-anchoring works identically — but only
+                // $player is the element ArtPlayer toggles fullscreen
+                // on (both native and fullscreen-web), so this is the
+                // one the skip button has to live inside to stay
+                // visible when the user expands the player. Appending
+                // to #watchPlayer (the previous behaviour) left the
+                // button outside the fullscreen viewport with no way
+                // to surface it short of exiting fullscreen.
+                var $playerHost = (art.template && art.template.$player) || playerHost;
+                if (skipButton) $playerHost.appendChild(skipButton);
 
                 wireSkipOverlay(art);
                 paintSkipRanges(art);
