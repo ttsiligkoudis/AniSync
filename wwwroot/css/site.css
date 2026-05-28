@@ -24,13 +24,17 @@
   /* Text */
   --text: #e0e0e0;
   --text-strong: #fff;
-  --text-2: #cfcfcf;     /* secondary text (consolidates var(--text-2)/var(--text-2)) */
+  --text-2: #cfcfcf;     /* secondary text (consolidates #ccc / #ddd) */
   --text-dim: #999;      /* dim labels / captions */
-  --text-muted: #7d7d7d; /* faint / disabled text (consolidates var(--text-muted)/var(--text-muted)/var(--text-muted)) */
+  --text-muted: #7d7d7d; /* faint / disabled text (consolidates #888 / #777 / #666) */
   /* Text/icons on a saturated accent/danger/brand fill or over artwork —
      stays light in BOTH themes (does NOT flip), unlike --text-strong which
      goes dark in the light theme for headings on the page background. */
   --on-accent: #fff;
+  /* RGB channel for translucent "dimmed" text/borders. Usage:
+     rgba(var(--ink-rgb), 0.6) keeps its own alpha but flips the colour —
+     white-on-dark in the dark theme, black-on-light in the light theme. */
+  --ink-rgb: 255, 255, 255;
 
   /* Accent (brand blue) */
   --accent: #3b82f6;
@@ -118,6 +122,7 @@
     --text-2: #3f3f3f;
     --text-dim: #5f6368;
     --text-muted: #80868b;
+    --ink-rgb: 0, 0, 0;
 
     --accent: #2563eb;
     --accent-hover: #1d4ed8;
@@ -155,6 +160,7 @@
   --text-2: #3f3f3f;
   --text-dim: #5f6368;
   --text-muted: #80868b;
+  --ink-rgb: 0, 0, 0;
 
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
@@ -644,7 +650,7 @@ body.anime-detail-page .anime-detail-hero {
 
     .site-header-cta-secondary:hover,
     .site-header-cta-secondary:focus {
-        border-color: rgba(255, 255, 255, 0.3);
+        border-color: rgba(var(--ink-rgb), 0.3);
         color: var(--text-strong);
         text-decoration: none;
     }
@@ -846,7 +852,7 @@ body.drawer-open .drawer-backdrop {
 
 .nav-drawer-cta-secondary:hover,
 .nav-drawer-cta-secondary:focus {
-    border-color: rgba(255, 255, 255, 0.3);
+    border-color: rgba(var(--ink-rgb), 0.3);
     color: var(--text-strong);
 }
 
@@ -1346,7 +1352,7 @@ body.modal-open {
 }
 
 .entry-modal-cancel:hover {
-    border-color: rgba(255, 255, 255, 0.3);
+    border-color: rgba(var(--ink-rgb), 0.3);
     color: var(--text-strong);
 }
 
@@ -1620,7 +1626,7 @@ body.modal-open {
     background: transparent;
     border: 1px solid var(--overlay-08);
     border-radius: 0.6rem;
-    color: rgba(255, 255, 255, 0.7);
+    color: rgba(var(--ink-rgb), 0.7);
     cursor: pointer;
     transition: background 0.15s, border-color 0.15s, color 0.15s;
     flex-shrink: 0;
@@ -1968,7 +1974,7 @@ body.modal-open {
 
     .pwa-install-btn:hover {
         background: var(--overlay-08);
-        border-color: rgba(255, 255, 255, 0.22);
+        border-color: rgba(var(--ink-rgb), 0.22);
         color: var(--on-accent);
     }
 
@@ -2069,7 +2075,7 @@ body.modal-open {
 }
 
 .hero-tagline {
-    color: #9ca3af;
+    color: var(--text-dim);
     font-size: 0.9rem;
     line-height: 1.45;
     margin: 0 0 0.2rem;
@@ -2117,7 +2123,7 @@ body.modal-open {
 
 .hero-cta-secondary:hover {
     background: var(--overlay-06);
-    border-color: rgba(255, 255, 255, 0.3);
+    border-color: rgba(var(--ink-rgb), 0.3);
     color: var(--text-strong);
 }
 
@@ -2547,7 +2553,7 @@ body.modal-open {
 
 .btn-secondary-action:hover {
     background: var(--overlay-05);
-    border-color: rgba(255,255,255,0.28);
+    border-color: rgba(var(--ink-rgb), 0.28);
     color: var(--text-strong);
     text-decoration: none;
 }
@@ -2646,7 +2652,7 @@ body.modal-open {
     justify-content: center;
     width: 2rem;
     height: 2rem;
-    color: rgba(255, 255, 255, 0.45);
+    color: rgba(var(--ink-rgb), 0.45);
     cursor: grab;
     flex-shrink: 0;
     touch-action: none;
@@ -2656,7 +2662,7 @@ body.modal-open {
 
 .stream-addon-drag-handle:active {
     cursor: grabbing;
-    color: rgba(255, 255, 255, 0.75);
+    color: rgba(var(--ink-rgb), 0.75);
 }
 
 /* While being dragged: fade the source row so the placeholder gap
@@ -2701,7 +2707,7 @@ body.modal-open {
     background: var(--overlay-05);
     border: 1px solid var(--overlay-10);
     border-radius: 0.5rem;
-    color: rgba(255, 255, 255, 0.7);
+    color: rgba(var(--ink-rgb), 0.7);
     cursor: pointer;
     transition: background 0.15s, border-color 0.15s, color 0.15s;
     text-decoration: none;
@@ -2711,7 +2717,7 @@ body.modal-open {
 .stream-addon-icon-btn:hover,
 .stream-addon-icon-btn:focus {
     background: var(--overlay-10);
-    border-color: rgba(255, 255, 255, 0.2);
+    border-color: rgba(var(--ink-rgb), 0.2);
     color: var(--text-strong);
     text-decoration: none;
 }
@@ -2745,7 +2751,7 @@ body.modal-open {
 }
 
 .stream-addon-name {
-    color: #e6e6e6;
+    color: var(--text);
     font-size: 0.85rem;
     font-weight: 500;
 }
@@ -2817,8 +2823,8 @@ body.modal-open {
 }
 
 .btn-ghost:hover {
-    background: rgba(255,255,255,0.09);
-    border-color: rgba(255,255,255,0.2);
+    background: rgba(var(--ink-rgb), 0.09);
+    border-color: rgba(var(--ink-rgb), 0.2);
     color: var(--text-strong);
     text-decoration: none;
 }
@@ -2848,7 +2854,7 @@ body.modal-open {
     align-items: center;
     gap: 0.75rem;
     padding: 0.6rem 0.9rem;
-    background: rgba(255,255,255,0.03);
+    background: rgba(var(--ink-rgb), 0.03);
     border: 1px solid var(--overlay-06);
     border-radius: 10px;
 }
@@ -2912,7 +2918,7 @@ body.modal-open {
     background: var(--overlay-05);
     border: 1px solid var(--overlay-12);
     border-radius: 8px;
-    color: #eee;
+    color: var(--text);
     font-family: inherit;
     font-size: 0.9rem;
 }
@@ -2992,7 +2998,7 @@ body.modal-open {
 .sync-modal-close {
     background: transparent;
     border: 0;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(var(--ink-rgb), 0.6);
     font-size: 1.6rem;
     line-height: 1;
     cursor: pointer;
@@ -3006,7 +3012,7 @@ body.modal-open {
 .episode-stream-section-title {
     font-size: 0.8rem;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(var(--ink-rgb), 0.6);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin: 1rem 0 0.4rem;
@@ -3071,7 +3077,7 @@ body.modal-open {
     background: var(--overlay-04);
     border: 1px solid var(--overlay-08);
     border-radius: 0.6rem;
-    color: rgba(255, 255, 255, 0.65);
+    color: rgba(var(--ink-rgb), 0.65);
     cursor: pointer;
     transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
@@ -3161,13 +3167,13 @@ body.modal-open {
     flex-wrap: wrap;
     align-items: center;
     gap: 0.5rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(var(--ink-rgb), 0.5);
     font-size: 0.75rem;
 }
 
 .episode-stream-size,
 .episode-stream-seeders {
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(var(--ink-rgb), 0.5);
     font-size: 0.75rem;
 }
 
@@ -3225,7 +3231,7 @@ body.modal-open {
     padding: 0.05rem 0.4rem;
     background: var(--overlay-06);
     border-radius: 0.35rem;
-    color: rgba(255, 255, 255, 0.75);
+    color: rgba(var(--ink-rgb), 0.75);
     font-size: 0.72rem;
 }
 
@@ -3272,7 +3278,7 @@ body.modal-open {
     padding: 0.05rem 0.4rem;
     background: var(--overlay-06);
     border-radius: 0.35rem;
-    color: rgba(255, 255, 255, 0.65);
+    color: rgba(var(--ink-rgb), 0.65);
     font-size: 0.72rem;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -3296,7 +3302,7 @@ body.modal-open {
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    color: rgba(255, 255, 255, 0.65);
+    color: rgba(var(--ink-rgb), 0.65);
     text-decoration: none;
     font-size: 0.85rem;
     margin-bottom: 0.5rem;
@@ -3317,12 +3323,12 @@ body.modal-open {
 .watch-meta {
     margin: 0.25rem 0 0;
     font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(var(--ink-rgb), 0.55);
 }
 
 .watch-meta-dot {
     margin: 0 0.35rem;
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(var(--ink-rgb), 0.35);
 }
 
 .watch-player-wrap {
@@ -3511,7 +3517,7 @@ body.modal-open {
 
 .watch-nav-direction {
     font-size: 0.78rem;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(var(--ink-rgb), 0.55);
     font-weight: 600;
 }
 
@@ -3526,7 +3532,7 @@ body.modal-open {
 .watch-section-title {
     font-size: 1rem;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.8);
+    color: rgba(var(--ink-rgb), 0.8);
     margin: 0 0 0.6rem;
 }
 
@@ -3550,7 +3556,7 @@ body.modal-open {
 .watch-section-subtitle {
     font-size: 0.8rem;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(var(--ink-rgb), 0.6);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin: 1rem 0 0.5rem;
@@ -3570,7 +3576,7 @@ body.modal-open {
     padding: 0.05rem 0.4rem;
     border-radius: 0.6rem;
     background: var(--overlay-08);
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(var(--ink-rgb), 0.55);
     font-size: 0.7rem;
     font-weight: 500;
     letter-spacing: 0.02em;
@@ -3603,7 +3609,7 @@ body.modal-open {
     z-index: 70;
     padding: 0.55rem 1rem;
     background: rgba(0, 0, 0, 0.75);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(var(--ink-rgb), 0.2);
     border-radius: 0.5rem;
     color: var(--on-accent);
     font-size: 0.85rem;
@@ -3665,7 +3671,7 @@ body.modal-open {
     background: var(--overlay-04);
     border: 1px solid var(--overlay-10);
     border-radius: 999px;
-    color: rgba(255, 255, 255, 0.7);
+    color: rgba(var(--ink-rgb), 0.7);
     font-size: 0.8rem;
     cursor: pointer;
     transition: background 0.15s, border-color 0.15s, color 0.15s;
@@ -3673,14 +3679,14 @@ body.modal-open {
 
 .watch-toggle:hover {
     color: var(--text-strong);
-    border-color: rgba(255, 255, 255, 0.2);
+    border-color: rgba(var(--ink-rgb), 0.2);
 }
 
 .watch-toggle-dot {
     width: 0.55rem;
     height: 0.55rem;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.25);
+    background: rgba(var(--ink-rgb), 0.25);
     transition: background 0.15s, box-shadow 0.15s;
 }
 
@@ -3707,7 +3713,7 @@ body.modal-open {
     background: var(--overlay-04);
     border: 1px solid var(--overlay-10);
     border-radius: 999px;
-    color: rgba(255, 255, 255, 0.7);
+    color: rgba(var(--ink-rgb), 0.7);
     font-size: 0.78rem;
 }
 
@@ -3726,7 +3732,7 @@ body.modal-open {
 }
 
 .watch-embed-status[data-kind="none"] {
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(var(--ink-rgb), 0.55);
 }
 
 .watch-embed-status[data-kind="error"] {
@@ -3876,7 +3882,7 @@ body.modal-open {
 
 .sync-modal-message {
     font-size: 0.85rem;
-    color: #bbb;
+    color: var(--text-2);
     margin: 0 0 1rem;
     min-height: 1.2rem;
 }
@@ -4466,7 +4472,7 @@ body.modal-open {
    name reads as the headline and the count as a quiet annotation. */
 .studio-tile-count {
     font-size: 0.78rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(var(--ink-rgb), 0.5);
     line-height: 1.2;
 }
 
@@ -4516,7 +4522,7 @@ body.modal-open {
 .tag-group-title {
     font-size: 0.95rem;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.65);
+    color: rgba(var(--ink-rgb), 0.65);
     margin: 0 0 0.6rem 0;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -4766,7 +4772,7 @@ body.modal-open {
     width: 260px;
     max-width: calc(100vw - 2rem);
     padding: 0.65rem 0.75rem;
-    background: #181818;
+    background: var(--surface-overlay);
     border: 1px solid var(--overlay-12);
     border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
@@ -5584,7 +5590,7 @@ a.stats-cell-link:hover {
     width: 100%;
     border-radius: 1.25rem;
     overflow: hidden;
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(var(--ink-rgb), 0.03);
     border: 1px solid var(--overlay-06);
     isolation: isolate; /* establish a stacking context for the backdrop layers */
 }
@@ -5701,7 +5707,7 @@ a.stats-cell-link:hover {
 
 .anime-detail-info {
     font-size: 0.85rem;
-    color: #9ca3af;
+    color: var(--text-dim);
 }
 
 /* Badges row: score + airing status, side by side. Wraps to the next line
@@ -6038,7 +6044,7 @@ button.anime-detail-user-state:hover {
 .anime-detail-user-state-unavailable,
 .anime-detail-user-state-unavailable:hover {
     background: var(--overlay-04);
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(var(--ink-rgb), 0.55);
     border-color: var(--overlay-08);
     cursor: help;
     transform: none;
@@ -6103,8 +6109,8 @@ button.anime-detail-user-state:hover {
     gap: 0.55rem;
     padding: 0.75rem 1.4rem;
     border-radius: 0.6rem;
-    background: #2a2a2a;
-    color: #f0f0f0;
+    background: var(--surface-raised);
+    color: var(--text);
     border: 1px solid var(--overlay-08);
     font-size: 0.95rem;
     font-weight: 600;
@@ -6115,7 +6121,7 @@ button.anime-detail-user-state:hover {
 .anime-detail-movie-cta:hover,
 .anime-detail-movie-cta:focus {
     background: var(--surface-raised);
-    border-color: rgba(255, 255, 255, 0.16);
+    border-color: rgba(var(--ink-rgb), 0.16);
     color: var(--text-strong);
     text-decoration: none;
 }
@@ -6141,7 +6147,7 @@ button.anime-detail-user-state:hover {
 }
 
 .anime-detail-synopsis {
-    color: #d0d0d0;
+    color: var(--text-2);
     font-size: 0.92rem;
     line-height: 1.55;
     margin: 0;
@@ -6301,7 +6307,7 @@ button.anime-detail-user-state:hover {
 }
 
 .anime-detail-episodes-body::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.22);
+    background: rgba(var(--ink-rgb), 0.22);
 }
 
 /* Collapsed state: cap the body at 0 height. We keep `display` intact
@@ -6377,7 +6383,7 @@ button.anime-detail-user-state:hover {
     max-width: 280px;
     padding: 0.4rem 0.75rem;
     background: var(--overlay-04);
-    border: 1px solid rgba(255, 255, 255, 0.10);
+    border: 1px solid rgba(var(--ink-rgb), 0.10);
     border-radius: 0.5rem;
     color: var(--text);
     font-size: 0.85rem;
@@ -6393,7 +6399,7 @@ button.anime-detail-user-state:hover {
 
 .anime-detail-episodes-filter:focus {
     outline: none;
-    border-color: rgba(255, 255, 255, 0.22);
+    border-color: rgba(var(--ink-rgb), 0.22);
     background: var(--overlay-06);
 }
 
@@ -6451,7 +6457,7 @@ button.anime-detail-user-state:hover {
 .notif-page-action {
     background: none;
     border: 1px solid var(--overlay-12);
-    color: #cfcfcf;
+    color: var(--text-2);
     padding: 0.4rem 0.85rem;
     border-radius: 999px;
     font-size: 0.82rem;
@@ -6464,7 +6470,7 @@ button.anime-detail-user-state:hover {
 .notif-page-action:hover:not(:disabled),
 .notif-page-action:focus:not(:disabled) {
     background: var(--overlay-05);
-    border-color: rgba(255, 255, 255, 0.22);
+    border-color: rgba(var(--ink-rgb), 0.22);
     color: var(--text-strong);
     outline: none;
 }
@@ -6495,7 +6501,7 @@ button.anime-detail-user-state:hover {
     border: 1px solid var(--overlay-06);
     border-radius: 0.65rem;
     overflow: hidden;
-    background: #141414;
+    background: var(--surface);
 }
 
 .notif-page-item,
@@ -6585,7 +6591,7 @@ button.anime-detail-user-state:hover {
 .notif-page-meta {
     margin-top: 0.2rem;
     font-size: 0.82rem;
-    color: #8a8a8a;
+    color: var(--text-muted);
 }
 
 .notif-page-delete {
@@ -6641,8 +6647,8 @@ button.anime-detail-user-state:hover {
     padding: 0.55rem 0.85rem;
     border: 1px solid var(--overlay-08);
     border-radius: 0.55rem;
-    background: rgba(255, 255, 255, 0.02);
-    color: #cfcfcf;
+    background: rgba(var(--ink-rgb), 0.02);
+    color: var(--text-2);
     font-size: 0.85rem;
 }
 
@@ -6694,14 +6700,14 @@ button.anime-detail-user-state:hover {
 
 .notif-push-toggle-disable .notif-push-toggle-btn {
     background: transparent;
-    color: #cfcfcf;
+    color: var(--text-2);
     border: 1px solid var(--overlay-18);
 }
 
 .notif-push-toggle-disable .notif-push-toggle-btn:hover:not(:disabled),
 .notif-push-toggle-disable .notif-push-toggle-btn:focus:not(:disabled) {
     background: var(--overlay-05);
-    border-color: rgba(255, 255, 255, 0.3);
+    border-color: rgba(var(--ink-rgb), 0.3);
 }
 
 /* Thumbnail wrapper — the play-diamond and watched-eye glyphs absolute-
@@ -6754,7 +6760,7 @@ button.anime-detail-user-state:hover {
     display: flex;
     align-items: center;
     justify-content: center;
-    color: rgba(255, 255, 255, 0.85);
+    color: rgba(var(--ink-rgb), 0.85);
     pointer-events: none;
     /* Drop-shadow gives the icon presence on bright thumbnails too. */
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
@@ -6826,7 +6832,7 @@ button.anime-detail-user-state:hover {
     margin: 0;
     font-size: 0.82rem;
     line-height: 1.45;
-    color: #c0c0c0;
+    color: var(--text-2);
     /* Two-line clamp — full description still accessible from the
        thumbnail's data attributes (future expansion: tap to expand). */
     display: -webkit-box;
@@ -6849,7 +6855,7 @@ ol.anime-detail-episodes[data-can-edit="true"] .anime-detail-episode:hover {
 /* Watched rows: thumbnail is fully opaque (the eye badge marks them) but
    title softens to suggest "already viewed". */
 .anime-detail-episode-watched .anime-detail-episode-title {
-    color: #b0b0b0;
+    color: var(--text-2);
 }
 
 /* Busy state during the save round-trip — same as before. */
@@ -7007,13 +7013,13 @@ ol.anime-detail-episodes-busy {
 .anime-detail-genre-list .anime-detail-link {
     background: var(--overlay-06);
     border-color: var(--overlay-18);
-    color: #d4d4d8;
+    color: var(--text-2);
 }
 
 .anime-detail-genre-list .anime-detail-link:hover,
 .anime-detail-genre-list .anime-detail-link:focus {
     background: var(--overlay-10);
-    border-color: rgba(255, 255, 255, 0.3);
+    border-color: rgba(var(--ink-rgb), 0.3);
     color: var(--text-strong);
 }
 
@@ -7063,7 +7069,7 @@ ol.anime-detail-episodes-busy {
 .notif-bell-open .notif-bell-btn {
     background: var(--overlay-08);
     color: var(--text-strong);
-    border-color: rgba(255, 255, 255, 0.22);
+    border-color: rgba(var(--ink-rgb), 0.22);
     outline: none;
 }
 
@@ -7132,7 +7138,7 @@ ol.anime-detail-episodes-busy {
     right: 16px;
     width: 360px;
     max-height: 55vh;
-    background: #141414;
+    background: var(--surface);
     border: 1px solid var(--overlay-12);
     border-radius: 0.65rem;
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
@@ -7197,7 +7203,7 @@ ol.anime-detail-episodes-busy {
 
 .notif-empty {
     padding: 1.25rem 1rem;
-    color: #8a8a8a;
+    color: var(--text-muted);
     font-size: 0.88rem;
     text-align: center;
 }
@@ -7260,7 +7266,7 @@ ol.anime-detail-episodes-busy {
 .notif-meta {
     margin-top: 0.2rem;
     font-size: 0.78rem;
-    color: #8a8a8a;
+    color: var(--text-muted);
 }
 
 /* "View all" link at the bottom of the bell dropdown. Goes to the
@@ -7278,13 +7284,13 @@ ol.anime-detail-episodes-busy {
     font-size: 0.84rem;
     font-weight: 600;
     border-top: 1px solid var(--overlay-08);
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(var(--ink-rgb), 0.02);
     transition: background 0.15s, color 0.15s;
 }
 
 .notif-panel-footer:hover,
 .notif-panel-footer:focus {
     background: var(--overlay-04);
-    color: #bfdbfe;
+    color: var(--accent-light);
     text-decoration: none;
 }
