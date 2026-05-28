@@ -347,6 +347,49 @@ table {
   to   { opacity: 1; transform: none; }
 }
 
+/* ── Pull-to-refresh indicator (item 13) ── */
+/* A floating spinner pill that follows the pull and spins while reloading.
+   Mounted + driven by pull-to-refresh.js (standalone display-mode only). */
+.ptr-indicator {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) - 4px);
+  left: 50%;
+  transform: translateX(-50%) translateY(0);
+  z-index: 150;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ptr-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--overlay-18);
+  border-top-color: var(--accent);
+}
+
+.ptr-indicator.ptr-ready .ptr-spinner {
+  transform: rotate(180deg);
+  transition: transform 0.2s ease;
+}
+
+.ptr-indicator.ptr-refreshing .ptr-spinner {
+  animation: ptr-spin 0.7s linear infinite;
+}
+
+@keyframes ptr-spin {
+  to { transform: rotate(360deg); }
+}
+
 html {
   font-size: 14px;
 }
@@ -357,8 +400,22 @@ html {
   }
 }
 
-.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
-  box-shadow: 0 0 0 0.1rem var(--text-strong), 0 0 0 0.25rem var(--accent);
+/* Keyboard-focus baseline (item 18). Replaces the old Bootstrap-derived
+   .btn/.form-control focus ring (those classes went away with Bootstrap).
+   :focus-visible only paints for keyboard / programmatic focus, so mouse
+   and touch users don't see a ring — elements with their own focus styling
+   override this, and form controls additionally get an accent border. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+  border-color: var(--accent);
 }
 
 html {
@@ -1264,6 +1321,68 @@ body.modal-open {
     cursor: not-allowed;
 }
 
+/* ──────────────────────────────────────────────────────────────────────
+   Manage-entry modal → bottom sheet on mobile (item 12)
+
+   Below 640px the centred dialog becomes a sheet docked to the bottom edge
+   with a grab handle and rounded top corners — the native mobile pattern,
+   and the manage-entry flow is the app's most-used interaction. Same
+   markup; manage-entry-modal.js adds a touch-drag-down dismiss (the
+   .is-dragging class suppresses the spring transition while a finger is
+   down). Placed after the base modal rules so these win on source order.
+   ────────────────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+    .entry-modal {
+        top: auto;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        transform: none;
+        width: 100%;
+        max-width: none;
+        max-height: 88vh;
+        border-radius: 1.1rem 1.1rem 0 0;
+        border-bottom: 0;
+        /* Keep the action row clear of the home indicator / gesture bar. */
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+        animation: sheet-up 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    /* While dragging, the sheet tracks the finger 1:1 — no easing. */
+    .entry-modal.is-dragging {
+        transition: none;
+    }
+
+    /* Grab handle — a pill centred above the title. */
+    .entry-modal-header {
+        position: relative;
+        padding-top: 1.6rem;
+    }
+    .entry-modal-header::before {
+        content: '';
+        position: absolute;
+        top: 0.6rem;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 38px;
+        height: 4px;
+        border-radius: var(--radius-pill);
+        background: var(--overlay-18);
+    }
+}
+
+@keyframes sheet-up {
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .entry-modal {
+        animation: none;
+    }
+}
+
 /* ── Toast notifications ── */
 /* Bottom-centred on mobile (clears the bottom-nav by default), top-right on
    desktop where there's no bottom-nav competing for space. */
@@ -1373,7 +1492,8 @@ body.modal-open {
     .loader-spinner,
     .paginator-loader-spinner,
     .episode-stream-action-spinner,
-    .source-chip-spinner {
+    .source-chip-spinner,
+    .ptr-indicator.ptr-refreshing .ptr-spinner {
         animation-duration: 0.8s !important;
         animation-iteration-count: infinite !important;
     }
