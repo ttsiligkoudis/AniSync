@@ -237,9 +237,16 @@ namespace AnimeList.Services
 
             // RETURNING yields newUid on a fresh INSERT and the existing uid when the conflict
             // refreshed a primary row. It yields nothing only when the conflicting row owns the
-            // identity as a *linked* secondary (DO UPDATE WHERE was false) — the rare race noted
-            // above, where no row was written and null is the honest answer.
-            return await cmd.ExecuteScalarAsync() as string;
+            // identity as a *linked* secondary (DO UPDATE WHERE was false). In that rare case
+            // the caller's question — "what uid owns this identity?" — is still answerable: the
+            // linked-secondary owner answers it just as well as a primary owner would, so fall
+            // back to FindUidByIdentityAsync rather than hand back null and force every caller
+            // to learn the no-write edge case.
+            var resultUid = await cmd.ExecuteScalarAsync() as string;
+            if (!string.IsNullOrEmpty(resultUid)) return resultUid;
+
+            var (existing, _) = await FindUidByIdentityAsync(tokenData);
+            return existing;
         }
 
         // Default packed flags for a freshly-linked account. flags1 byte enables
@@ -716,12 +723,19 @@ namespace AnimeList.Services
             if (string.IsNullOrEmpty(uid)) return (null, "uid-missing");
 
             using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
+            // BEGIN IMMEDIATE for consistency with the linked-token write paths: the swap is
+            // a read-modify-write of token_json + linked_tokens, and a concurrent unlink/link
+            // landing between the read and the UPDATE would otherwise be silently clobbered.
+            // Early-return paths below dispose `tx` without committing, which rolls back —
+            // they don't write anything anyway, so rollback is semantically a no-op.
+            using var tx = conn.BeginTransaction(deferred: false);
 
             // Read the current row so we can reshuffle primary <-> linked atomically below.
             string oldPrimaryJson = null;
             string linkedJson = null;
             using (var read = conn.CreateCommand())
             {
+                read.Transaction = tx;
                 read.CommandText = "SELECT token_json, linked_tokens FROM configs WHERE uid = $uid LIMIT 1";
                 read.Parameters.AddWithValue("$uid", uid);
                 using var reader = await read.ExecuteReaderAsync();
@@ -770,6 +784,7 @@ namespace AnimeList.Services
             async Task<int> RunUpdate()
             {
                 using var update = conn.CreateCommand();
+                update.Transaction = tx;
                 update.CommandText = """
                     UPDATE configs
                        SET service = $s, token_json = $j,
@@ -792,6 +807,7 @@ namespace AnimeList.Services
             {
                 if (string.IsNullOrEmpty(newUserKey) || newIdentityCol == null) return false;
                 using var probe = conn.CreateCommand();
+                probe.Transaction = tx;
                 probe.CommandText = $"SELECT 1 FROM configs WHERE {newIdentityCol} = $k AND uid <> $uid LIMIT 1";
                 probe.Parameters.AddWithValue("$k", newUserKey);
                 probe.Parameters.AddWithValue("$uid", uid);
@@ -805,6 +821,7 @@ namespace AnimeList.Services
                 // The colliding row keeps its own UID, flags, and linked_tokens — caller
                 // must have warned the user that other-install state is lost.
                 using var del = conn.CreateCommand();
+                del.Transaction = tx;
                 del.CommandText = $"DELETE FROM configs WHERE {newIdentityCol} = $k AND uid <> $uid";
                 del.Parameters.AddWithValue("$k", newUserKey);
                 del.Parameters.AddWithValue("$uid", uid);
@@ -812,6 +829,7 @@ namespace AnimeList.Services
             }
 
             await RunUpdate();
+            await tx.CommitAsync();
             return (newPrimary, null);
         }
 
