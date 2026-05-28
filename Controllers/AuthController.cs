@@ -101,6 +101,15 @@ namespace AnimeList.Controllers
         [HttpGet]
         public async Task<IActionResult> Login(AnimeService? animeService = null, string username = null, string password = null, bool anonymous = false, string returnUrl = null)
         {
+            // Already-authenticated short-circuit. Re-running the OAuth dance for a logged-in
+            // user would either silently replace their primary (login flow with `state` round-
+            // trip) or refresh tokens they already have. Send them to a sensible landing and
+            // let them /Auth/Logout first if they actually meant to switch accounts.
+            // Anonymous users (anime-service preference picked but no real account) still pass
+            // through — they DO need /Auth/Login to upgrade into a real session.
+            if (GetSessionPrimary() != null)
+                return RedirectToReturnUrlOrHome(returnUrl);
+
             // Stash the post-login destination on the session for the OAuth
             // branches (AniList / MAL) so /Auth/Callback can read + honour
             // it on return. Same key the link-additional-provider flow uses;
@@ -212,13 +221,19 @@ namespace AnimeList.Controllers
             // this session — refuse before touching the authorization code so an attacker
             // can't graft their provider account onto a victim's session (account fixation).
             // In practice the legitimate way to land here is the back-button / refresh
-            // landing on an already-consumed callback URL; surfacing an explicit "link
-            // expired" view is friendlier than silently redirecting to the dashboard where
-            // the user sees the logged-out shell with no explanation.
+            // landing on an already-consumed callback URL.
+            //   - Authenticated user with no flow in flight: redirect home. "Sign-in link
+            //     expired" would be confusing context for someone who's already signed in
+            //     (they were typically chasing a bookmarked callback URL).
+            //   - Otherwise: render the explicit OauthStateExpired view so the previously-
+            //     anonymous user sees actionable "Sign in again" messaging instead of
+            //     silently landing on the logged-out dashboard.
             if (string.IsNullOrEmpty(expectedState)
                 || !string.Equals(expectedState, state, StringComparison.Ordinal))
             {
                 _logger.LogWarning("OAuth callback rejected: state mismatch (service={Service}).", oauthService);
+                if (GetSessionPrimary() != null)
+                    return RedirectToReturnUrlOrHome(oauthReturnUrl);
                 Response.StatusCode = StatusCodes.Status400BadRequest;
                 return View("OauthStateExpired");
             }
@@ -585,10 +600,14 @@ namespace AnimeList.Controllers
         /// Renders the standalone signup form. Kitsu is the only one of the three providers
         /// we support that exposes a public registration API (JSON:API users endpoint) —
         /// AniList and MAL require a manual signup on their own sites.
+        /// Authenticated users are bounced to home: creating another account from a logged-
+        /// in session would mint a second config row that the current cookie doesn't own,
+        /// leaving the user staring at a signup form they shouldn't be on.
         /// </summary>
         [HttpGet]
         public IActionResult Register(string returnUrl = null)
         {
+            if (GetSessionPrimary() != null) return RedirectToReturnUrlOrHome(returnUrl);
             ViewBag.ReturnUrl = returnUrl;
             return View();
         }
@@ -596,6 +615,11 @@ namespace AnimeList.Controllers
         [HttpPost]
         public async Task<IActionResult> Register(string name, string email, string password, string confirmPassword, string returnUrl = null)
         {
+            // Defence-in-depth against the GET guard above — a stale tab that started the
+            // form while logged out shouldn't be able to post once the user has signed in
+            // somewhere else in the meantime.
+            if (GetSessionPrimary() != null) return RedirectToReturnUrlOrHome(returnUrl);
+
             // Mirror the basic constraints Kitsu would reject server-side anyway, but
             // surface them inline so the user doesn't pay a network round-trip to learn
             // their password is too short or doesn't match the confirmation.
