@@ -211,7 +211,6 @@
                             ? $"Ep {Model.Entry.Progress} / {t}"
                             : $"Ep {Model.Entry.Progress}");
                     }
-                    if (Model.Entry.UserScore is double us && us > 0) userBits.Add($"Your score: {us.ToString("0.0")}");
                     if (userBits.Count > 0)
                     {
                         if (canEdit)
