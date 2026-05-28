@@ -204,6 +204,17 @@ namespace AnimeList.Services
                 // on screen. Strip the opening + closing tags (preserve
                 // the inner text) before returning.
                 vtt = StripFontTags(vtt);
+                // ASS / SSA override blocks ({\an8}, {\fad(200,200)},
+                // {\pos(x,y)}, {\c&Hxxxxxx&}, …) leak through when an
+                // OpenSubtitles release re-packages an .ass track as
+                // .srt / .vtt without normalising the body — common
+                // for anime where the original sub author authored in
+                // ASS for typesetting / karaoke. Native VTT renderers
+                // have no concept of these tags, so they paint them as
+                // literal text on the cue. Same shape as the embedded-
+                // MKV converter's ASS_OVERRIDE_RE (Watch.cshtml) so a
+                // file routed through either path renders the same.
+                vtt = StripAssOverrides(vtt);
                 // Lift cues off the bottom edge so they don't collide
                 // with ArtPlayer's controls bar / sit flush against
                 // the video frame. Provider VTTs almost never set a
@@ -426,6 +437,22 @@ namespace AnimeList.Services
 
         private static string StripFontTags(string vtt) =>
             string.IsNullOrEmpty(vtt) ? vtt : FontTag.Replace(vtt, string.Empty);
+
+        // ASS / SSA override block: "{" + at least one backslash-
+        // prefixed tag (\an8, \pos, \fad, \c&H…&, \b1, …) + "}". The
+        // negated char class on the body bounds the match non-greedy,
+        // so two adjacent overrides on the same line ("{\an8}{\fad
+        // (200,200)}Lyrics…") strip independently instead of swallowing
+        // the text between them. Requiring the backslash leaves
+        // legitimate dialogue like "He muttered {something}" untouched
+        // — ASS overrides are the only case in this corpus where
+        // braces are syntax rather than text.
+        private static readonly Regex AssOverride = new(
+            @"\{\\[^}]*\}",
+            RegexOptions.Compiled);
+
+        private static string StripAssOverrides(string vtt) =>
+            string.IsNullOrEmpty(vtt) ? vtt : AssOverride.Replace(vtt, string.Empty);
 
         // Cue-header lines look like "00:00:01.500 --> 00:00:04.000"
         // optionally followed by space-separated cue settings. WebVTT
