@@ -80,4 +80,14 @@
     }
 
     window.AniSyncToast = { show: showToast };
+
+    // Haptics — a subtle tactile tick on key actions (mark-watched, +1
+    // episode, pull-to-refresh trigger). Android honours the Vibration API;
+    // iOS browsers ignore it, so feature-detect and no-op everywhere else.
+    window.AniSyncHaptics = {
+        tick: function (ms) {
+            try { if (navigator.vibrate) navigator.vibrate(ms || 10); }
+            catch (_) { /* blocked / unsupported — silent no-op */ }
+        }
+    };
 })();
