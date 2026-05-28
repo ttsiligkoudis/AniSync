@@ -196,7 +196,32 @@
         <button type="button" id="watchSourcesRefresh" class="episode-stream-action watch-sources-refresh" title="Refresh sources" aria-label="Refresh sources"></button>
     </div>
     <div id="watchSourcesBody" class="watch-sources-body">
-        <p class="hint-text">Looking for streams…</p>
+        @* Shimmer placeholders shaped like the stream list; the client
+           swaps in real rows (or an empty/no-sources message) once the
+           addon fan-out resolves. *@
+        <ul class="episode-stream-skeleton" aria-hidden="true">
+            <li class="episode-stream-skeleton-row">
+                <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
+                <span class="episode-stream-skeleton-meta">
+                    <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
+                    <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
+                </span>
+            </li>
+            <li class="episode-stream-skeleton-row">
+                <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
+                <span class="episode-stream-skeleton-meta">
+                    <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
+                    <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
+                </span>
+            </li>
+            <li class="episode-stream-skeleton-row">
+                <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
+                <span class="episode-stream-skeleton-meta">
+                    <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
+                    <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
+                </span>
+            </li>
+        </ul>
     </div>
 </section>
 
@@ -719,6 +744,24 @@
                 });
                 if (text != null) n.textContent = text;
                 return n;
+            }
+
+            // Shimmer placeholder rows shaped like the real stream list, shown
+            // in the Sources panel while the addon fan-out runs — perceived
+            // performance over a bare "Looking for streams…" line. Reuses the
+            // shared .skeleton-shimmer treatment from site.css.
+            function streamSkeleton() {
+                var ul = el('ul', { class: 'episode-stream-skeleton', 'aria-hidden': 'true' });
+                for (var i = 0; i < 4; i++) {
+                    var li = el('li', { class: 'episode-stream-skeleton-row' });
+                    li.appendChild(el('span', { class: 'episode-stream-skeleton-quality skeleton-shimmer' }));
+                    var meta = el('span', { class: 'episode-stream-skeleton-meta' });
+                    meta.appendChild(el('span', { class: 'episode-stream-skeleton-line skeleton-shimmer' }));
+                    meta.appendChild(el('span', { class: 'episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer' }));
+                    li.appendChild(meta);
+                    ul.appendChild(li);
+                }
+                return ul;
             }
 
             function destroyPlayer() {
@@ -3648,10 +3691,9 @@
 
                 if (pendingAddons && debrid.length === 0) {
                     // No streams from any settled addon yet — keep
-                    // the placeholder visible so the user sees the
-                    // section is alive while the slower addons are
-                    // still in flight.
-                    sourcesBody.appendChild(el('p', { class: 'hint-text' }, 'Looking for streams…'));
+                    // the skeleton visible so the user sees the section
+                    // is alive while the slower addons are still in flight.
+                    sourcesBody.appendChild(streamSkeleton());
                 } else if (!pendingAddons && debrid.length === 0 && external.length === 0) {
                     var msg = data && data.anonymous
                         ? "Sign in and add a Stremio stream addon (Torrentio, MediaFusion, …) in Settings to find streaming sources for this episode."
@@ -3878,7 +3920,8 @@
                     if (streamCacheKey) {
                         try { localStorage.removeItem(streamCacheKey); } catch (_) {}
                     }
-                    sourcesBody.innerHTML = '<p class="hint-text">Looking for streams…</p>';
+                    sourcesBody.innerHTML = '';
+                    sourcesBody.appendChild(streamSkeleton());
                     fetchStreams();
                 });
             }

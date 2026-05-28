@@ -4973,6 +4973,53 @@ a.stats-cell-link:hover {
     }
 }
 
+/* Sources-panel loading skeleton — shaped like .episode-stream-row so the
+   Watch page shows shimmer placeholders instead of a "Looking for streams…"
+   text line while the addon fan-out runs. The shimmer comes from the shared
+   .skeleton-shimmer class on the inner blocks. */
+.episode-stream-skeleton {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.episode-stream-skeleton-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid var(--overlay-08);
+    border-radius: 0.6rem;
+    background: var(--overlay-04);
+}
+
+.episode-stream-skeleton-quality {
+    width: 3.5rem;
+    height: 1.15rem;
+    border-radius: 0.4rem;
+    flex-shrink: 0;
+}
+
+.episode-stream-skeleton-meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.episode-stream-skeleton-line {
+    height: 0.7rem;
+    border-radius: 0.3rem;
+}
+
+.episode-stream-skeleton-line-short {
+    width: 55%;
+}
+
 .stats-label {
     font-size: 0.72rem;
     color: var(--text-dim);
