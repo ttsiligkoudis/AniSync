@@ -12,11 +12,68 @@
     'use strict';
 
     // Register the service worker first — install eligibility on
-    // Chromium requires an active SW. Fire-and-forget; failure here
-    // doesn't break anything user-facing.
+    // Chromium requires an active SW. Failure here doesn't break
+    // anything user-facing (the site just isn't installable).
+    //
+    // Update flow: the SW no longer skipWaiting()s on install, so a
+    // freshly-deployed worker parks in `waiting` instead of swapping
+    // assets out from under the running page. We watch for that waiting
+    // worker and surface a tasteful "New version available" toast; on
+    // tap we post SKIP_WAITING and reload once the new worker takes
+    // control (controllerchange). This kills the "app looks broken until
+    // I refresh after an update" glitch.
     if ('serviceWorker' in navigator) {
+        var reloadingForUpdate = false;
+        // When the freshly-activated worker takes control, reload exactly
+        // once so the page picks up the new CSS/JS cleanly.
+        navigator.serviceWorker.addEventListener('controllerchange', function () {
+            if (reloadingForUpdate) return;
+            reloadingForUpdate = true;
+            window.location.reload();
+        });
+
+        var promptShownFor = null; // de-dupe the toast per waiting worker
+
+        function promptUpdate(waitingWorker) {
+            if (!waitingWorker || promptShownFor === waitingWorker) return;
+            promptShownFor = waitingWorker;
+            var toast = window.AniSyncToast;
+            var activate = function () {
+                waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+            };
+            if (toast && toast.show) {
+                toast.show('New version available', {
+                    action: 'Update',
+                    onAction: activate,
+                    persist: true
+                });
+            } else {
+                // No toast component on this page — activate silently; the
+                // controllerchange reload still gives a clean swap.
+                activate();
+            }
+        }
+
         window.addEventListener('load', function () {
-            navigator.serviceWorker.register('/sw.js').catch(function () {
+            navigator.serviceWorker.register('/sw.js').then(function (reg) {
+                // A worker may already be waiting (update downloaded while the
+                // page was closed, then reopened from cache).
+                if (reg.waiting && navigator.serviceWorker.controller) {
+                    promptUpdate(reg.waiting);
+                }
+                // A new worker started installing for this page session.
+                reg.addEventListener('updatefound', function () {
+                    var installing = reg.installing;
+                    if (!installing) return;
+                    installing.addEventListener('statechange', function () {
+                        // `installed` + an existing controller == an update
+                        // (not the very first install on a fresh client).
+                        if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+                            promptUpdate(reg.waiting || installing);
+                        }
+                    });
+                });
+            }).catch(function () {
                 // ignore — falls back to a non-installable site
             });
         });

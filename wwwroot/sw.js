@@ -17,14 +17,17 @@
 //     because /css/site.css?v=abc never matched the cached
 //     /css/site.css entry.
 //     POSTs / API calls / cross-origin requests pass through verbatim.
-const CACHE_VERSION = 'anisync-shell-v3';
+const CACHE_VERSION = 'anisync-shell-v4';
+const OFFLINE_URL = '/offline.html';
 const SHELL_ASSETS = [
     '/',
+    OFFLINE_URL,
     '/css/site.css',
     '/lib/bootstrap/dist/css/bootstrap.min.css',
     '/lib/jquery/dist/jquery.min.js',
     '/js/loader.js',
     '/js/toast.js',
+    '/js/theme-toggle.js',
     '/js/pwa-install.js',
     '/js/scroll-top.js',
     '/manifest.webmanifest',
@@ -42,7 +45,20 @@ self.addEventListener('install', function (event) {
             });
         })
     );
-    self.skipWaiting();
+    // Deliberately NOT calling self.skipWaiting() here. A freshly-deployed
+    // SW that activates immediately under a running page can swap CSS/JS
+    // out from under it (the "app looks broken until I refresh" glitch).
+    // Instead the new worker parks in `waiting`; pwa-install.js detects it,
+    // shows an "update available" toast, and posts SKIP_WAITING on user tap.
+});
+
+// Activate the waiting worker on demand — pwa-install.js posts this once the
+// user accepts the "New version available" toast. controllerchange then
+// fires page-side and triggers a single clean reload.
+self.addEventListener('message', function (event) {
+    if (event.data && event.data.type === 'SKIP_WAITING') {
+        self.skipWaiting();
+    }
 });
 
 self.addEventListener('activate', function (event) {
@@ -67,11 +83,17 @@ self.addEventListener('fetch', function (event) {
         fetch(req).catch(function () {
             // ignoreSearch:true so versioned URLs (?v=hash from
             // asp-append-version) match the unversioned cache keys.
-            // Falls through to the precached "/" shell when the
-            // specific request isn't in cache (typical offline
-            // navigation to an uncached route).
             return caches.match(req, { ignoreSearch: true }).then(function (cached) {
-                return cached || caches.match('/', { ignoreSearch: true });
+                if (cached) return cached;
+                // Navigation requests that miss the cache get the branded
+                // offline page — NOT the "/" dashboard shell, which needs
+                // the network for continue-watching / airing data and would
+                // render half-broken. Non-navigation misses still fall back
+                // to the cached "/" shell so a styled frame can paint.
+                if (req.mode === 'navigate') {
+                    return caches.match(OFFLINE_URL, { ignoreSearch: true });
+                }
+                return caches.match('/', { ignoreSearch: true });
             });
         })
     );
