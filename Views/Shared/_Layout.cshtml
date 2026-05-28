@@ -54,7 +54,12 @@
 <html lang="en">
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    @* viewport-fit=cover is required for env(safe-area-inset-*) to resolve
+       to non-zero in browser tabs (the app already pads the bottom-nav,
+       drawer overlays and FABs against it). interactive-widget=resizes-content
+       reflows the layout when the on-screen keyboard opens so inputs on the
+       Kitsu login / search / manage-entry forms don't hide behind it. *@
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     @* Strip the Referer header on outbound clicks. The configure page URL embeds
        the user's Config UID; without this meta tag, a click on any external link
        (or a redirect through a third-party OAuth provider) leaks the UID via

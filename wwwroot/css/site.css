@@ -203,11 +203,16 @@ h1, h2, h3, h4, h5, h6 {
   margin-bottom: 0.5rem;
   font-weight: 600;
   line-height: 1.2;
+  /* Even out ragged short lines / kill orphan words in titles. Capped at
+     a handful of lines by the browser; ignored where unsupported. */
+  text-wrap: balance;
 }
 
 p {
   margin-top: 0;
   margin-bottom: 1rem;
+  /* Avoid single-word last lines in body copy (synopsis blocks etc.). */
+  text-wrap: pretty;
 }
 
 ul, ol {

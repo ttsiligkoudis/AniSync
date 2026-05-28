@@ -3891,4 +3891,51 @@
             }
         })();
     </script>
+    <script>
+        // Episode swipe-nav (item 14): a horizontal swipe on the page
+        // navigates to the prev/next episode, reusing the nav buttons' own
+        // hrefs. Touches that start inside the video player (#watchPlayer),
+        // the source list, the toolbar, or any interactive control are
+        // ignored so the player's native gestures (seek/volume) and stream
+        // taps are never hijacked. Pairs with the View Transitions crossfade
+        // for a slick episode-to-episode slide.
+        (function () {
+            var prev = document.querySelector('.watch-nav-prev');
+            var next = document.querySelector('.watch-nav-next');
+            if (!prev && !next) return;
+            var player = document.getElementById('watchPlayer');
+            var startX = 0, startY = 0, tracking = false;
+            var H_THRESHOLD = 70;  // min horizontal travel to count as a swipe
+            var V_LIMIT = 50;      // max vertical drift to stay "horizontal"
+
+            document.addEventListener('touchstart', function (e) {
+                if (e.touches.length !== 1) { tracking = false; return; }
+                var t = e.target;
+                if (player && player.contains(t)) { tracking = false; return; }
+                if (t.closest && t.closest('a, button, input, textarea, select, [role="slider"], .watch-sources, .watch-player-toolbar')) {
+                    tracking = false;
+                    return;
+                }
+                startX = e.touches[0].clientX;
+                startY = e.touches[0].clientY;
+                tracking = true;
+            }, { passive: true });
+
+            document.addEventListener('touchend', function (e) {
+                if (!tracking) return;
+                tracking = false;
+                var touch = e.changedTouches && e.changedTouches[0];
+                if (!touch) return;
+                var dx = touch.clientX - startX;
+                var dy = touch.clientY - startY;
+                if (Math.abs(dx) < H_THRESHOLD || Math.abs(dy) > V_LIMIT) return;
+                // Swipe left → next episode; swipe right → previous.
+                var target = dx < 0 ? next : prev;
+                if (target && target.href) {
+                    if (window.AniSyncHaptics) window.AniSyncHaptics.tick();
+                    window.location.href = target.href;
+                }
+            }, { passive: true });
+        })();
+    </script>
 }

@@ -644,6 +644,7 @@
         if (plusBtn) {
             e.preventDefault();
             e.stopPropagation();
+            if (window.AniSyncHaptics) window.AniSyncHaptics.tick();
             var owningCard = plusBtn.closest('a.library-card[data-meta-id]');
             if (owningCard) bumpProgress(plusBtn, owningCard);
             return;
@@ -658,6 +659,7 @@
             var list = episodeRow.closest('ol.anime-detail-episodes[data-can-edit="true"]');
             if (list) {
                 e.preventDefault();
+                if (window.AniSyncHaptics) window.AniSyncHaptics.tick();
                 markEpisodeWatched(episodeRow, list);
                 return;
             }
