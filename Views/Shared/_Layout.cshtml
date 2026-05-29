@@ -758,13 +758,6 @@
     <script src="~/js/pull-to-refresh.js" asp-append-version="true" defer></script>
     <script src="~/js/site-search.js" asp-append-version="true" defer></script>
     <script src="~/js/storage-sweep.js" asp-append-version="true" defer></script>
-    @* Cross-browser instant-nav fallback. The Speculation Rules block below
-       gives Chromium prerender/prefetch on hover-intent; hover-prefetch.js
-       self-disables there and only runs on browsers WITHOUT speculation-rules
-       support (Safari/Firefox), where it warms a <link rel=prefetch> on
-       pointer-intent. Same exclusions as the ruleset (auth / api / mutation
-       links are never prefetched). *@
-    <script src="~/js/hover-prefetch.js" asp-append-version="true" defer></script>
     <script>
         // Universal back button. Lives in the layout so every page
         // has it — primarily a rescue valve for Stremio desktop's in-
@@ -870,62 +863,6 @@
         <script src="~/js/notifications.js" asp-append-version="true" defer></script>
     }
 
-    @* ── Speculation Rules — warm the next document on click-intent ──
-       prefetch-ONLY, conservative. On pointerdown / touchstart we fetch the
-       destination's HTML into the prefetch cache so the click's navigation
-       skips the document round-trip — but it's still a NORMAL navigation, so
-       the loading bar shows immediately and the page paints progressively.
-
-       We deliberately do NOT prerender. A prerendered page is swapped in on
-       activation with no progress indicator, and on touch (no hover lead time)
-       the render only starts at the tap — which feels like "tap → dead pause →
-       page pops in" on heavier pages like the anime detail. prefetch keeps the
-       familiar immediate-feedback navigation, just faster. Inert on browsers
-       without support (they full-load as before) — no feature gate needed.
-
-       eagerness "conservative" = pointerdown / touchstart only (a click is
-       committing), never on hover — so we never warm links the cursor merely
-       passes over, and issue at most the request for the link being pressed.
-
-       SAFETY: /Auth/Logout is a state-mutating GET — excluded by path (no
-       pattern matches it), by [data-disconnect], and by its ?returnUrl query;
-       AuthController.Logout also refuses any Sec-Purpose: prefetch request.
-       external links (target=_blank / rel=external) and any [data-no-prerender]
-       opt-out are excluded too. If a browser rejects selector_matches it drops
-       the whole rule object — the path patterns alone still keep auth/api/
-       external out. *@
-    <script type="speculationrules">
-    {
-      "prefetch": [
-        {
-          "where": { "and": [
-            { "href_matches": "/anime/*" },
-            { "not": { "selector_matches": "[data-disconnect]" } },
-            { "not": { "selector_matches": "[data-no-prerender]" } },
-            { "not": { "selector_matches": "a[target=\"_blank\"]" } },
-            { "not": { "selector_matches": "a[rel~=\"external\"]" } }
-          ] },
-          "eagerness": "conservative"
-        },
-        {
-          "where": { "and": [
-            { "or": [
-              { "href_matches": "/library" },
-              { "href_matches": "/discover" },
-              { "href_matches": "/discover/*" },
-              { "href_matches": "/notifications" }
-            ] },
-            { "not": { "href_matches": "/discover/*/page" } },
-            { "not": { "selector_matches": "[data-disconnect]" } },
-            { "not": { "selector_matches": "[data-no-prerender]" } },
-            { "not": { "selector_matches": "a[target=\"_blank\"]" } },
-            { "not": { "selector_matches": "a[rel~=\"external\"]" } }
-          ] },
-          "eagerness": "conservative"
-        }
-      ]
-    }
-    </script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

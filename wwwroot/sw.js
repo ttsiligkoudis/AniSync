@@ -17,7 +17,7 @@
 //     because /css/site.css?v=abc never matched the cached
 //     /css/site.css entry.
 //     POSTs / API calls / cross-origin requests pass through verbatim.
-const CACHE_VERSION = 'anisync-shell-v5';
+const CACHE_VERSION = 'anisync-shell-v6';
 const OFFLINE_URL = '/offline.html';
 const SHELL_ASSETS = [
     '/',
@@ -30,7 +30,6 @@ const SHELL_ASSETS = [
     '/js/pwa-install.js',
     '/js/scroll-top.js',
     '/js/pull-to-refresh.js',
-    '/js/hover-prefetch.js',
     '/manifest.webmanifest',
     '/logo.png',
     '/icons/icon-192.png',

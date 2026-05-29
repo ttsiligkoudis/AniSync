@@ -717,15 +717,16 @@ namespace AnimeList.Controllers
 
         public async Task<IActionResult> Logout(string returnUrl = null)
         {
-            // Speculation guard. Logout is a state-mutating GET, so a browser's
-            // prefetch/prerender (Speculation Rules, link rel=prefetch, a crawler,
-            // or a browser extension) hitting this URL would silently disconnect
-            // the user before they ever clicked. Chromium stamps speculative
-            // navigations with `Sec-Purpose: prefetch[;prerender]` — if present,
-            // bounce to the dashboard WITHOUT clearing the session. The real click
-            // carries no such header and proceeds normally. The client ruleset
-            // already excludes this link three ways; this is the server-side
-            // backstop so no mis-authored rule can ever log someone out.
+            // Speculation guard. Logout is a state-mutating GET, so any
+            // speculative fetch of this URL — a browser's built-in link
+            // prefetch / address-bar preload, a crawler, a prefetching
+            // extension — would silently disconnect the user before they ever
+            // clicked. Browsers stamp speculative navigations with
+            // `Sec-Purpose: prefetch[;prerender]`; if present, bounce to the
+            // dashboard WITHOUT clearing the session. The real click carries no
+            // such header and proceeds normally. (The app no longer ships its
+            // own Speculation Rules, but this backstop stays — it guards against
+            // every prefetch source, not just our own.)
             var secPurpose = Request.Headers["Sec-Purpose"].ToString();
             if (!string.IsNullOrEmpty(secPurpose) &&
                 secPurpose.Contains("prefetch", StringComparison.OrdinalIgnoreCase))
