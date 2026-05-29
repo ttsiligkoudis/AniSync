@@ -42,6 +42,12 @@
   --glass-bg: linear-gradient(180deg, rgba(24, 24, 24, 0.72) 0%, rgba(12, 12, 12, 0.68) 100%);
   --glass-border: rgba(255, 255, 255, 0.14);
 
+  /* Recessed (sunken) panels/fields — a darkening overlay in the dark theme;
+     a much gentler one in the light theme so it reads as a subtle inset
+     rather than a muddy grey slab. */
+  --sunken: rgba(0, 0, 0, 0.28);
+  --sunken-strong: rgba(0, 0, 0, 0.4);
+
   /* Accent (brand blue) */
   --accent: #3b82f6;
   --accent-hover: #2563eb;
@@ -133,6 +139,9 @@
     --glass-bg: linear-gradient(180deg, rgba(252, 252, 253, 0.86) 0%, rgba(244, 244, 247, 0.82) 100%);
     --glass-border: rgba(0, 0, 0, 0.1);
 
+    --sunken: rgba(0, 0, 0, 0.05);
+    --sunken-strong: rgba(0, 0, 0, 0.07);
+
     --accent: #2563eb;
     --accent-hover: #1d4ed8;
     --accent-light: #1d4ed8;
@@ -173,6 +182,9 @@
 
   --glass-bg: linear-gradient(180deg, rgba(252, 252, 253, 0.86) 0%, rgba(244, 244, 247, 0.82) 100%);
   --glass-border: rgba(0, 0, 0, 0.1);
+
+  --sunken: rgba(0, 0, 0, 0.05);
+  --sunken-strong: rgba(0, 0, 0, 0.07);
 
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
@@ -2530,7 +2542,9 @@ body.modal-open {
     text-decoration: none;
     cursor: pointer;
     transition: opacity 0.2s, transform 0.1s;
-    color: var(--text-strong);
+    /* Always sits on the accent→purple gradient (btn-install/login/save), so
+       the label stays white in both themes — black-on-purple reads poorly. */
+    color: var(--on-accent);
 }
 
 .btn-primary-action:hover {
@@ -2580,7 +2594,7 @@ body.modal-open {
 /* Inner card inside Installation Options — slightly darker so it pops against the
    outer section card. */
 .install-inner-card {
-    background: rgba(0,0,0,0.28);
+    background: var(--sunken);
     border: 1px solid var(--overlay-05);
     border-radius: 12px;
     padding: 1.1rem 1rem;
@@ -2651,7 +2665,7 @@ body.modal-open {
     gap: var(--space-2);
     align-items: center;
     padding: 0.55rem 0.75rem;
-    background: rgba(0,0,0,0.4);
+    background: var(--sunken-strong);
     border: 1px solid var(--overlay-08);
     border-radius: 8px;
     transition: border-color 0.15s, background 0.15s, opacity 0.15s;
@@ -2788,7 +2802,7 @@ body.modal-open {
     flex: 1;
     min-width: 0;
     padding: 0.55rem 0.75rem;
-    background: rgba(0,0,0,0.4);
+    background: var(--sunken-strong);
     border: 1px solid var(--overlay-08);
     border-radius: 8px;
     color: #c4b8ff;
@@ -2796,6 +2810,13 @@ body.modal-open {
     font-size: 0.78rem;
     outline: none;
 }
+
+/* The light-purple URL is invisible on the (now light) sunken field in the
+   light theme — drop to a darker brand purple there. */
+@media (prefers-color-scheme: light) {
+    :root:not([data-theme]) .manifest-url-input { color: #6d28d9; }
+}
+[data-theme="light"] .manifest-url-input { color: #6d28d9; }
 
 .btn-icon-copy {
     width: 42px;
