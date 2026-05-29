@@ -798,26 +798,33 @@ public class HomeController : Controller
                 continue;
             }
 
-            var manifestUrl = StreamAddonCatalog.BuildManifestUrl(addonId, provider, apiKey);
-            if (string.IsNullOrEmpty(manifestUrl))
+            // One addon can map to several manifest URLs — Comet runs as two
+            // interchangeable public instances, so episode lookups fan out
+            // across the pair. Each URL is validated + added independently.
+            var manifestUrls = StreamAddonCatalog.BuildManifestUrls(addonId, provider, apiKey);
+            if (manifestUrls.Count == 0)
             {
                 skipped.Add(new { addon = addonId, reason = "couldn't build a manifest URL" });
                 continue;
             }
 
-            // Same validation gate as the manual Add path: a built URL that
-            // doesn't resolve to a stream-capable manifest (provider down,
-            // bad key, drifted config format) is skipped, not stored.
-            var addon = await _addonStreamService.FetchManifestAsync(manifestUrl);
-            if (addon == null)
+            foreach (var manifestUrl in manifestUrls)
             {
-                skipped.Add(new { addon = addonId, reason = "couldn't validate — check your key, or add it manually" });
-                continue;
-            }
+                // Same validation gate as the manual Add path: a built URL
+                // that doesn't resolve to a stream-capable manifest (provider
+                // down, bad key, drifted config format) is skipped, not
+                // stored.
+                var addon = await _addonStreamService.FetchManifestAsync(manifestUrl);
+                if (addon == null)
+                {
+                    skipped.Add(new { addon = addonId, reason = "couldn't validate — check your key, or add it manually" });
+                    continue;
+                }
 
-            var wasAdded = await _configStore.AddStreamAddonAsync(uid, addon);
-            if (wasAdded) added.Add(addon);
-            else skipped.Add(new { addon = addonId, reason = "already added" });
+                var wasAdded = await _configStore.AddStreamAddonAsync(uid, addon);
+                if (wasAdded) added.Add(addon);
+                else skipped.Add(new { addon = addonId, reason = "already added" });
+            }
         }
 
         // Matching browser stream cache (anisync.streams.{uid}.*) is wiped
