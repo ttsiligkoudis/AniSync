@@ -116,7 +116,7 @@ namespace AnimeList.Services
             {
                 maxResultsPerResolution = 0,
                 maxSize = 0,
-                cachedOnly = false,
+                cachedOnly = true,
                 sortCachedUncachedTogether = false,
                 removeTrash = true,
                 resultFormat = new[] { "all" },
