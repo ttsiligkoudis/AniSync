@@ -61,5 +61,35 @@
             "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96", "type": "image/png" }]
         }
     ],
+    "screenshots": [
+        {
+            "src": "/screenshots/dashboard-mobile.png",
+            "sizes": "780x1688",
+            "type": "image/png",
+            "form_factor": "narrow",
+            "label": "Your seasonal dashboard — airing counts and new episodes today"
+        },
+        {
+            "src": "/screenshots/detail-mobile.png",
+            "sizes": "780x1688",
+            "type": "image/png",
+            "form_factor": "narrow",
+            "label": "Anime details with synopsis, trailer and one-tap tracking"
+        },
+        {
+            "src": "/screenshots/dashboard-wide.png",
+            "sizes": "1280x800",
+            "type": "image/png",
+            "form_factor": "wide",
+            "label": "Your seasonal dashboard — airing counts and new episodes today"
+        },
+        {
+            "src": "/screenshots/detail-wide.png",
+            "sizes": "1280x800",
+            "type": "image/png",
+            "form_factor": "wide",
+            "label": "Anime details with synopsis, trailer and one-tap tracking"
+        }
+    ],
     "categories": ["entertainment", "productivity"]
 }

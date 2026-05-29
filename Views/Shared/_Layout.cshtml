@@ -66,6 +66,11 @@
        Referer. no-referrer is the strictest setting — same protection applied to
        the Swagger UI page in Program.cs. *@
     <meta name="referrer" content="no-referrer" />
+    @* Meta description — drives the SERP snippet and is what link-unfurlers
+       (Discord / iMessage / Slack) fall back to. Per-page views can override
+       via ViewData["Description"]; otherwise the app-level pitch (mirrors the
+       manifest description) applies. *@
+    <meta name="description" content="@(ViewData["Description"]?.ToString() ?? "Track and sync your anime across AniList, MyAnimeList and Kitsu — see what's airing, get new-episode alerts, and watch through Stremio.")" />
     @* PWA manifest + iOS / Android install hints. The manifest declares
        icons, start_url, theme_color etc.; Chromium uses it (plus an
        active service worker, registered by pwa-install.js) to decide
@@ -73,6 +78,18 @@
        address bar, standalone-mode title bar) the same dark shade as
        the page so the seam disappears. apple-touch-icon is iOS Safari's
        fallback "Add to Home Screen" icon (it ignores the manifest). *@
+    @* Warm up TCP+TLS to the poster / artwork CDNs before the grid's <img>
+       requests fire, so connection setup isn't on the critical path to LCP.
+       preconnect for the two primary poster hosts (AniList + Kitsu); the
+       cheaper dns-prefetch for secondary artwork / thumbnail origins so we
+       don't hold open more sockets than the above-the-fold path needs. No
+       crossorigin attr — posters load as plain (non-CORS) <img>, so a
+       crossorigin preconnect would open a separate, unused connection. *@
+    <link rel="preconnect" href="https://s4.anilist.co" />
+    <link rel="preconnect" href="https://media.kitsu.app" />
+    <link rel="dns-prefetch" href="https://cdn.myanimelist.net" />
+    <link rel="dns-prefetch" href="https://image.tmdb.org" />
+    <link rel="dns-prefetch" href="https://episodes.metahub.space" />
     <link rel="manifest" href="/manifest.webmanifest" />
     @* Per-scheme theme-color so the OS chrome (Android address bar /
        standalone title bar, iOS status bar tint) matches whichever theme
@@ -148,7 +165,7 @@
     <aside class="nav-drawer" aria-label="Site navigation">
         <div class="nav-drawer-header">
             <a class="site-logo" href="/" aria-label="AniSync home">
-                <img src="/logo.png" alt="AniSync" />
+                <img src="/logo.png" alt="AniSync" width="1024" height="1024" />
             </a>
             <button class="drawer-close" aria-label="Close menu"
                     onclick="document.body.classList.remove('drawer-open')">×</button>
@@ -237,7 +254,7 @@
                 </svg>
             </button>
             <a class="site-logo" href="/" aria-label="AniSync home">
-                <img src="/logo.png" alt="AniSync" />
+                <img src="/logo.png" alt="AniSync" width="1024" height="1024" />
             </a>
                 @* Inline desktop nav — mirrors the slide-in drawer's links.
                    Hidden under 992px (lg) where the hamburger takes over.

@@ -369,6 +369,11 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 /anisync.db
+# SQLite WAL/SHM sidecars + the runtime anime-id mapping cache the app
+# downloads on startup — regenerated on every run, never source.
+/anisync.db-shm
+/anisync.db-wal
+/anime-mappings.json
 /cf-cors-proxy/package-lock.json
 /cf-cors-proxy/package.json
 /cf-episode-notifier/package-lock.json

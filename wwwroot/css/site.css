@@ -52,6 +52,13 @@
   --accent: #3b82f6;
   --accent-hover: #2563eb;
   --accent-light: #93c5fd;
+  /* Accent as a FILLED background under white (--on-accent) text. The plain
+     --accent (#3b82f6) reads beautifully as accent TEXT on the dark page
+     (5.25:1) but only hits 3.67:1 behind white — below the 4.5:1 AA floor for
+     button labels. --accent-fill is a notch deeper (#2563eb → 5.17:1 on white)
+     so filled CTAs pass; text/links/focus rings keep the lighter --accent. */
+  --accent-fill: #2563eb;
+  --accent-fill-hover: #1d4ed8;
 
   /* Semantic */
   --danger: #ef4444;
@@ -145,6 +152,8 @@
     --accent: #2563eb;
     --accent-hover: #1d4ed8;
     --accent-light: #1d4ed8;
+    --accent-fill: #2563eb;
+    --accent-fill-hover: #1d4ed8;
 
     --danger: #dc2626;
     --success: #15a34a;
@@ -189,6 +198,8 @@
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --accent-light: #1d4ed8;
+  --accent-fill: #2563eb;
+  --accent-fill-hover: #1d4ed8;
 
   --danger: #dc2626;
   --success: #15a34a;
@@ -662,13 +673,13 @@ body.anime-detail-page .anime-detail-hero {
     .site-header-cta-primary,
     .site-header-cta-primary:link,
     .site-header-cta-primary:visited {
-        background: var(--accent);
+        background: var(--accent-fill);
         color: var(--on-accent);
     }
 
     .site-header-cta-primary:hover,
     .site-header-cta-primary:focus {
-        background: var(--accent-hover);
+        background: var(--accent-fill-hover);
         color: var(--on-accent);
         text-decoration: none;
     }
@@ -868,13 +879,13 @@ body.drawer-open .drawer-backdrop {
 .nav-drawer-cta-primary,
 .nav-drawer-cta-primary:link,
 .nav-drawer-cta-primary:visited {
-    background: var(--accent);
+    background: var(--accent-fill);
     color: var(--on-accent);
 }
 
 .nav-drawer-cta-primary:hover,
 .nav-drawer-cta-primary:focus {
-    background: var(--accent-hover);
+    background: var(--accent-fill-hover);
     color: var(--on-accent);
 }
 
@@ -1393,13 +1404,13 @@ body.modal-open {
 }
 
 .entry-modal-save {
-    background: var(--accent);
+    background: var(--accent-fill);
     border: 1px solid var(--accent);
     color: var(--on-accent);
 }
 
 .entry-modal-save:hover {
-    background: var(--accent-hover);
+    background: var(--accent-fill-hover);
     border-color: var(--accent-hover);
 }
 
@@ -1721,7 +1732,7 @@ body.modal-open {
 }
 
 .pwa-install-btn:hover {
-    background: var(--accent);
+    background: var(--accent-fill);
     border-color: var(--accent);
     color: var(--on-accent);
 }
@@ -2140,13 +2151,13 @@ body.modal-open {
 }
 
 .hero-cta-primary {
-    background: var(--accent);
+    background: var(--accent-fill);
     color: var(--on-accent);
     border: 1px solid var(--accent);
 }
 
 .hero-cta-primary:hover {
-    background: var(--accent-hover);
+    background: var(--accent-fill-hover);
     border-color: var(--accent-hover);
     color: var(--on-accent);
 }
@@ -2195,7 +2206,7 @@ body.modal-open {
 .service-toggle .label.active,
 .service-toggle .label.active:hover {
     color: var(--on-accent);
-    background: var(--accent);
+    background: var(--accent-fill);
 }
 
 /* Account-card chrome: the connected-pill + disconnect button row that
@@ -2522,7 +2533,7 @@ body.modal-open {
 }
 
 .switch input:checked + .slider {
-    background: var(--accent);
+    background: var(--accent-fill);
 }
 
 .switch input:checked + .slider::before {
@@ -4371,7 +4382,7 @@ body.modal-open {
     width: 44px;
     height: 44px;
     border-radius: 999px;
-    background: var(--accent);
+    background: var(--accent-fill);
     border: 1px solid var(--accent);
     color: var(--on-accent);
     display: inline-flex;
@@ -4388,7 +4399,7 @@ body.modal-open {
 
 .scroll-top-btn:hover,
 .scroll-top-btn:focus {
-    background: var(--accent-hover);
+    background: var(--accent-fill-hover);
     box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
 }
 
@@ -5185,7 +5196,7 @@ a.stats-cell-link:hover {
 
 .library-tab-active,
 .library-tab-active:hover {
-    background: var(--accent);
+    background: var(--accent-fill);
     color: var(--on-accent);
 }
 
@@ -5346,7 +5357,7 @@ a.stats-cell-link:hover {
 .filter-bar-submit {
     flex: 0 0 auto;
     padding: 0.55rem 1.2rem;
-    background: var(--accent);
+    background: var(--accent-fill);
     border: 0;
     border-radius: 1.5rem;
     color: var(--on-accent);
@@ -5358,7 +5369,7 @@ a.stats-cell-link:hover {
 
 .filter-bar-submit:hover,
 .filter-bar-submit:focus {
-    background: var(--accent-hover);
+    background: var(--accent-fill-hover);
 }
 
 .filter-bar-clear {
@@ -5615,7 +5626,7 @@ a.stats-cell-link:hover {
 
 .library-card-plus:hover,
 .library-card-plus:focus-visible {
-    background: var(--accent-hover);
+    background: var(--accent-fill-hover);
 }
 
 .library-card-plus:disabled {
@@ -5852,7 +5863,7 @@ a.stats-cell-link:hover {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: var(--accent);
+    background: var(--accent-fill);
     animation: airing-pulse 2s ease-in-out infinite;
 }
 
@@ -6143,7 +6154,7 @@ button.anime-detail-user-state:hover {
     align-items: center;
     gap: var(--space-2);
     padding: 0.55rem 1.4rem;
-    background: var(--accent);
+    background: var(--accent-fill);
     color: var(--on-accent);
     border-radius: 999px;
     font-size: 0.92rem;
@@ -6155,7 +6166,7 @@ button.anime-detail-user-state:hover {
 
 .anime-detail-watch-next:hover,
 .anime-detail-watch-next:focus {
-    background: var(--accent-hover);
+    background: var(--accent-fill-hover);
     color: var(--on-accent);
     text-decoration: none;
 }
@@ -6289,7 +6300,7 @@ button.anime-detail-user-state:hover {
 
 .season-tab-active,
 .season-tab-active:hover {
-    background: var(--accent);
+    background: var(--accent-fill);
     color: var(--on-accent);
 }
 
@@ -6750,7 +6761,7 @@ button.anime-detail-user-state:hover {
 
 .notif-push-toggle-btn {
     flex-shrink: 0;
-    background: var(--accent);
+    background: var(--accent-fill);
     color: var(--on-accent);
     border: 0;
     padding: 0.4rem 0.95rem;
@@ -6764,7 +6775,7 @@ button.anime-detail-user-state:hover {
 
 .notif-push-toggle-btn:hover:not(:disabled),
 .notif-push-toggle-btn:focus:not(:disabled) {
-    background: var(--accent-hover);
+    background: var(--accent-fill-hover);
     outline: none;
 }
 
@@ -7039,7 +7050,7 @@ ol.anime-detail-episodes-busy {
 }
 
 .anime-detail-trailer-card:hover .anime-detail-trailer-play::before {
-    background: var(--accent);
+    background: var(--accent-fill);
     transform: scale(1.05);
 }
 
