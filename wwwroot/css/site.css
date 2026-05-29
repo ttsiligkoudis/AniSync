@@ -5034,6 +5034,224 @@ body.modal-open {
     color: var(--text-strong);
 }
 
+/* ── Streaming setup nudge (dashboard) ─────────────────────────────────
+   Dismissible banner shown to logged-in users who haven't configured a
+   stream addon (gated server-side by DashboardViewModel.HasStreamAddons).
+   Concise headline + CTA to /advanced#streams, with an expandable "How it
+   works" body toggled by .is-open (same idiom as the stats-info popover
+   above). Reuses the hero-card's accent-tint treatment so it reads as part
+   of the dashboard rather than an alert. */
+.stream-nudge {
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.85rem;
+    padding: 1rem 1.1rem;
+    margin-bottom: 0.75rem;
+    background:
+        radial-gradient(circle at top right, rgba(59, 130, 246, 0.08), transparent 60%),
+        rgba(59, 130, 246, 0.05);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    border-radius: var(--radius-lg);
+}
+
+.stream-nudge-dismiss {
+    position: absolute;
+    top: 0.55rem;
+    right: 0.55rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s;
+}
+
+.stream-nudge-dismiss:hover,
+.stream-nudge-dismiss:focus {
+    color: var(--text-strong);
+    background: var(--overlay-08);
+    outline: none;
+}
+
+.stream-nudge-icon {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    background: rgba(59, 130, 246, 0.14);
+    color: var(--accent-light);
+}
+
+.stream-nudge-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+    /* leave room for the absolute dismiss button */
+    padding-right: 1.5rem;
+}
+
+.stream-nudge-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-strong);
+}
+
+.stream-nudge-text {
+    margin: 0;
+    font-size: 0.85rem;
+    line-height: 1.45;
+    color: var(--text-2);
+}
+
+.stream-nudge-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.25rem;
+}
+
+.stream-nudge-cta,
+.stream-nudge-cta:link,
+.stream-nudge-cta:visited {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.4rem 0.85rem;
+    background: var(--accent-fill);
+    color: #fff;
+    font-size: 0.83rem;
+    font-weight: 600;
+    border-radius: var(--radius-pill);
+    text-decoration: none;
+    transition: background 0.15s;
+}
+
+.stream-nudge-cta:hover,
+.stream-nudge-cta:focus {
+    background: var(--accent-fill-hover);
+    text-decoration: none;
+    outline: none;
+}
+
+.stream-nudge-learn {
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--accent);
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.stream-nudge-learn:hover,
+.stream-nudge-learn:focus {
+    text-decoration: underline;
+    outline: none;
+}
+
+/* Collapsed by default; the .is-open class (toggled by the inline script in
+   Index.cshtml) reveals it. */
+.stream-nudge-detail {
+    display: none;
+    margin-top: 0.4rem;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: var(--text-2);
+}
+
+.stream-nudge.is-open .stream-nudge-detail {
+    display: block;
+}
+
+.stream-nudge-detail p {
+    margin: 0 0 0.5rem;
+}
+
+.stream-nudge-detail p:last-child {
+    margin-bottom: 0;
+}
+
+.stream-nudge-detail a {
+    color: var(--accent);
+    text-decoration: underline;
+}
+
+/* ── Sources-panel empty state (watch page) ───────────────────────────
+   Richer "no stream addon" explainer rendered by streamSetupEmptyState()
+   in Watch.cshtml when a settled fan-out found nothing because no addon is
+   configured (or the viewer is anonymous). Same expandable .is-open idiom. */
+.sources-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0;
+    text-align: center;
+}
+
+.sources-empty-text {
+    margin: 0;
+}
+
+.sources-empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+}
+
+.sources-empty-learn {
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--accent);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.sources-empty-learn:hover,
+.sources-empty-learn:focus {
+    text-decoration: underline;
+    outline: none;
+}
+
+.sources-empty-detail {
+    display: none;
+    max-width: 32rem;
+    margin-top: 0.15rem;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+    text-align: left;
+}
+
+.sources-empty.is-open .sources-empty-detail {
+    display: block;
+}
+
+.sources-empty-detail p {
+    margin: 0 0 0.5rem;
+}
+
+.sources-empty-detail p:last-child {
+    margin-bottom: 0;
+}
+
 /* Library variant sits inline inside the page-subtitle line; nudge it up a
    hair so the icon centres against the text baseline. */
 .library-refresh-btn {
