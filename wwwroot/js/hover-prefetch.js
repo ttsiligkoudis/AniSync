@@ -72,9 +72,12 @@
         warm(a);
     }
 
-    // pointerenter (desktop hover) + pointerdown/touchstart (the moment before a
-    // tap commits) cover both input modes. Passive listeners — we never block.
-    document.addEventListener('pointerenter', onIntent, { capture: true, passive: true });
+    // Conservative (click-intent only): fire on pointerdown / touchstart — the
+    // moment a click is committing — NOT on hover. Mirrors the Speculation
+    // Rules "conservative" eagerness so behaviour matches across browsers and
+    // we never warm links the user merely moves the cursor over. pointerdown
+    // still lands ~50-150ms before the click resolves, so the document fetch
+    // gets a head start. Passive listeners — we never block the gesture.
     document.addEventListener('pointerdown', onIntent, { capture: true, passive: true });
     document.addEventListener('touchstart', onIntent, { capture: true, passive: true });
 })();

@@ -23,12 +23,18 @@
     // control (controllerchange). This kills the "app looks broken until
     // I refresh after an update" glitch.
     if ('serviceWorker' in navigator) {
-        var reloadingForUpdate = false;
-        // When the freshly-activated worker takes control, reload exactly
-        // once so the page picks up the new CSS/JS cleanly.
+        // Reload ONLY when the user accepted an update (tapped "Update", which
+        // posts SKIP_WAITING and sets this flag). Reloading on *every*
+        // controllerchange is a footgun: the very first time a fresh visitor
+        // installs the SW, sw.js's clients.claim() takes control of this
+        // already-open page and fires controllerchange too — reloading on that
+        // is the "page loads then instantly refreshes and runs every request
+        // twice" bug. It also cancels any in-flight prerender of this page
+        // (a prerendered doc that navigates/reloads is discarded by Chromium),
+        // which silently defeats the speculation-rules speedup. Gate on intent.
+        var updateAccepted = false;
         navigator.serviceWorker.addEventListener('controllerchange', function () {
-            if (reloadingForUpdate) return;
-            reloadingForUpdate = true;
+            if (!updateAccepted) return;
             window.location.reload();
         });
 
@@ -39,6 +45,7 @@
             promptShownFor = waitingWorker;
             var toast = window.AniSyncToast;
             var activate = function () {
+                updateAccepted = true;
                 waitingWorker.postMessage({ type: 'SKIP_WAITING' });
             };
             if (toast && toast.show) {
