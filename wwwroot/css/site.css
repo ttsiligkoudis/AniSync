@@ -36,6 +36,12 @@
      white-on-dark in the dark theme, black-on-light in the light theme. */
   --ink-rgb: 255, 255, 255;
 
+  /* Frosted-glass overlay chrome (bottom-nav "More" sheet, floating save
+     bar) — translucent so the blur shows through. Flips to a light frost in
+     the light theme so it doesn't read as a dark slab on a light page. */
+  --glass-bg: linear-gradient(180deg, rgba(24, 24, 24, 0.72) 0%, rgba(12, 12, 12, 0.68) 100%);
+  --glass-border: rgba(255, 255, 255, 0.14);
+
   /* Accent (brand blue) */
   --accent: #3b82f6;
   --accent-hover: #2563eb;
@@ -124,6 +130,9 @@
     --text-muted: #80868b;
     --ink-rgb: 0, 0, 0;
 
+    --glass-bg: linear-gradient(180deg, rgba(252, 252, 253, 0.86) 0%, rgba(244, 244, 247, 0.82) 100%);
+    --glass-border: rgba(0, 0, 0, 0.1);
+
     --accent: #2563eb;
     --accent-hover: #1d4ed8;
     --accent-light: #1d4ed8;
@@ -161,6 +170,9 @@
   --text-dim: #5f6368;
   --text-muted: #80868b;
   --ink-rgb: 0, 0, 0;
+
+  --glass-bg: linear-gradient(180deg, rgba(252, 252, 253, 0.86) 0%, rgba(244, 244, 247, 0.82) 100%);
+  --glass-border: rgba(0, 0, 0, 0.1);
 
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
@@ -982,12 +994,10 @@ body.drawer-open .drawer-backdrop {
     max-height: 60vh;
     overflow-y: auto;
     padding: 6px 0;
-    background: linear-gradient(180deg,
-        rgba(24, 24, 24, 0.72) 0%,
-        rgba(12, 12, 12, 0.68) 100%);
+    background: var(--glass-bg);
     backdrop-filter: blur(16px) saturate(150%);
     -webkit-backdrop-filter: blur(16px) saturate(150%);
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    border: 1px solid var(--glass-border);
     border-radius: 14px;
     box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
     z-index: 49;
@@ -1034,7 +1044,7 @@ body.drawer-open .drawer-backdrop {
     padding: 0 14px;
     background: transparent;
     border: 0;
-    color: rgba(255, 255, 255, 0.92);
+    color: rgba(var(--ink-rgb), 0.92);
     font-family: inherit;
     font-size: 0.92rem;
     font-weight: 500;
@@ -1065,7 +1075,7 @@ body.drawer-open .drawer-backdrop {
 
 .bottom-nav-more-sheet .bottom-nav-more-row-icon {
     flex: 0 0 20px;
-    color: rgba(255, 255, 255, 0.78);
+    color: rgba(var(--ink-rgb), 0.78);
 }
 
 .bottom-nav-more-sheet .bottom-nav-more-row:hover .bottom-nav-more-row-icon,
@@ -7128,6 +7138,23 @@ ol.anime-detail-episodes-busy {
     border-color: var(--overlay-18);
     outline: none;
 }
+
+/* Theme-toggle icon: sun while dark, moon while light — driven entirely by
+   the active theme so it can never desync (no JS dependency). Resolution
+   mirrors the token blocks: default = dark (sun); prefers-color-scheme:light
+   with no manual choice = light (moon); [data-theme] overrides the OS. */
+.theme-icon-moon { display: none; }
+.theme-icon-sun { display: inline-flex; }
+
+@media (prefers-color-scheme: light) {
+    :root:not([data-theme]) .theme-icon-sun { display: none; }
+    :root:not([data-theme]) .theme-icon-moon { display: inline-flex; }
+}
+
+[data-theme="light"] .theme-icon-sun { display: none; }
+[data-theme="light"] .theme-icon-moon { display: inline-flex; }
+[data-theme="dark"] .theme-icon-sun { display: inline-flex; }
+[data-theme="dark"] .theme-icon-moon { display: none; }
 
 .notif-bell-badge {
     /* Anchored to the bell button's top-right corner with a tight inset
