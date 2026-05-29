@@ -1,111 +1,94 @@
-// Theme toggle — cycles System → Light → Dark and persists the choice.
+// Theme toggle — a simple two-state light ⇄ dark switch.
 //
-// The pre-paint stamp in _Layout's <head> has already applied a stored
-// light/dark preference to <html data-theme> before first paint (so there's
-// no flash); this module owns everything *after* load: wiring the toggle
-// button(s), swapping the displayed icon, persisting to localStorage, and
-// keeping the OS chrome's theme-color in sync.
+// Each tap flips to the opposite of whatever is currently showing and stores
+// the explicit choice, so every tap visibly changes the theme. (The previous
+// three-state System → Light → Dark cycle could land on a state that resolved
+// to the same effective theme as the OS, which read as "nothing happened" for
+// a tap or two.)
 //
-// Theme resolution (mirrors the CSS in site.css):
-//   • "system" → no data-theme attribute; prefers-color-scheme drives it
-//   • "light"  → data-theme="light" (overrides the OS)
-//   • "dark"   → data-theme="dark"  (overrides the OS)
-//
-// theme-color sync: _Layout ships two media-scoped <meta name="theme-color">
-// tags that handle the system-follows case. When the user makes a MANUAL
-// choice we append a single media-less meta (always matches, last-in-DOM
-// wins) carrying the resolved color; in "system" mode we remove it so the
-// media tags take back over.
+// Until the user taps, no preference is stored and the CSS follows the OS via
+// prefers-color-scheme (the pre-paint stamp in _Layout only sets data-theme
+// when an explicit light/dark choice exists). The icon reflects the CURRENT
+// theme and implies the action: a sun while dark (tap → light), a moon while
+// light (tap → dark).
 (function () {
     'use strict';
 
     var STORAGE_KEY = 'anisync-theme';
-    var ORDER = ['system', 'light', 'dark'];
-    // theme-color values per resolved scheme — kept in step with the manifest
+    // theme-color values per scheme — kept in step with the manifest
     // background_color (dark) and the light theme's --bg.
     var COLOR = { dark: '#0A0A0A', light: '#ffffff' };
 
     var media = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
-    function getStored() {
+    function stored() {
         try {
             var v = localStorage.getItem(STORAGE_KEY);
-            return (v === 'light' || v === 'dark') ? v : 'system';
-        } catch (_) { return 'system'; }
+            return (v === 'light' || v === 'dark') ? v : null;
+        } catch (_) { return null; }
     }
 
-    function setStored(mode) {
-        try {
-            if (mode === 'system') localStorage.removeItem(STORAGE_KEY);
-            else localStorage.setItem(STORAGE_KEY, mode);
-        } catch (_) { /* storage blocked — in-memory only for this session */ }
+    // The scheme actually on screen: an explicit choice, else the OS.
+    function effective() {
+        return stored() || ((media && media.matches) ? 'dark' : 'light');
     }
 
-    // The scheme actually showing on screen, accounting for "system".
-    function resolved(mode) {
-        if (mode === 'light' || mode === 'dark') return mode;
-        return (media && media.matches) ? 'dark' : 'light';
-    }
-
-    function applyAttr(mode) {
-        var root = document.documentElement;
-        if (mode === 'system') root.removeAttribute('data-theme');
-        else root.setAttribute('data-theme', mode);
-    }
-
-    // Authoritative media-less theme-color meta for manual choices; absent in
-    // system mode so the two media-scoped metas drive the chrome instead.
-    function syncThemeColor(mode) {
-        var existing = document.querySelector('meta[name="theme-color"]:not([media])');
-        if (mode === 'system') {
-            if (existing) existing.remove();
-            return;
+    // Authoritative media-less theme-color meta for explicit choices (a
+    // media-less meta always matches and, being last in DOM order, wins over
+    // the two media-scoped metas _Layout ships).
+    function syncMeta(theme) {
+        var m = document.querySelector('meta[name="theme-color"]:not([media])');
+        if (!m) {
+            m = document.createElement('meta');
+            m.setAttribute('name', 'theme-color');
+            document.head.appendChild(m);
         }
-        if (!existing) {
-            existing = document.createElement('meta');
-            existing.setAttribute('name', 'theme-color');
-            document.head.appendChild(existing);
-        }
-        existing.setAttribute('content', COLOR[resolved(mode)]);
+        m.setAttribute('content', COLOR[theme]);
     }
 
-    function syncButtons(mode) {
-        var label = 'Theme: ' + mode;
+    function syncIcons(theme) {
+        var next = theme === 'dark' ? 'light' : 'dark';
         document.querySelectorAll('[data-theme-toggle]').forEach(function (btn) {
+            var label = 'Switch to ' + next + ' theme';
             btn.setAttribute('aria-label', label);
             btn.setAttribute('title', label);
-            btn.querySelectorAll('[data-theme-icon]').forEach(function (icon) {
-                icon.hidden = icon.getAttribute('data-theme-icon') !== mode;
+            // data-when-theme="dark" → the sun (shown while dark);
+            // data-when-theme="light" → the moon (shown while light).
+            btn.querySelectorAll('[data-when-theme]').forEach(function (ic) {
+                ic.hidden = ic.getAttribute('data-when-theme') !== theme;
             });
         });
     }
 
-    function apply(mode) {
-        applyAttr(mode);
-        syncThemeColor(mode);
-        syncButtons(mode);
+    function applyExplicit(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        syncMeta(theme);
+        syncIcons(theme);
     }
 
-    var current = getStored();
-    apply(current);
+    // Initial render: reflect whatever is showing. Only touch the theme-color
+    // meta when there's an explicit choice (otherwise leave the media metas to
+    // follow the OS).
+    syncIcons(effective());
+    if (stored()) syncMeta(effective());
 
-    function cycle() {
-        current = ORDER[(ORDER.indexOf(current) + 1) % ORDER.length];
-        setStored(current);
-        apply(current);
+    function toggle() {
+        var next = effective() === 'dark' ? 'light' : 'dark';
+        try { localStorage.setItem(STORAGE_KEY, next); } catch (_) { /* storage blocked */ }
+        applyExplicit(next);
     }
 
     document.querySelectorAll('[data-theme-toggle]').forEach(function (btn) {
         btn.addEventListener('click', function (e) {
             e.preventDefault();
-            cycle();
+            toggle();
         });
     });
 
-    // When following the OS and the OS flips, re-sync the theme-color meta
-    // (the CSS already reacts on its own via prefers-color-scheme).
+    // While still following the OS (no explicit choice), keep the icon in step
+    // if the OS theme flips. The CSS reacts on its own via prefers-color-scheme.
     if (media) {
-        var onChange = function () { if (current === 'system') syncThemeColor('system'); };
+        var onChange = function () { if (!stored()) syncIcons(effective()); };
         if (media.addEventListener) media.addEventListener('change', onChange);
         else if (media.addListener) media.addListener(onChange); // Safari < 14
     }
