@@ -231,23 +231,6 @@ namespace AnimeList.Controllers
                 && !string.IsNullOrEmpty(anime.id)
                 && !anime.id.StartsWith(anilistPrefix);
 
-            // Stream-source availability gate. Two independent signals: a
-            // Real-Debrid API key on file (Torrentio → RD-cached torrents
-            // surface on the watch page), or the External services toggle
-            // turned on (Crunchyroll / Netflix / HiDive links from
-            // GetExternalLinksAsync). Either alone is enough — they
-            // populate different sections of the picker. Both off →
-            // there's nothing to render on /watch, so the episode rows
-            // stay inert here.
-            bool hasAddons = false;
-            bool externalEnabled = false;
-            if (!string.IsNullOrEmpty(uid))
-            {
-                var watchConfig = await GetConfigByUidAsync(uid, _configStore);
-                externalEnabled = watchConfig?.showExternalStreams == true;
-                hasAddons = (await _configStore.GetStreamAddonsAsync(uid)).Count > 0;
-            }
-
             return View(new AnimeDetailViewModel
             {
                 Anime = anime,
@@ -259,7 +242,6 @@ namespace AnimeList.Controllers
                 EntryUnavailable = entryUnavailable,
                 SourceLinks = sourceLinks,
                 DeferredSupplementaryLinks = deferredSupplementaryLinks,
-                HasStreamSources = hasAddons || externalEnabled,
                 IsMultiSeasonGroup = isMultiSeasonGroup,
             });
         }
@@ -1278,14 +1260,6 @@ namespace AnimeList.Controllers
         // meta call). Related + recommendations are always deferred regardless
         // of this flag.
         public bool DeferredSupplementaryLinks { get; set; }
-
-        // True when the user has at least one stream source wired up — a
-        // Real-Debrid API key on file OR the External services toggle
-        // turned on. Drives whether episode rows are clickable: if false,
-        // clicking would just navigate to a /watch page with no sources
-        // to render, which is a dead end, so we render the rows as inert
-        // and skip the cursor/keyboard affordances.
-        public bool HasStreamSources { get; set; }
 
         // True when the page is rendering an imdb-grouped franchise that
         // spans more than one cour. The user's tracker entry is per-cour

@@ -308,7 +308,6 @@
                 }
 
                 var showWatchCta = a.type != MetaType.movie.ToString()
-                    && Model.HasStreamSources
                     && totalEps > 0
                     && nextEp <= totalEps
                     && !isCompleted
@@ -681,17 +680,15 @@
 
                 var description = !string.IsNullOrEmpty(v.overview) ? v.overview : v.description;
 
-                // role/tabindex only when at least one stream source is
-                // wired up (RD key OR External services). Razor omits an
-                // attribute entirely when its value is null, so this
-                // leaves the row inert when both sources are off.
-                var rowRole = Model.HasStreamSources ? "button" : null;
-                var rowTabIndex = Model.HasStreamSources ? "0" : null;
-
+                // Episode rows are always interactive now — clicking lands
+                // on /watch, which surfaces the stream picker (and a "set up
+                // streaming" prompt when no addon/external source is wired
+                // up yet). Future episodes stay inert via the
+                // anime-detail-episode-future guard in the click handler.
                 <li class="@string.Join(" ", classes)"
                     data-episode-num="@v.episode"
                     data-season-num="@(v.season > 0 ? v.season : 1)"
-                    role="@rowRole" tabindex="@rowTabIndex">
+                    role="button" tabindex="0">
                     <div class="anime-detail-episode-thumb-wrap">
                         @if (!string.IsNullOrEmpty(v.thumbnail))
                         {
@@ -762,16 +759,15 @@
         </div>
     </section>
 }
-else if (a.type == MetaType.movie.ToString() && Model.HasStreamSources)
+else if (a.type == MetaType.movie.ToString())
 {
     @* Movie meta has no per-episode list (the underlying service collapses
        the whole feature into one streamable unit), so the user has no
        click target to reach the watch page. Surface a single CTA pointed
        at /anime/{id}/watch/1 — the watch route treats episode=1 as the
-       movie body for movie-typed entries. Gated on HasStreamSources for
-       the same reason episode rows are inert when neither stream addons
-       nor External services are wired up — without a source there'd be
-       nothing to play on the other side of the click. *@
+       movie body for movie-typed entries. Always shown now: even without a
+       stream addon / External services wired up, the watch page surfaces
+       the source picker and a "set up streaming" prompt. *@
     <section class="anime-detail-section anime-detail-movie-cta-wrap">
         <a class="anime-detail-movie-cta" href="@($"/anime/{a.id}/watch/1")">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
@@ -1297,12 +1293,10 @@ else
         var animeId = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.Anime?.id));
         if (!animeId) return;
 
-        // Server-side gate. When the user has no RD key AND External
-        // services is off there's nothing for the watch page to render,
-        // so we don't wire any click / keyboard activation here.
-        var hasStreamSources = @(Model.HasStreamSources ? "true" : "false");
-        if (!hasStreamSources) return;
-
+        // Episode rows always navigate to /watch now — even without a
+        // stream addon / External services wired up, the watch page renders
+        // the source picker and a "set up streaming" prompt. Future episodes
+        // are still skipped in handleEpisodeActivate().
         var episodesList = document.querySelector('.anime-detail-episodes');
         if (!episodesList) return;
 
