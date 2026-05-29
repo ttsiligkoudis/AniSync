@@ -69,48 +69,66 @@ namespace AnimeList.Services
             !string.IsNullOrWhiteSpace(addonId)
             && Addons.Any(a => string.Equals(a.Id, addonId, StringComparison.OrdinalIgnoreCase));
 
+        // Comet runs as two well-known public instances; we set up both so
+        // episode lookups fan out across the pair (one is often reachable /
+        // populated when the other is rate-limited or down). They share the
+        // same config blob — only the host differs — and surface as two
+        // distinct rows because each manifest reports its own display name.
+        private static readonly string[] CometHosts =
+        {
+            "https://comet.elfhosted.com",
+            "https://comet.feels.legal",
+        };
+
         /// <summary>
-        /// Builds the Stremio manifest URL for one catalog addon, given a
+        /// Builds the Stremio manifest URL(s) for one catalog addon, given a
         /// debrid provider + API key. Pure string construction, no network —
         /// the caller validates each URL through the addon-stream service
-        /// before persisting. Returns null for an unknown addon id (or a
-        /// missing provider / key) so the caller can skip it.
+        /// before persisting. Returns one URL for most addons, but more than
+        /// one where an addon runs as several interchangeable public
+        /// instances (Comet). Empty for an unknown addon id (or a missing
+        /// provider / key) so the caller can skip it.
         /// </summary>
-        public static string BuildManifestUrl(string addonId, DebridProvider provider, string apiKey)
+        public static IReadOnlyList<string> BuildManifestUrls(string addonId, DebridProvider provider, string apiKey)
         {
-            if (provider == null || string.IsNullOrWhiteSpace(apiKey)) return null;
+            if (provider == null || string.IsNullOrWhiteSpace(apiKey)) return Array.Empty<string>();
             var key = apiKey.Trim();
 
             return (addonId ?? string.Empty).ToLowerInvariant() switch
             {
-                "torrentio" => BuildTorrentio(provider, key),
+                "torrentio" => new[] { BuildTorrentio(provider, key) },
                 "comet"     => BuildComet(provider, key),
-                _           => null,
+                _           => Array.Empty<string>(),
             };
         }
 
-        // Torrentio reads its config from flat pipe-separated key=value
-        // segments in the URL path. The debrid key alone is the minimal
-        // valid config — Torrentio applies its own default provider set and
-        // sort order on top, exactly as its /configure page does when you
-        // only fill in the debrid field. The API key isn't percent-encoded:
-        // debrid tokens are URL-safe alphanumerics and Torrentio parses the
-        // raw path segment, so escaping it would corrupt the value.
+        // Torrentio reads its config from pipe-separated key=value segments
+        // in the URL path, with the pipes percent-encoded as %7C exactly as
+        // its own /configure page emits them. We bake in a curated default
+        // set — sort by seeders, Greek language priority, drop cam / screener
+        // / 480p junk via qualityfilter, cap at 5 results per query, and trim
+        // the catalog + download-link noise from the debrid output — then
+        // append the debrid credential as the final segment. The API key
+        // isn't escaped: debrid tokens are URL-safe alphanumerics and
+        // Torrentio parses the raw segment, so escaping would corrupt it.
+        private const string TorrentioOptions =
+            "sort=seeders%7Clanguage=greek%7Cqualityfilter=480p,scr,cam%7Climit=5%7Cdebridoptions=nocatalog,nodownloadlinks";
+
         private static string BuildTorrentio(DebridProvider provider, string key)
-            => $"https://torrentio.strem.fun/{provider.TorrentioKey}={key}/manifest.json";
+            => $"https://torrentio.strem.fun/{TorrentioOptions}%7C{provider.TorrentioKey}={key}/manifest.json";
 
         // Comet reads a base64-encoded JSON config blob from the path,
         // mirroring exactly what its own /configure page emits:
-        // JSON.stringify → base64 → percent-encode the segment. The shape
-        // below tracks current Comet (the debrid credential lives in a
-        // `debridServices` array of { service, apiKey } objects — the old
-        // flat debridService/debridApiKey pair was dropped). Values are
-        // neutral defaults (no quality cap, cached + uncached both shown);
-        // the user can fine-tune later via the Configure link on the row.
-        // base64 can contain '+' and '/', so the segment is percent-encoded
-        // before it goes in the path; Comet URL-decodes it back before
-        // base64-decoding.
-        private static string BuildComet(DebridProvider provider, string key)
+        // JSON.stringify → btoa (raw standard base64) → drop it straight in
+        // the path, no percent-encoding (confirmed against a real Comet URL,
+        // whose blob is bare base64). The shape below tracks current Comet:
+        // the debrid credential lives in a `debridServices` array of
+        // { service, apiKey } objects (the old flat debridService/
+        // debridApiKey pair was dropped). cachedOnly is on so only
+        // instantly-playable debrid sources surface; everything else is left
+        // at Comet's defaults and can be fine-tuned via the Configure link on
+        // the row. Built once and pointed at every Comet instance.
+        private static IReadOnlyList<string> BuildComet(DebridProvider provider, string key)
         {
             var config = new
             {
@@ -145,7 +163,7 @@ namespace AnimeList.Services
             };
             var json = SerializeObject(config);
             var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
-            return $"https://comet.elfhosted.com/{Uri.EscapeDataString(b64)}/manifest.json";
+            return CometHosts.Select(host => $"{host}/{b64}/manifest.json").ToArray();
         }
     }
 }
