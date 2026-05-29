@@ -5438,6 +5438,11 @@ a.stats-cell-link:hover {
     overflow-x: auto;
     overflow-y: hidden;
     scroll-snap-type: x mandatory;
+    /* Top breathing room so a tile's hover/touch lift (translateY) rises into
+       this padding instead of being clipped by the scroller's overflow box
+       (overflow-x:auto forces overflow-y to clip). Covers every dashboard
+       shelf since they all use .poster-scroll-row. */
+    padding-top: 8px;
     /* Bleed past main's left/right padding so the row appears to extend to
        the viewport edges — matches the StreamD shelves that scroll edge-to-
        edge while the rest of the page stays inset. */
