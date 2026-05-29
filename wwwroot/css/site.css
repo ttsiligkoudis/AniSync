@@ -80,6 +80,7 @@
 
   /* Elevation */
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  --card-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
 
   /* Spacing scale */
   --space-1: 0.25rem;
@@ -162,6 +163,8 @@
     --border: var(--overlay-08);
 
     --shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+  --card-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+    --card-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
 
     color-scheme: light;
   }
@@ -397,7 +400,12 @@ table {
      infinite-scroll batches and reordered shelves don't accrue runaway
      delays; later / appended cards just fade in immediately. */
   .library-grid > .library-card {
-    animation: card-enter 0.34s ease both;
+    /* `backwards` (not `both`): hold the hidden/offset start during the
+       stagger delay, but DON'T retain transform:none after finishing —
+       otherwise the filled animation value pins the card flat and overrides
+       the :hover lift (which is why grid cards only showed a shadow while
+       the dashboard scroll-row, not animated here, still lifted). */
+    animation: card-enter 0.34s ease backwards;
   }
   .library-grid > .library-card:nth-child(1) { animation-delay: 0.02s; }
   .library-grid > .library-card:nth-child(2) { animation-delay: 0.05s; }
@@ -5472,7 +5480,7 @@ a.stats-cell-link:hover {
 
 .library-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--card-shadow);
     text-decoration: none;
     color: inherit;
 }
