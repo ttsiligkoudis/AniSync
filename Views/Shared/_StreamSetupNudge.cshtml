@@ -1,0 +1,110 @@
+@{
+    // Shared "set up streaming" nudge banner. Rendered on the dashboard
+    // (Views/Home/Index.cshtml) for logged-in users with no stream addon,
+    // and in the /watch source panel (Views/Anime/Watch.cshtml) when there's
+    // nothing to play yet — same component both places so the prompt reads
+    // identically wherever a user first hits the "no sources" wall.
+    //
+    // ViewData knobs:
+    //   ["dismissible"] (bool, default false) — render the "×" close button
+    //       and honour the localStorage dismiss flag. The dashboard sets this
+    //       (the banner is one card among many); the watch panel doesn't (the
+    //       banner IS the panel's content, so there'd be nothing left behind).
+    //   ["anonymous"]   (bool, default false) — swap the CTA to "Sign in"
+    //       (→ /configure) since adding an addon requires an account. Only the
+    //       watch panel passes this; the dashboard gates the banner to
+    //       logged-in users upstream.
+    var nudgeDismissible = ViewData["dismissible"] as bool? ?? false;
+    var nudgeAnonymous = ViewData["anonymous"] as bool? ?? false;
+    var nudgeCtaHref = nudgeAnonymous ? "/configure" : "/advanced#streams";
+    var nudgeCtaLabel = nudgeAnonymous ? "Sign in →" : "Set up streaming →";
+    // Unique id so aria-controls stays valid even if two banners ever share a
+    // page (dashboard + an embedded panel, say).
+    var nudgeDetailId = "streamNudgeDetail-" + Guid.NewGuid().ToString("N")[..8];
+}
+@* hidden only when dismissible: the wiring script reveals it after checking
+   the dismiss flag, so a dismissed banner never flashes before the JS runs.
+   When it's not dismissible there's nothing to check, so render it visible. *@
+<section class="stream-nudge" data-stream-nudge @(nudgeDismissible ? "hidden" : null)>
+    @if (nudgeDismissible)
+    {
+        <button class="stream-nudge-dismiss" type="button" aria-label="Dismiss" data-stream-nudge-dismiss>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+        </button>
+    }
+    <div class="stream-nudge-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+        </svg>
+    </div>
+    <div class="stream-nudge-body">
+        <h3 class="stream-nudge-title">Watch right here, in AniSync</h3>
+        <p class="stream-nudge-text">
+            Add a stream addon to surface debrid-cached sources on every episode's player.
+        </p>
+        <div class="stream-nudge-actions">
+            <a class="stream-nudge-cta" href="@nudgeCtaHref">@nudgeCtaLabel</a>
+            <button class="stream-nudge-learn"
+                    type="button"
+                    aria-expanded="false"
+                    aria-controls="@nudgeDetailId"
+                    data-stream-nudge-toggle>
+                How it works
+            </button>
+        </div>
+        <div id="@nudgeDetailId" class="stream-nudge-detail">
+            <p>
+                A <strong>stream addon</strong> (Torrentio, MediaFusion, Comet,
+                AIOStreams, …) finds torrents for an episode and hands AniSync
+                a list of ready-to-play sources.
+            </p>
+            <p>
+                Pair it with a <strong>debrid</strong> service (Real-Debrid,
+                AllDebrid, Premiumize, …): paste your debrid API key and the
+                addon unlocks instantly-streamable, cached copies — no
+                downloads, no seeding. The quick setup on
+                <a href="/advanced#streams">Advanced → Streams</a> wires both up
+                in one step.
+            </p>
+        </div>
+    </div>
+</section>
+@* Wires every nudge on the page: the "How it works" expand/collapse and,
+   when present, the dismiss button (persisted in localStorage so it never
+   nags). Idempotent + instance-scoped so it's safe to include per render. *@
+<script>
+    (function () {
+        var DISMISS_KEY = 'anisync.debridNudgeDismissed.v1';
+        document.querySelectorAll('[data-stream-nudge]').forEach(function (nudge) {
+            if (nudge.dataset.nudgeWired === '1') return;
+            nudge.dataset.nudgeWired = '1';
+
+            var dismiss = nudge.querySelector('[data-stream-nudge-dismiss]');
+            if (dismiss) {
+                var gone = false;
+                try { gone = localStorage.getItem(DISMISS_KEY) === '1'; } catch (e) { }
+                if (gone) { nudge.remove(); return; }
+                // Reveal now that we know it wasn't dismissed (markup ships
+                // hidden to avoid a flash before this check).
+                nudge.hidden = false;
+                dismiss.addEventListener('click', function () {
+                    try { localStorage.setItem(DISMISS_KEY, '1'); } catch (e) { }
+                    nudge.remove();
+                });
+            } else {
+                nudge.hidden = false;
+            }
+
+            var toggle = nudge.querySelector('[data-stream-nudge-toggle]');
+            if (toggle) {
+                toggle.addEventListener('click', function () {
+                    var open = nudge.classList.toggle('is-open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+            }
+        });
+    })();
+</script>
