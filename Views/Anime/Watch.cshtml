@@ -77,14 +77,13 @@
     <p class="watch-meta">@seasonLabel @if (!string.IsNullOrEmpty(watchDisplayDate)) { <span class="watch-meta-dot">·</span> <span>@watchDisplayDate</span> }</p>
 </section>
 
-@* Only mount the inline player when the user actually has a way to
-   resolve a playable URL — i.e. a Real-Debrid key on file. External-
-   services alone navigate out via the source picker rows below, so
-   the player would be a dead frame with nothing behind it. *@
-@if (Model.HasStreamAddons)
-{
-    <section class="watch-player-wrap">
-        @* ArtPlayer owns the contents of #watchPlayer once a source is
+@* The inline player frame always renders — even when the user has no
+   stream addon yet — so the page reads as a real player (episode poster +
+   "pick a source" prompt) rather than empty space. ArtPlayer only takes
+   over once a debrid source is picked; without an addon there's nothing to
+   pick, and the source panel below shows the "set up streaming" banner. *@
+<section class="watch-player-wrap">
+    @* ArtPlayer owns the contents of #watchPlayer once a source is
            picked — it replaces children with its own <video> + chrome.
            The empty-state placeholder swaps out at that moment. The
            skip button is a sibling so ArtPlayer's wipe doesn't take
@@ -112,7 +111,11 @@
                     <img class="watch-player-poster" src="@ep.thumbnail" alt="" loading="lazy" decoding="async"
                          onerror="this.classList.add('is-missing');" />
                 }
-                <span class="watch-player-prompt">Pick a source below to start watching.</span>
+                <span class="watch-player-prompt">
+                    @(!Model.HasStreamAddons && !Model.ExternalStreamsEnabled
+                        ? "Set up streaming below to start watching."
+                        : "Pick a source below to start watching.")
+                </span>
             </div>
         </div>
         @* AniSkip overlay: corner-anchored button rendered by JS when
@@ -163,7 +166,6 @@
                or anything AV1-encoded on older browsers). *@
         </div>
     </section>
-}
 
 <nav class="watch-nav">
     @if (Model.Prev != null)
@@ -196,32 +198,45 @@
         <button type="button" id="watchSourcesRefresh" class="episode-stream-action watch-sources-refresh" title="Refresh sources" aria-label="Refresh sources"></button>
     </div>
     <div id="watchSourcesBody" class="watch-sources-body">
-        @* Shimmer placeholders shaped like the stream list; the client
-           swaps in real rows (or an empty/no-sources message) once the
-           addon fan-out resolves. *@
-        <ul class="episode-stream-skeleton" aria-hidden="true">
-            <li class="episode-stream-skeleton-row">
-                <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
-                <span class="episode-stream-skeleton-meta">
-                    <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
-                    <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
-                </span>
-            </li>
-            <li class="episode-stream-skeleton-row">
-                <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
-                <span class="episode-stream-skeleton-meta">
-                    <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
-                    <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
-                </span>
-            </li>
-            <li class="episode-stream-skeleton-row">
-                <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
-                <span class="episode-stream-skeleton-meta">
-                    <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
-                    <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
-                </span>
-            </li>
-        </ul>
+        @if (!Model.HasStreamAddons && !Model.ExternalStreamsEnabled)
+        {
+            @* Nothing wired up to resolve a source — no addons, External
+               services off. Render the shared "set up streaming" banner
+               straight away (same one the dashboard shows) instead of a
+               skeleton that would only spin into an empty state. The
+               source-panel script leaves this in place (it skips the
+               fan-out for this case). *@
+            @await Html.PartialAsync("_StreamSetupNudge", new ViewDataDictionary(ViewData) { ["anonymous"] = Model.AnonymousUser })
+        }
+        else
+        {
+            @* Shimmer placeholders shaped like the stream list; the client
+               swaps in real rows (or an empty/no-sources message) once the
+               addon fan-out resolves. *@
+            <ul class="episode-stream-skeleton" aria-hidden="true">
+                <li class="episode-stream-skeleton-row">
+                    <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
+                    <span class="episode-stream-skeleton-meta">
+                        <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
+                        <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
+                    </span>
+                </li>
+                <li class="episode-stream-skeleton-row">
+                    <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
+                    <span class="episode-stream-skeleton-meta">
+                        <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
+                        <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
+                    </span>
+                </li>
+                <li class="episode-stream-skeleton-row">
+                    <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
+                    <span class="episode-stream-skeleton-meta">
+                        <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
+                        <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
+                    </span>
+                </li>
+            </ul>
+        }
     </div>
 </section>
 
@@ -4146,16 +4161,15 @@
 
             // Nothing to fetch when the user has neither a stream addon nor
             // External services on — the fan-out would have no addons to
-            // query and no external links to list, so spinning on the
-            // skeleton just to land on the empty state is wasted work (and
-            // looks broken). Short-circuit straight to the setup prompt and
-            // hide the refresh control, which can't surface anything either.
+            // query and no external links to list. The Sources panel already
+            // ships the server-rendered "set up streaming" banner for this
+            // case (see _StreamSetupNudge in the markup), so leave it in
+            // place: just hide the refresh control, which can't surface
+            // anything either, and skip the round-trip entirely.
             // (Server flags from the WatchViewModel — see AnimeController.)
             var hasStreamAddons = @(Model.HasStreamAddons ? "true" : "false");
             var externalStreamsEnabled = @(Model.ExternalStreamsEnabled ? "true" : "false");
             if (!hasStreamAddons && !externalStreamsEnabled) {
-                sourcesBody.innerHTML = '';
-                sourcesBody.appendChild(streamSetupEmptyState(@(Model.AnonymousUser ? "true" : "false")));
                 if (refreshBtn) refreshBtn.hidden = true;
             } else {
                 var cachedStreamData = readCachedStreamData();
