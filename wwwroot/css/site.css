@@ -80,7 +80,6 @@
 
   /* Elevation */
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
-  --card-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
 
   /* Spacing scale */
   --space-1: 0.25rem;
@@ -163,8 +162,6 @@
     --border: var(--overlay-08);
 
     --shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
-  --card-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
-    --card-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
 
     color-scheme: light;
   }
@@ -5475,12 +5472,11 @@ a.stats-cell-link:hover {
     color: inherit;
     border-radius: 0.85rem;
     overflow: hidden;
-    transition: transform 0.1s, box-shadow 0.15s;
+    transition: transform 0.1s;
 }
 
 .library-card:hover {
     transform: translateY(-2px);
-    box-shadow: var(--card-shadow);
     text-decoration: none;
     color: inherit;
 }
