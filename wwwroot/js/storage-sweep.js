@@ -31,6 +31,13 @@
     var RESUME_PREFIX = 'anisync.resume.';
     var RESUME_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
+    // anisync.lastSource.{uid}.{episodeKey} — which source the user last
+    // clicked to play, for the "Last played" marker on the watch page.
+    // Tiny ({url, ts}); kept on the same 90-day horizon as resume so it
+    // survives until a show is realistically abandoned.
+    var LAST_SOURCE_PREFIX = 'anisync.lastSource.';
+    var LAST_SOURCE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
     function sweep() {
         var now;
         try { now = Date.now(); } catch (_) { return; }
@@ -49,6 +56,7 @@
             var ttl = null;
             if (key.indexOf(STREAM_PREFIX) === 0) ttl = STREAM_TTL_MS;
             else if (key.indexOf(RESUME_PREFIX) === 0) ttl = RESUME_TTL_MS;
+            else if (key.indexOf(LAST_SOURCE_PREFIX) === 0) ttl = LAST_SOURCE_TTL_MS;
             if (ttl === null) continue;
 
             var raw;
