@@ -3323,13 +3323,15 @@ body.modal-open {
     color: var(--text-strong);
 }
 
-/* Last-played marker: accent left bar + raised background + accent border
-   on the pick button, paired with a "✓ Last played" pill in the sub-row,
-   so the user can see at a glance which source they last clicked to play. */
+/* Last-played marker: theme-aware grey left bar + raised background +
+   border on the pick button, paired with a "✓ Last played" pill in the
+   sub-row, so the user can see at a glance which source they last clicked
+   to play. Uses the same --overlay-18 grey as the active filter tab
+   (lighter than surrounding rows in dark theme, darker in light). */
 .episode-stream-row.is-last-played .episode-stream-pick {
-    border-color: var(--accent);
+    border-color: var(--overlay-18);
     background: var(--overlay-07);
-    box-shadow: inset 3px 0 0 0 var(--accent);
+    box-shadow: inset 3px 0 0 0 var(--overlay-18);
 }
 
 .episode-stream-played-badge {
@@ -3338,8 +3340,8 @@ body.modal-open {
     gap: 0.2rem;
     padding: 0.05rem 0.4rem;
     border-radius: 0.35rem;
-    background: var(--accent-fill);
-    color: var(--on-accent);
+    background: var(--overlay-18);
+    color: var(--text-strong);
     font-size: 0.68rem;
     font-weight: 700;
     white-space: nowrap;
