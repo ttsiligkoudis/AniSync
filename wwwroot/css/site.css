@@ -374,9 +374,12 @@ table {
    gentle staggered entrance for poster grids.)
    ────────────────────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: no-preference) {
-  /* Tap feedback — a subtle press-down that reads as "app-like". */
-  .library-card:active {
-    transform: scale(0.97);
+  /* Tap feedback — a subtle press-down that reads as "app-like".
+     .is-pressing (pointerdown-driven, instant) gets a touch more travel
+     than the :active fallback so the press is unmistakable on a poster. */
+  .library-card:active,
+  .library-card.is-pressing {
+    transform: scale(0.96);
   }
   .library-card-inert:active {
     transform: none;
@@ -5646,7 +5649,19 @@ a.stats-cell-link:hover {
     color: inherit;
     border-radius: 0.85rem;
     overflow: hidden;
-    transition: transform 0.1s;
+    transition: transform 0.1s, filter 0.1s;
+    /* Kill the ~300ms double-tap-zoom delay so the press/navigation
+       reacts the instant the finger lands. */
+    touch-action: manipulation;
+}
+
+/* Instant press feedback driven by tap-feedback.js (pointerdown adds
+   .is-pressing before the browser's tap/scroll disambiguation would let
+   :active through). The brightness dim sits outside the reduced-motion
+   guard so even motion-averse users get a clear "tap registered" cue;
+   the scale lives in the motion block below. */
+.library-card.is-pressing {
+    filter: brightness(0.9);
 }
 
 .library-card:hover {
