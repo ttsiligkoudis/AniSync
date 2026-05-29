@@ -3314,9 +3314,13 @@ body.modal-open {
     border-color: var(--overlay-15);
 }
 .episode-stream-filter.is-active {
-    background: var(--accent-fill);
-    border-color: var(--accent-fill);
-    color: var(--on-accent);
+    /* Theme-aware grey rather than the brand blue: the overlay tokens are
+       white-based in dark theme (so this reads lighter than the inactive
+       --overlay-04 pills) and black-based in light theme (so it reads
+       darker), which is the contrast direction the design calls for. */
+    background: var(--overlay-18);
+    border-color: var(--overlay-18);
+    color: var(--text-strong);
 }
 
 /* Last-played marker: accent left bar + raised background + accent border
