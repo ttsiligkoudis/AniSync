@@ -101,12 +101,14 @@ namespace AnimeList.Services
 
         // Comet reads a base64-encoded JSON config blob from the path,
         // mirroring exactly what its own /configure page emits:
-        // JSON.stringify → base64 → percent-encode the segment. We send the
-        // full documented field set so the blob matches a hand-configured
-        // install (Comet defaults anything missing, but matching the real
-        // shape keeps us robust if a field ever becomes required). base64
-        // can contain '+' and '/', so the segment is percent-encoded before
-        // it goes in the path; Comet URL-decodes it back before
+        // JSON.stringify → base64 → percent-encode the segment. The shape
+        // below tracks current Comet (the debrid credential lives in a
+        // `debridServices` array of { service, apiKey } objects — the old
+        // flat debridService/debridApiKey pair was dropped). Values are
+        // neutral defaults (no quality cap, cached + uncached both shown);
+        // the user can fine-tune later via the Configure link on the row.
+        // base64 can contain '+' and '/', so the segment is percent-encoded
+        // before it goes in the path; Comet URL-decodes it back before
         // base64-decoding.
         private static string BuildComet(DebridProvider provider, string key)
         {
@@ -115,19 +117,31 @@ namespace AnimeList.Services
                 maxResultsPerResolution = 0,
                 maxSize = 0,
                 cachedOnly = false,
+                sortCachedUncachedTogether = false,
                 removeTrash = true,
                 resultFormat = new[] { "all" },
-                debridService = provider.CometService,
-                debridApiKey = key,
+                debridServices = new[]
+                {
+                    new { service = provider.CometService, apiKey = key },
+                },
+                enableTorrent = false,
+                deduplicateStreams = true,
+                scrapeDebridAccountTorrents = false,
                 debridStreamProxyPassword = "",
                 languages = new
                 {
                     required = Array.Empty<string>(),
+                    allowed = Array.Empty<string>(),
                     exclude = Array.Empty<string>(),
                     preferred = Array.Empty<string>(),
                 },
                 resolutions = new { },
-                options = new { },
+                options = new
+                {
+                    remove_ranks_under = -10000000000L,
+                    allow_english_in_languages = false,
+                    remove_unknown_languages = false,
+                },
             };
             var json = SerializeObject(config);
             var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
