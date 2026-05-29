@@ -46,30 +46,27 @@
         m.setAttribute('content', COLOR[theme]);
     }
 
-    function syncIcons(theme) {
+    // The sun/moon icon is driven by CSS off the active theme (see site.css),
+    // so JS only keeps the accessible label in step with the action.
+    function syncLabel(theme) {
         var next = theme === 'dark' ? 'light' : 'dark';
         document.querySelectorAll('[data-theme-toggle]').forEach(function (btn) {
             var label = 'Switch to ' + next + ' theme';
             btn.setAttribute('aria-label', label);
             btn.setAttribute('title', label);
-            // data-when-theme="dark" → the sun (shown while dark);
-            // data-when-theme="light" → the moon (shown while light).
-            btn.querySelectorAll('[data-when-theme]').forEach(function (ic) {
-                ic.hidden = ic.getAttribute('data-when-theme') !== theme;
-            });
         });
     }
 
     function applyExplicit(theme) {
         document.documentElement.setAttribute('data-theme', theme);
         syncMeta(theme);
-        syncIcons(theme);
+        syncLabel(theme);
     }
 
     // Initial render: reflect whatever is showing. Only touch the theme-color
     // meta when there's an explicit choice (otherwise leave the media metas to
     // follow the OS).
-    syncIcons(effective());
+    syncLabel(effective());
     if (stored()) syncMeta(effective());
 
     function toggle() {
@@ -88,7 +85,7 @@
     // While still following the OS (no explicit choice), keep the icon in step
     // if the OS theme flips. The CSS reacts on its own via prefers-color-scheme.
     if (media) {
-        var onChange = function () { if (!stored()) syncIcons(effective()); };
+        var onChange = function () { if (!stored()) syncLabel(effective()); };
         if (media.addEventListener) media.addEventListener('change', onChange);
         else if (media.addListener) media.addListener(onChange); // Safari < 14
     }
