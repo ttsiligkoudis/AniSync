@@ -105,14 +105,15 @@ namespace AnimeList.Services
         // Torrentio reads its config from pipe-separated key=value segments
         // in the URL path, with the pipes percent-encoded as %7C exactly as
         // its own /configure page emits them. We bake in a curated default
-        // set — sort by seeders, Greek language priority, drop cam / screener
-        // / 480p junk via qualityfilter, cap at 5 results per query, and trim
-        // the catalog + download-link noise from the debrid output — then
-        // append the debrid credential as the final segment. The API key
-        // isn't escaped: debrid tokens are URL-safe alphanumerics and
-        // Torrentio parses the raw segment, so escaping would corrupt it.
+        // set — sort by seeders, drop cam / screener / 480p junk via
+        // qualityfilter, cap at 5 results per query, and trim the catalog +
+        // download-link noise from the debrid output — then append the debrid
+        // credential as the final segment. No language priority: left neutral
+        // so the default suits any user. The API key isn't escaped: debrid
+        // tokens are URL-safe alphanumerics and Torrentio parses the raw
+        // segment, so escaping would corrupt it.
         private const string TorrentioOptions =
-            "sort=seeders%7Clanguage=greek%7Cqualityfilter=480p,scr,cam%7Climit=5%7Cdebridoptions=nocatalog,nodownloadlinks";
+            "sort=seeders%7Cqualityfilter=480p,scr,cam%7Climit=5%7Cdebridoptions=nocatalog,nodownloadlinks";
 
         private static string BuildTorrentio(DebridProvider provider, string key)
             => $"https://torrentio.strem.fun/{TorrentioOptions}%7C{provider.TorrentioKey}={key}/manifest.json";
@@ -153,7 +154,25 @@ namespace AnimeList.Services
                     exclude = Array.Empty<string>(),
                     preferred = Array.Empty<string>(),
                 },
-                resolutions = new { },
+                // Best-guess shape for Comet's resolution picker: a dict of
+                // resolution-key → enabled. Restricts to 2160p/1440p/1080p/
+                // 720p (+ Unknown) and drops the SD/LD tiers, mirroring the
+                // selection in Comet's UI. Keys lead with digits so this has
+                // to be a Dictionary, not an anonymous object. If Comet
+                // actually expects a different shape it'll fall back to its
+                // own defaults rather than break the blob.
+                resolutions = new Dictionary<string, bool>
+                {
+                    ["2160p"] = true,
+                    ["1440p"] = true,
+                    ["1080p"] = true,
+                    ["720p"] = true,
+                    ["576p"] = false,
+                    ["480p"] = false,
+                    ["360p"] = false,
+                    ["240p"] = false,
+                    ["unknown"] = true,
+                },
                 options = new
                 {
                     remove_ranks_under = -10000000000L,
