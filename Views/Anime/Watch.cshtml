@@ -629,7 +629,15 @@
             var sourcesBody = document.getElementById('watchSourcesBody');
             var playerHost  = document.getElementById('watchPlayer');
             var fallbackHost = document.getElementById('watchPlayerFallback');
-            if (!sourcesBody || !playerHost) return;
+            // The inline player (#watchPlayer) only renders when the user
+            // has a stream addon — see @@if (Model.HasStreamAddons) in the
+            // markup above. Don't bail when it's absent: the Sources panel
+            // must still initialise so it can render external "Other sites"
+            // links or the "set up streaming" prompt (the bottom of this
+            // IIFE handles both). Every player dereference below is inside a
+            // function that only runs when a debrid source is picked, which
+            // can't happen without an addon, so they're never hit here.
+            if (!sourcesBody) return;
 
             // Live ArtPlayer instance — recreated on every source pick
             // so the underlying <video> can be swapped cleanly.
