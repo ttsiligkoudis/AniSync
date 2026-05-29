@@ -1,4 +1,5 @@
 using AnimeList.Models;
+using AnimeList.Services;
 using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
@@ -757,6 +758,75 @@ public class HomeController : Controller
     }
 
     /// <summary>
+    /// One-click debrid setup: given a debrid provider + API key and a set
+    /// of catalog addon ids, builds each addon's manifest URL from
+    /// <see cref="StreamAddonCatalog"/>, validates it the same way
+    /// <see cref="AddStreamAddon"/> does (fetch the manifest, confirm it
+    /// advertises stream support, derive the display name), and persists
+    /// the ones that check out. Returns the added entries so the client can
+    /// render rows without a refresh, plus per-addon skip reasons so it can
+    /// tell the user what couldn't be auto-configured (already added, or an
+    /// addon whose upstream config format drifted). The API key is used
+    /// only to mint the URLs — it lives inside the stored manifest URL and
+    /// is never logged here.
+    /// </summary>
+    [HttpPost("Home/AddDebridAddons")]
+    public async Task<JsonResult> AddDebridAddons([FromBody] DebridAddonsRequest request)
+    {
+        var (uid, error) = await ResolveOwnUidOrErrorAsync();
+        if (error != null) return error;
+
+        var provider = StreamAddonCatalog.FindProvider(request?.provider);
+        if (provider == null)
+            return new JsonResult(new { success = false, error = "unknown debrid provider" });
+        var apiKey = (request?.apiKey ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(apiKey))
+            return new JsonResult(new { success = false, error = "API key required" });
+
+        // No addon subset pinned by the client → set up the whole catalog.
+        var addonIds = (request.addons != null && request.addons.Count > 0)
+            ? request.addons
+            : StreamAddonCatalog.Addons.Select(a => a.Id).ToList();
+
+        var added = new List<StreamAddon>();
+        var skipped = new List<object>();
+        foreach (var addonId in addonIds)
+        {
+            if (!StreamAddonCatalog.IsKnownAddon(addonId))
+            {
+                skipped.Add(new { addon = addonId, reason = "unknown addon" });
+                continue;
+            }
+
+            var manifestUrl = StreamAddonCatalog.BuildManifestUrl(addonId, provider, apiKey);
+            if (string.IsNullOrEmpty(manifestUrl))
+            {
+                skipped.Add(new { addon = addonId, reason = "couldn't build a manifest URL" });
+                continue;
+            }
+
+            // Same validation gate as the manual Add path: a built URL that
+            // doesn't resolve to a stream-capable manifest (provider down,
+            // bad key, drifted config format) is skipped, not stored.
+            var addon = await _addonStreamService.FetchManifestAsync(manifestUrl);
+            if (addon == null)
+            {
+                skipped.Add(new { addon = addonId, reason = "couldn't validate — check your key, or add it manually" });
+                continue;
+            }
+
+            var wasAdded = await _configStore.AddStreamAddonAsync(uid, addon);
+            if (wasAdded) added.Add(addon);
+            else skipped.Add(new { addon = addonId, reason = "already added" });
+        }
+
+        // Matching browser stream cache (anisync.streams.{uid}.*) is wiped
+        // client-side by the same handler that hit this endpoint — see
+        // _ConfigurePageScript.cshtml.
+        return new JsonResult(new { success = true, added, skipped });
+    }
+
+    /// <summary>
     /// Persists the toggle bits to the config store for the given UID. Auto-called by the
     /// Install button on the configure page so the manifest the addon serves immediately
     /// reflects the user's current toggle state. Bumps the revision so the install URL
@@ -964,6 +1034,20 @@ public class ReorderStreamAddonsRequest
     // any addon the list omits stays at its current relative position
     // (defensive against stale clients losing rows).
     public List<string> urls { get; set; }
+}
+
+public class DebridAddonsRequest
+{
+    public string uid { get; set; }
+    // Catalog debrid provider id (StreamAddonCatalog.Providers), e.g.
+    // "realdebrid". Resolved server-side; unknown ids are rejected.
+    public string provider { get; set; }
+    // The user's debrid API key. Flows into each built manifest URL and is
+    // never logged on its own.
+    public string apiKey { get; set; }
+    // Catalog addon ids to set up (StreamAddonCatalog.Addons), e.g.
+    // ["torrentio", "comet"]. Null / empty means "all catalog addons".
+    public List<string> addons { get; set; }
 }
 
 public class ConfigBackup

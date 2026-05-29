@@ -1041,6 +1041,95 @@
         }
     });
 
+    // ── Debrid quick setup ────────────────────────────────────────────
+    // Pick a provider + paste one API key → the server builds & validates
+    // the scraper-addon manifest URLs (Torrentio / Comet) and persists the
+    // ones that check out. We append a row for each addon that came back
+    // added, reusing buildAddonRow() and mirroring the manual Add path's
+    // bookkeeping (re-baseline the reorder snapshot, wipe the watch-page
+    // stream cache). Bound unconditionally — on /stremio (or for anonymous
+    // installs) these elements don't render and the selectors no-op.
+    var $debridProvider = $('#debridProvider');
+    var $debridApiKeyLink = $('#debridApiKeyLink');
+
+    // Point the "Get your API key" link at the selected provider's token
+    // page. data-apikey-url is rendered onto each <option> from the
+    // server-side catalog so the link and the dropdown never drift apart.
+    function syncDebridApiKeyLink() {
+        var url = $debridProvider.find('option:selected').attr('data-apikey-url') || '';
+        if (url) $debridApiKeyLink.attr('href', url);
+    }
+    $debridProvider.on('change', syncDebridApiKeyLink);
+    syncDebridApiKeyLink();
+
+    $('#debridAddBtn').on('click', async function () {
+        if (!configUid) return;
+        var provider = $debridProvider.val();
+        var apiKey = ($('#debridApiKey').val() || '').trim();
+        var addons = $('.debrid-addon-toggle:checked').map(function () {
+            return this.value;
+        }).get();
+        var $status = $('#debridSetupStatus').removeClass('is-error is-ok').text('');
+        if (!apiKey) {
+            $status.addClass('is-error').text('Paste your debrid API key first.');
+            return;
+        }
+        if (addons.length === 0) {
+            $status.addClass('is-error').text('Tick at least one addon to add.');
+            return;
+        }
+        var $btn = $(this);
+        $btn.prop('disabled', true).text('Setting up…');
+        try {
+            var resp = await fetch('/Home/AddDebridAddons', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    uid: configUid,
+                    provider: provider,
+                    apiKey: apiKey,
+                    addons: addons,
+                }),
+            });
+            if (!resp.ok) throw new Error('setup failed: ' + resp.status);
+            var data = await resp.json();
+            if (!data.success) throw new Error(data.error || 'setup failed');
+
+            var addedNames = [];
+            (data.added || []).forEach(function (addon) {
+                $('#streamAddonList').append(buildAddonRow(addon));
+                addedNames.push(addon.name || addon.Name || 'addon');
+            });
+            if (addedNames.length) {
+                // Add/Remove persist immediately server-side, so re-baseline
+                // the reorder snapshot (otherwise the next Save would diff
+                // the new rows against a stale order and POST a spurious
+                // reorder), and wipe the watch-page localStorage cache that
+                // was computed against the pre-add addon list.
+                initialAddonOrder = currentStreamAddonOrder();
+                wipeStreamCache();
+                $('#debridApiKey').val('');
+            }
+
+            // Human-readable summary of what landed and what got skipped.
+            var parts = [];
+            if (addedNames.length) parts.push('Added ' + addedNames.join(', ') + '.');
+            var skipped = data.skipped || [];
+            if (skipped.length) {
+                var bits = skipped.map(function (s) {
+                    return (s.addon || 'addon') + ' — ' + (s.reason || 'skipped');
+                });
+                parts.push('Skipped: ' + bits.join('; ') + '.');
+            }
+            if (!parts.length) parts.push('Nothing to add.');
+            $status.addClass(addedNames.length ? 'is-ok' : 'is-error').text(parts.join(' '));
+        } catch (e) {
+            $status.addClass('is-error').text('Could not set up addons: ' + e.message);
+        } finally {
+            $btn.prop('disabled', false).text('Save');
+        }
+    });
+
     // ── Backups ───────────────────────────────────────────────────────
     $('#importConfigBtn').on('click', function () {
         $('#importConfigFile').trigger('click');
