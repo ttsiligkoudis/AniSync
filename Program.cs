@@ -442,7 +442,34 @@ app.UseStatusCodePagesWithReExecute("/error/{0}");
 
 app.UseResponseCompression();
 app.UseHttpsRedirection();
-app.UseStaticFiles();
+// Cache-Control on static assets. By default UseStaticFiles emits no max-age,
+// so browsers revalidate every asset on every navigation (a 304 round-trip per
+// file) — Lighthouse flags this as an inefficient cache policy and it's real
+// latency on mobile. asp-append-version stamps css/js/scoped-bundle URLs with a
+// ?v=<content-hash>, so those bytes are immutable for that URL and can be cached
+// for a year; the hash changes whenever the file does, so a deploy is picked up
+// without any stale-asset risk. sw.js and the manifest are deliberately excluded
+// (no-cache) so a new service worker / manifest is seen on the next visit rather
+// than pinned behind a long TTL — the SW update-flow depends on that freshness.
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        var path = ctx.Context.Request.Path.Value ?? string.Empty;
+        if (path.EndsWith("/sw.js", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".webmanifest", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.Headers.CacheControl = "no-cache";
+            return;
+        }
+        // Versioned (fingerprinted) assets → immutable for a year; everything
+        // else (icons, logo, screenshots, jquery) → a month, which still clears
+        // the efficient-cache bar without pinning unfingerprinted art for a year.
+        ctx.Context.Response.Headers.CacheControl = ctx.Context.Request.Query.ContainsKey("v")
+            ? "public, max-age=31536000, immutable"
+            : "public, max-age=2592000";
+    }
+});
 app.UseRouting();
 app.UseRateLimiter();
 // Parameterless: activates CORS for endpoints carrying [EnableCors("AddonCors")]
