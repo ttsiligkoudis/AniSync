@@ -180,7 +180,7 @@ namespace AnimeList.Services
             alter.ExecuteNonQuery();
         }
 
-        public async Task<string> UpsertAsync(TokenData tokenData)
+        public async Task<string> UpsertAsync(TokenData tokenData, bool showExternalStreamsOnCreate = false)
         {
             var serviceInt = (int)tokenData.anime_service;
             var userKey = GetUserKey(tokenData);
@@ -233,7 +233,12 @@ namespace AnimeList.Services
             cmd.Parameters.AddWithValue("$j", json);
             cmd.Parameters.AddWithValue("$c", now);
             cmd.Parameters.AddWithValue("$u", now);
-            cmd.Parameters.AddWithValue("$f", DefaultFlagsPacked);
+            // Brand-new rows seed from DefaultFlagsPacked; the /account entry point additionally
+            // turns the External services bit (flags3 0x02) on. The ON CONFLICT path above only
+            // refreshes token_json/updated_at, so this never disturbs an existing row's flags.
+            cmd.Parameters.AddWithValue("$f", showExternalStreamsOnCreate
+                ? (DefaultFlagsPacked | 0x02L)
+                : DefaultFlagsPacked);
 
             // RETURNING yields newUid on a fresh INSERT and the existing uid when the conflict
             // refreshed a primary row. It yields nothing only when the conflicting row owns the
@@ -374,6 +379,16 @@ namespace AnimeList.Services
             cmd.Parameters.AddWithValue("$uid", uid);
             var raw = await cmd.ExecuteScalarAsync();
             return raw is long l ? l : 0L;
+        }
+
+        public async Task<bool> ClearShowExternalStreamsAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return false;
+            var (f1, f2, f3, _) = await GetFlagsAsync(uid);
+            if ((f3 & 0x02) == 0) return false; // already off — no write, no revision bump
+            f3 &= unchecked((byte)~0x02);
+            await SetFlagsAsync(uid, f1, f2, f3);
+            return true;
         }
 
         public async Task<string> EnsureScrobbleTokenAsync(string uid)

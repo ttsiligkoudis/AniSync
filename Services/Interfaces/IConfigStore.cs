@@ -12,8 +12,11 @@ namespace AnimeList.Services.Interfaces
         /// Inserts a row for <paramref name="tokenData"/> if no row exists for the same
         /// <c>(anime_service, user_key)</c>; otherwise updates the existing row's token JSON.
         /// In either case returns the row's UID — the same UID across re-logins for the same user.
+        /// <paramref name="showExternalStreamsOnCreate"/> seeds the "External services" toggle on
+        /// for a brand-new row only — the /account entry point turns it on, /configure leaves it
+        /// off. It has no effect when an existing row is refreshed (that path keeps its flags).
         /// </summary>
-        Task<string> UpsertAsync(TokenData tokenData);
+        Task<string> UpsertAsync(TokenData tokenData, bool showExternalStreamsOnCreate = false);
 
         /// <summary>
         /// Single indexed lookup that finds the row owning <paramref name="candidate"/>'s
@@ -57,6 +60,16 @@ namespace AnimeList.Services.Interfaces
         /// Returns 0 if the UID is unknown.
         /// </summary>
         Task<long> SetFlagsAsync(string uid, byte flags1, byte flags2, byte flags3);
+
+        /// <summary>
+        /// Clears just the "External services" toggle (flags3 0x02) for a UID, leaving every other
+        /// flag untouched and bumping the revision like any flag write. Used when the user sets up
+        /// their first stream addon: once AniSync can serve real streams, the external streaming-
+        /// site links default off. No-op (no write, no revision bump) when the toggle is already
+        /// off — so re-enabling it after a later addon add is respected. Returns true when a write
+        /// actually happened.
+        /// </summary>
+        Task<bool> ClearShowExternalStreamsAsync(string uid);
 
         /// <summary>
         /// Removes the row for <paramref name="uid"/> from the config store. No-op if missing.

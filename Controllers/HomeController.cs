@@ -268,7 +268,10 @@ public class HomeController : Controller
 
     [Route("/configure")]
     [Route("{config}/configure")]
-    public async Task<IActionResult> Configure(string config = null)
+    public Task<IActionResult> Configure(string config = null)
+        => RenderConfigure("Stremio", config, externalLinksDefaultOnCreate: false);
+
+    private async Task<IActionResult> RenderConfigure(string viewName, string config, bool externalLinksDefaultOnCreate)
     {
         var tokenData = await _tokenService.GetAccessTokenAsync(config);
 
@@ -332,7 +335,10 @@ public class HomeController : Controller
                 }
                 else
                 {
-                    configUid = await _configStore.UpsertAsync(tokenData);
+                    // First row for this identity. externalLinksDefaultOnCreate seeds the
+                    // External services toggle: on for the /account entry, off for /configure
+                    // (the Stremio path) — see the Account()/Configure() wrappers below.
+                    configUid = await _configStore.UpsertAsync(tokenData, showExternalStreamsOnCreate: externalLinksDefaultOnCreate);
                 }
                 // Used as cache-busting bytes in the install URL — see Configure.cshtml's JS.
                 configRevision = await _configStore.GetRevisionAsync(configUid);
@@ -394,14 +400,14 @@ public class HomeController : Controller
             ? new Configuration { showTrending = true, showSeasonal = true, discoverOnlySeasonal = true }
             : new Configuration();
 
-        // Default view is the Stremio addon page (catalogs / streams /
-        // install URL + the shared Account header) because /configure is
-        // the URL Stremio's "Configure" button appends to every addon
-        // manifest — landing the user on the addon panel directly avoids
-        // a redirect hop. The Account() and Advanced() actions below
-        // wrap this same logic and just swap the view name for the
-        // account-focused / advanced views respectively.
-        return View("Stremio", new ConfigureViewModel
+        // /configure renders the Stremio addon page (catalogs / streams /
+        // install URL + the shared Account header) because that's the URL
+        // Stremio's "Configure" button appends to every addon manifest —
+        // landing the user on the addon panel directly avoids a redirect
+        // hop. The Account() and Advanced() actions below reuse this same
+        // core, passing the account-focused / advanced view names (and the
+        // External services default that goes with their entry point).
+        return View(viewName, new ConfigureViewModel
         {
             TokenData = encodedTokenData,
             ConfigUid = configUid,
@@ -435,7 +441,7 @@ public class HomeController : Controller
     /// the identity-focused view from the site nav.
     /// </summary>
     [Route("/account")]
-    public Task<IActionResult> Account() => RenderConfigure("Configure", config: null);
+    public Task<IActionResult> Account() => RenderConfigure("Configure", config: null, externalLinksDefaultOnCreate: true);
 
     /// <summary>
     /// Advanced settings page — Backups, Danger Zone, Home Server Sync.
@@ -444,20 +450,7 @@ public class HomeController : Controller
     /// rendered them.
     /// </summary>
     [Route("/advanced")]
-    public Task<IActionResult> Advanced() => RenderConfigure("Advanced", config: null);
-
-    private async Task<IActionResult> RenderConfigure(string viewName, string config)
-    {
-        var result = await Configure(config);
-        if (result is ViewResult viewResult)
-        {
-            viewResult.ViewName = viewName;
-            return viewResult;
-        }
-        // Non-view results (RedirectResult / NotFound / etc.) flow through
-        // unchanged so the Stremio route inherits Configure's redirect logic.
-        return result;
-    }
+    public Task<IActionResult> Advanced() => RenderConfigure("Advanced", config: null, externalLinksDefaultOnCreate: false);
 
     /// <summary>
     /// Generates a fresh scrobble token for the given UID, invalidating any existing webhook
@@ -721,7 +714,13 @@ public class HomeController : Controller
                 error = "couldn't fetch a Stremio stream-addon manifest at that URL" });
         }
 
+        // First-addon transition: once the user has any stream addon, AniSync can serve real
+        // streams, so the external streaming-site links default off — but only on the 0→1 add,
+        // so a user who later re-enables External services keeps that choice (see decision note).
+        var hadAddons = (await _configStore.GetStreamAddonsAsync(uid)).Count > 0;
         var added = await _configStore.AddStreamAddonAsync(uid, addon);
+        if (added && !hadAddons)
+            await _configStore.ClearShowExternalStreamsAsync(uid);
         // The matching stream cache lives in the user's browser
         // (localStorage anisync.streams.{uid}.*) and is wiped client-
         // side by the same handler that hit this endpoint — see
@@ -799,6 +798,11 @@ public class HomeController : Controller
             ? request.addons
             : StreamAddonCatalog.Addons.Select(a => a.Id).ToList();
 
+        // Captured before the loop so the external-links clear below keys off whether the user
+        // already had addons — debrid setup adds several at once, but it's still a single 0→1
+        // transition for the External services default.
+        var hadAddons = (await _configStore.GetStreamAddonsAsync(uid)).Count > 0;
+
         var added = new List<StreamAddon>();
         var skipped = new List<object>();
         foreach (var addonId in addonIds)
@@ -858,6 +862,12 @@ public class HomeController : Controller
                 else skipped.Add(new { addon = addonId, reason = "already added" });
             }
         }
+
+        // First-addon transition (see AddStreamAddon): default External services off once the
+        // user goes from zero addons to having some. No-op if they already had addons, or if the
+        // toggle was already off / they later turned it back on.
+        if (added.Count > 0 && !hadAddons)
+            await _configStore.ClearShowExternalStreamsAsync(uid);
 
         // Matching browser stream cache (anisync.streams.{uid}.*) is wiped
         // client-side by the same handler that hit this endpoint — see
