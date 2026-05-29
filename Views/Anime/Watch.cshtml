@@ -4136,11 +4136,26 @@
                 });
             }
 
-            var cachedStreamData = readCachedStreamData();
-            if (cachedStreamData) {
-                applyStreamData(cachedStreamData);
+            // Nothing to fetch when the user has neither a stream addon nor
+            // External services on — the fan-out would have no addons to
+            // query and no external links to list, so spinning on the
+            // skeleton just to land on the empty state is wasted work (and
+            // looks broken). Short-circuit straight to the setup prompt and
+            // hide the refresh control, which can't surface anything either.
+            // (Server flags from the WatchViewModel — see AnimeController.)
+            var hasStreamAddons = @(Model.HasStreamAddons ? "true" : "false");
+            var externalStreamsEnabled = @(Model.ExternalStreamsEnabled ? "true" : "false");
+            if (!hasStreamAddons && !externalStreamsEnabled) {
+                sourcesBody.innerHTML = '';
+                sourcesBody.appendChild(streamSetupEmptyState(@(Model.AnonymousUser ? "true" : "false")));
+                if (refreshBtn) refreshBtn.hidden = true;
             } else {
-                fetchStreams();
+                var cachedStreamData = readCachedStreamData();
+                if (cachedStreamData) {
+                    applyStreamData(cachedStreamData);
+                } else {
+                    fetchStreams();
+                }
             }
         })();
     </script>

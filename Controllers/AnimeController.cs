@@ -466,10 +466,18 @@ namespace AnimeList.Controllers
             // picker still renders below either way (external links
             // for users without addons) but the empty player wrap would
             // be dead chrome if nothing can hand it a playable URL.
+            // externalEnabled feeds the same gate from the other side:
+            // together they tell the source panel whether there's anything
+            // to fetch (addons to fan out OR external links to list). When
+            // both are off the panel short-circuits to the setup prompt
+            // rather than spinning on a fan-out that has nothing to do.
             bool hasAddons = false;
+            bool externalEnabled = false;
             if (!string.IsNullOrEmpty(uid))
             {
                 hasAddons = (await _configStore.GetStreamAddonsAsync(uid)).Count > 0;
+                var watchConfig = await GetConfigByUidAsync(uid, _configStore);
+                externalEnabled = watchConfig?.showExternalStreams == true;
             }
 
             return View("Watch", new WatchViewModel
@@ -481,6 +489,7 @@ namespace AnimeList.Controllers
                 ConfigUid = uid,
                 AnonymousUser = tokenData.anonymousUser,
                 HasStreamAddons = hasAddons,
+                ExternalStreamsEnabled = externalEnabled,
             });
         }
 
@@ -1322,5 +1331,14 @@ namespace AnimeList.Controllers
         // chrome would be inert dead weight without addon-resolved
         // streams behind it.
         public bool HasStreamAddons { get; set; }
+
+        // True when the user's "External services" toggle is on
+        // (Crunchyroll / Netflix / HiDive … links surfaced in the source
+        // picker's "Other sites" bucket). Together with HasStreamAddons
+        // this tells the watch page whether there's anything to fetch at
+        // all: when both are false the source panel skips the network
+        // round-trip and shows the "set up streaming" prompt immediately
+        // instead of spinning on skeleton placeholders.
+        public bool ExternalStreamsEnabled { get; set; }
     }
 }
