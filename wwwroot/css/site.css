@@ -5476,7 +5476,7 @@ a.stats-cell-link:hover {
 }
 
 .library-card:hover {
-    transform: translateY(-2px);
+    transform: translateY(-5px);
     text-decoration: none;
     color: inherit;
 }
