@@ -112,7 +112,7 @@
                          onerror="this.classList.add('is-missing');" />
                 }
                 <span class="watch-player-prompt">
-                    @(!Model.HasStreamAddons && !Model.ExternalStreamsEnabled
+                    @(!Model.HasStreamAddons
                         ? "Set up streaming below to start watching."
                         : "Pick a source below to start watching.")
                 </span>
@@ -198,47 +198,48 @@
         <button type="button" id="watchSourcesRefresh" class="episode-stream-action watch-sources-refresh" title="Refresh sources" aria-label="Refresh sources"></button>
     </div>
     <div id="watchSourcesBody" class="watch-sources-body">
-        @if (!Model.HasStreamAddons && !Model.ExternalStreamsEnabled)
-        {
-            @* Nothing wired up to resolve a source — no addons, External
-               services off. Render the shared "set up streaming" banner
-               straight away (same one the dashboard shows) instead of a
-               skeleton that would only spin into an empty state. The
-               source-panel script leaves this in place (it skips the
-               fan-out for this case). *@
-            @await Html.PartialAsync("_StreamSetupNudge", new ViewDataDictionary(ViewData) { ["anonymous"] = Model.AnonymousUser })
-        }
-        else
-        {
-            @* Shimmer placeholders shaped like the stream list; the client
-               swaps in real rows (or an empty/no-sources message) once the
-               addon fan-out resolves. *@
-            <ul class="episode-stream-skeleton" aria-hidden="true">
-                <li class="episode-stream-skeleton-row">
-                    <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
-                    <span class="episode-stream-skeleton-meta">
-                        <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
-                        <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
-                    </span>
-                </li>
-                <li class="episode-stream-skeleton-row">
-                    <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
-                    <span class="episode-stream-skeleton-meta">
-                        <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
-                        <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
-                    </span>
-                </li>
-                <li class="episode-stream-skeleton-row">
-                    <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
-                    <span class="episode-stream-skeleton-meta">
-                        <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
-                        <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
-                    </span>
-                </li>
-            </ul>
-        }
+        @* Shimmer placeholders shaped like the stream list; the client
+           swaps in real rows (or an empty/no-sources message) once the
+           addon fan-out resolves. For the nothing-to-fetch case (no addon
+           + External services off) the source-panel script clears these
+           and drops a terse "no sources" line; the persistent banner below
+           carries the "set up streaming" call to action. *@
+        <ul class="episode-stream-skeleton" aria-hidden="true">
+            <li class="episode-stream-skeleton-row">
+                <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
+                <span class="episode-stream-skeleton-meta">
+                    <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
+                    <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
+                </span>
+            </li>
+            <li class="episode-stream-skeleton-row">
+                <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
+                <span class="episode-stream-skeleton-meta">
+                    <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
+                    <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
+                </span>
+            </li>
+            <li class="episode-stream-skeleton-row">
+                <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
+                <span class="episode-stream-skeleton-meta">
+                    <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
+                    <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
+                </span>
+            </li>
+        </ul>
     </div>
 </section>
+
+@* Persistent "set up streaming" banner — shown below the Sources section
+   whenever the user has no stream addon, even when External services are on
+   and external links are listed above. External links navigate out; a stream
+   addon (+ debrid) is what unlocks in-app, debrid-cached playback, so the
+   nudge stays relevant alongside them. Same shared component as the
+   dashboard. *@
+@if (!Model.HasStreamAddons)
+{
+    @await Html.PartialAsync("_StreamSetupNudge", new ViewDataDictionary(ViewData) { ["anonymous"] = Model.AnonymousUser })
+}
 
 @section Scripts {
     @* History-stack hygiene for the /watch flow:
@@ -789,55 +790,6 @@
                     ul.appendChild(li);
                 }
                 return ul;
-            }
-
-            // Empty-state explainer for the Sources panel when a settled
-            // fan-out turned up nothing *and* the cause is "no stream addon
-            // set up" (anonymous, or logged-in with none configured). Concise
-            // headline + CTA, with an expandable "What's a stream addon?"
-            // body (collapsed; revealed via .is-open) so curious users learn
-            // what addons/debrid do without cluttering the panel. Built with
-            // the same el() helper + .is-open idiom used elsewhere here.
-            function streamSetupEmptyState(anonymous) {
-                var wrap = el('div', { class: 'sources-empty' });
-
-                wrap.appendChild(el('p', { class: 'hint-text sources-empty-text' },
-                    anonymous
-                        ? 'Sign in and add a stream addon to find streaming sources for this episode.'
-                        : 'No streaming sources yet for this episode.'));
-
-                var actions = el('div', { class: 'sources-empty-actions' });
-                var cta = el('a', { class: 'btn-ghost btn-ghost-sm sources-empty-cta' },
-                    anonymous ? 'Sign in →' : 'Set up streaming →');
-                cta.href = anonymous ? '/configure' : '/advanced#streams';
-                actions.appendChild(cta);
-
-                var detail = el('div', { class: 'sources-empty-detail', id: 'sourcesEmptyDetail' });
-                var toggle = el('button', {
-                    type: 'button',
-                    class: 'sources-empty-learn',
-                    'aria-expanded': 'false',
-                    'aria-controls': 'sourcesEmptyDetail'
-                }, "What's a stream addon?");
-                toggle.addEventListener('click', function () {
-                    var open = wrap.classList.toggle('is-open');
-                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-                });
-                actions.appendChild(toggle);
-                wrap.appendChild(actions);
-
-                var p1 = el('p', null,
-                    'A stream addon (Torrentio, MediaFusion, Comet, AIOStreams, …) finds ' +
-                    'torrents for an episode and hands AniSync a list of ready-to-play sources.');
-                var p2 = el('p', null,
-                    'Pair it with a debrid service (Real-Debrid, AllDebrid, Premiumize, …) ' +
-                    'and the addon unlocks instantly-streamable, cached copies — no downloads, ' +
-                    'no seeding. Set both up under Advanced → Streams.');
-                detail.appendChild(p1);
-                detail.appendChild(p2);
-                wrap.appendChild(detail);
-
-                return wrap;
             }
 
             function destroyPlayer() {
@@ -3825,19 +3777,13 @@
                     // is alive while the slower addons are still in flight.
                     sourcesBody.appendChild(streamSkeleton());
                 } else if (!pendingAddons && debrid.length === 0 && external.length === 0) {
-                    if (data && data.anonymous) {
-                        // Not signed in — point them at sign-in + addon setup.
-                        sourcesBody.appendChild(streamSetupEmptyState(true));
-                    } else if (data && !data.addonsConfigured) {
-                        // Signed in but no stream addon configured — the
-                        // actionable case: explain + deep-link to /advanced.
-                        sourcesBody.appendChild(streamSetupEmptyState(false));
-                    } else {
-                        // Addon configured, fan-out just found nothing for
-                        // this episode — terse line, nothing to set up.
-                        sourcesBody.appendChild(el('p', { class: 'hint-text' },
-                            "No streaming sources found for this episode."));
-                    }
+                    // Nothing found. The "set up streaming" upsell lives in
+                    // the persistent banner below the Sources section (server-
+                    // rendered whenever the user has no stream addon — see
+                    // _StreamSetupNudge in the markup), so keep this line
+                    // terse and let that banner carry the call to action.
+                    sourcesBody.appendChild(el('p', { class: 'hint-text' },
+                        "No streaming sources found for this episode."));
                 }
 
                 // The list is rebuilt from scratch on every (progressive)
@@ -4170,6 +4116,12 @@
             var hasStreamAddons = @(Model.HasStreamAddons ? "true" : "false");
             var externalStreamsEnabled = @(Model.ExternalStreamsEnabled ? "true" : "false");
             if (!hasStreamAddons && !externalStreamsEnabled) {
+                // Clear the skeleton and drop a terse line — there's nothing
+                // to fan out. The "set up streaming" call to action lives in
+                // the persistent banner below the Sources section.
+                sourcesBody.innerHTML = '';
+                sourcesBody.appendChild(el('p', { class: 'hint-text' },
+                    "No streaming sources found for this episode."));
                 if (refreshBtn) refreshBtn.hidden = true;
             } else {
                 var cachedStreamData = readCachedStreamData();

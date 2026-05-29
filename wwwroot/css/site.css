@@ -5189,69 +5189,6 @@ body.modal-open {
     text-decoration: underline;
 }
 
-/* ── Sources-panel empty state (watch page) ───────────────────────────
-   Richer "no stream addon" explainer rendered by streamSetupEmptyState()
-   in Watch.cshtml when a settled fan-out found nothing because no addon is
-   configured (or the viewer is anonymous). Same expandable .is-open idiom. */
-.sources-empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0.5rem 0;
-    text-align: center;
-}
-
-.sources-empty-text {
-    margin: 0;
-}
-
-.sources-empty-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-    gap: 0.75rem;
-}
-
-.sources-empty-learn {
-    padding: 0;
-    border: none;
-    background: transparent;
-    color: var(--accent);
-    font-size: 0.8rem;
-    font-weight: 500;
-    cursor: pointer;
-}
-
-.sources-empty-learn:hover,
-.sources-empty-learn:focus {
-    text-decoration: underline;
-    outline: none;
-}
-
-.sources-empty-detail {
-    display: none;
-    max-width: 32rem;
-    margin-top: 0.15rem;
-    font-size: 0.8rem;
-    line-height: 1.5;
-    color: var(--text-muted);
-    text-align: left;
-}
-
-.sources-empty.is-open .sources-empty-detail {
-    display: block;
-}
-
-.sources-empty-detail p {
-    margin: 0 0 0.5rem;
-}
-
-.sources-empty-detail p:last-child {
-    margin-bottom: 0;
-}
-
 /* Library variant sits inline inside the page-subtitle line; nudge it up a
    hair so the icon centres against the text baseline. */
 .library-refresh-btn {
