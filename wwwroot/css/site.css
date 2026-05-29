@@ -3282,6 +3282,65 @@ body.modal-open {
     text-decoration: none;
 }
 
+/* Provider filter tabs above the debrid list (Stremio-style): "All" plus
+   one pill per provider. Horizontally scrollable so a long provider list
+   stays on one line instead of wrapping into a tall block. */
+.episode-stream-filters {
+    display: flex;
+    gap: 0.4rem;
+    margin: 0 0 0.6rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+}
+.episode-stream-filters::-webkit-scrollbar { display: none; }
+
+.episode-stream-filter {
+    flex: 0 0 auto;
+    padding: 0.32rem 0.7rem;
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-08);
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 600;
+    font-family: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.episode-stream-filter:hover {
+    color: var(--text-2);
+    border-color: var(--overlay-15);
+}
+.episode-stream-filter.is-active {
+    background: var(--accent-fill);
+    border-color: var(--accent-fill);
+    color: var(--on-accent);
+}
+
+/* Last-played marker: accent left bar + raised background + accent border
+   on the pick button, paired with a "✓ Last played" pill in the sub-row,
+   so the user can see at a glance which source they last clicked to play. */
+.episode-stream-row.is-last-played .episode-stream-pick {
+    border-color: var(--accent);
+    background: var(--overlay-07);
+    box-shadow: inset 3px 0 0 0 var(--accent);
+}
+
+.episode-stream-played-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 0.35rem;
+    background: var(--accent-fill);
+    color: var(--on-accent);
+    font-size: 0.68rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
 .episode-stream-quality {
     display: inline-flex;
     align-items: center;

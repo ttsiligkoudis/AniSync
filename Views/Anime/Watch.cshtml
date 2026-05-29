@@ -3586,10 +3586,57 @@
                     sourcesBody.appendChild(h);
                 }
 
+                // Provider filter tabs (Stremio-style): "All" plus one tab
+                // per distinct addon that returned a stream, in first-seen
+                // order. Only worth showing once two or more providers are
+                // present — a single provider has nothing to filter. The
+                // selection lives in sourceProviderFilter (outer scope) so it
+                // survives the progressive re-renders during fan-out and
+                // sticks until the user changes it.
+                if (debrid.length > 0) {
+                    var providers = [];
+                    debrid.forEach(function (s) {
+                        var p = s.provider || 'Other';
+                        if (providers.indexOf(p) === -1) providers.push(p);
+                    });
+                    // Drop a stale selection if that provider didn't come
+                    // back this render (e.g. a slower addon dropped out).
+                    if (sourceProviderFilter !== 'all' && providers.indexOf(sourceProviderFilter) === -1) {
+                        sourceProviderFilter = 'all';
+                    }
+                    if (providers.length >= 2) {
+                        var tabs = el('div', { class: 'episode-stream-filters', role: 'tablist' });
+                        var allTab = el('button', {
+                            type: 'button',
+                            class: 'episode-stream-filter' + (sourceProviderFilter === 'all' ? ' is-active' : ''),
+                            'data-provider': 'all',
+                        }, 'All');
+                        allTab.addEventListener('click', function () { setProviderFilter('all'); });
+                        tabs.appendChild(allTab);
+                        providers.forEach(function (p) {
+                            var t = el('button', {
+                                type: 'button',
+                                class: 'episode-stream-filter' + (sourceProviderFilter === p ? ' is-active' : ''),
+                                'data-provider': p,
+                            }, p);
+                            t.addEventListener('click', function () { setProviderFilter(p); });
+                            tabs.appendChild(t);
+                        });
+                        sourcesBody.appendChild(tabs);
+                    }
+                }
+
                 if (debrid.length > 0) {
                     var list = el('ul', { class: 'episode-stream-list' });
                     debrid.forEach(function (s) {
-                        var li = el('li', { class: 'episode-stream-row' });
+                        var li = el('li', {
+                            class: 'episode-stream-row',
+                            // data-* hooks for the two client-side affordances:
+                            // data-stream-url keys the "last played" marker,
+                            // data-provider drives the provider filter tabs.
+                            'data-stream-url': s.url || '',
+                            'data-provider': s.provider || 'Other',
+                        });
                         var btn = el('button', { type: 'button', class: 'episode-stream-pick' });
                         btn.appendChild(el('span', { class: 'episode-stream-quality' }, s.quality || '—'));
 
@@ -3658,7 +3705,10 @@
                         if (sub.childNodes.length > 0) meta.appendChild(sub);
                         btn.appendChild(meta);
 
-                        btn.addEventListener('click', function () { playStream(s); });
+                        btn.addEventListener('click', function () {
+                            markSourcePlayed(s);
+                            playStream(s);
+                        });
                         li.appendChild(btn);
 
                         // Side actions: copy link + open externally.
@@ -3667,7 +3717,11 @@
                         // rather than inside it so the click targets
                         // don't overlap.
                         var actions = el('div', { class: 'episode-stream-actions' });
-                        actions.appendChild(buildExternalAction(s.url, firstLine));
+                        var extAction = buildExternalAction(s.url, firstLine);
+                        // Opening externally is "playing" the source too, so
+                        // mark it as last-played the same as an inline pick.
+                        extAction.addEventListener('click', function () { markSourcePlayed(s); });
+                        actions.appendChild(extAction);
                         li.appendChild(actions);
 
                         list.appendChild(li);
@@ -3706,6 +3760,12 @@
                             : "No streaming sources found for this episode.");
                     sourcesBody.appendChild(el('p', { class: 'hint-text' }, msg));
                 }
+
+                // The list is rebuilt from scratch on every (progressive)
+                // render, so re-assert the provider filter and the
+                // last-played marker against the freshly-built rows.
+                applyProviderFilter();
+                applyLastSourceHighlight(readLastSourceUrl());
             }
 
             var qs = 'id=' + encodeURIComponent(animeId)
@@ -3733,6 +3793,96 @@
                     + '|e=' + (streamEpisode != null ? streamEpisode : '_')
                     + (isMovie ? '|movie' : '')
                 : null;
+
+            // ── Source picker affordances: provider filter + last-played ──
+            // Current provider-filter selection ('all' or a provider name).
+            // Outer scope so it survives the progressive re-renders of
+            // renderSources during the addon fan-out.
+            var sourceProviderFilter = 'all';
+
+            // Per-episode key for the last-played marker — same composition
+            // as the stream cache key so it scopes to this exact
+            // anime/season/episode and to the signed-in config.
+            var lastSourceKey = configUid
+                ? 'anisync.lastSource.' + configUid + '.' + animeId
+                    + '|s=' + (streamSeason != null ? streamSeason : '_')
+                    + '|e=' + (streamEpisode != null ? streamEpisode : '_')
+                    + (isMovie ? '|movie' : '')
+                : null;
+
+            function readLastSourceUrl() {
+                if (!lastSourceKey) return null;
+                try {
+                    var raw = localStorage.getItem(lastSourceKey);
+                    if (!raw) return null;
+                    var obj = JSON.parse(raw);
+                    return obj && obj.url ? obj.url : null;
+                } catch (_) { return null; }
+            }
+
+            // Persist the chosen source and light it up immediately. Keyed on
+            // the stream URL — the only stable id the client receives. Debrid
+            // URLs are token-bound and rotate when the cache expires and the
+            // fan-out re-runs, so the marker naturally lapses after that
+            // window rather than pointing at a dead row.
+            function markSourcePlayed(stream) {
+                if (!stream || !stream.url) return;
+                if (lastSourceKey) {
+                    try {
+                        localStorage.setItem(lastSourceKey,
+                            JSON.stringify({ url: stream.url, ts: Date.now() }));
+                    } catch (_) { /* private mode / quota — best-effort */ }
+                }
+                applyLastSourceHighlight(stream.url);
+            }
+
+            function applyLastSourceHighlight(url) {
+                if (!sourcesBody) return;
+                // Clear any previous marker (class + badge) first so only one
+                // row is ever flagged.
+                var flagged = sourcesBody.querySelectorAll('.episode-stream-row.is-last-played');
+                for (var i = 0; i < flagged.length; i++) flagged[i].classList.remove('is-last-played');
+                var oldBadge = sourcesBody.querySelector('.episode-stream-played-badge');
+                if (oldBadge && oldBadge.parentNode) oldBadge.parentNode.removeChild(oldBadge);
+                if (!url) return;
+                var rows = sourcesBody.querySelectorAll('.episode-stream-row[data-stream-url]');
+                for (var j = 0; j < rows.length; j++) {
+                    if (rows[j].getAttribute('data-stream-url') !== url) continue;
+                    rows[j].classList.add('is-last-played');
+                    var badge = el('span', {
+                        class: 'episode-stream-played-badge',
+                        title: 'Last source you played',
+                    }, '✓ Last played');
+                    var sub = rows[j].querySelector('.episode-stream-sub');
+                    if (sub) sub.insertBefore(badge, sub.firstChild);
+                    else {
+                        var meta = rows[j].querySelector('.episode-stream-meta');
+                        if (meta) meta.appendChild(badge);
+                    }
+                    break;
+                }
+            }
+
+            function applyProviderFilter() {
+                if (!sourcesBody) return;
+                var rows = sourcesBody.querySelectorAll('.episode-stream-row[data-provider]');
+                for (var i = 0; i < rows.length; i++) {
+                    var p = rows[i].getAttribute('data-provider');
+                    var show = !sourceProviderFilter || sourceProviderFilter === 'all'
+                        || p === sourceProviderFilter;
+                    rows[i].style.display = show ? '' : 'none';
+                }
+            }
+
+            function setProviderFilter(provider) {
+                sourceProviderFilter = provider;
+                var tabBtns = sourcesBody.querySelectorAll('.episode-stream-filter');
+                for (var i = 0; i < tabBtns.length; i++) {
+                    tabBtns[i].classList.toggle('is-active',
+                        tabBtns[i].getAttribute('data-provider') === provider);
+                }
+                applyProviderFilter();
+            }
 
             function readCachedStreamData() {
                 if (!streamCacheKey) return null;
