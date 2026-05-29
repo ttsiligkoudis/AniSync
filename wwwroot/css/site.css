@@ -133,7 +133,7 @@
     --text-strong: #0a0a0a;
     --text-2: #3f3f3f;
     --text-dim: #5f6368;
-    --text-muted: #80868b;
+    --text-muted: #696c70;
     --ink-rgb: 0, 0, 0;
 
     --glass-bg: linear-gradient(180deg, rgba(252, 252, 253, 0.86) 0%, rgba(244, 244, 247, 0.82) 100%);
@@ -177,7 +177,7 @@
   --text-strong: #0a0a0a;
   --text-2: #3f3f3f;
   --text-dim: #5f6368;
-  --text-muted: #80868b;
+  --text-muted: #696c70;
   --ink-rgb: 0, 0, 0;
 
   --glass-bg: linear-gradient(180deg, rgba(252, 252, 253, 0.86) 0%, rgba(244, 244, 247, 0.82) 100%);
