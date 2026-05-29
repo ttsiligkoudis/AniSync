@@ -465,7 +465,7 @@ Two small Workers ship alongside the app — both optional, both free to run:
 - Filler/canon tags scraped from [AnimeFillerList](https://www.animefillerlist.com), negative-cached so unknown shows don't pound their server.
 - Intro/outro markers from [AniSkip](https://aniskip.com).
 - Subtitles from [OpenSubtitles](https://opensubtitles.com) + [Wyzie](https://sub.wyzie.ru) (Subdl / Addic7ed federated).
-- Stream addons via the Stremio addon protocol — Torrentio, MediaFusion, Comet, Jackettio, AIOStreams all work.
+- Stream addons via the Stremio addon protocol — Torrentio, MediaFusion, Comet, Jackettio, AIOStreams all work. The /advanced Streams card has a quick-setup step: pick a debrid provider, paste one API key, and AniSync builds + validates the Torrentio / Comet manifest URLs for you (with a "Get your API key" jump-link per provider); anything outside that catalog still goes in via the manual paste box.
 - Deployed on [Fly.io](https://fly.io).
 
 ## Acknowledgements

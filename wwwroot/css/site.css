@@ -2834,6 +2834,99 @@ body.modal-open {
 }
 [data-theme="light"] .manifest-url-input { color: #6d28d9; }
 
+/* ── Debrid quick setup ──────────────────────────────────────────
+   The easy path that sits above the addon list + manual paste box:
+   a provider dropdown, one API-key field, an addon picker, a Save
+   button, and a status line. Wrapped in its own bordered panel so it
+   reads as a single coherent step distinct from the list below. */
+.debrid-setup {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 0.85rem;
+    margin-bottom: 0.85rem;
+    background: var(--overlay-05);
+    border: 1px solid var(--overlay-08);
+    border-radius: 10px;
+}
+
+.debrid-setup-row {
+    display: flex;
+    gap: var(--space-2);
+    align-items: stretch;
+    flex-wrap: wrap;
+}
+
+.debrid-select {
+    flex: 0 0 auto;
+    min-width: 9.5rem;
+    padding: 0.55rem 0.75rem;
+    background: var(--sunken-strong);
+    border: 1px solid var(--overlay-08);
+    border-radius: 8px;
+    color: var(--text-strong);
+    font-family: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    outline: none;
+}
+
+/* The API-key field reuses .manifest-url-input for the sunken
+   monospace look, but here it needs to flex alongside the select. */
+.debrid-setup-row .manifest-url-input { flex: 1 1 12rem; }
+
+.debrid-setup-addons {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    flex-wrap: wrap;
+}
+
+.debrid-setup-addons-label {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.debrid-addon-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+    color: var(--text-2);
+    cursor: pointer;
+}
+
+.debrid-addon-check input {
+    cursor: pointer;
+    accent-color: var(--accent);
+}
+
+.debrid-setup-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.debrid-apikey-link {
+    font-size: 0.8rem;
+    color: var(--accent);
+    text-decoration: none;
+}
+.debrid-apikey-link:hover { text-decoration: underline; }
+
+/* Status line — collapsed until the Save handler writes a result,
+   then green for "added" / soft-red for an error or all-skipped. */
+.debrid-setup-status {
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+.debrid-setup-status:empty { display: none; }
+.debrid-setup-status.is-ok { color: #2ecc71; }
+.debrid-setup-status.is-error { color: #e0626b; }
+
 .btn-icon-copy {
     width: 42px;
     flex-shrink: 0;

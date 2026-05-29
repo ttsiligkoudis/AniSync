@@ -1,4 +1,5 @@
 @model AnimeList.Models.ConfigureViewModel
+@using AnimeList.Services
 @{
     // isStremio = true when this partial renders on /stremio (toggles
     // affect the Stremio addon stream surface). false on /advanced
@@ -83,6 +84,45 @@
     @if (!isStremio && !Model.AnonymousUser && !string.IsNullOrEmpty(Model.ConfigUid))
     {
         <p class="manifest-url-label" style="margin-top: 1.5rem;">Stream addons</p>
+
+        @* Quick setup — the easy path. Pick a debrid service, paste the
+           one API key it gives you, and AniSync builds + validates the
+           scraper-addon manifest URLs for you (Torrentio, Comet) instead
+           of making you walk each addon's own /configure page and paste
+           the result back by hand. The "Get your API key" link jumps to
+           the selected provider's token page. Anything the catalog can't
+           build deterministically (e.g. MediaFusion, whose config is
+           encrypted with the addon's own secret) still goes through the
+           manual paste box below. *@
+        <div class="debrid-setup" id="debridSetup">
+            <div class="debrid-setup-row">
+                <select id="debridProvider" class="debrid-select" aria-label="Debrid provider">
+                    @foreach (var p in StreamAddonCatalog.Providers)
+                    {
+                        <option value="@p.Id" data-apikey-url="@p.ApiKeyUrl">@p.DisplayName</option>
+                    }
+                </select>
+                <input id="debridApiKey" class="manifest-url-input" type="password"
+                       placeholder="Paste your API key" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="debrid-setup-addons">
+                <span class="debrid-setup-addons-label">Add:</span>
+                @foreach (var a in StreamAddonCatalog.Addons)
+                {
+                    <label class="debrid-addon-check">
+                        <input type="checkbox" class="debrid-addon-toggle" value="@a.Id" checked />
+                        <span>@a.DisplayName</span>
+                    </label>
+                }
+            </div>
+            <div class="debrid-setup-actions">
+                <a id="debridApiKeyLink" class="debrid-apikey-link" target="_blank" rel="noopener"
+                   href="@StreamAddonCatalog.Providers[0].ApiKeyUrl">Get your API key ↗</a>
+                <button id="debridAddBtn" class="btn-ghost btn-ghost-sm" type="button">Save</button>
+            </div>
+            <p id="debridSetupStatus" class="debrid-setup-status" role="status" aria-live="polite"></p>
+        </div>
+
         <ul id="streamAddonList" class="stream-addon-list">
             @foreach (var addon in Model.StreamAddons)
             {
@@ -138,13 +178,15 @@
                 </li>
             }
         </ul>
+        <p class="manifest-url-label">Or paste a manifest URL</p>
         <div class="manifest-url-row">
             <input id="streamAddonInput" class="manifest-url-input" type="text"
                    placeholder="https://….example.com/…/manifest.json" autocomplete="off" />
             <button id="streamAddonAddBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;">Add</button>
         </div>
         <p class="option-name-sub" style="margin-top: 0.5rem;">
-            Paste a Stremio stream-addon manifest URL — Torrentio
+            Already have a configured manifest URL? Paste any Stremio
+            stream-addon manifest — Torrentio
             (<a href="https://torrentio.strem.fun" target="_blank" rel="noopener">torrentio.strem.fun</a>),
             MediaFusion (<a href="https://mediafusion.elfhosted.com" target="_blank" rel="noopener">mediafusion.elfhosted.com</a>),
             Comet (<a href="https://comet.feels.legal/configure" target="_blank" rel="noopener">comet.feels.legal</a>),
