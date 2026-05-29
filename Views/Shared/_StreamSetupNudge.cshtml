@@ -11,12 +11,12 @@
     //       (the banner is one card among many); the watch panel doesn't (the
     //       banner IS the panel's content, so there'd be nothing left behind).
     //   ["anonymous"]   (bool, default false) — swap the CTA to "Sign in"
-    //       (→ /configure) since adding an addon requires an account. Only the
+    //       (→ /account) since adding an addon requires an account. Only the
     //       watch panel passes this; the dashboard gates the banner to
     //       logged-in users upstream.
     var nudgeDismissible = ViewData["dismissible"] as bool? ?? false;
     var nudgeAnonymous = ViewData["anonymous"] as bool? ?? false;
-    var nudgeCtaHref = nudgeAnonymous ? "/configure" : "/advanced#streams";
+    var nudgeCtaHref = nudgeAnonymous ? "/account" : "/advanced#streams";
     var nudgeCtaLabel = nudgeAnonymous ? "Sign in →" : "Set up streaming →";
     // Unique id so aria-controls stays valid even if two banners ever share a
     // page (dashboard + an embedded panel, say).
