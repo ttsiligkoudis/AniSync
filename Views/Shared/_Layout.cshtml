@@ -131,11 +131,17 @@
     <title>@fullTitle</title>
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/AniSync.styles.css" asp-append-version="true" />
-    <script src="~/lib/jquery/dist/jquery.min.js"></script>
-    @* Load loader.js early (right after jQuery) so the fetch wrap and
-       jQuery ajax hooks are in place before any other script can fire
-       an HTTP request. *@
-    <script src="~/js/loader.js" asp-append-version="true"></script>
+    @* jQuery + loader.js are `defer`-ed so they fetch during head parse but
+       execute AFTER the document is parsed (in order, before DOMContentLoaded)
+       — keeping ~94KB of script off the critical rendering path so first paint
+       isn't blocked. jQuery is only needed for later interactions (the
+       standalone ManageEntry page + the Configure/Stremio inline scripts, which
+       now run on DOMContentLoaded), never at paint. loader.js's window.fetch
+       wrap + guarded $.ajax hook install just after parse; the only parse-time
+       scripts (theme stamp, tz cookie) issue no requests, so nothing of note
+       escapes the spinner. *@
+    <script src="~/lib/jquery/dist/jquery.min.js" defer></script>
+    <script src="~/js/loader.js" asp-append-version="true" defer></script>
     @* Stamp the viewer's UTC offset (in minutes, JS getTimezoneOffset
        convention — positive = west of UTC) into a cookie so server-
        rendered "today" shelves (the dashboard's New Episodes Today, in
@@ -151,6 +157,30 @@
                 if (existing === 'anisync_tz=' + offset) return;
                 document.cookie = 'anisync_tz=' + offset + '; path=/; max-age=31536000; SameSite=Lax';
             } catch (_) { /* cookies disabled — server falls back to UTC */ }
+        })();
+    </script>
+    @* bfcache revalidation registry. Defined inline in <head> so it exists
+       before any parse-time inline hydration script (the dashboard shelves,
+       etc.) can register with it. When the browser restores this page from
+       the back/forward cache (instant, but with the DOM frozen as it was),
+       `pageshow` fires with persisted=true; we then run every registered
+       loader so the user sees fresh data instead of a stale snapshot. Each
+       loader already gates on its own localStorage TTL, so a re-fire only
+       hits the network when the cached data is actually stale. *@
+    <script>
+        (function () {
+            var fns = [];
+            window.AniSyncRevalidate = {
+                on: function (fn) { if (typeof fn === 'function') fns.push(fn); },
+                fire: function () {
+                    for (var i = 0; i < fns.length; i++) {
+                        try { fns[i](); } catch (_) { /* one loader's failure shouldn't stop the rest */ }
+                    }
+                }
+            };
+            window.addEventListener('pageshow', function (e) {
+                if (e.persisted) window.AniSyncRevalidate.fire();
+            });
         })();
     </script>
 </head>
@@ -728,6 +758,13 @@
     <script src="~/js/pull-to-refresh.js" asp-append-version="true" defer></script>
     <script src="~/js/site-search.js" asp-append-version="true" defer></script>
     <script src="~/js/storage-sweep.js" asp-append-version="true" defer></script>
+    @* Cross-browser instant-nav fallback. The Speculation Rules block below
+       gives Chromium prerender/prefetch on hover-intent; hover-prefetch.js
+       self-disables there and only runs on browsers WITHOUT speculation-rules
+       support (Safari/Firefox), where it warms a <link rel=prefetch> on
+       pointer-intent. Same exclusions as the ruleset (auth / api / mutation
+       links are never prefetched). *@
+    <script src="~/js/hover-prefetch.js" asp-append-version="true" defer></script>
     <script>
         // Universal back button. Lives in the layout so every page
         // has it — primarily a rescue valve for Stremio desktop's in-
@@ -750,10 +787,18 @@
             try {
                 if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
             } catch (_) { /* matchMedia unavailable — proceed */ }
+            // Covers every poster→detail entry point: the shared _PosterGrid
+            // cards (dashboard / discover / library / studio / tag, plus the
+            // detail page's own related + recommendation rows — all rendered as
+            // a.library-card) AND the header search dropdown (a.site-search-result,
+            // its own poster class). The detail hero carries the matching
+            // vt-shared-poster name in CSS, so the tapped poster morphs into it.
             document.addEventListener('click', function (e) {
-                var card = e.target.closest ? e.target.closest('a.library-card') : null;
+                var card = e.target.closest
+                    ? e.target.closest('a.library-card, a.site-search-result')
+                    : null;
                 if (!card) return;
-                var img = card.querySelector('.library-card-poster');
+                var img = card.querySelector('.library-card-poster, .site-search-result-poster');
                 if (img) img.style.viewTransitionName = 'vt-shared-poster';
             }, true);
         })();
@@ -804,6 +849,78 @@
     {
         <script src="~/js/notifications.js" asp-append-version="true" defer></script>
     }
+
+    @* ── Speculation Rules — instant in-app navigation on Chromium ──
+       Document-level rules: Chromium re-evaluates them against the page's live
+       links, so dynamic anime ids / episode numbers are covered with no
+       per-view code. An inert data block on browsers that don't support it
+       (they just full-load as before) — no feature gate needed.
+
+       prerender (renders the page, incl. its post-paint hydration, in a hidden
+       tab → click is instant) is reserved for LIGHT pages. prefetch (document
+       bytes only, no JS) is used for the HEAVY Watch route (ArtPlayer + a 437KB
+       matroska bundle — we don't want that executing speculatively) and for the
+       dashboard "/" (so its multi-shelf fan-out isn't fired speculatively).
+
+       eagerness "moderate" = pointerdown / ~200ms hover, so we only speculate
+       links the user signals intent on — never every link in the viewport.
+
+       SAFETY: /Auth/Logout is a state-mutating GET. It is excluded three ways —
+       it matches none of the path patterns below, it carries [data-disconnect],
+       and it gains a ?returnUrl query on click (and no rule allows query
+       strings via the patterns). The AuthController.Logout action additionally
+       refuses any request carrying Sec-Purpose: prefetch. external links
+       (target=_blank / rel=external) and any [data-no-prerender] opt-out are
+       excluded too. If a browser rejects selector_matches it drops the whole
+       rule object — validate in DevTools; the path patterns alone still keep
+       Logout/api/external out. *@
+    <script type="speculationrules">
+    {
+      "prerender": [
+        {
+          "where": { "and": [
+            { "href_matches": "/anime/*" },
+            { "not": { "href_matches": "/anime/*/watch/*" } },
+            { "not": { "selector_matches": "[data-disconnect]" } },
+            { "not": { "selector_matches": "[data-no-prerender]" } },
+            { "not": { "selector_matches": "a[target=\"_blank\"]" } },
+            { "not": { "selector_matches": "a[rel~=\"external\"]" } }
+          ] },
+          "eagerness": "moderate"
+        },
+        {
+          "where": { "and": [
+            { "or": [
+              { "href_matches": "/library" },
+              { "href_matches": "/discover" },
+              { "href_matches": "/discover/*" },
+              { "href_matches": "/notifications" }
+            ] },
+            { "not": { "href_matches": "/discover/*/page" } },
+            { "not": { "selector_matches": "[data-disconnect]" } },
+            { "not": { "selector_matches": "[data-no-prerender]" } },
+            { "not": { "selector_matches": "a[target=\"_blank\"]" } },
+            { "not": { "selector_matches": "a[rel~=\"external\"]" } }
+          ] },
+          "eagerness": "moderate"
+        }
+      ],
+      "prefetch": [
+        {
+          "where": { "and": [
+            { "href_matches": "/anime/*/watch/*" },
+            { "not": { "selector_matches": "[data-disconnect]" } },
+            { "not": { "selector_matches": "[data-no-prerender]" } }
+          ] },
+          "eagerness": "moderate"
+        },
+        {
+          "where": { "href_matches": "/" },
+          "eagerness": "conservative"
+        }
+      ]
+    }
+    </script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

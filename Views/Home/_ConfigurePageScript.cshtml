@@ -8,6 +8,12 @@
     script works for both pages without per-page subsetting.
 *@
 <script>
+  // jQuery is `defer`-ed in the layout (off the critical render path) and this
+  // partial renders inline mid-body, so jQuery isn't defined yet when this parses.
+  // Run the whole body on DOMContentLoaded, after deferred scripts (incl. jQuery)
+  // have executed. Function declarations hoist within this callback, so no
+  // internal reordering is needed (the body keeps its original indentation).
+  document.addEventListener('DOMContentLoaded', function () {
     // Numeric service selector: 0 = Kitsu, 1 = AniList, 2 = MyAnimeList. Mirrors the
     // AnimeService enum on the server.
     var selectedService = @Model.ServiceIndex;
@@ -1154,4 +1160,5 @@
             + '&anonymous=true'
             + '&returnUrl=' + encodeURIComponent(anonReturnUrl);
     });
+  });
 </script>

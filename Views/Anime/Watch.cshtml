@@ -306,7 +306,11 @@
             }
         })();
     </script>
-    <script src="https://unpkg.com/artplayer@5/dist/artplayer.js"></script>
+    @* `defer` keeps ArtPlayer off the render-blocking path. `new Artplayer`
+       only runs inside initPlayer() on a user source-row click, and a deferred
+       script executes before DOMContentLoaded — long before any click — so
+       window.Artplayer is guaranteed defined by first interaction. *@
+    <script src="https://unpkg.com/artplayer@5/dist/artplayer.js" defer></script>
     @* SSA / ASS embedded subtitle support. matroska-subtitles parses
        the MKV stream client-side; jassub (a libass WebAssembly port)
        renders the result. Both ship ESM/Node-only on npm, so we go

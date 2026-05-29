@@ -145,6 +145,10 @@
 </div>
 
 <script>
+  // jQuery is now `defer`-ed in the layout (off the critical render path), so
+  // it isn't defined while this inline script parses. Wrap the jQuery-dependent
+  // body in DOMContentLoaded, which fires after deferred scripts have executed.
+  document.addEventListener('DOMContentLoaded', function () {
     var config = '@Html.Raw(Model.Config)';
     var originalId = '@Html.Raw(Model.Id)';
 
@@ -233,4 +237,5 @@
             }
         });
     });
+  });
 </script>

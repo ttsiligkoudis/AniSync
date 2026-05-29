@@ -291,6 +291,13 @@
                     fetchAndRender();
                 });
             }
+
+            // On bfcache restore (instant back/forward nav), refresh the numbers
+            // only if the cached stats expired while the page sat frozen — fresh
+            // on back-nav without re-fetching on every quick in-and-out.
+            if (window.AniSyncRevalidate) {
+                window.AniSyncRevalidate.on(function () { if (!readCache()) fetchAndRender(); });
+            }
         })();
     </script>
 }
@@ -414,6 +421,13 @@
                 paint(cached);
             } else {
                 fetchAndPaint();
+            }
+
+            // On bfcache restore, re-pull only if the 10-minute cache expired
+            // while the page was frozen — keeps the back button from surfacing
+            // stale progress, without re-fetching on every quick in-and-out.
+            if (window.AniSyncRevalidate) {
+                window.AniSyncRevalidate.on(function () { if (readCache() == null) fetchAndPaint(); });
             }
         })();
     </script>
