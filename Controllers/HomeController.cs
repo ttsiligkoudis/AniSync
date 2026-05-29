@@ -96,6 +96,7 @@ public class HomeController : Controller
 
         string uid = null;
         bool hasStats = false;
+        bool hasStreamAddons = false;
         List<string> contributingNames = [];
         // Lifted to outer scope so the view-model construction below can
         // surface the currently-working linked services alongside the
@@ -121,6 +122,15 @@ public class HomeController : Controller
             if (!string.IsNullOrEmpty(uid))
             {
                 linkedTokens = await _configStore.GetLinkedTokensAsync(uid);
+
+                // Gate the "set up streaming" nudge banner: one lightweight
+                // store read on a path that already touches the store
+                // (FindUidByIdentityAsync / GetLinkedTokensAsync above), so
+                // the dashboard render still reflects current config without
+                // an AniList round-trip. The banner self-hides once this is
+                // true. Same call the configure page uses (see ~line 340).
+                var streamAddons = await _configStore.GetStreamAddonsAsync(uid);
+                hasStreamAddons = streamAddons is { Count: > 0 };
             }
             if (tokenData.anime_service == AnimeService.Anilist)
             {
@@ -187,6 +197,7 @@ public class HomeController : Controller
             ConfigUid = uid,
             LinkedServices = linkedServiceNames,
             HasStats = hasStats,
+            HasStreamAddons = hasStreamAddons,
             ContributingServices = contributingNames,
         });
     }

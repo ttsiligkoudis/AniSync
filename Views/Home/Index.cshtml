@@ -46,6 +46,98 @@
     }
 </section>
 
+@* Streaming nudge — only for logged-in non-anonymous users who haven't
+   configured a stream addon yet (Model.HasStreamAddons gate). Self-hides
+   the moment they add one on /advanced; the "×" dismiss persists in
+   localStorage so it never nags. Concise headline + CTA, with an
+   expandable "How it works" body that mirrors the dashboard-stats-info
+   popover convention (collapsed by default, revealed via .is-open). *@
+@if (isLoggedIn && !anonymousUser && !Model.HasStreamAddons)
+{
+    <section class="stream-nudge" data-stream-nudge hidden>
+        <button class="stream-nudge-dismiss"
+                type="button"
+                aria-label="Dismiss"
+                data-stream-nudge-dismiss>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+        </button>
+        <div class="stream-nudge-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+        </div>
+        <div class="stream-nudge-body">
+            <h3 class="stream-nudge-title">Watch right here, in AniSync</h3>
+            <p class="stream-nudge-text">
+                Add a stream addon to surface debrid-cached sources on every episode's player.
+            </p>
+            <div class="stream-nudge-actions">
+                <a class="stream-nudge-cta" href="/advanced#streams">Set up streaming →</a>
+                <button class="stream-nudge-learn"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="streamNudgeDetail"
+                        data-stream-nudge-toggle>
+                    How it works
+                </button>
+            </div>
+            <div id="streamNudgeDetail" class="stream-nudge-detail">
+                <p>
+                    A <strong>stream addon</strong> (Torrentio, MediaFusion, Comet,
+                    AIOStreams, …) finds torrents for an episode and hands AniSync
+                    a list of ready-to-play sources.
+                </p>
+                <p>
+                    Pair it with a <strong>debrid</strong> service (Real-Debrid,
+                    AllDebrid, Premiumize, …): paste your debrid API key and the
+                    addon unlocks instantly-streamable, cached copies — no
+                    downloads, no seeding. The quick setup on
+                    <a href="/advanced#streams">Advanced → Streams</a> wires both up
+                    in one step.
+                </p>
+            </div>
+        </div>
+    </section>
+    @* Expand/collapse, dismiss → localStorage, and mount-time dismiss check.
+       Kept tiny + inline, matching the stats-info popover script below. *@
+    <script>
+        (function () {
+            var nudge = document.querySelector('[data-stream-nudge]');
+            if (!nudge) return;
+            var DISMISS_KEY = 'anisync.debridNudgeDismissed.v1';
+
+            var dismissed = false;
+            try { dismissed = localStorage.getItem(DISMISS_KEY) === '1'; } catch (e) { }
+            if (dismissed) {
+                nudge.remove();
+                return;
+            }
+            // Hidden in markup so a dismissed banner never flashes before
+            // the check above runs; reveal it now that we know to keep it.
+            nudge.hidden = false;
+
+            var toggle = nudge.querySelector('[data-stream-nudge-toggle]');
+            if (toggle) {
+                toggle.addEventListener('click', function () {
+                    var open = nudge.classList.toggle('is-open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+            }
+
+            var dismiss = nudge.querySelector('[data-stream-nudge-dismiss]');
+            if (dismiss) {
+                dismiss.addEventListener('click', function () {
+                    try { localStorage.setItem(DISMISS_KEY, '1'); } catch (e) { }
+                    nudge.remove();
+                });
+            }
+        })();
+    </script>
+}
+
 @* Stats strip: two big counts (Watching / Completed) plus a top-genres chip
    row. Only renders for logged-in non-anonymous users with at least one
    completed entry — without that, the genre breakdown would be empty and

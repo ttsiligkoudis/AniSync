@@ -768,6 +768,55 @@
                 return ul;
             }
 
+            // Empty-state explainer for the Sources panel when a settled
+            // fan-out turned up nothing *and* the cause is "no stream addon
+            // set up" (anonymous, or logged-in with none configured). Concise
+            // headline + CTA, with an expandable "What's a stream addon?"
+            // body (collapsed; revealed via .is-open) so curious users learn
+            // what addons/debrid do without cluttering the panel. Built with
+            // the same el() helper + .is-open idiom used elsewhere here.
+            function streamSetupEmptyState(anonymous) {
+                var wrap = el('div', { class: 'sources-empty' });
+
+                wrap.appendChild(el('p', { class: 'hint-text sources-empty-text' },
+                    anonymous
+                        ? 'Sign in and add a stream addon to find streaming sources for this episode.'
+                        : 'No streaming sources yet for this episode.'));
+
+                var actions = el('div', { class: 'sources-empty-actions' });
+                var cta = el('a', { class: 'btn-ghost btn-ghost-sm sources-empty-cta' },
+                    anonymous ? 'Sign in →' : 'Set up streaming →');
+                cta.href = anonymous ? '/configure' : '/advanced#streams';
+                actions.appendChild(cta);
+
+                var detail = el('div', { class: 'sources-empty-detail', id: 'sourcesEmptyDetail' });
+                var toggle = el('button', {
+                    type: 'button',
+                    class: 'sources-empty-learn',
+                    'aria-expanded': 'false',
+                    'aria-controls': 'sourcesEmptyDetail'
+                }, "What's a stream addon?");
+                toggle.addEventListener('click', function () {
+                    var open = wrap.classList.toggle('is-open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                actions.appendChild(toggle);
+                wrap.appendChild(actions);
+
+                var p1 = el('p', null,
+                    'A stream addon (Torrentio, MediaFusion, Comet, AIOStreams, …) finds ' +
+                    'torrents for an episode and hands AniSync a list of ready-to-play sources.');
+                var p2 = el('p', null,
+                    'Pair it with a debrid service (Real-Debrid, AllDebrid, Premiumize, …) ' +
+                    'and the addon unlocks instantly-streamable, cached copies — no downloads, ' +
+                    'no seeding. Set both up under Advanced → Streams.');
+                detail.appendChild(p1);
+                detail.appendChild(p2);
+                wrap.appendChild(detail);
+
+                return wrap;
+            }
+
             function destroyPlayer() {
                 // ArtPlayer.destroy(true) detaches the player, removes
                 // its DOM, and unbinds every listener it registered.
@@ -3753,12 +3802,19 @@
                     // is alive while the slower addons are still in flight.
                     sourcesBody.appendChild(streamSkeleton());
                 } else if (!pendingAddons && debrid.length === 0 && external.length === 0) {
-                    var msg = data && data.anonymous
-                        ? "Sign in and add a Stremio stream addon (Torrentio, MediaFusion, …) in Settings to find streaming sources for this episode."
-                        : (data && !data.addonsConfigured
-                            ? "No streaming sources found. Add a Stremio stream addon (Torrentio, MediaFusion, Comet, AIOStreams, …) in Settings to surface debrid-cached torrents."
-                            : "No streaming sources found for this episode.");
-                    sourcesBody.appendChild(el('p', { class: 'hint-text' }, msg));
+                    if (data && data.anonymous) {
+                        // Not signed in — point them at sign-in + addon setup.
+                        sourcesBody.appendChild(streamSetupEmptyState(true));
+                    } else if (data && !data.addonsConfigured) {
+                        // Signed in but no stream addon configured — the
+                        // actionable case: explain + deep-link to /advanced.
+                        sourcesBody.appendChild(streamSetupEmptyState(false));
+                    } else {
+                        // Addon configured, fan-out just found nothing for
+                        // this episode — terse line, nothing to set up.
+                        sourcesBody.appendChild(el('p', { class: 'hint-text' },
+                            "No streaming sources found for this episode."));
+                    }
                 }
 
                 // The list is rebuilt from scratch on every (progressive)

@@ -30,6 +30,14 @@ namespace AnimeList.Models
         // can link AniList from /configure to unlock it.
         public bool HasStats { get; set; }
 
+        // True when the viewer has ≥1 stream addon configured. Gates the
+        // "set up streaming" nudge banner the dashboard renders for
+        // logged-in non-anonymous users — shown only when this is false,
+        // so it self-dismisses the moment the user adds an addon on
+        // /advanced (no client round-trip needed; the next dashboard
+        // render just stops emitting the banner).
+        public bool HasStreamAddons { get; set; }
+
         // Names of the services that contributed data to the stats. Stats
         // are AniList-only now, so this is either ["Anilist"] (panel shown)
         // or empty (panel hidden). Kept as a list to leave room for a future
