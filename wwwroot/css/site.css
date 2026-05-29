@@ -5702,10 +5702,28 @@ a.stats-cell-link:hover {
 .anime-detail-title {
     font-size: var(--text-xl);
     font-weight: 700;
-    color: var(--text-strong);
+    /* The hero sits over the (dark) backdrop image + shade, so the title
+       stays light in BOTH themes — in the light theme --text-strong would
+       go near-black and vanish against the artwork. The text-shadow keeps
+       it legible over varied backdrops. The no-backdrop flat-hero variant
+       overrides this back to the theme colour below. */
+    color: var(--on-accent);
+    text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.45);
     margin: 0;
     line-height: 1.15;
     letter-spacing: -0.015em;
+}
+
+/* No banner art → the hero is a theme surface (light in the light theme),
+   so the title + info follow the theme instead of forcing white. */
+.anime-detail-hero-flat .anime-detail-title {
+    color: var(--text-strong);
+    text-shadow: none;
+}
+
+.anime-detail-hero-flat .anime-detail-info {
+    color: var(--text-dim);
+    text-shadow: none;
 }
 
 @media (min-width: 768px) {
@@ -5716,7 +5734,9 @@ a.stats-cell-link:hover {
 
 .anime-detail-info {
     font-size: 0.85rem;
-    color: var(--text-dim);
+    /* Over the dark hero backdrop in both themes (flat-hero overrides above). */
+    color: rgba(255, 255, 255, 0.78);
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
 }
 
 /* Badges row: score + airing status, side by side. Wraps to the next line
