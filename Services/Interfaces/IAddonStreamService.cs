@@ -23,6 +23,18 @@ namespace AnimeList.Services.Interfaces
         Task<StreamAddon> FetchManifestAsync(string manifestUrl, CancellationToken ct = default);
 
         /// <summary>
+        /// POSTs <paramref name="configJson"/> to an addon's encrypt endpoint
+        /// (e.g. MediaFusion's <c>/encrypt-user-data</c>) and returns the
+        /// <c>encrypted_str</c> token from the response — the opaque blob that
+        /// goes into <c>{host}/{token}/manifest.json</c>. Used by the debrid
+        /// quick-setup for addons whose config is encrypted server-side and so
+        /// can't be built offline like Torrentio / Comet. Subject to the same
+        /// SSRF guard + timeout as the manifest fetch; returns null on any
+        /// failure (unreachable, non-success status, missing token).
+        /// </summary>
+        Task<string> EncryptConfigAsync(string encryptEndpoint, string configJson, CancellationToken ct = default);
+
+        /// <summary>
         /// Pulls the addon's stream list for one (anime, season, episode).
         /// Strips <c>/manifest.json</c> from <paramref name="manifestUrl"/>,
         /// appends <c>/stream/{type}/{id}.json</c>, parses the response

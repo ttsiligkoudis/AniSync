@@ -35,6 +35,7 @@ namespace AnimeList.Services
             string DisplayName,
             string TorrentioKey,
             string CometService,
+            string MediaFusionService,
             string ApiKeyUrl);
 
         /// <summary>An addon the quick-setup flow knows how to auto-configure.</summary>
@@ -45,20 +46,28 @@ namespace AnimeList.Services
         // there in a new tab based on the dropdown selection.
         public static readonly IReadOnlyList<DebridProvider> Providers = new[]
         {
-            new DebridProvider("realdebrid", "Real-Debrid", "realdebrid", "realdebrid", "https://real-debrid.com/apitoken"),
-            new DebridProvider("alldebrid",  "AllDebrid",   "alldebrid",  "alldebrid",  "https://alldebrid.com/apikeys/"),
-            new DebridProvider("premiumize", "Premiumize",  "premiumize", "premiumize", "https://www.premiumize.me/account"),
-            new DebridProvider("torbox",     "TorBox",      "torbox",     "torbox",     "https://torbox.app/settings"),
-            new DebridProvider("debridlink", "Debrid-Link", "debridlink", "debridlink", "https://debrid-link.com/webapp/apikey"),
-            new DebridProvider("easydebrid", "EasyDebrid",  "easydebrid", "easydebrid", "https://paradise-cloud.com/products/easydebrid"),
-            new DebridProvider("offcloud",   "Offcloud",    "offcloud",   "offcloud",   "https://offcloud.com/#/account"),
+            new DebridProvider("realdebrid", "Real-Debrid", "realdebrid", "realdebrid", "realdebrid", "https://real-debrid.com/apitoken"),
+            new DebridProvider("alldebrid",  "AllDebrid",   "alldebrid",  "alldebrid",  "alldebrid",  "https://alldebrid.com/apikeys/"),
+            new DebridProvider("premiumize", "Premiumize",  "premiumize", "premiumize", "premiumize", "https://www.premiumize.me/account"),
+            new DebridProvider("torbox",     "TorBox",      "torbox",     "torbox",     "torbox",     "https://torbox.app/settings"),
+            new DebridProvider("debridlink", "Debrid-Link", "debridlink", "debridlink", "debridlink", "https://debrid-link.com/webapp/apikey"),
+            new DebridProvider("easydebrid", "EasyDebrid",  "easydebrid", "easydebrid", "easydebrid", "https://paradise-cloud.com/products/easydebrid"),
+            new DebridProvider("offcloud",   "Offcloud",    "offcloud",   "offcloud",   "offcloud",   "https://offcloud.com/#/account"),
         };
 
         public static readonly IReadOnlyList<CatalogAddon> Addons = new[]
         {
-            new CatalogAddon("torrentio", "Torrentio"),
-            new CatalogAddon("comet",     "Comet"),
+            new CatalogAddon("torrentio",   "Torrentio"),
+            new CatalogAddon("comet",       "Comet"),
+            new CatalogAddon("mediafusion", "MediaFusion"),
         };
+
+        // MediaFusion encrypts its config server-side with a private key, so
+        // unlike Torrentio / Comet we can't mint its manifest URL offline —
+        // the config JSON is POSTed to this endpoint, which returns an
+        // encrypted token we drop into {host}/{token}/manifest.json.
+        public const string MediaFusionHost = "https://mediafusion.elfhosted.com";
+        public const string MediaFusionEncryptUrl = MediaFusionHost + "/encrypt-user-data";
 
         public static DebridProvider FindProvider(string id) =>
             string.IsNullOrWhiteSpace(id)
@@ -183,6 +192,94 @@ namespace AnimeList.Services
             var json = SerializeObject(config);
             var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
             return CometHosts.Select(host => $"{host}/{b64}/manifest.json").ToArray();
+        }
+
+        /// <summary>
+        /// Builds the JSON body to POST to MediaFusion's
+        /// <see cref="MediaFusionEncryptUrl"/>. Unlike Torrentio / Comet,
+        /// MediaFusion encrypts the config server-side, so this is only half
+        /// the job — the caller sends this body to the encrypt endpoint and
+        /// drops the returned token into {host}/{token}/manifest.json. Shape
+        /// mirrors what MediaFusion's own configure page submits: one debrid
+        /// streaming-provider (cached-only, via MediaFlow), high-tier
+        /// resolutions + Unknown only, anime included, all-permissive
+        /// content filters. Returns null for a missing provider / key.
+        /// </summary>
+        public static string BuildMediaFusionConfigJson(DebridProvider provider, string apiKey)
+        {
+            if (provider == null || string.IsNullOrWhiteSpace(apiKey)) return null;
+            var key = apiKey.Trim();
+
+            // One streaming-provider entry, shared by the array form (current
+            // MediaFusion) and the singular field (kept for back-compat).
+            var prov = new
+            {
+                name = "Provider",
+                service = provider.MediaFusionService,
+                token = key,
+                enable_watchlist_catalogs = false,
+                qbittorrent_config = (object)null,
+                only_show_cached_streams = true,
+                use_mediaflow = true,
+                sabnzbd_config = (object)null,
+                nzbget_config = (object)null,
+                nzbdav_config = (object)null,
+                easynews_config = (object)null,
+                priority = 0,
+                enabled = true,
+            };
+
+            var config = new
+            {
+                streaming_providers = new[] { prov },
+                streaming_provider = prov,
+                selected_catalogs = Array.Empty<string>(),
+                // High tiers + Unknown (the trailing null) only, mirroring
+                // the resolution restriction applied to Comet.
+                selected_resolutions = new[] { "4k", "2160p", "1440p", "1080p", "720p", null },
+                enable_catalogs = true,
+                enable_imdb_metadata = false,
+                max_size = "inf",
+                min_size = 0,
+                max_streams_per_resolution = 10,
+                nudity_filter = new[] { "Severe" },
+                certification_filter = new[] { "Adults+" },
+                language_sorting = new[]
+                {
+                    "English", "Tamil", "Hindi", "Malayalam", "Kannada", "Telugu", "Chinese",
+                    "Russian", "Arabic", "Japanese", "Korean", "Taiwanese", "Latino", "French",
+                    "Spanish", "Portuguese", "Italian", "German", "Ukrainian", "Polish", "Czech",
+                    "Thai", "Indonesian", "Vietnamese", "Dutch", "Bengali", "Turkish", "Greek",
+                    "Swedish", "Romanian", "Hungarian", "Finnish", "Norwegian", "Danish", "Hebrew",
+                    "Lithuanian", "Punjabi", "Marathi", "Gujarati", "Bhojpuri", "Nepali", "Urdu",
+                    "Tagalog", "Filipino", "Malay", "Mongolian", "Armenian", "Georgian", null,
+                },
+                quality_filter = new[] { "BluRay/UHD", "WEB/HD", "DVD/TV/SAT", "CAM/Screener", "Unknown" },
+                hdr_filter = new[] { "HDR10", "HDR10+", "Dolby Vision", "HLG", "SDR", "Unknown" },
+                live_search_streams = false,
+                include_anime = true,
+                enable_telegram_streams = false,
+                enable_acestream_streams = false,
+                max_streams = 25,
+                stream_type_grouping = "separate",
+                stream_type_order = new[] { "torrent", "usenet", "telegram", "http", "acestream", "youtube" },
+                provider_grouping = "separate",
+                stream_name_filter_mode = "disabled",
+                stream_name_filter_patterns = Array.Empty<string>(),
+                stream_name_filter_use_regex = false,
+                torrent_sorting_priority = new[]
+                {
+                    new { key = "cached",     direction = "desc" },
+                    new { key = "resolution", direction = "desc" },
+                    new { key = "quality",    direction = "desc" },
+                    new { key = "language",   direction = "desc" },
+                    new { key = "size",       direction = "desc" },
+                    new { key = "seeders",    direction = "desc" },
+                    new { key = "created_at", direction = "desc" },
+                },
+                telegram_config = (object)null,
+            };
+            return SerializeObject(config);
         }
     }
 }

@@ -800,8 +800,29 @@ public class HomeController : Controller
 
             // One addon can map to several manifest URLs — Comet runs as two
             // interchangeable public instances, so episode lookups fan out
-            // across the pair. Each URL is validated + added independently.
-            var manifestUrls = StreamAddonCatalog.BuildManifestUrls(addonId, provider, apiKey);
+            // across the pair. MediaFusion is the odd one out: its config is
+            // encrypted with the addon's own server-side key, so we can't
+            // build its URL offline — we POST the config to MediaFusion's
+            // encrypt endpoint and wrap the returned token. Everything else
+            // is pure offline string-building. Each resulting URL is then
+            // validated + added independently.
+            IReadOnlyList<string> manifestUrls;
+            if (string.Equals(addonId, "mediafusion", StringComparison.OrdinalIgnoreCase))
+            {
+                var configJson = StreamAddonCatalog.BuildMediaFusionConfigJson(provider, apiKey);
+                var token = configJson == null
+                    ? null
+                    : await _addonStreamService.EncryptConfigAsync(
+                        StreamAddonCatalog.MediaFusionEncryptUrl, configJson);
+                manifestUrls = string.IsNullOrEmpty(token)
+                    ? Array.Empty<string>()
+                    : new[] { $"{StreamAddonCatalog.MediaFusionHost}/{token}/manifest.json" };
+            }
+            else
+            {
+                manifestUrls = StreamAddonCatalog.BuildManifestUrls(addonId, provider, apiKey);
+            }
+
             if (manifestUrls.Count == 0)
             {
                 skipped.Add(new { addon = addonId, reason = "couldn't build a manifest URL" });

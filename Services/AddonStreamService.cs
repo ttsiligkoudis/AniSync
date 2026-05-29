@@ -3,6 +3,7 @@ using AnimeList.Services.Interfaces;
 using Newtonsoft.Json.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace AnimeList.Services
@@ -264,6 +265,73 @@ namespace AnimeList.Services
             catch (Exception ex)
             {
                 _logger.LogInformation(ex, "Addon manifest fetch failed for {Url}.", trimmed);
+                return null;
+            }
+        }
+
+        public async Task<string> EncryptConfigAsync(string encryptEndpoint, string configJson, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(encryptEndpoint) || string.IsNullOrWhiteSpace(configJson))
+                return null;
+            if (!Uri.TryCreate(encryptEndpoint, UriKind.Absolute, out var parsed)
+                || (parsed.Scheme != "http" && parsed.Scheme != "https"))
+                return null;
+            // Same SSRF guard the manifest fetch uses — this POST is
+            // server-side to a user-influenced host, so refuse internal /
+            // metadata addresses.
+            if (!await IsSafeOutboundUrlAsync(encryptEndpoint, ct))
+            {
+                _logger.LogWarning("Refused config-encrypt POST to {Url}: host resolves to a disallowed address.", encryptEndpoint);
+                return null;
+            }
+
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(ManifestTimeout);
+
+                var client = _clientFactory.CreateClient();
+                using var content = new StringContent(configJson, Encoding.UTF8, "application/json");
+                var response = await client.PostAsync(encryptEndpoint, content, cts.Token);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation("Config-encrypt POST returned {Status} for {Url}.",
+                        (int)response.StatusCode, encryptEndpoint);
+                    return null;
+                }
+
+                var body = await response.Content.ReadAsStringAsync(cts.Token);
+                JObject result;
+                try { result = JObject.Parse(body); }
+                catch
+                {
+                    _logger.LogInformation("Config-encrypt response from {Url} did not parse as JSON.", encryptEndpoint);
+                    return null;
+                }
+
+                // MediaFusion answers { status: "success", encrypted_str: "…" }
+                // (and { status: "error", … } on failure). Treat an explicit
+                // non-success status as a failure, but don't require the
+                // status field — only the token actually matters.
+                var status = (string)result["status"];
+                if (!string.IsNullOrEmpty(status)
+                    && !string.Equals(status, "success", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation("Config-encrypt at {Url} reported status '{Status}'.", encryptEndpoint, status);
+                    return null;
+                }
+
+                var encrypted = (string)result["encrypted_str"];
+                return string.IsNullOrWhiteSpace(encrypted) ? null : encrypted;
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Config-encrypt POST timed out for {Url}.", encryptEndpoint);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogInformation(ex, "Config-encrypt POST failed for {Url}.", encryptEndpoint);
                 return null;
             }
         }
