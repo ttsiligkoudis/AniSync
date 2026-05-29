@@ -5811,7 +5811,10 @@ a.stats-cell-link:hover {
 .anime-detail-status-airing {
     background: rgba(59, 130, 246, 0.15);
     border-color: rgba(59, 130, 246, 0.4);
-    color: var(--accent-light);
+    /* The hero is dark in both themes, so keep the light-blue (the dark-theme
+       --accent-light value) instead of flipping to the darker light-theme
+       accent, which reads poorly on the dark backdrop. */
+    color: #93c5fd;
 }
 
 .anime-detail-status-finished {
@@ -6093,7 +6096,9 @@ button.anime-detail-user-state:hover {
    competing with the status text. */
 .anime-detail-user-state-icon {
     flex-shrink: 0;
-    color: var(--accent-light);
+    /* On the dark hero in both themes — keep the dark-theme light-blue so the
+       pencil/edit glyph stays legible (matches the user-state pill text). */
+    color: #93c5fd;
 }
 
 /* "Not on your list" variant — fired when the requested anime has no
