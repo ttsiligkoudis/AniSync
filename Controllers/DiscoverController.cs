@@ -87,6 +87,17 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
+            // Media-type preference: Discover for movies / series is the Cinemeta-backed
+            // video browse (/movies, /series). Anime stays here. Anonymous users (uid null)
+            // always get anime — they can't have set a preference. The media-type switch on
+            // both surfaces routes back through here so this single read decides the landing.
+            if (uid != null)
+            {
+                var preferredMediaType = await _configStore.GetMediaTypeAsync(uid);
+                if (preferredMediaType == MetaType.movie) return Redirect("/movies");
+                if (preferredMediaType == MetaType.series) return Redirect("/series");
+            }
+
             // Honor the "Hide unaired from Watching" pref. Only affects the
             // ListType.Current discover-only tab; harmless on every other list.
             var configuration = await GetConfigByUidAsync(uid, _configStore);

@@ -31,7 +31,15 @@
         : hasGenre ? $"{Model.Genre} · Discover"
         : isSeasonal ? $"{Model.Season} · Discover"
         : $"{activeLabel} · Discover";
+
+    ViewData["MtActive"] = MetaType.anime;
+    ViewData["MtReturnUrl"] = "/discover";
 }
+
+@* Media-type switch. Discover itself only renders anime; picking Movies / Series
+   persists the preference and DiscoverController redirects to the Cinemeta-backed
+   /movies · /series browse. *@
+@await Html.PartialAsync("_MediaTypeToggle")
 
 @if (hasTag)
 {

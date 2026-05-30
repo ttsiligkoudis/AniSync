@@ -18,16 +18,33 @@ namespace AnimeList.Controllers
         private readonly ITokenService _tokenService;
         private readonly IConfigStore _configStore;
         private readonly IMergedListService _mergedListService;
+        private readonly ITraktService _traktService;
+        private readonly ICinemetaService _cinemeta;
 
         public LibraryController(
             ITokenService tokenService,
             IConfigStore configStore,
-            IMergedListService mergedListService)
+            IMergedListService mergedListService,
+            ITraktService traktService,
+            ICinemetaService cinemeta)
         {
             _tokenService = tokenService;
             _configStore = configStore;
             _mergedListService = mergedListService;
+            _traktService = traktService;
+            _cinemeta = cinemeta;
         }
+
+        // The list tabs that make sense for movies / series (sourced from Trakt):
+        // Watchlist (Planning), Watched history (Completed), and in-progress playback
+        // (Current). The anime-only Paused / Dropped / Rewatching tabs have no Trakt
+        // analogue, so the video library shows a reduced tab strip.
+        private static readonly ListType[] VideoListTypes =
+        [
+            ListType.Current,
+            ListType.Completed,
+            ListType.Planning,
+        ];
 
         // The six list types the user-list catalogs map to. Trending/Seasonal/Airing
         // are the discover catalogs (handled by DiscoverController); Search isn't a
@@ -64,6 +81,13 @@ namespace AnimeList.Controllers
             // anonymous sessions, so a single null check covers both cases.
             var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             if (uid == null) return RedirectToAction("Index", "Home");
+
+            // Media-type preference decides what the library shows: anime (the user's
+            // merged tracker lists) or movies / series (their Trakt lists). The tab strip
+            // narrows for video since the anime-only statuses don't map onto Trakt.
+            var mediaType = await _configStore.GetMediaTypeAsync(uid);
+            var isVideo = mediaType != MetaType.anime;
+            var tabs = isVideo ? VideoListTypes : UserListTypes;
 
             var hasSearch = !string.IsNullOrWhiteSpace(search);
             var hasGenre = !string.IsNullOrWhiteSpace(genre);
@@ -106,8 +130,9 @@ namespace AnimeList.Controllers
             {
                 ConfigUid = uid,
                 AnimeService = tokenData.anime_service,
+                MediaType = mediaType,
                 ActiveList = activeList,
-                Tabs = UserListTypes,
+                Tabs = tabs,
                 Search = hasSearch ? search.Trim() : null,
                 Genre = hasGenre ? genre.Trim() : null,
                 AvailableGenres = PopularGenres,
@@ -142,6 +167,13 @@ namespace AnimeList.Controllers
             var hasSearch = !string.IsNullOrWhiteSpace(search);
             var hasGenre = !string.IsNullOrWhiteSpace(genre);
             var activeList = ParseListType(list);
+
+            // Movies / series come from Trakt (watchlist / history / playback) hydrated to
+            // posters via Cinemeta, rather than the anime merged-list path below.
+            var mediaType = await _configStore.GetMediaTypeAsync(uid);
+            if (mediaType != MetaType.anime)
+                return await VideoPaneAsync(uid, activeList, mediaType, search, hasSearch);
+
             var labels = new Dictionary<ListType, string>
             {
                 [ListType.Current]   = "Watching",
@@ -206,6 +238,87 @@ namespace AnimeList.Controllers
                 },
             });
         }
+
+        // Movies / series library pane: pull the user's Trakt list for the active tab,
+        // hydrate the IMDb ids into poster-bearing Metas via Cinemeta (in parallel,
+        // preserving Trakt order), and render the same _LibraryPane the anime path uses —
+        // with VideoLinks on so the cards route to /movie|series/{id}.
+        private async Task<IActionResult> VideoPaneAsync(string uid, ListType activeList, MetaType mediaType, string search, bool hasSearch)
+        {
+            var labels = new Dictionary<ListType, string>
+            {
+                [ListType.Current]   = "Continue Watching",
+                [ListType.Completed] = "Watched",
+                [ListType.Planning]  = "Watchlist",
+            };
+            var kind = mediaType == MetaType.movie ? "movies" : "series";
+
+            var items = await _traktService.GetListAsync(uid, activeList, mediaType);
+            var metas = await HydrateVideoMetasAsync(items);
+
+            if (hasSearch && metas.Count > 0)
+            {
+                var q = NormalizeTitle(search);
+                metas = metas
+                    .Select(m => (meta: m, score: ScoreMatch(q, m.name)))
+                    .Where(x => x.score >= 0.4)
+                    .OrderByDescending(x => x.score)
+                    .Select(x => x.meta)
+                    .ToList();
+            }
+
+            var label = labels.GetValueOrDefault(activeList, activeList.ToString());
+            if (!_traktService.IsConfigured)
+            {
+                return PartialView("_LibraryPane", new LibraryPaneViewModel
+                {
+                    Grid = new PosterGridViewModel
+                    {
+                        Items = [],
+                        ConfigUid = uid,
+                        VideoLinks = true,
+                        EmptyMessage = "Trakt isn't configured on this server, so movie / series lists aren't available.",
+                    },
+                });
+            }
+
+            return PartialView("_LibraryPane", new LibraryPaneViewModel
+            {
+                Grid = new PosterGridViewModel
+                {
+                    Items = metas,
+                    ConfigUid = uid,
+                    VideoLinks = true,
+                    EmptyMessage = hasSearch
+                        ? $"No matches for \"{search.Trim()}\"."
+                        : $"Nothing in your {kind} {label} on Trakt. Connect Trakt from your Account to track {kind}.",
+                },
+            });
+        }
+
+        // Hydrates Trakt list items (imdb id + type) into poster-bearing Meta via Cinemeta,
+        // in parallel, preserving order and dropping any id Cinemeta can't resolve. Forces
+        // Meta.type from the Trakt item so _PosterGrid's VideoLinks routing picks the right
+        // /movie|series path.
+        private async Task<List<Meta>> HydrateVideoMetasAsync(List<TraktListItem> items)
+        {
+            var lookups = items.Select(async it =>
+            {
+                try
+                {
+                    var meta = await _cinemeta.GetVideoMetaAsync(it.Type, it.ImdbId);
+                    if (meta == null) return null;
+                    meta.type = it.Type == "movie" ? MetaType.movie.ToString() : MetaType.series.ToString();
+                    return meta;
+                }
+                catch
+                {
+                    return null;
+                }
+            });
+            var resolved = await Task.WhenAll(lookups);
+            return resolved.Where(m => m != null).ToList();
+        }
     }
 
     /// <summary>
@@ -217,6 +330,8 @@ namespace AnimeList.Controllers
     {
         public string ConfigUid { get; set; }
         public AnimeService AnimeService { get; set; }
+        /// <summary>Preferred media type — anime renders the merged tracker lists; movie / series render Trakt lists.</summary>
+        public MetaType MediaType { get; set; } = MetaType.anime;
         public ListType ActiveList { get; set; }
         public IReadOnlyList<ListType> Tabs { get; set; } = [];
         // The active search term, or null when the page is in tab-list mode. The

@@ -3,21 +3,47 @@
     ViewData["BodyClass"] = "library-page";
     ViewData["ActiveNav"] = "library";
 
-    var labels = new Dictionary<ListType, string>
-    {
-        [ListType.Current]    = "Watching",
-        [ListType.Completed]  = "Completed",
-        [ListType.Planning]   = "Planning",
-        [ListType.Paused]     = "Paused",
-        [ListType.Dropped]    = "Dropped",
-        [ListType.Repeating]  = "Rewatching",
-    };
+    var isVideo = Model.MediaType != MetaType.anime;
+    var labels = isVideo
+        ? new Dictionary<ListType, string>
+        {
+            [ListType.Current]    = "Continue Watching",
+            [ListType.Completed]  = "Watched",
+            [ListType.Planning]   = "Watchlist",
+        }
+        : new Dictionary<ListType, string>
+        {
+            [ListType.Current]    = "Watching",
+            [ListType.Completed]  = "Completed",
+            [ListType.Planning]   = "Planning",
+            [ListType.Paused]     = "Paused",
+            [ListType.Dropped]    = "Dropped",
+            [ListType.Repeating]  = "Rewatching",
+        };
+    var noun = Model.MediaType == MetaType.movie ? "movies" : Model.MediaType == MetaType.series ? "series" : "anime";
 
     var hasSearch = !string.IsNullOrEmpty(Model.Search);
     var hasGenre = !string.IsNullOrEmpty(Model.Genre);
-    var activeLabel = labels[Model.ActiveList];
+    var activeLabel = labels.GetValueOrDefault(Model.ActiveList, Model.ActiveList.ToString());
     var activeListSlug = Model.ActiveList.ToString().ToLower();
+    var currentPath = Context.Request.Path + Context.Request.QueryString;
+}
 
+@* Media-type switch — anime (merged tracker lists) vs movies / series (Trakt lists).
+   Each chip persists the preference (POST /Home/SetMediaType) and reloads. Mirrors the
+   account-page selector. *@
+<div class="media-type-toggle library-media-toggle">
+    @foreach (var (mt, mtLabel) in new[] { (MetaType.anime, "Anime"), (MetaType.movie, "Movies"), (MetaType.series, "Series") })
+    {
+        <form method="post" action="/Home/SetMediaType" class="media-type-form">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="mediaType" value="@((int)mt)" />
+            <input type="hidden" name="returnUrl" value="/library" />
+            <button type="submit" class="label @(Model.MediaType == mt ? "active" : "")">@mtLabel</button>
+        </form>
+    }
+</div>
+@{
     ViewData["Title"] = hasSearch
         ? $"Search: {Model.Search} · Library"
         : hasGenre
@@ -54,17 +80,22 @@
     <input type="search"
            name="search"
            value="@Model.Search"
-           placeholder="Search anime…"
+           placeholder="Search @noun…"
            class="filter-bar-search"
            autocomplete="off" />
 
-    <select name="genre" class="filter-bar-select" aria-label="Genre">
-        <option value="">All genres</option>
-        @foreach (var g in Model.AvailableGenres)
-        {
-            <option value="@g" selected="@(Model.Genre == g)">@g</option>
-        }
-    </select>
+    @* The genre dropdown is an AniList/MAL/Kitsu catalog filter — it doesn't apply to
+       the Trakt-sourced movie / series lists, so it's anime-only. *@
+    @if (!isVideo)
+    {
+        <select name="genre" class="filter-bar-select" aria-label="Genre">
+            <option value="">All genres</option>
+            @foreach (var g in Model.AvailableGenres)
+            {
+                <option value="@g" selected="@(Model.Genre == g)">@g</option>
+            }
+        </select>
+    }
 
     <button type="submit" class="filter-bar-submit">Search</button>
 

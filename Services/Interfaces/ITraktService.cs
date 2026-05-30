@@ -54,6 +54,21 @@ namespace AnimeList.Services.Interfaces
         /// </summary>
         Task<List<TraktListItem>> GetPlaybackAsync(string uid);
 
+        /// <summary>
+        /// The user's watched history (movies + episodes), de-duplicated to one
+        /// entry per IMDb id. Empty when not connected.
+        /// </summary>
+        Task<List<TraktListItem>> GetHistoryAsync(string uid);
+
+        /// <summary>
+        /// Returns the user's Trakt list for a given AniSync list tab + media type:
+        /// Planning → watchlist, Completed → watched history, Current → in-progress
+        /// playback. Filtered to the requested <paramref name="mediaType"/>
+        /// (movie / series). Other list types return empty (no Trakt analogue).
+        /// Drives the media-type-aware Library.
+        /// </summary>
+        Task<List<TraktListItem>> GetListAsync(string uid, ListType list, MetaType mediaType);
+
         // ── Writes ──────────────────────────────────────────────────────────
 
         /// <summary>Adds a movie/show to the watchlist. No-op return false when not connected.</summary>
