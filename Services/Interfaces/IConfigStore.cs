@@ -139,28 +139,32 @@ namespace AnimeList.Services.Interfaces
         /// </summary>
         Task<string> GetPlexUsernameAsync(string uid);
 
-        // ── Trakt (video section) ──────────────────────────────────────────
-        // Trakt is a linked capability on an AniSync account, stored as a
-        // dedicated credential on the config row rather than through the
-        // anime-keyed LinkedToken mechanism (Trakt isn't an AnimeService).
+        // ── Trakt ───────────────────────────────────────────────────────────
+        // Trakt is now a first-class provider (AnimeService.Trakt): its credentials
+        // live in the unified token model (primary token_json or a linked_tokens
+        // entry), the same as every other provider. The legacy dedicated-column
+        // storage is gone.
 
         /// <summary>
-        /// Reads the connected Trakt credentials for this UID, or null when the
-        /// user hasn't connected Trakt.
+        /// Projects the connected Trakt credentials for this UID (whether held as the
+        /// primary or a linked secondary) into the legacy TraktToken shape, or null when
+        /// the user hasn't connected Trakt. Display-only convenience for the legacy video
+        /// section — does not refresh. New code should resolve the Trakt token through the
+        /// normal primary / linked-token paths.
         /// </summary>
         Task<TraktToken> GetTraktTokenAsync(string uid);
 
-        /// <summary>
-        /// Persists (or replaces) the user's Trakt credentials on their config
-        /// row. No-op for an empty UID.
-        /// </summary>
-        Task SetTraktTokenAsync(string uid, TraktToken token);
+        // ── Media-type preference ───────────────────────────────────────────
 
         /// <summary>
-        /// Clears the user's Trakt connection (on explicit disconnect or after
-        /// an unrecoverable refresh failure).
+        /// The user's preferred media type (anime / movie / series). Drives which
+        /// providers the account page offers. Defaults to <see cref="MetaType.anime"/>
+        /// for unknown UIDs and rows that predate the column.
         /// </summary>
-        Task ClearTraktTokenAsync(string uid);
+        Task<MetaType> GetMediaTypeAsync(string uid);
+
+        /// <summary>Persists the user's preferred media type. No-op for an empty UID.</summary>
+        Task SetMediaTypeAsync(string uid, MetaType mediaType);
 
         /// <summary>
         /// Reads the user's configured stream addons. Empty list when the UID

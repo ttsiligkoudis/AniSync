@@ -2237,6 +2237,53 @@ body.modal-open {
     background: var(--accent-fill);
 }
 
+/* Media-type selector (Anime / Movies / Series) — reuses the pill look of the
+   provider picker, but each pill is its own form-submit <button> (the preference
+   persists server-side and reloads the page) rather than a JS-driven span. */
+.media-type-toggle {
+    display: flex;
+    align-items: stretch;
+    gap: 0.4rem;
+    padding: 0.3rem;
+    margin-bottom: 0.85rem;
+    border-radius: 999px;
+    background: var(--overlay-05);
+    border: 1px solid var(--overlay-08);
+}
+
+.media-type-form {
+    flex: 1;
+    margin: 0;
+    display: flex;
+}
+
+.media-type-toggle .label {
+    flex: 1;
+    text-align: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    transition: color 0.15s, background 0.15s;
+    cursor: pointer;
+    user-select: none;
+    padding: 0.45rem 0.9rem;
+    border-radius: 999px;
+    border: 0;
+    background: transparent;
+    font-family: inherit;
+}
+
+.media-type-toggle .label:hover {
+    color: var(--text-strong);
+    background: var(--overlay-06);
+}
+
+.media-type-toggle .label.active,
+.media-type-toggle .label.active:hover {
+    color: var(--on-accent);
+    background: var(--accent-fill);
+}
+
 /* Account-card chrome: the connected-pill + disconnect button row that
    sits below the provider picker. The previous design hung a tiny ✗
    chip off the green pill; the button is now an explicit ghost button

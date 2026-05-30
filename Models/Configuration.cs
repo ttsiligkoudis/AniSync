@@ -68,5 +68,11 @@
         //   - MAL: node.nsfw == "black" (filtered client-side after fetch).
         //   - Kitsu: attributes.ageRating == "R18" (filtered client-side).
         public bool showAdultContent { get; set; }
+
+        // The user's preferred media type (anime / movie / series). Persisted in its own
+        // store column (not the packed flags, which are full and ride the Stremio install
+        // URL). Drives which providers the account page offers and, in later phases, what
+        // Discover / Library surface. Defaults to anime.
+        public MetaType preferredMediaType { get; set; } = MetaType.anime;
     }
 }

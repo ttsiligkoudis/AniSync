@@ -54,6 +54,10 @@ namespace AnimeList.Services
                 {
                     AnimeService.Anilist => await _anilist.GetUserListEntriesAsync(token),
                     AnimeService.MyAnimeList => await _mal.GetUserListEntriesAsync(token),
+                    // Trakt's airing-notification snapshot is wired up with the rest of the
+                    // Trakt list integration in a later phase — empty for now so a Trakt
+                    // primary doesn't fire a Kitsu call with a Trakt token.
+                    AnimeService.Trakt => [],
                     _ => await _kitsu.GetUserListEntriesAsync(token),
                 };
 

@@ -46,8 +46,15 @@ namespace AnimeList.Services
                     anilist_user_key  TEXT,
                     kitsu_user_key    TEXT,
                     mal_user_key      TEXT,
+                    trakt_user_key    TEXT,
 
                     flags             INTEGER NOT NULL DEFAULT 0,
+                    -- Preferred media type (MetaType enum int: anime=0, movie=1,
+                    -- series=2). Drives which providers the account page offers and,
+                    -- in later phases, what Discover / Library surface. Website-only
+                    -- preference — deliberately NOT packed into `flags` (which is full
+                    -- and also rides the Stremio install URL).
+                    media_type        INTEGER NOT NULL DEFAULT 0,
                     revision          INTEGER NOT NULL DEFAULT 0,
                     scrobble_token    TEXT,
                     plex_username     TEXT,
@@ -157,9 +164,25 @@ namespace AnimeList.Services
             // CREATE IF NOT EXISTS doesn't alter existing tables. The
             // try/catch covers the "already exists" race on a fresh DB.
             EnsureColumn(conn, "configs", "stream_addons", "TEXT");
-            // Connected Trakt credentials (video section). Serialized TraktToken
-            // JSON; NULL when the user hasn't connected Trakt.
-            EnsureColumn(conn, "configs", "trakt_token_json", "TEXT");
+            // Trakt is now a first-class provider stored in the unified token model
+            // (token_json when primary / linked_tokens when secondary), keyed by its own
+            // identity column — same shape as the other providers. The legacy dedicated
+            // `trakt_token_json` column (a separate Trakt silo) is no longer read or
+            // written; it's left orphaned on databases that predate this change.
+            EnsureColumn(conn, "configs", "trakt_user_key", "TEXT");
+            // Website-only media-type preference (MetaType int). See CREATE TABLE comment.
+            EnsureColumn(conn, "configs", "media_type", "INTEGER NOT NULL DEFAULT 0");
+
+            // Created after EnsureColumn so it works on databases that predate the
+            // trakt_user_key column (the CREATE TABLE block above won't add a column to
+            // an existing table, so the index can't live there — it'd reference a missing
+            // column on the first run against an old DB).
+            using var traktIdx = conn.CreateCommand();
+            traktIdx.CommandText = """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_configs_trakt
+                    ON configs(trakt_user_key) WHERE trakt_user_key IS NOT NULL;
+                """;
+            traktIdx.ExecuteNonQuery();
         }
 
         private static void EnsureColumn(SqliteConnection conn, string table, string column, string typeAndConstraints)
@@ -517,17 +540,59 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(uid)) return null;
 
+            // Trakt now lives in the unified token model: it's the row's primary when
+            // the user signed in with Trakt (service == Trakt → token_json), otherwise a
+            // linked secondary (linked_tokens entry with Service == Trakt). This projects
+            // whichever slot holds it back into the legacy TraktToken shape so display-only
+            // callers (the soon-to-be-removed video section) keep working without a refresh.
             using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT trakt_token_json FROM configs WHERE uid = $uid LIMIT 1";
-            cmd.Parameters.AddWithValue("$uid", uid);
-            var json = await cmd.ExecuteScalarAsync() as string;
-            if (string.IsNullOrEmpty(json)) return null;
-            try { return DeserializeObject<TraktToken>(json); }
-            catch { return null; }
+
+            TokenData trakt = null;
+            using (var read = conn.CreateCommand())
+            {
+                read.CommandText = "SELECT service, token_json, linked_tokens FROM configs WHERE uid = $uid LIMIT 1";
+                read.Parameters.AddWithValue("$uid", uid);
+                using var reader = await read.ExecuteReaderAsync();
+                if (!await reader.ReadAsync()) return null;
+
+                var service = (AnimeService)reader.GetInt32(0);
+                if (service == AnimeService.Trakt)
+                {
+                    trakt = DeserializeObject<TokenData>(reader.GetString(1));
+                }
+                else
+                {
+                    var linkedJson = reader.IsDBNull(2) ? null : reader.GetString(2);
+                    trakt = DeserializeLinkedTokens(linkedJson)
+                        .FirstOrDefault(l => l.Service == AnimeService.Trakt && !l.NeedsReauth)?.TokenData;
+                }
+            }
+
+            if (trakt == null || string.IsNullOrEmpty(trakt.access_token)) return null;
+            return new TraktToken
+            {
+                access_token = trakt.access_token,
+                refresh_token = trakt.refresh_token,
+                expiration_date = trakt.expiration_date,
+                username = trakt.username,
+            };
         }
 
-        public async Task SetTraktTokenAsync(string uid, TraktToken token)
+        public async Task<MetaType> GetMediaTypeAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return MetaType.anime;
+
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT media_type FROM configs WHERE uid = $uid LIMIT 1";
+            cmd.Parameters.AddWithValue("$uid", uid);
+            var raw = await cmd.ExecuteScalarAsync();
+            return raw is long l && Enum.IsDefined(typeof(MetaType), (int)l)
+                ? (MetaType)(int)l
+                : MetaType.anime;
+        }
+
+        public async Task SetMediaTypeAsync(string uid, MetaType mediaType)
         {
             if (string.IsNullOrEmpty(uid)) return;
 
@@ -535,27 +600,10 @@ namespace AnimeList.Services
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 UPDATE configs
-                   SET trakt_token_json = $j, updated_at = $ts
+                   SET media_type = $m, updated_at = $ts
                  WHERE uid = $uid
                 """;
-            cmd.Parameters.AddWithValue("$j",
-                token == null ? (object)DBNull.Value : SerializeObject(token));
-            cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-            cmd.Parameters.AddWithValue("$uid", uid);
-            await cmd.ExecuteNonQueryAsync();
-        }
-
-        public async Task ClearTraktTokenAsync(string uid)
-        {
-            if (string.IsNullOrEmpty(uid)) return;
-
-            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                UPDATE configs
-                   SET trakt_token_json = NULL, updated_at = $ts
-                 WHERE uid = $uid
-                """;
+            cmd.Parameters.AddWithValue("$m", (int)mediaType);
             cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             cmd.Parameters.AddWithValue("$uid", uid);
             await cmd.ExecuteNonQueryAsync();
@@ -951,6 +999,9 @@ namespace AnimeList.Services
             AnimeService.Anilist => td.user_id,
             AnimeService.MyAnimeList => td.user_id,
             AnimeService.Kitsu => td.username,
+            // Trakt's stable slug (user.ids.slug from /users/settings), captured into
+            // user_id at exchange time.
+            AnimeService.Trakt => td.user_id,
             _ => null,
         };
 
@@ -964,6 +1015,7 @@ namespace AnimeList.Services
             AnimeService.Anilist     => "anilist_user_key",
             AnimeService.MyAnimeList => "mal_user_key",
             AnimeService.Kitsu       => "kitsu_user_key",
+            AnimeService.Trakt       => "trakt_user_key",
             _ => null,
         };
 

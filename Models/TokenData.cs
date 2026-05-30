@@ -27,8 +27,8 @@ namespace AnimeList.Models
         public string score_format { get; set; }
 
         // Kitsu uses a password grant (so we treat "no username" as anonymous); the OAuth-based
-        // services (AniList, MyAnimeList) only have a username after the callback, so we key off
-        // the access_token instead.
+        // services (AniList, MyAnimeList, Trakt) only have a username after the callback, so we
+        // key off the access_token instead.
         public bool anonymousUser => anime_service == AnimeService.Kitsu
             ? string.IsNullOrEmpty(username)
             : string.IsNullOrEmpty(access_token);

@@ -400,6 +400,12 @@ public class HomeController : Controller
             ? new Configuration { showTrending = true, showSeasonal = true, discoverOnlySeasonal = true }
             : new Configuration();
 
+        // Media-type preference is a per-user website setting stored in its own column
+        // (not the packed flags). Hydrate it for logged-in users so the account page's
+        // provider list renders for the right media type.
+        if (!string.IsNullOrEmpty(configUid))
+            configuration.preferredMediaType = await _configStore.GetMediaTypeAsync(configUid);
+
         // /configure renders the Stremio addon page (catalogs / streams /
         // install URL + the shared Account header) because that's the URL
         // Stremio's "Configure" button appends to every addon manifest —
@@ -891,6 +897,25 @@ public class HomeController : Controller
 
         var revision = await _configStore.SetFlagsAsync(uid, request.flags1, request.flags2, request.flags3);
         return new JsonResult(new { success = true, revision });
+    }
+
+    /// <summary>
+    /// Persists the signed-in user's preferred media type (anime / movie / series), then
+    /// reloads the page they triggered it from so the account-page provider list re-renders
+    /// for the new type. Form POST (antiforgery-protected) rather than JSON because the
+    /// account-page selector is a plain submit that wants a full reload, and the preference
+    /// changes which providers/UI are shown server-side.
+    /// </summary>
+    [HttpPost("Home/SetMediaType")]
+    public async Task<IActionResult> SetMediaType([FromForm] int mediaType, [FromForm] string returnUrl = null)
+    {
+        var uid = await ResolveCurrentUidAsync();
+        if (!string.IsNullOrEmpty(uid) && Enum.IsDefined(typeof(MetaType), mediaType))
+            await _configStore.SetMediaTypeAsync(uid, (MetaType)mediaType);
+
+        if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+            return Redirect(returnUrl);
+        return RedirectToAction("Account");
     }
 
     /// <summary>

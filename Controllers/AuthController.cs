@@ -15,6 +15,7 @@ namespace AnimeList.Controllers
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
+        private readonly ITraktService _traktService;
         private readonly IAnimeMappingService _mappingService;
         private readonly ILogger<AuthController> _logger;
 
@@ -84,7 +85,7 @@ namespace AnimeList.Controllers
         public AuthController(ITokenService tokenService, IHttpContextAccessor httpContextAccessor,
             IConfigStore configStore, IConfiguration configuration, ISyncService syncService,
             IAnilistService anilistService, IKitsuService kitsuService, IMalService malService,
-            IAnimeMappingService mappingService, ILogger<AuthController> logger)
+            ITraktService traktService, IAnimeMappingService mappingService, ILogger<AuthController> logger)
         {
             _tokenService = tokenService;
             _httpContextAccessor = httpContextAccessor;
@@ -94,6 +95,7 @@ namespace AnimeList.Controllers
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
+            _traktService = traktService;
             _mappingService = mappingService;
             _logger = logger;
         }
@@ -142,6 +144,10 @@ namespace AnimeList.Controllers
             if (animeService == AnimeService.MyAnimeList)
             {
                 return BeginMalOauth(OauthFlowLogin) ?? RedirectToReturnUrlOrHome(returnUrl);
+            }
+            if (animeService == AnimeService.Trakt)
+            {
+                return BeginTraktOauth(OauthFlowLogin) ?? RedirectToReturnUrlOrHome(returnUrl);
             }
             // Kitsu uses the password grant — the form on /configure (and /account)
             // POSTs straight to /Auth/LoginKitsu so the credentials never appear in
@@ -216,6 +222,23 @@ namespace AnimeList.Controllers
             return Redirect(url);
         }
 
+        /// <summary>
+        /// Builds the Trakt authorize redirect, tagging the session with the supplied flow
+        /// ("Login" or "Link") so the shared /Auth/Callback knows which side to land on.
+        /// Trakt's OAuth is a standard code grant with a CSRF `state` — no PKCE. Returns
+        /// null when Trakt credentials aren't configured (caller falls back to a redirect).
+        /// </summary>
+        private IActionResult BeginTraktOauth(string flow)
+        {
+            if (!_traktService.IsConfigured)
+                return null;
+
+            HttpContext.Session.SetString(OauthServiceKey, AnimeService.Trakt.ToString());
+            HttpContext.Session.SetString(OauthFlowKey, flow);
+            var state = BeginOauthState();
+            return Redirect(_traktService.BuildAuthorizeUrl(state));
+        }
+
         [HttpGet]
         public async Task<IActionResult> Callback(string code, string state = null)
         {
@@ -269,6 +292,15 @@ namespace AnimeList.Controllers
             TokenData linkedTokenData = null;
             if (oauthService == AnimeService.MyAnimeList.ToString())
                 linkedTokenData = await _tokenService.GetAccessTokenByMalCodeAsync(code, malVerifier, setSession: !isLink);
+            else if (oauthService == AnimeService.Trakt.ToString())
+            {
+                // Trakt's OAuth exchange lives in TraktService; it returns a Trakt-tagged
+                // TokenData. Mirror the other providers' setSession convention here (the
+                // login flow seeds the session, the link flow leaves the primary's intact).
+                linkedTokenData = await _traktService.ExchangeCodeAsync(code);
+                if (!isLink && linkedTokenData != null)
+                    HttpContext.Session.SetString("AccessToken", SerializeObject(linkedTokenData));
+            }
             else
                 linkedTokenData = await _tokenService.GetAccessTokenByCodeAsync(code, setSession: !isLink);
 
@@ -344,6 +376,12 @@ namespace AnimeList.Controllers
             if (service == AnimeService.MyAnimeList)
             {
                 return BeginMalOauth(OauthFlowLink);
+            }
+
+            if (service == AnimeService.Trakt)
+            {
+                return BeginTraktOauth(OauthFlowLink)
+                    ?? BadRequest("Trakt client is not configured. Set Trakt:ClientId / ClientSecret / RedirectUri.");
             }
 
             // Kitsu uses password grant — UI posts to /Auth/LinkKitsu instead.

@@ -3,9 +3,11 @@ using AnimeList.Models;
 namespace AnimeList.Services.Interfaces
 {
     /// <summary>
-    /// Trakt OAuth + API client for the video section. Trakt is a linked
-    /// capability on an AniSync account (stored via
-    /// <see cref="IConfigStore.SetTraktTokenAsync"/>), not a login identity.
+    /// Trakt OAuth + API client. Trakt is a first-class provider
+    /// (<see cref="AnimeService.Trakt"/>) — its credentials live in the unified
+    /// <see cref="TokenData"/> model (primary or linked), the same as every other
+    /// provider. This service owns the Trakt-specific OAuth exchange/refresh and the
+    /// Trakt REST API calls.
     /// </summary>
     public interface ITraktService
     {
@@ -16,18 +18,26 @@ namespace AnimeList.Services.Interfaces
         string BuildAuthorizeUrl(string state);
 
         /// <summary>
-        /// Exchanges an OAuth authorization code for a <see cref="TraktToken"/>,
-        /// resolving the account username from /users/settings. Returns null on
-        /// any failure (bad code, not configured, network).
+        /// Exchanges an OAuth authorization code for a Trakt-tagged
+        /// <see cref="TokenData"/>, resolving the account username + stable slug
+        /// (the identity key) from /users/settings. Returns null on any failure
+        /// (bad code, not configured, network).
         /// </summary>
-        Task<TraktToken> ExchangeCodeAsync(string code);
+        Task<TokenData> ExchangeCodeAsync(string code);
 
         /// <summary>
-        /// Returns a valid (refreshed-if-needed) token for the UID, persisting a
-        /// refresh back to the store. Returns null when Trakt isn't connected or
-        /// the token can't be refreshed (in which case the connection is cleared).
+        /// Exchanges a Trakt refresh token for a fresh access/refresh pair, carrying
+        /// the prior token's identity (user_id / username) forward. Returns null when
+        /// refresh fails.
         /// </summary>
-        Task<TraktToken> GetValidTokenAsync(string uid);
+        Task<TokenData> RefreshTokenAsync(TokenData token);
+
+        /// <summary>
+        /// Returns a valid (refreshed-if-needed) Trakt token for the UID — resolved from
+        /// whichever slot holds it (primary or linked) — persisting a refresh back to that
+        /// slot. Returns null when Trakt isn't connected or the token can't be refreshed.
+        /// </summary>
+        Task<TokenData> GetValidTokenAsync(string uid);
 
         // ── Reads ───────────────────────────────────────────────────────────
 

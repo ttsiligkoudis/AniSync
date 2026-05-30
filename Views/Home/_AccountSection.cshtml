@@ -5,6 +5,9 @@
     // /configure and /stremio so both surfaces stay in lockstep when
     // a user adds / drops / promotes a linked provider.
     var linkedByService = Model.LinkedByService;
+    // Threaded into the media-type form so the user lands back on the page they
+    // changed it from (/account or /configure). Validated server-side via Url.IsLocalUrl.
+    var currentPath = Context.Request.Path + Context.Request.QueryString;
 }
 
 @* Account card — wraps the provider picker and the connected/disconnect
@@ -17,6 +20,27 @@
     <section class="section-card">
         <span class="section-title">Account</span>
 
+        @* Media-type preference. Drives which trackers are offered below and (in later
+           phases) what Discover / Library surface. Logged-in only — it persists to the
+           user's row. Each pill is a tiny antiforgery-protected POST that reloads the page
+           so the provider list re-renders for the chosen type. *@
+        @if (Model.IsLoggedIn)
+        {
+            <p class="service-toggle-hint">What do you want to track?</p>
+            <div class="media-type-toggle">
+                @foreach (var (mt, mtLabel) in new[] {
+                    (MetaType.anime, "Anime"), (MetaType.movie, "Movies"), (MetaType.series, "Series") })
+                {
+                    <form method="post" action="/Home/SetMediaType" class="media-type-form">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="mediaType" value="@((int)mt)" />
+                        <input type="hidden" name="returnUrl" value="@currentPath" />
+                        <button type="submit" class="label @(Model.PreferredMediaType == mt ? "active" : "")">@mtLabel</button>
+                    </form>
+                }
+            </div>
+        }
+
         @if (!Model.AnonymousUser)
         {
             @* Pre-login the picker shows all three providers — the user picks one to authenticate.
@@ -26,10 +50,19 @@
             var kitsuLinked   = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.Kitsu,        out var kl) && !kl.NeedsReauth;
             var anilistLinked = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.Anilist,      out var al) && !al.NeedsReauth;
             var malLinked     = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.MyAnimeList, out var ml) && !ml.NeedsReauth;
+            var traktLinked   = Model.IsLoggedIn && linkedByService.TryGetValue(AnimeService.Trakt,        out var tl) && !tl.NeedsReauth;
 
-            var showKitsu   = !Model.IsLoggedIn || Model.IsKitsu   || kitsuLinked;
-            var showAnilist = !Model.IsLoggedIn || Model.IsAnilist || anilistLinked;
-            var showMal     = !Model.IsLoggedIn || Model.IsMal     || malLinked;
+            // Anime trackers only make sense under the Anime media type; Trakt is offered for
+            // every type (it's the only tracker that covers movies / series). Pre-login the
+            // picker shows the candidates for the current media type so the user authenticates
+            // with one of them; post-login it always shows the primary + healthy linked
+            // accounts (the swap UI) regardless of media type, so a user's own accounts never
+            // disappear from the picker.
+            var animeType   = Model.PreferredMediaType == MetaType.anime;
+            var showKitsu   = (!Model.IsLoggedIn && animeType) || Model.IsKitsu   || kitsuLinked;
+            var showAnilist = (!Model.IsLoggedIn && animeType) || Model.IsAnilist || anilistLinked;
+            var showMal     = (!Model.IsLoggedIn && animeType) || Model.IsMal     || malLinked;
+            var showTrakt   = !Model.IsLoggedIn || Model.IsTrakt || traktLinked;
 
             if (Model.HasSwappableLinks)
             {
@@ -48,6 +81,10 @@
                 @if (showMal)
                 {
                     <span class="label @(Model.IsMal ? "active" : "")" id="labelMal" data-service="2" data-service-name="MyAnimeList">MyAnimeList</span>
+                }
+                @if (showTrakt)
+                {
+                    <span class="label @(Model.IsTrakt ? "active" : "")" id="labelTrakt" data-service="3" data-service-name="Trakt">Trakt</span>
                 }
             </div>
         }

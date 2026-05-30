@@ -13,6 +13,11 @@ namespace AnimeList.Services
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly IConfigStore _configStore;
         private readonly IConfiguration _configuration;
+        // Trakt's OAuth exchange/refresh lives in TraktService (it owns the Trakt API
+        // surface). TokenService delegates the Trakt refresh here so the primary +
+        // linked refresh paths stay uniform. Safe (no DI cycle): TraktService depends on
+        // IConfigStore / IConfiguration / IHttpClientFactory, never on ITokenService.
+        private readonly ITraktService _traktService;
         // In-process token caches keyed by user_id (AniList/MAL) or username (Kitsu). Backed by
         // MemoryCache rather than a plain dictionary so they stay bounded: a 30-minute sliding
         // window keeps only recently-active users (an AniList token lives ~1 year, so a
@@ -24,6 +29,7 @@ namespace AnimeList.Services
         private static readonly MemoryCache _kitsuTokenCache = new(new MemoryCacheOptions { SizeLimit = 20_000 });
         private static readonly MemoryCache _anilistTokenCache = new(new MemoryCacheOptions { SizeLimit = 20_000 });
         private static readonly MemoryCache _malTokenCache = new(new MemoryCacheOptions { SizeLimit = 20_000 });
+        private static readonly MemoryCache _traktTokenCache = new(new MemoryCacheOptions { SizeLimit = 20_000 });
 
         // Per-(service, cache-key) refresh lock. AniList and MAL rotate the
         // refresh_token on every successful exchange — two concurrent callers
@@ -41,12 +47,13 @@ namespace AnimeList.Services
         private static SemaphoreSlim LockFor(string key) =>
             _refreshLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
 
-        public TokenService(IHttpClientFactory clientFactory, IHttpContextAccessor httpContextAccessor, IConfigStore configStore, IConfiguration configuration)
+        public TokenService(IHttpClientFactory clientFactory, IHttpContextAccessor httpContextAccessor, IConfigStore configStore, IConfiguration configuration, ITraktService traktService)
         {
             _clientFactory = clientFactory;
             _httpContextAccessor = httpContextAccessor;
             _configStore = configStore;
             _configuration = configuration;
+            _traktService = traktService;
         }
 
         // Pulled from configuration so deployments can supply their own MyAnimeList app
@@ -213,6 +220,50 @@ namespace AnimeList.Services
                     }
                 }
             }
+            else if (tokenData.anime_service == AnimeService.Trakt)
+            {
+                if (string.IsNullOrEmpty(tokenData?.access_token))
+                    return null;
+
+                var cacheKey = tokenData.user_id;
+                if (!string.IsNullOrEmpty(cacheKey)
+                    && _traktTokenCache.TryGetValue(cacheKey, out TokenData cached)
+                    && !IsTokenExpired(cached.expiration_date))
+                {
+                    tokenData = cached;
+                }
+                else if (IsTokenExpired(tokenData.expiration_date) && !string.IsNullOrEmpty(tokenData.refresh_token))
+                {
+                    // Trakt rotates the refresh_token on every exchange, same as AniList/MAL —
+                    // serialise per user so concurrent refreshes don't race each other into an
+                    // invalid_grant. The refresh itself is delegated to TraktService.
+                    var sem = LockFor("trakt:" + (cacheKey ?? string.Empty));
+                    await sem.WaitAsync();
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(cacheKey)
+                            && _traktTokenCache.TryGetValue(cacheKey, out TokenData freshly)
+                            && !IsTokenExpired(freshly.expiration_date))
+                        {
+                            tokenData = freshly;
+                        }
+                        else
+                        {
+                            var refreshed = await _traktService.RefreshTokenAsync(tokenData);
+                            if (refreshed != null && !string.IsNullOrEmpty(cacheKey))
+                            {
+                                _traktTokenCache.Set(cacheKey, refreshed, _tokenCacheEntry);
+                                await _configStore.UpdateByUserAsync(refreshed);
+                            }
+                            tokenData = refreshed;
+                        }
+                    }
+                    finally
+                    {
+                        sem.Release();
+                    }
+                }
+            }
             else
             {
                 var cacheKey = tokenData.username;
@@ -278,6 +329,10 @@ namespace AnimeList.Services
             else if (tokenData.anime_service == AnimeService.MyAnimeList && !string.IsNullOrEmpty(tokenData.user_id))
             {
                 _malTokenCache.Remove(tokenData.user_id);
+            }
+            else if (tokenData.anime_service == AnimeService.Trakt && !string.IsNullOrEmpty(tokenData.user_id))
+            {
+                _traktTokenCache.Remove(tokenData.user_id);
             }
             else if (tokenData.anime_service == AnimeService.Kitsu && !string.IsNullOrEmpty(tokenData.username))
             {
@@ -613,6 +668,12 @@ namespace AnimeList.Services
                     refreshed.user_id ??= token.user_id;
                     refreshed.username ??= token.username;
                     return refreshed;
+
+                case AnimeService.Trakt:
+                    // Trakt rotates the refresh_token on every exchange; delegate to
+                    // TraktService which carries the prior identity forward.
+                    if (string.IsNullOrEmpty(token.refresh_token)) return null;
+                    return await _traktService.RefreshTokenAsync(token);
 
                 case AnimeService.Kitsu:
                     // Kitsu's password grant returns a refresh_token (Doorkeeper); we now
