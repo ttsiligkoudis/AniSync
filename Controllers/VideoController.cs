@@ -45,6 +45,9 @@ namespace AnimeList.Controllers
         // Cinemeta pages its catalogs in blocks of 100. The browse JS sends
         // 1-indexed page numbers; we convert page → item offset with this.
         private const int CatalogPageSize = 100;
+        // Cap on items hydrated for a Trakt shelf — each costs a Cinemeta meta
+        // lookup, so keep the per-shelf fan-out bounded.
+        private const int TraktShelfSize = 18;
 
         // Hand-curated genre picker — the intersection of Cinemeta's movie /
         // series genre lists, ordered by rough popularity. Avoids an extra
@@ -125,6 +128,67 @@ namespace AnimeList.Controllers
             });
         }
 
+        /// <summary>
+        /// Client-loaded Trakt shelf (kind = "continue" | "watchlist") for the
+        /// browse pages. Resolves the user's Trakt list, hydrates posters via
+        /// Cinemeta, and renders the shared horizontal poster row. Kept out of
+        /// the initial page render so the N per-item Cinemeta lookups don't
+        /// block first paint — loaded by a fetch after the grid, like /video/page.
+        /// Returns an empty 204 when Trakt isn't connected so the shelf simply
+        /// doesn't appear.
+        /// </summary>
+        [Route("/video/trakt-shelf")]
+        public async Task<IActionResult> TraktShelf(string kind)
+        {
+            var (token, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+            _ = token;
+            if (string.IsNullOrEmpty(uid)) return NoContent();
+
+            var trakt = await _configStore.GetTraktTokenAsync(uid);
+            if (trakt?.Connected != true) return NoContent();
+
+            var watchlist = string.Equals(kind, "watchlist", StringComparison.OrdinalIgnoreCase);
+            var items = watchlist
+                ? await _trakt.GetWatchlistAsync(uid)
+                : await _trakt.GetPlaybackAsync(uid);
+
+            var metas = await BuildVideoMetasAsync(items.Take(TraktShelfSize).ToList());
+            if (metas.Count == 0) return NoContent();
+
+            return PartialView("_PosterGrid", new PosterGridViewModel
+            {
+                Items = metas,
+                ConfigUid = uid,
+                Variant = "scroll",
+                VideoLinks = true,
+            });
+        }
+
+        // Hydrates Trakt list items (imdb id + type) into poster-bearing Meta
+        // via Cinemeta, in parallel, preserving the Trakt order and dropping any
+        // id Cinemeta can't resolve. Forces Meta.type from the Trakt item so the
+        // _PosterGrid VideoLinks routing picks the right /movie|series path.
+        private async Task<List<Meta>> BuildVideoMetasAsync(List<TraktListItem> items)
+        {
+            var lookups = items.Select(async it =>
+            {
+                try
+                {
+                    var meta = await _cinemeta.GetVideoMetaAsync(it.Type, it.ImdbId);
+                    if (meta == null) return null;
+                    meta.type = it.Type == "movie" ? MetaType.movie.ToString() : MetaType.series.ToString();
+                    return meta;
+                }
+                catch
+                {
+                    return null;
+                }
+            });
+
+            var resolved = await Task.WhenAll(lookups);
+            return resolved.Where(m => m != null).ToList();
+        }
+
         [Route("/movie/{id}")]
         public Task<IActionResult> MovieDetail(string id) => Detail("movie", id);
 
@@ -147,12 +211,14 @@ namespace AnimeList.Controllers
             }
 
             var uid = await ResolveUidAsync();
+            var traktToken = string.IsNullOrEmpty(uid) ? null : await _configStore.GetTraktTokenAsync(uid);
 
             return View("Detail", new VideoDetailViewModel
             {
                 Type = type,
                 Meta = meta,
                 ConfigUid = uid,
+                TraktConnected = traktToken?.Connected == true,
             });
         }
 
@@ -314,5 +380,6 @@ namespace AnimeList.Controllers
         public string Type { get; set; }
         public Meta Meta { get; set; }
         public string ConfigUid { get; set; }
+        public bool TraktConnected { get; set; }
     }
 }

@@ -28,5 +28,40 @@ namespace AnimeList.Services.Interfaces
         /// the token can't be refreshed (in which case the connection is cleared).
         /// </summary>
         Task<TraktToken> GetValidTokenAsync(string uid);
+
+        // ── Reads ───────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// The user's Trakt watchlist (movies + shows), newest-added first.
+        /// Empty when not connected.
+        /// </summary>
+        Task<List<TraktListItem>> GetWatchlistAsync(string uid);
+
+        /// <summary>
+        /// In-progress playback (continue-watching): movies + episodes the user
+        /// started but hasn't finished, most-recently-paused first. Empty when
+        /// not connected.
+        /// </summary>
+        Task<List<TraktListItem>> GetPlaybackAsync(string uid);
+
+        // ── Writes ──────────────────────────────────────────────────────────
+
+        /// <summary>Adds a movie/show to the watchlist. No-op return false when not connected.</summary>
+        Task<bool> AddToWatchlistAsync(string uid, string type, string imdbId);
+
+        /// <summary>Removes a movie/show from the watchlist.</summary>
+        Task<bool> RemoveFromWatchlistAsync(string uid, string type, string imdbId);
+
+        /// <summary>
+        /// Marks a movie (or a specific series episode when season+episode are
+        /// supplied) as watched — adds it to the Trakt history.
+        /// </summary>
+        Task<bool> AddToHistoryAsync(string uid, string type, string imdbId, int? season, int? episode);
+
+        /// <summary>
+        /// Sends a scrobble action ("start" | "pause" | "stop") with playback
+        /// progress (0–100). Trakt auto-marks watched on a "stop" past ~80%.
+        /// </summary>
+        Task<bool> ScrobbleAsync(string uid, string action, string type, string imdbId, int? season, int? episode, double progress);
     }
 }
