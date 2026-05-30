@@ -36,9 +36,9 @@
     ViewData["MtReturnUrl"] = "/discover";
 }
 
-@* Media-type switch. Discover itself only renders anime; picking Movies / Series
-   persists the preference and DiscoverController redirects to the Cinemeta-backed
-   /movies · /series browse. *@
+@* Media-type switch. Picking Movies / Series persists the preference; Discover then
+   renders the Cinemeta-backed video browse for that type (it's the single browse
+   surface now — the standalone /movies · /series routes are gone). *@
 @await Html.PartialAsync("_MediaTypeToggle")
 
 @if (hasTag)
