@@ -1,0 +1,15 @@
+[
+    {
+        "//": "Digital Asset Links — proves the APK and the website share an owner, which lets the TWA run WITHOUT the address bar (otherwise it falls back to a Custom Tab that shows the URL for a second).",
+        "//deploy": "Serve the filled-in version at https://YOUR-DOMAIN.example/.well-known/assetlinks.json (see 'Serving assetlinks.json' in twa/README.md — ASP.NET Core does NOT serve dot-directories from wwwroot by default).",
+        "//fingerprint": "Replace the SHA-256 below with YOUR signing key's fingerprint: `keytool -list -v -keystore twa/android.keystore -alias android` (or copy it from `bubblewrap fingerprint`). Use the upload/app-signing key you actually ship with.",
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {
+            "namespace": "android_app",
+            "package_name": "com.anisync.twa",
+            "sha256_cert_fingerprints": [
+                "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99"
+            ]
+        }
+    }
+]
