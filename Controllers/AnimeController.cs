@@ -29,6 +29,7 @@ namespace AnimeList.Controllers
         private readonly ISubtitleService _subtitleService;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ISyncService _syncService;
+        private readonly ITraktService _traktService;
         private readonly ILogger<AnimeController> _logger;
 
         public AnimeController(
@@ -46,6 +47,7 @@ namespace AnimeList.Controllers
             ISubtitleService subtitleService,
             IHttpClientFactory httpClientFactory,
             ISyncService syncService,
+            ITraktService traktService,
             ILogger<AnimeController> logger)
         {
             _tokenService = tokenService;
@@ -62,6 +64,7 @@ namespace AnimeList.Controllers
             _subtitleService = subtitleService;
             _httpClientFactory = httpClientFactory;
             _syncService = syncService;
+            _traktService = traktService;
             _logger = logger;
         }
 
@@ -1042,9 +1045,27 @@ namespace AnimeList.Controllers
 
             try
             {
+                // Video (movie / series) auto-track goes to Trakt: the id is an IMDb tt id,
+                // not an anime id, so it bypasses the anime-primary dispatch and lands in
+                // the user's Trakt history (primary or linked Trakt token, resolved by uid).
+                // This is the unified replacement for the old manual "Mark watched" button
+                // + live scrobble the video watch page used to call /api/trakt/* for.
+                var isVideo = req.Type == "movie" || req.Type == "series";
+                if (isVideo)
+                {
+                    var (videoUid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                    if (string.IsNullOrEmpty(videoUid))
+                        return Json(new { ok = false, reason = "no-uid" });
+
+                    var season = req.Type == "series" ? req.Season : null;
+                    var episode = req.Type == "series" ? req.Episode : (int?)null;
+                    var ok = await _traktService.AddToHistoryAsync(videoUid, req.Type, req.Id, season, episode);
+                    return Json(new { ok, reason = ok ? null : "trakt-not-connected" });
+                }
+
                 // Single call into the shared SyncService helper:
                 // dispatches to the right primary-tracker SaveAnimeEntry
-                // (AniList / MAL / Kitsu by tokenData.anime_service)
+                // (AniList / MAL / Kitsu / Trakt by tokenData.anime_service)
                 // AND fans out to linked secondaries. Same code path
                 // SubtitlesController uses for the Stremio addon's
                 // subtitle-fetch auto-track hook.
@@ -1061,6 +1082,32 @@ namespace AnimeList.Controllers
                     req.Id, req.Season, req.Episode);
                 return Json(new { ok = false, reason = "save-failed" });
             }
+        }
+
+        /// <summary>
+        /// Trakt watchlist toggle for a movie / series (video detail page). Replaces the
+        /// retired /api/trakt/watchlist endpoint — resolves the current session's uid and
+        /// adds / removes the title on the user's Trakt watchlist (primary or linked Trakt).
+        /// </summary>
+        [HttpPost("/anime/trakt-watchlist")]
+        public async Task<IActionResult> TraktWatchlist([FromBody] TraktActionRequest req)
+        {
+            if (req is null || string.IsNullOrWhiteSpace(req.id) || string.IsNullOrWhiteSpace(req.type))
+                return Json(new { success = false, reason = "invalid-request" });
+
+            var tokenData = await _tokenService.GetAccessTokenAsync();
+            if (tokenData is null || tokenData.anonymousUser)
+                return Json(new { success = false, reason = "not_connected" });
+
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+            if (string.IsNullOrEmpty(uid))
+                return Json(new { success = false, reason = "not_connected" });
+
+            var remove = string.Equals(req.action, "remove", StringComparison.OrdinalIgnoreCase);
+            var ok = remove
+                ? await _traktService.RemoveFromWatchlistAsync(uid, req.type, req.id)
+                : await _traktService.AddToWatchlistAsync(uid, req.type, req.id);
+            return Json(new { success = ok, inWatchlist = ok && !remove });
         }
 
         /// <summary>
@@ -1114,6 +1161,12 @@ namespace AnimeList.Controllers
             public string Id { get; set; }
             public int? Season { get; set; }
             public int Episode { get; set; }
+            /// <summary>
+            /// "movie" / "series" when the watch page is a Cinemeta video (Id is an IMDb
+            /// tt id) — routes the mark to the user's Trakt history instead of the anime
+            /// primary. Null / empty for the anime watch page (the default tracker path).
+            /// </summary>
+            public string Type { get; set; }
             /// <summary>
             /// Optional source URL. When present, the server probes
             /// the URL with a Range 0-0 request and refuses to mark

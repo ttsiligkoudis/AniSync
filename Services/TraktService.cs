@@ -294,14 +294,6 @@ namespace AnimeList.Services
                 ? Task.FromResult(false)
                 : PostAuthedAsync(uid, "/sync/history", SyncBody(type, imdbId, season, episode));
 
-        public Task<bool> ScrobbleAsync(string uid, string action, string type, string imdbId, int? season, int? episode, double progress)
-        {
-            var a = action?.ToLowerInvariant();
-            if (string.IsNullOrEmpty(imdbId) || (a != "start" && a != "pause" && a != "stop"))
-                return Task.FromResult(false);
-            return PostAuthedAsync(uid, $"/scrobble/{a}", ScrobbleBody(type, imdbId, season, episode, progress));
-        }
-
         // ── Unified-fan-out writes (token-based) ────────────────────────────
         // These are the writes the SyncService fan-out + the manage-entry / auto-track
         // paths use. They take the resolved Trakt TokenData directly (primary or linked)
@@ -475,25 +467,6 @@ namespace AnimeList.Services
                 };
             }
             return new JObject { ["shows"] = new JArray { show } };
-        }
-
-        // Single-item body for /scrobble/{action}: a flat movie/show(+episode)
-        // alongside the playback progress percent.
-        private static JObject ScrobbleBody(string type, string imdbId, int? season, int? episode, double progress)
-        {
-            var ids = new JObject { ["imdb"] = imdbId };
-            var body = new JObject { ["progress"] = progress };
-            if (type == "movie")
-            {
-                body["movie"] = new JObject { ["ids"] = ids };
-            }
-            else
-            {
-                body["show"] = new JObject { ["ids"] = ids };
-                if (season.HasValue && episode.HasValue)
-                    body["episode"] = new JObject { ["season"] = season.Value, ["number"] = episode.Value };
-            }
-            return body;
         }
 
         private static string Truncate(string s, int max) =>

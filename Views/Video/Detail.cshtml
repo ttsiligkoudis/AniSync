@@ -129,7 +129,7 @@
                             var inList = btn.dataset.in === 'true';
                             var action = inList ? 'remove' : 'add';
                             btn.disabled = true;
-                            fetch('/api/trakt/watchlist', {
+                            fetch('/anime/trakt-watchlist', {
                                 method: 'POST',
                                 credentials: 'same-origin',
                                 headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
