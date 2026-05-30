@@ -86,6 +86,44 @@
     }
 }
 
+@* Trakt shelves — Continue Watching + Watchlist. Only when connected and not
+   searching. Each is hidden until its client-side fetch returns cards, so an
+   empty list (or a Trakt hiccup) leaves no dangling header. The poster rows
+   come back as the shared horizontal _PosterGrid (Variant=scroll). *@
+@if (Model.TraktConnected && string.IsNullOrEmpty(Model.Search))
+{
+    <style>
+        .trakt-shelf { margin: 0 0 1.5rem; }
+        .trakt-shelf-title { font-size: 1.05rem; font-weight: 700; margin: 0 0 .6rem; }
+    </style>
+    <section class="trakt-shelf" data-kind="continue" hidden>
+        <h2 class="trakt-shelf-title">Continue Watching</h2>
+        <div class="trakt-shelf-body"></div>
+    </section>
+    <section class="trakt-shelf" data-kind="watchlist" hidden>
+        <h2 class="trakt-shelf-title">Your Watchlist</h2>
+        <div class="trakt-shelf-body"></div>
+    </section>
+    <script>
+        (function () {
+            document.querySelectorAll('.trakt-shelf').forEach(function (sec) {
+                var kind = sec.getAttribute('data-kind');
+                fetch('/video/trakt-shelf?kind=' + encodeURIComponent(kind), {
+                    credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                })
+                    .then(function (r) { return r.status === 204 ? '' : r.text(); })
+                    .then(function (html) {
+                        if (!html || !html.trim()) return;
+                        sec.querySelector('.trakt-shelf-body').innerHTML = html;
+                        sec.hidden = false;
+                    })
+                    .catch(function () { });
+            });
+        })();
+    </script>
+}
+
 @* Combined filter form — search input + genre dropdown + Search button. Same
    visual language as the /discover filter bar; nothing auto-submits. *@
 <form method="get" action="@browseAction" class="filter-bar" role="search">

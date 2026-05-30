@@ -109,6 +109,49 @@
                 </a>
             }
 
+            @* Trakt watchlist toggle. Only when connected. Idempotent add/remove;
+               label flips optimistically and reverts on failure. *@
+            @if (Model.TraktConnected)
+            {
+                <button type="button" class="video-play-btn" id="traktWatchlistBtn"
+                        style="background:transparent;border:1px solid rgba(255,255,255,.35);color:#fff"
+                        data-type="@(isMovie ? "movie" : "series")" data-id="@m.id" data-in="false">
+                    ＋ Watchlist
+                </button>
+                <script>
+                    (function () {
+                        var btn = document.getElementById('traktWatchlistBtn');
+                        if (!btn) return;
+                        function toast(msg) {
+                            if (window.AniSyncToast && window.AniSyncToast.show) window.AniSyncToast.show(msg);
+                        }
+                        btn.addEventListener('click', function () {
+                            var inList = btn.dataset.in === 'true';
+                            var action = inList ? 'remove' : 'add';
+                            btn.disabled = true;
+                            fetch('/api/trakt/watchlist', {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                                body: JSON.stringify({ type: btn.dataset.type, id: btn.dataset.id, action: action })
+                            })
+                                .then(function (r) { return r.json(); })
+                                .then(function (d) {
+                                    if (d && d.success) {
+                                        btn.dataset.in = inList ? 'false' : 'true';
+                                        btn.textContent = inList ? '＋ Watchlist' : '✓ In Watchlist';
+                                        toast(inList ? 'Removed from watchlist' : 'Added to watchlist');
+                                    } else {
+                                        toast('Couldn’t update watchlist');
+                                    }
+                                })
+                                .catch(function () { toast('Network error'); })
+                                .finally(function () { btn.disabled = false; });
+                        });
+                    })();
+                </script>
+            }
+
             @if (!string.IsNullOrEmpty(m.description))
             {
                 <p class="video-hero-desc">@m.description</p>

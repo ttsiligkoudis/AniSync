@@ -154,6 +154,203 @@ namespace AnimeList.Services
             }
         }
 
+        // ── Reads ───────────────────────────────────────────────────────────
+
+        public async Task<List<TraktListItem>> GetWatchlistAsync(string uid)
+        {
+            var arr = await GetAuthedAsync(uid, "/sync/watchlist?extended=full") as JArray;
+            if (arr == null) return new();
+
+            var items = new List<TraktListItem>();
+            foreach (var it in arr)
+            {
+                var t = (string)it["type"];
+                if (t == "movie") items.Add(MovieItem(it["movie"]));
+                else if (t == "show") items.Add(ShowItem(it["show"]));
+            }
+            return items.Where(i => !string.IsNullOrEmpty(i.ImdbId)).ToList();
+        }
+
+        public async Task<List<TraktListItem>> GetPlaybackAsync(string uid)
+        {
+            var arr = await GetAuthedAsync(uid, "/sync/playback?extended=full") as JArray;
+            if (arr == null) return new();
+
+            var items = new List<TraktListItem>();
+            foreach (var it in arr)
+            {
+                var t = (string)it["type"];
+                var progress = (double?)it["progress"];
+                var pausedAt = (DateTime?)it["paused_at"];
+
+                if (t == "movie")
+                {
+                    var m = MovieItem(it["movie"]);
+                    m.Progress = progress; m.PausedAt = pausedAt;
+                    items.Add(m);
+                }
+                else if (t == "episode")
+                {
+                    var s = ShowItem(it["show"]);
+                    s.Season = (int?)it["episode"]?["season"];
+                    s.Episode = (int?)it["episode"]?["number"];
+                    s.Progress = progress; s.PausedAt = pausedAt;
+                    items.Add(s);
+                }
+            }
+            return items
+                .Where(i => !string.IsNullOrEmpty(i.ImdbId))
+                .OrderByDescending(i => i.PausedAt)
+                .ToList();
+        }
+
+        // ── Writes ──────────────────────────────────────────────────────────
+
+        public Task<bool> AddToWatchlistAsync(string uid, string type, string imdbId) =>
+            string.IsNullOrEmpty(imdbId)
+                ? Task.FromResult(false)
+                : PostAuthedAsync(uid, "/sync/watchlist", SyncBody(type, imdbId, null, null));
+
+        public Task<bool> RemoveFromWatchlistAsync(string uid, string type, string imdbId) =>
+            string.IsNullOrEmpty(imdbId)
+                ? Task.FromResult(false)
+                : PostAuthedAsync(uid, "/sync/watchlist/remove", SyncBody(type, imdbId, null, null));
+
+        public Task<bool> AddToHistoryAsync(string uid, string type, string imdbId, int? season, int? episode) =>
+            string.IsNullOrEmpty(imdbId)
+                ? Task.FromResult(false)
+                : PostAuthedAsync(uid, "/sync/history", SyncBody(type, imdbId, season, episode));
+
+        public Task<bool> ScrobbleAsync(string uid, string action, string type, string imdbId, int? season, int? episode, double progress)
+        {
+            var a = action?.ToLowerInvariant();
+            if (string.IsNullOrEmpty(imdbId) || (a != "start" && a != "pause" && a != "stop"))
+                return Task.FromResult(false);
+            return PostAuthedAsync(uid, $"/scrobble/{a}", ScrobbleBody(type, imdbId, season, episode, progress));
+        }
+
+        // ── Shared HTTP + body helpers ──────────────────────────────────────
+
+        private HttpRequestMessage BuildApiRequest(HttpMethod method, string path, string accessToken, JToken body = null)
+        {
+            var req = new HttpRequestMessage(method, $"{ApiBase}{path}");
+            req.Headers.TryAddWithoutValidation("User-Agent", "AniSync/1.0");
+            req.Headers.Add("trakt-api-version", "2");
+            req.Headers.Add("trakt-api-key", ClientId);
+            req.Headers.Add("Authorization", $"Bearer {accessToken}");
+            if (body != null)
+                req.Content = new StringContent(body.ToString(), System.Text.Encoding.UTF8, "application/json");
+            return req;
+        }
+
+        private async Task<JToken> GetAuthedAsync(string uid, string path)
+        {
+            var token = await GetValidTokenAsync(uid);
+            if (token == null) return null;
+            try
+            {
+                var client = _clientFactory.CreateClient();
+                client.Timeout = TimeSpan.FromSeconds(10);
+                using var req = BuildApiRequest(HttpMethod.Get, path, token.access_token);
+                var resp = await client.SendAsync(req);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Trakt GET {Path} returned {Status}.", path, (int)resp.StatusCode);
+                    return null;
+                }
+                return JToken.Parse(await resp.Content.ReadAsStringAsync());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Trakt GET {Path} failed.", path);
+                return null;
+            }
+        }
+
+        private async Task<bool> PostAuthedAsync(string uid, string path, JObject body)
+        {
+            var token = await GetValidTokenAsync(uid);
+            if (token == null) return false;
+            try
+            {
+                var client = _clientFactory.CreateClient();
+                client.Timeout = TimeSpan.FromSeconds(10);
+                using var req = BuildApiRequest(HttpMethod.Post, path, token.access_token, body);
+                var resp = await client.SendAsync(req);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var b = await resp.Content.ReadAsStringAsync();
+                    _logger.LogWarning("Trakt POST {Path} returned {Status}: {Body}", path, (int)resp.StatusCode, Truncate(b, 300));
+                    return false;
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Trakt POST {Path} failed.", path);
+                return false;
+            }
+        }
+
+        private static TraktListItem MovieItem(JToken m) => new()
+        {
+            Type = "movie",
+            ImdbId = (string)m?["ids"]?["imdb"],
+            Title = (string)m?["title"],
+            Year = (int?)m?["year"],
+        };
+
+        private static TraktListItem ShowItem(JToken s) => new()
+        {
+            Type = "series",
+            ImdbId = (string)s?["ids"]?["imdb"],
+            Title = (string)s?["title"],
+            Year = (int?)s?["year"],
+        };
+
+        // Grouped body for /sync/* endpoints (watchlist, history). A movie
+        // rides under "movies"; a show under "shows" — with seasons/episodes
+        // nested when a specific episode is targeted.
+        private static JObject SyncBody(string type, string imdbId, int? season, int? episode)
+        {
+            var ids = new JObject { ["imdb"] = imdbId };
+            if (type == "movie")
+                return new JObject { ["movies"] = new JArray { new JObject { ["ids"] = ids } } };
+
+            var show = new JObject { ["ids"] = ids };
+            if (season.HasValue && episode.HasValue)
+            {
+                show["seasons"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["number"] = season.Value,
+                        ["episodes"] = new JArray { new JObject { ["number"] = episode.Value } },
+                    },
+                };
+            }
+            return new JObject { ["shows"] = new JArray { show } };
+        }
+
+        // Single-item body for /scrobble/{action}: a flat movie/show(+episode)
+        // alongside the playback progress percent.
+        private static JObject ScrobbleBody(string type, string imdbId, int? season, int? episode, double progress)
+        {
+            var ids = new JObject { ["imdb"] = imdbId };
+            var body = new JObject { ["progress"] = progress };
+            if (type == "movie")
+            {
+                body["movie"] = new JObject { ["ids"] = ids };
+            }
+            else
+            {
+                body["show"] = new JObject { ["ids"] = ids };
+                if (season.HasValue && episode.HasValue)
+                    body["episode"] = new JObject { ["season"] = season.Value, ["number"] = episode.Value };
+            }
+            return body;
+        }
+
         private static string Truncate(string s, int max) =>
             string.IsNullOrEmpty(s) ? s : (s.Length <= max ? s : s.Substring(0, max));
 
