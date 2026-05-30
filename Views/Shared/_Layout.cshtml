@@ -227,26 +227,9 @@
                 </svg>
                 <span class="nav-label">Discover</span>
             </a>
-            @* Video section — general movies & series via Cinemeta. *@
-            <a href="/movies" class="@(activeNav == "movies" ? "active" : "")">
-                <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <rect x="2" y="3" width="20" height="18" rx="2"></rect>
-                    <line x1="7" y1="3" x2="7" y2="21"></line>
-                    <line x1="17" y1="3" x2="17" y2="21"></line>
-                    <line x1="2" y1="9" x2="7" y2="9"></line>
-                    <line x1="2" y1="15" x2="7" y2="15"></line>
-                    <line x1="17" y1="9" x2="22" y2="9"></line>
-                    <line x1="17" y1="15" x2="22" y2="15"></line>
-                </svg>
-                <span class="nav-label">Movies</span>
-            </a>
-            <a href="/series" class="@(activeNav == "series" ? "active" : "")">
-                <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <rect x="2" y="7" width="20" height="14" rx="2"></rect>
-                    <polyline points="17 2 12 7 7 2"></polyline>
-                </svg>
-                <span class="nav-label">Series</span>
-            </a>
+            @* Movies & series fold into Discover now — it's media-type aware (the
+               Anime / Movies / Series switch lives on Discover & Library), so the
+               standalone nav items are gone. *@
             @* Settings consolidates the /configure (Account) + /stremio (addon
                configure) pages; the Stremio link is reachable from the
                Settings page rather than crowding the top-level nav. The active
@@ -334,27 +317,7 @@
                         </svg>
                         <span class="nav-label">Discover</span>
                     </a>
-                    @* Video section — general movies & series via Cinemeta,
-                       alongside the anime surfaces. *@
-                    <a href="/movies" class="@(activeNav == "movies" ? "active" : "")">
-                        <svg class="nav-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <rect x="2" y="3" width="20" height="18" rx="2"></rect>
-                            <line x1="7" y1="3" x2="7" y2="21"></line>
-                            <line x1="17" y1="3" x2="17" y2="21"></line>
-                            <line x1="2" y1="9" x2="7" y2="9"></line>
-                            <line x1="2" y1="15" x2="7" y2="15"></line>
-                            <line x1="17" y1="9" x2="22" y2="9"></line>
-                            <line x1="17" y1="15" x2="22" y2="15"></line>
-                        </svg>
-                        <span class="nav-label">Movies</span>
-                    </a>
-                    <a href="/series" class="@(activeNav == "series" ? "active" : "")">
-                        <svg class="nav-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <rect x="2" y="7" width="20" height="14" rx="2"></rect>
-                            <polyline points="17 2 12 7 7 2"></polyline>
-                        </svg>
-                        <span class="nav-label">Series</span>
-                    </a>
+                    @* Movies & series fold into Discover (media-type aware). *@
                     @* Settings consolidates Account + Stremio addon pages —
                        same activeNav double-match as the drawer / bottom-nav
                        so navigating between /configure and /stremio keeps the

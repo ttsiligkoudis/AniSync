@@ -2,7 +2,7 @@
 @{
     var m = Model.Meta;
     var isMovie = Model.Type == "movie";
-    ViewData["ActiveNav"] = isMovie ? "movies" : "series";
+    ViewData["ActiveNav"] = "discover";
     ViewData["Title"] = $"{m.name} · AniSync";
     ViewData["BodyClass"] = "video-detail-page";
 

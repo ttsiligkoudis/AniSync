@@ -4,9 +4,9 @@
     // returnUrl. Callers pass the active type + where to land via ViewData:
     //   ViewData["MtActive"]    — the MetaType to highlight (defaults to anime)
     //   ViewData["MtReturnUrl"] — local URL to return to after the switch
-    // On Discover / the video browse this is "/discover" (DiscoverController then
-    // redirects movie/series prefs to /movies|/series); on Library it's "/library"
-    // so the user stays put and the pane just re-sources.
+    // On Discover / the video browse this is "/discover" (Discover renders the chosen
+    // type's browse directly); on Library it's "/library" so the user stays put and the
+    // pane just re-sources.
     var mtActive = ViewData["MtActive"] is MetaType a ? a : MetaType.anime;
     var mtReturnUrl = ViewData["MtReturnUrl"] as string ?? "/discover";
 }

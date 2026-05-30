@@ -2,7 +2,10 @@
 @{
     ViewData["BodyClass"] = "library-page";
     var isMovies = Model.Type == "movie";
-    ViewData["ActiveNav"] = isMovies ? "movies" : "series";
+    // Rendered by DiscoverController for a movie/series media-type preference — this
+    // IS the Discover surface for video, so the nav highlights Discover and the
+    // filter form posts back to /discover (the old /movies · /series routes are gone).
+    ViewData["ActiveNav"] = "discover";
 
     var label = isMovies ? "Movies" : "Series";
     var hasSearch = !string.IsNullOrEmpty(Model.Search);
@@ -12,10 +15,8 @@
         : hasGenre ? $"{Model.Genre} · {label}"
         : $"{label} · AniSync";
 
-    // Browse + search both post back to the active type's route so the form's
-    // hidden state isn't needed — the action URL carries the type.
-    var browseAction = isMovies ? "/movies" : "/series";
-    var here = browseAction;
+    var browseAction = "/discover";
+    var here = "/discover";
     var traktFeedback = Context.Request.Query["trakt"].ToString();
 
     ViewData["MtActive"] = isMovies ? MetaType.movie : MetaType.series;

@@ -49,60 +49,10 @@ namespace AnimeList.Controllers
         // lookup, so keep the per-shelf fan-out bounded.
         private const int TraktShelfSize = 18;
 
-        // Hand-curated genre picker — the intersection of Cinemeta's movie /
-        // series genre lists, ordered by rough popularity. Avoids an extra
-        // manifest round-trip per browse render and keeps the dropdown
-        // consistent across both types.
-        private static readonly string[] VideoGenres =
-        [
-            "Action", "Adventure", "Animation", "Comedy", "Crime",
-            "Documentary", "Drama", "Family", "Fantasy", "History",
-            "Horror", "Mystery", "Romance", "Sci-Fi", "Thriller", "War",
-        ];
-
-        [Route("/movies")]
-        public Task<IActionResult> Movies(string genre = null, string search = null)
-            => Browse("movie", genre, search);
-
-        [Route("/series")]
-        public Task<IActionResult> Series(string genre = null, string search = null)
-            => Browse("series", genre, search);
-
-        private async Task<IActionResult> Browse(string type, string genre, string search)
-        {
-            var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
-            var hasSearch = !string.IsNullOrWhiteSpace(search);
-
-            // Trakt connection status for the header strip. Cheap direct read
-            // (no refresh) — display only.
-            var traktToken = string.IsNullOrEmpty(uid) ? null : await _configStore.GetTraktTokenAsync(uid);
-
-            // Browse (popularity) loads paint behind a skeleton + a client-side
-            // page-1 fetch (video-pagination.js) so the initial render isn't
-            // blocked on Cinemeta — same pattern /discover uses. Search is
-            // single-shot (Cinemeta's relevance list isn't paginated here), so
-            // we fetch + render it server-side.
-            List<Meta> items = [];
-            if (hasSearch)
-            {
-                items = await _cinemeta.GetVideoCatalogAsync(type, genre, search.Trim());
-            }
-
-            return View("Index", new VideoBrowseViewModel
-            {
-                Type = type,
-                ConfigUid = uid,
-                Genre = string.IsNullOrWhiteSpace(genre) ? null : genre.Trim(),
-                Search = hasSearch ? search.Trim() : null,
-                AvailableGenres = VideoGenres,
-                Items = items,
-                NeedsClientLoad = !hasSearch,
-                SignedIn = !string.IsNullOrEmpty(uid),
-                TraktConfigured = _trakt.IsConfigured,
-                TraktConnected = traktToken?.Connected == true,
-                TraktUsername = traktToken?.username,
-            });
-        }
+        // Browse (the /movies · /series listing) folded into DiscoverController — Discover
+        // is now the single browse surface and renders movies / series by media-type
+        // preference. The data endpoints below (/video/page, /video/trakt-shelf) and the
+        // detail / watch routes remain here as the click-through targets.
 
         /// <summary>
         /// Infinite-scroll pagination endpoint for the browse grids. Returns

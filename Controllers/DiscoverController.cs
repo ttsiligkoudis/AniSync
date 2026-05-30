@@ -20,6 +20,8 @@ namespace AnimeList.Controllers
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
         private readonly IAnilistFallback _anilistFallback;
+        private readonly ICinemetaService _cinemeta;
+        private readonly ITraktService _trakt;
         private readonly IConfigStore _configStore;
 
         public DiscoverController(
@@ -28,6 +30,8 @@ namespace AnimeList.Controllers
             IKitsuService kitsuService,
             IMalService malService,
             IAnilistFallback anilistFallback,
+            ICinemetaService cinemeta,
+            ITraktService trakt,
             IConfigStore configStore)
         {
             _tokenService = tokenService;
@@ -35,8 +39,20 @@ namespace AnimeList.Controllers
             _kitsuService = kitsuService;
             _malService = malService;
             _anilistFallback = anilistFallback;
+            _cinemeta = cinemeta;
+            _trakt = trakt;
             _configStore = configStore;
         }
+
+        // Hand-curated video genre picker (intersection of Cinemeta's movie / series
+        // genre lists), used when Discover renders the movies / series browse — folded
+        // in from the old standalone video controller now that /movies · /series are gone.
+        private static readonly string[] VideoGenres =
+        [
+            "Action", "Adventure", "Animation", "Comedy", "Crime",
+            "Documentary", "Drama", "Family", "Fantasy", "History",
+            "Horror", "Mystery", "Romance", "Sci-Fi", "Thriller", "War",
+        ];
 
         // The three discover catalogs. Order is the tab strip rendering order;
         // Trending leads because it's the most-viewed catalog in the addon's
@@ -87,15 +103,15 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
 
-            // Media-type preference: Discover for movies / series is the Cinemeta-backed
-            // video browse (/movies, /series). Anime stays here. Anonymous users (uid null)
-            // always get anime — they can't have set a preference. The media-type switch on
-            // both surfaces routes back through here so this single read decides the landing.
+            // Media-type preference: Discover IS the browse surface for movies / series too
+            // (the standalone /movies · /series routes are gone). For a video preference we
+            // render the Cinemeta-backed browse view right here. Anonymous users (uid null)
+            // always get anime — they can't have set a preference.
             if (uid != null)
             {
                 var preferredMediaType = await _configStore.GetMediaTypeAsync(uid);
-                if (preferredMediaType == MetaType.movie) return Redirect("/movies");
-                if (preferredMediaType == MetaType.series) return Redirect("/series");
+                if (preferredMediaType != MetaType.anime)
+                    return await VideoBrowseAsync(preferredMediaType, uid, search, genre);
             }
 
             // Honor the "Hide unaired from Watching" pref. Only affects the
@@ -233,6 +249,40 @@ namespace AnimeList.Controllers
                 Tag = hasTag ? tag.Trim() : null,
                 Items = metas ?? [],
                 NeedsClientLoad = !hasSearch,
+            });
+        }
+
+        /// <summary>
+        /// Renders the Cinemeta-backed movies / series browse as the Discover surface for
+        /// a video media-type preference. Search renders server-side; the popularity browse
+        /// hands page 1 to discover-pagination.js (which pages via /video/page). Folded in
+        /// from the retired standalone /movies · /series controller.
+        /// </summary>
+        private async Task<IActionResult> VideoBrowseAsync(MetaType mediaType, string uid, string search, string genre)
+        {
+            var type = mediaType == MetaType.movie ? "movie" : "series";
+            var hasSearch = !string.IsNullOrWhiteSpace(search);
+
+            var items = hasSearch
+                ? await _cinemeta.GetVideoCatalogAsync(type, genre, search.Trim())
+                : new List<Meta>();
+
+            // Trakt connection status for the header strip — cheap projection read, display only.
+            var traktToken = await _configStore.GetTraktTokenAsync(uid);
+
+            return View("/Views/Video/Index.cshtml", new VideoBrowseViewModel
+            {
+                Type = type,
+                ConfigUid = uid,
+                Genre = string.IsNullOrWhiteSpace(genre) ? null : genre.Trim(),
+                Search = hasSearch ? search.Trim() : null,
+                AvailableGenres = VideoGenres,
+                Items = items,
+                NeedsClientLoad = !hasSearch,
+                SignedIn = true,
+                TraktConfigured = _trakt.IsConfigured,
+                TraktConnected = traktToken?.Connected == true,
+                TraktUsername = traktToken?.username,
             });
         }
 
