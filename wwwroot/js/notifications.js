@@ -44,6 +44,17 @@
     var markAllBtn = bell.querySelector('[data-notif-read-all]');
     if (!toggle || !panel || !badge || !list) return;
 
+    // Reparent the panel to <body>. It's authored inside .notif-bell (which
+    // lives in .site-header: sticky + z-index:50, i.e. its own stacking
+    // context), so the panel's z-index is otherwise resolved *within* that
+    // context and capped at the header's level — letting the watch page's
+    // video player paint over it. position:fixed does NOT escape an ancestor
+    // stacking context for paint order; only reparenting does. As a direct
+    // child of <body> the panel's z-index finally competes at the document
+    // root and sits above the player. (Its toggle/positioning logic keys off
+    // the bell's screen rect, so the visual anchor is unaffected.)
+    if (panel.parentElement !== document.body) document.body.appendChild(panel);
+
     var listLoaded = false;
     var pollTimer = null;
 
@@ -172,11 +183,10 @@
         } catch (_) { /* keep last state — user can retry by reopening */ }
     }
 
-    // The CSS makes .notif-panel position:fixed so it escapes the
-    // .site-header stacking context (which would otherwise let the watch
-    // page's video element paint over it). At desktop widths the visual
-    // anchor "panel hangs below the bell" is no longer free from CSS, so
-    // we measure the bell's screen rect and pin top/right inline.
+    // The panel is position:fixed and portaled to <body> (see init), so it's
+    // anchored to the viewport rather than the bell. At desktop widths the
+    // visual "panel hangs below the bell" anchor is therefore no longer free
+    // from CSS, so we measure the bell's screen rect and pin top/right inline.
     function positionPanel() {
         // ≤600px: full-width via media query — clear any inline overrides.
         if (window.matchMedia('(max-width: 600px)').matches) {
@@ -252,10 +262,13 @@
         });
     }
 
-    // Click-outside dismissal — same shape as the search dropdown.
+    // Click-outside dismissal — same shape as the search dropdown. The panel
+    // is portaled to <body> (see init), so it's no longer inside the bell;
+    // clicks within it must be treated as inside or every panel interaction
+    // (Mark all read, item taps) would self-dismiss.
     document.addEventListener('click', function (ev) {
         if (panel.hidden) return;
-        if (bell.contains(ev.target)) return;
+        if (bell.contains(ev.target) || panel.contains(ev.target)) return;
         closePanel();
     });
     document.addEventListener('keydown', function (ev) {
