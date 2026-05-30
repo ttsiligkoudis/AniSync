@@ -11,51 +11,55 @@
    on this page (catalogs, streams, prefs) silently no-op. *@
 <header class="page-header">
     <h1 class="page-title">Advanced</h1>
-    <p class="page-subtitle">Backups · home server sync · destructive actions</p>
+    <p class="page-subtitle">Streams · sync · home server sync · backups · destructive actions</p>
 </header>
 
 @if (Model.IsLoggedIn)
 {
-    <!-- ─── BACKUPS ─────────────────────────────────────────────────── -->
-    @* Export is gated on a config row existing — HomeController.ExportConfig
-       returns 400 for anonymous sessions. Import is left visible because it's
-       the canonical "restore on a fresh browser" path: an anonymous (no-session)
-       user imports a backup to recover their tokens + flags, which then bumps
-       them into the non-anonymous flow on next render. *@
-    <section class="section-card">
-        <span class="section-title">Backups</span>
-        <p class="section-description">
-            @(Model.AnonymousUser
-                ? "Restore your configuration from a previously exported file."
-                : "Export your configuration to a file or restore from one.")
-        </p>
-
-        <div class="btn-action-row">
-            @if (!Model.AnonymousUser)
-            {
-                <a id="exportConfigBtn" class="btn-ghost" href="/Home/ExportConfig" download>
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="17 8 12 3 7 8"></polyline>
-                        <line x1="12" y1="3" x2="12" y2="15"></line>
-                    </svg>
-                    Export
-                </a>
-            }
-            <button id="importConfigBtn" class="btn-ghost" type="button">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="7 10 12 15 17 10"></polyline>
-                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                Import
-            </button>
-            <input id="importConfigFile" type="file" accept="application/json,.json" hidden />
-        </div>
-    </section>
-
+    @* Sections are ordered Streams → Sync → Home Server Sync → Backups →
+       Danger Zone. The non-anonymous-only block is split around Backups
+       because Backups (Import) stays visible to anonymous sessions as the
+       "restore on a fresh browser" path, while everything else needs a
+       real config row. *@
     @if (!Model.AnonymousUser)
     {
+        <!-- ─── STREAMS ─────────────────────────────────────────────────── -->
+        @* Shared partial with /stremio — isStremio=false hides the
+           Manage Entry toggle (which only affects the Stremio addon's
+           Stream list) but keeps the rest of the affordances visible
+           since RD + external services still surface on the web app's
+           per-episode picker. *@
+        @await Html.PartialAsync("_StreamsSection", Model,
+            new ViewDataDictionary(ViewData) { ["isStremio"] = false })
+
+        <!-- ─── BACKFILL LINKED ACCOUNTS ────────────────────────────────── -->
+        @* Moved out of /configure's Linked Accounts card so the primary
+           configure surface stays focused on identity. Lives here in
+           Advanced because it's a one-shot maintenance action — useful
+           right after linking a new provider, otherwise dormant. The
+           handler (#syncNowBtn) is in _ConfigurePageScript and shared
+           across all three configure views, so this just renders the
+           button + copy. *@
+        @if (Model.HasSwappableLinks)
+        {
+            <section class="section-card">
+                <span class="section-title">Sync</span>
+                <div class="full-sync-row">
+                    <div class="full-sync-text">
+                        <strong>Backfill linked accounts</strong>
+                        <span>Push every entry from your @Model.ServiceDisplay library to your linked accounts in one go. Useful right after first linking.</span>
+                    </div>
+                    <button type="button" id="syncNowBtn" class="btn-ghost btn-ghost-sm">Sync from primary</button>
+                </div>
+            </section>
+
+            @* Modal lives where the trigger lives — _ConfigurePageScript's
+               startFullSync() looks up #syncModal in the DOM. Was previously
+               mounted on /configure alongside the button; moved here with
+               the button. *@
+            @await Html.PartialAsync("_SyncModal")
+        }
+
         <!-- ─── HOME SERVER SYNC ────────────────────────────────────────── -->
         @* Webhook ingestion from Plex / Jellyfin / Emby. The URL below points to a single
            endpoint that auto-detects which server is calling — users only ever copy one URL. *@
@@ -98,44 +102,48 @@
             </p>
 
         </section>
+    }
 
-        <!-- ─── STREAMS ─────────────────────────────────────────────────── -->
-        @* Shared partial with /stremio — isStremio=false hides the
-           Manage Entry toggle (which only affects the Stremio addon's
-           Stream list) but keeps the rest of the affordances visible
-           since RD + external services still surface on the web app's
-           per-episode picker. *@
-        @await Html.PartialAsync("_StreamsSection", Model,
-            new ViewDataDictionary(ViewData) { ["isStremio"] = false })
+    <!-- ─── BACKUPS ─────────────────────────────────────────────────── -->
+    @* Export is gated on a config row existing — HomeController.ExportConfig
+       returns 400 for anonymous sessions. Import is left visible because it's
+       the canonical "restore on a fresh browser" path: an anonymous (no-session)
+       user imports a backup to recover their tokens + flags, which then bumps
+       them into the non-anonymous flow on next render. *@
+    <section class="section-card">
+        <span class="section-title">Backups</span>
+        <p class="section-description">
+            @(Model.AnonymousUser
+                ? "Restore your configuration from a previously exported file."
+                : "Export your configuration to a file or restore from one.")
+        </p>
 
-        <!-- ─── BACKFILL LINKED ACCOUNTS ────────────────────────────────── -->
-        @* Moved out of /configure's Linked Accounts card so the primary
-           configure surface stays focused on identity. Lives here in
-           Advanced because it's a one-shot maintenance action — useful
-           right after linking a new provider, otherwise dormant. The
-           handler (#syncNowBtn) is in _ConfigurePageScript and shared
-           across all three configure views, so this just renders the
-           button + copy. *@
-        @if (Model.HasSwappableLinks)
-        {
-            <section class="section-card">
-                <span class="section-title">Sync</span>
-                <div class="full-sync-row">
-                    <div class="full-sync-text">
-                        <strong>Backfill linked accounts</strong>
-                        <span>Push every entry from your @Model.ServiceDisplay library to your linked accounts in one go. Useful right after first linking.</span>
-                    </div>
-                    <button type="button" id="syncNowBtn" class="btn-ghost btn-ghost-sm">Sync from primary</button>
-                </div>
-            </section>
+        <div class="btn-action-row">
+            @if (!Model.AnonymousUser)
+            {
+                <a id="exportConfigBtn" class="btn-ghost" href="/Home/ExportConfig" download>
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    Export
+                </a>
+            }
+            <button id="importConfigBtn" class="btn-ghost" type="button">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Import
+            </button>
+            <input id="importConfigFile" type="file" accept="application/json,.json" hidden />
+        </div>
+    </section>
 
-            @* Modal lives where the trigger lives — _ConfigurePageScript's
-               startFullSync() looks up #syncModal in the DOM. Was previously
-               mounted on /configure alongside the button; moved here with
-               the button. *@
-            @await Html.PartialAsync("_SyncModal")
-        }
-
+    @if (!Model.AnonymousUser)
+    {
         <!-- ─── DANGER ZONE ─────────────────────────────────────────────── -->
         @* Anonymous users have no DB row (HomeController only Upserts when !anonymousUser),
            so Reset is a no-op (the JS guards on configUid) and Delete has nothing to delete.
