@@ -36,23 +36,28 @@ namespace AnimeList.Services
             string TorrentioKey,
             string CometService,
             string MediaFusionService,
-            string ApiKeyUrl);
+            string ApiKeyUrl,
+            string SignUpUrl);
 
         /// <summary>An addon the quick-setup flow knows how to auto-configure.</summary>
         public record CatalogAddon(string Id, string DisplayName);
 
         // ApiKeyUrl is the page where the user generates / copies the token
         // for that service — the "Get your API key" link jumps straight
-        // there in a new tab based on the dropdown selection.
+        // there in a new tab based on the dropdown selection. SignUpUrl is the
+        // provider's account-registration page, surfaced as a "Sign up" link
+        // ahead of the key link: most providers' key pages redirect to login,
+        // and Real-Debrid's even 403s when signed out, so a brand-new user
+        // needs the register page first.
         public static readonly IReadOnlyList<DebridProvider> Providers = new[]
         {
-            new DebridProvider("realdebrid", "Real-Debrid", "realdebrid", "realdebrid", "realdebrid", "https://real-debrid.com/apitoken"),
-            new DebridProvider("alldebrid",  "AllDebrid",   "alldebrid",  "alldebrid",  "alldebrid",  "https://alldebrid.com/apikeys/"),
-            new DebridProvider("premiumize", "Premiumize",  "premiumize", "premiumize", "premiumize", "https://www.premiumize.me/account"),
-            new DebridProvider("torbox",     "TorBox",      "torbox",     "torbox",     "torbox",     "https://torbox.app/settings"),
-            new DebridProvider("debridlink", "Debrid-Link", "debridlink", "debridlink", "debridlink", "https://debrid-link.com/webapp/apikey"),
-            new DebridProvider("easydebrid", "EasyDebrid",  "easydebrid", "easydebrid", "easydebrid", "https://paradise-cloud.com/products/easydebrid"),
-            new DebridProvider("offcloud",   "Offcloud",    "offcloud",   "offcloud",   "offcloud",   "https://offcloud.com/#/account"),
+            new DebridProvider("realdebrid", "Real-Debrid", "realdebrid", "realdebrid", "realdebrid", "https://real-debrid.com/apitoken", "https://real-debrid.com/signup.php"),
+            new DebridProvider("alldebrid",  "AllDebrid",   "alldebrid",  "alldebrid",  "alldebrid",  "https://alldebrid.com/apikeys/", "https://alldebrid.com/register/"),
+            new DebridProvider("premiumize", "Premiumize",  "premiumize", "premiumize", "premiumize", "https://www.premiumize.me/account", "https://www.premiumize.me/register"),
+            new DebridProvider("torbox",     "TorBox",      "torbox",     "torbox",     "torbox",     "https://torbox.app/settings", "https://torbox.app/login"),
+            new DebridProvider("debridlink", "Debrid-Link", "debridlink", "debridlink", "debridlink", "https://debrid-link.com/webapp/apikey", "https://debrid-link.com/webapp/register"),
+            new DebridProvider("easydebrid", "EasyDebrid",  "easydebrid", "easydebrid", "easydebrid", "https://paradise-cloud.com/products/easydebrid", "https://paradise-cloud.com/register"),
+            new DebridProvider("offcloud",   "Offcloud",    "offcloud",   "offcloud",   "offcloud",   "https://offcloud.com/#/account", "https://offcloud.com/register"),
         };
 
         public static readonly IReadOnlyList<CatalogAddon> Addons = new[]

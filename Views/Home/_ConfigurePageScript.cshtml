@@ -1051,13 +1051,18 @@
     // installs) these elements don't render and the selectors no-op.
     var $debridProvider = $('#debridProvider');
     var $debridApiKeyLink = $('#debridApiKeyLink');
+    var $debridSignUpLink = $('#debridSignUpLink');
 
-    // Point the "Get your API key" link at the selected provider's token
-    // page. data-apikey-url is rendered onto each <option> from the
-    // server-side catalog so the link and the dropdown never drift apart.
+    // Point the "Sign up" + "Get your API key" links at the selected
+    // provider's register / token pages. data-signup-url and data-apikey-url
+    // are rendered onto each <option> from the server-side catalog so the
+    // links and the dropdown never drift apart.
     function syncDebridApiKeyLink() {
-        var url = $debridProvider.find('option:selected').attr('data-apikey-url') || '';
-        if (url) $debridApiKeyLink.attr('href', url);
+        var $opt = $debridProvider.find('option:selected');
+        var apiUrl = $opt.attr('data-apikey-url') || '';
+        var signUpUrl = $opt.attr('data-signup-url') || '';
+        if (apiUrl) $debridApiKeyLink.attr('href', apiUrl);
+        if (signUpUrl) $debridSignUpLink.attr('href', signUpUrl);
     }
     $debridProvider.on('change', syncDebridApiKeyLink);
     syncDebridApiKeyLink();

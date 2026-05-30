@@ -89,8 +89,9 @@
            one API key it gives you, and AniSync builds + validates the
            scraper-addon manifest URLs for you (Torrentio, Comet) instead
            of making you walk each addon's own /configure page and paste
-           the result back by hand. The "Get your API key" link jumps to
-           the selected provider's token page. Anything the catalog can't
+           the result back by hand. The "Sign up" / "Get your API key" links
+           jump to the selected provider's register / token pages. Anything the
+           catalog can't
            build deterministically (e.g. MediaFusion, whose config is
            encrypted with the addon's own secret) still goes through the
            manual paste box below. *@
@@ -99,7 +100,7 @@
                 <select id="debridProvider" class="debrid-select" aria-label="Debrid provider">
                     @foreach (var p in StreamAddonCatalog.Providers)
                     {
-                        <option value="@p.Id" data-apikey-url="@p.ApiKeyUrl">@p.DisplayName</option>
+                        <option value="@p.Id" data-apikey-url="@p.ApiKeyUrl" data-signup-url="@p.SignUpUrl">@p.DisplayName</option>
                     }
                 </select>
                 <input id="debridApiKey" class="manifest-url-input" type="password"
@@ -116,8 +117,16 @@
                 }
             </div>
             <div class="debrid-setup-actions">
-                <a id="debridApiKeyLink" class="debrid-apikey-link" target="_blank" rel="noopener"
-                   href="@StreamAddonCatalog.Providers[0].ApiKeyUrl">Get your API key ↗</a>
+                @* "Sign up" comes first: the key pages below mostly redirect to
+                   login (and Real-Debrid's 403s when signed out), so a new user
+                   registers here first. Both hrefs are re-pointed at the chosen
+                   provider by syncDebridApiKeyLink() in _ConfigurePageScript. *@
+                <span class="debrid-setup-links">
+                    <a id="debridSignUpLink" class="debrid-apikey-link" target="_blank" rel="noopener"
+                       href="@StreamAddonCatalog.Providers[0].SignUpUrl">Sign up ↗</a>
+                    <a id="debridApiKeyLink" class="debrid-apikey-link" target="_blank" rel="noopener"
+                       href="@StreamAddonCatalog.Providers[0].ApiKeyUrl">Get your API key ↗</a>
+                </span>
                 <button id="debridAddBtn" class="btn-ghost btn-ghost-sm" type="button">Save</button>
             </div>
             <p id="debridSetupStatus" class="debrid-setup-status" role="status" aria-live="polite"></p>
