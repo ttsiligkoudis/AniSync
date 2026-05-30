@@ -595,6 +595,7 @@
 
             function close() {
                 sheet.hidden = true;
+                document.body.classList.remove('bottom-nav-more-open');
                 toggle.setAttribute('aria-expanded', 'false');
                 toggle.classList.remove('is-open');
                 if (label) label.textContent = 'More';
@@ -602,6 +603,9 @@
             }
             function open() {
                 sheet.hidden = false;
+                // Lets CSS hide the floating Save bar + scroll-to-top button so
+                // they don't sit in front of the open menu sheet.
+                document.body.classList.add('bottom-nav-more-open');
                 toggle.setAttribute('aria-expanded', 'true');
                 toggle.classList.add('is-open');
                 if (label) label.textContent = 'Close';
