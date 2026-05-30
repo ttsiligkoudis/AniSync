@@ -39,7 +39,7 @@ namespace AnimeList.Services
             $"&redirect_uri={Uri.EscapeDataString(RedirectUri)}" +
             $"&state={Uri.EscapeDataString(state)}";
 
-        public async Task<TraktToken> ExchangeCodeAsync(string code)
+        public async Task<TokenData> ExchangeCodeAsync(string code)
         {
             if (!IsConfigured || string.IsNullOrEmpty(code)) return null;
 
@@ -53,43 +53,20 @@ namespace AnimeList.Services
             });
             if (token == null) return null;
 
-            token.username = await FetchUsernameAsync(token.access_token);
+            // Resolve the account identity once at exchange time. The slug is stable and
+            // doubles as the identity key (GetUserKey/IdentityColumnFor → trakt_user_key),
+            // so a re-login dedups onto the same config row.
+            var (username, slug) = await FetchUserAsync(token.access_token);
+            token.username = username;
+            token.user_id = slug ?? username;
             return token;
         }
 
-        public async Task<TraktToken> GetValidTokenAsync(string uid)
-        {
-            if (string.IsNullOrEmpty(uid)) return null;
-
-            var token = await _configStore.GetTraktTokenAsync(uid);
-            if (token == null || !token.Connected) return null;
-
-            // Refresh a few minutes ahead of expiry so an in-flight API call
-            // doesn't race the boundary. No expiry recorded → assume valid.
-            var needsRefresh = token.expiration_date.HasValue
-                && token.expiration_date.Value <= DateTime.UtcNow.AddMinutes(5);
-            if (!needsRefresh) return token;
-
-            var refreshed = await RefreshAsync(token);
-            if (refreshed == null)
-            {
-                // Unrecoverable — clear so the UI prompts a reconnect rather
-                // than retrying a dead token on every render.
-                _logger.LogInformation("Trakt token refresh failed for uid {Uid}; clearing connection.", uid);
-                await _configStore.ClearTraktTokenAsync(uid);
-                return null;
-            }
-
-            refreshed.username = token.username; // carry over; /settings unchanged on refresh
-            await _configStore.SetTraktTokenAsync(uid, refreshed);
-            return refreshed;
-        }
-
-        private async Task<TraktToken> RefreshAsync(TraktToken token)
+        public async Task<TokenData> RefreshTokenAsync(TokenData token)
         {
             if (!IsConfigured || string.IsNullOrEmpty(token?.refresh_token)) return null;
 
-            return await PostTokenAsync(new JObject
+            var refreshed = await PostTokenAsync(new JObject
             {
                 ["refresh_token"] = token.refresh_token,
                 ["client_id"] = ClientId,
@@ -97,13 +74,66 @@ namespace AnimeList.Services
                 ["redirect_uri"] = RedirectUri,
                 ["grant_type"] = "refresh_token",
             });
+            if (refreshed == null) return null;
+
+            // Refresh responses don't echo identity back — carry it over so the persisted
+            // token (and its identity column) stays usable. Same pattern as MAL/Kitsu.
+            refreshed.user_id ??= token.user_id;
+            refreshed.username ??= token.username;
+            return refreshed;
+        }
+
+        public async Task<TokenData> GetValidTokenAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return null;
+
+            // Resolve the Trakt token from whichever slot holds it: the row's primary when
+            // the user signed in with Trakt, otherwise a linked secondary.
+            var primary = await _configStore.GetAsync(uid);
+            var isPrimary = primary?.anime_service == AnimeService.Trakt;
+            var token = isPrimary
+                ? primary
+                : (await _configStore.GetLinkedTokensAsync(uid))
+                    .FirstOrDefault(l => l.Service == AnimeService.Trakt && !l.NeedsReauth)?.TokenData;
+
+            if (token == null || string.IsNullOrEmpty(token.access_token)) return null;
+
+            // Refresh a few minutes ahead of expiry so an in-flight API call
+            // doesn't race the boundary. No expiry recorded → assume valid.
+            var needsRefresh = token.expiration_date.HasValue
+                && token.expiration_date.Value <= DateTime.UtcNow.AddMinutes(5);
+            if (!needsRefresh) return token;
+
+            var refreshed = await RefreshTokenAsync(token);
+            if (refreshed == null)
+            {
+                _logger.LogInformation("Trakt token refresh failed for uid {Uid}.", uid);
+                return null;
+            }
+
+            // Persist the refresh back to the slot it came from.
+            if (isPrimary)
+            {
+                await _configStore.UpdateByUserAsync(refreshed);
+            }
+            else
+            {
+                await _configStore.SetLinkedTokenAsync(uid, new LinkedToken
+                {
+                    Service = AnimeService.Trakt,
+                    TokenData = refreshed,
+                    NeedsReauth = false,
+                });
+            }
+            return refreshed;
         }
 
         /// <summary>
-        /// POSTs to /oauth/token (authorization_code or refresh_token grant) and
-        /// parses the common token response shape. Returns null on any failure.
+        /// POSTs to /oauth/token (authorization_code or refresh_token grant) and parses the
+        /// common token response shape into a Trakt-tagged <see cref="TokenData"/>. Returns
+        /// null on any failure.
         /// </summary>
-        private async Task<TraktToken> PostTokenAsync(JObject body)
+        private async Task<TokenData> PostTokenAsync(JObject body)
         {
             try
             {
@@ -140,8 +170,9 @@ namespace AnimeList.Services
                     ? DateTimeOffset.FromUnixTimeSeconds(createdAt.Value).UtcDateTime
                     : DateTime.UtcNow;
 
-                return new TraktToken
+                return new TokenData
                 {
+                    anime_service = AnimeService.Trakt,
                     access_token = accessToken,
                     refresh_token = (string)json["refresh_token"],
                     expiration_date = expiresIn > 0 ? baseTime.AddSeconds(expiresIn) : null,
@@ -354,7 +385,9 @@ namespace AnimeList.Services
         private static string Truncate(string s, int max) =>
             string.IsNullOrEmpty(s) ? s : (s.Length <= max ? s : s.Substring(0, max));
 
-        private async Task<string> FetchUsernameAsync(string accessToken)
+        // Resolves (display username, stable slug) from /users/settings. The slug is the
+        // stable identity key; username is for display. Either may be null on failure.
+        private async Task<(string username, string slug)> FetchUserAsync(string accessToken)
         {
             try
             {
@@ -368,16 +401,17 @@ namespace AnimeList.Services
                 req.Headers.Add("Authorization", $"Bearer {accessToken}");
 
                 var response = await client.SendAsync(req);
-                if (!response.IsSuccessStatusCode) return null;
+                if (!response.IsSuccessStatusCode) return (null, null);
 
                 var json = JObject.Parse(await response.Content.ReadAsStringAsync());
-                return (string)json["user"]?["username"]
-                    ?? (string)json["user"]?["ids"]?["slug"];
+                var slug = (string)json["user"]?["ids"]?["slug"];
+                var username = (string)json["user"]?["username"] ?? slug;
+                return (username, slug);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Trakt /users/settings lookup failed.");
-                return null;
+                return (null, null);
             }
         }
     }

@@ -69,12 +69,18 @@ namespace AnimeList.Models
         public bool IsLoggedIn => !string.IsNullOrEmpty(TokenData) || !string.IsNullOrEmpty(ConfigUid);
         public bool IsAnilist => AnimeService == AnimeService.Anilist;
         public bool IsMal => AnimeService == AnimeService.MyAnimeList;
-        public bool IsKitsu => !IsAnilist && !IsMal;
+        public bool IsTrakt => AnimeService == AnimeService.Trakt;
+        // Explicit now that Trakt is a provider — the old "anything-not-AniList/MAL"
+        // definition would have mislabelled a Trakt primary as Kitsu.
+        public bool IsKitsu => AnimeService == AnimeService.Kitsu;
 
         /// <summary>Numeric service id consumed by the JS picker (matches the AnimeService enum order).</summary>
-        public int ServiceIndex => IsAnilist ? 1 : IsMal ? 2 : 0;
+        public int ServiceIndex => IsAnilist ? 1 : IsMal ? 2 : IsTrakt ? 3 : 0;
 
-        public string ServiceDisplay => IsAnilist ? "AniList" : IsMal ? "MyAnimeList" : "Kitsu";
+        public string ServiceDisplay => IsAnilist ? "AniList" : IsMal ? "MyAnimeList" : IsTrakt ? "Trakt" : "Kitsu";
+
+        /// <summary>The user's preferred media type — drives the account page's provider list.</summary>
+        public MetaType PreferredMediaType => Configuration.preferredMediaType;
 
         // hideManageEntry / disableAutoTrack are inverse-sense — flip them so the
         // configure UI can render positive toggles ("Manage Entry on" / "Auto-track on").

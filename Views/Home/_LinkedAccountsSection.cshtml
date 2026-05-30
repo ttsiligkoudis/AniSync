@@ -17,7 +17,12 @@
    Link / Unlink / Re-link. *@
 @if (Model.IsLoggedIn && !Model.AnonymousUser)
 {
-    var allServices = new[] { AnimeService.Kitsu, AnimeService.Anilist, AnimeService.MyAnimeList };
+    // Which providers are offered as sync targets depends on the media type: the anime
+    // trackers (Kitsu / AniList / MAL) only track anime, while Trakt tracks anime, movies
+    // and series. So anime → all four; movies / series → Trakt only.
+    var allServices = Model.PreferredMediaType == MetaType.anime
+        ? new[] { AnimeService.Kitsu, AnimeService.Anilist, AnimeService.MyAnimeList, AnimeService.Trakt }
+        : new[] { AnimeService.Trakt };
 
     <section class="section-card">
         <span class="section-title">Linked Accounts</span>

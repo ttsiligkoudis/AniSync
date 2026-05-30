@@ -1,12 +1,12 @@
 namespace AnimeList.Models
 {
     /// <summary>
-    /// A connected Trakt account's OAuth credentials, stored as a dedicated
-    /// credential on the user's existing config row (the <c>trakt_token_json</c>
-    /// column) — deliberately separate from <see cref="TokenData"/> so the
-    /// anime-rooted identity model (anime_service enum, per-service switches)
-    /// stays untouched. Trakt is a linked capability on an AniSync account, not
-    /// a login identity of its own.
+    /// Legacy read-only projection of a connected Trakt account's OAuth credentials.
+    /// Trakt is now a first-class provider stored in the unified <see cref="TokenData"/>
+    /// model (anime_service = Trakt); this shape only survives as the return type of
+    /// <see cref="Services.Interfaces.IConfigStore.GetTraktTokenAsync"/>, which the
+    /// soon-to-be-removed video section consumes for display. New code should use the
+    /// provider's <see cref="TokenData"/> directly.
     /// </summary>
     public class TraktToken
     {
