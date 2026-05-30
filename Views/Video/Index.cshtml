@@ -15,6 +15,63 @@
     // Browse + search both post back to the active type's route so the form's
     // hidden state isn't needed — the action URL carries the type.
     var browseAction = isMovies ? "/movies" : "/series";
+    var here = browseAction;
+    var traktFeedback = Context.Request.Query["trakt"].ToString();
+}
+
+@* Trakt connection strip. Only shown once Trakt is configured server-side.
+   Connecting writes onto the user's account, so it's gated on a signed-in
+   session. *@
+@if (Model.TraktConfigured)
+{
+    <style>
+        .trakt-strip {
+            display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+            padding: .6rem .9rem; margin: 0 0 1rem; border-radius: 10px;
+            background: rgba(237,9,79,.08); font-size: .9rem;
+        }
+        .trakt-strip-dot { width: .55rem; height: .55rem; border-radius: 50%; background: #888; flex: 0 0 auto; }
+        .trakt-strip-dot.is-on { background: #2ecc71; }
+        .trakt-strip-spacer { flex: 1 1 auto; }
+        .trakt-strip a.trakt-btn, .trakt-strip button.trakt-btn {
+            border: 0; cursor: pointer; text-decoration: none; font: inherit;
+            padding: .35rem .9rem; border-radius: 999px; background: #ed094f; color: #fff; font-weight: 600;
+        }
+        .trakt-strip button.trakt-btn-ghost { background: transparent; color: inherit; opacity: .7; }
+    </style>
+    <div class="trakt-strip">
+        <span class="trakt-strip-dot @(Model.TraktConnected ? "is-on" : "")" aria-hidden="true"></span>
+        @if (Model.TraktConnected)
+        {
+            <span>Trakt connected@(string.IsNullOrEmpty(Model.TraktUsername) ? "" : $" as {Model.TraktUsername}")</span>
+            <span class="trakt-strip-spacer"></span>
+            <form method="post" action="/trakt/disconnect" style="margin:0">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="returnUrl" value="@here" />
+                <button type="submit" class="trakt-btn trakt-btn-ghost">Disconnect</button>
+            </form>
+        }
+        else if (Model.SignedIn)
+        {
+            <span>Connect Trakt to track what you watch.</span>
+            <span class="trakt-strip-spacer"></span>
+            <a class="trakt-btn" href="/trakt/connect?returnUrl=@Uri.EscapeDataString(here)">Connect Trakt</a>
+        }
+        else
+        {
+            <span>Sign in to connect Trakt and track what you watch.</span>
+            <span class="trakt-strip-spacer"></span>
+            <a class="trakt-btn" href="/account">Sign in</a>
+        }
+    </div>
+    @if (traktFeedback == "connected")
+    {
+        <p class="library-empty" style="color:#2ecc71">✓ Trakt connected.</p>
+    }
+    else if (traktFeedback == "error")
+    {
+        <p class="library-empty" style="color:#ed094f">Couldn't connect Trakt — please try again.</p>
+    }
 }
 
 @* Combined filter form — search input + genre dropdown + Search button. Same

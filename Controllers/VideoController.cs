@@ -25,17 +25,20 @@ namespace AnimeList.Controllers
         private readonly ICinemetaService _cinemeta;
         private readonly ITokenService _tokenService;
         private readonly IConfigStore _configStore;
+        private readonly ITraktService _trakt;
         private readonly ILogger<VideoController> _logger;
 
         public VideoController(
             ICinemetaService cinemeta,
             ITokenService tokenService,
             IConfigStore configStore,
+            ITraktService trakt,
             ILogger<VideoController> logger)
         {
             _cinemeta = cinemeta;
             _tokenService = tokenService;
             _configStore = configStore;
+            _trakt = trakt;
             _logger = logger;
         }
 
@@ -64,8 +67,12 @@ namespace AnimeList.Controllers
 
         private async Task<IActionResult> Browse(string type, string genre, string search)
         {
-            var uid = await ResolveUidAsync();
+            var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             var hasSearch = !string.IsNullOrWhiteSpace(search);
+
+            // Trakt connection status for the header strip. Cheap direct read
+            // (no refresh) — display only.
+            var traktToken = string.IsNullOrEmpty(uid) ? null : await _configStore.GetTraktTokenAsync(uid);
 
             // Browse (popularity) loads paint behind a skeleton + a client-side
             // page-1 fetch (video-pagination.js) so the initial render isn't
@@ -87,6 +94,10 @@ namespace AnimeList.Controllers
                 AvailableGenres = VideoGenres,
                 Items = items,
                 NeedsClientLoad = !hasSearch,
+                SignedIn = !string.IsNullOrEmpty(uid),
+                TraktConfigured = _trakt.IsConfigured,
+                TraktConnected = traktToken?.Connected == true,
+                TraktUsername = traktToken?.username,
             });
         }
 
@@ -287,6 +298,12 @@ namespace AnimeList.Controllers
         // and video-pagination.js fetches page 1 on load. False for search,
         // which is rendered server-side from Items.
         public bool NeedsClientLoad { get; set; }
+
+        // Trakt connection status for the header strip.
+        public bool SignedIn { get; set; }
+        public bool TraktConfigured { get; set; }
+        public bool TraktConnected { get; set; }
+        public string TraktUsername { get; set; }
     }
 
     /// <summary>

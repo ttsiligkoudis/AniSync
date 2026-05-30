@@ -139,6 +139,29 @@ namespace AnimeList.Services.Interfaces
         /// </summary>
         Task<string> GetPlexUsernameAsync(string uid);
 
+        // ── Trakt (video section) ──────────────────────────────────────────
+        // Trakt is a linked capability on an AniSync account, stored as a
+        // dedicated credential on the config row rather than through the
+        // anime-keyed LinkedToken mechanism (Trakt isn't an AnimeService).
+
+        /// <summary>
+        /// Reads the connected Trakt credentials for this UID, or null when the
+        /// user hasn't connected Trakt.
+        /// </summary>
+        Task<TraktToken> GetTraktTokenAsync(string uid);
+
+        /// <summary>
+        /// Persists (or replaces) the user's Trakt credentials on their config
+        /// row. No-op for an empty UID.
+        /// </summary>
+        Task SetTraktTokenAsync(string uid, TraktToken token);
+
+        /// <summary>
+        /// Clears the user's Trakt connection (on explicit disconnect or after
+        /// an unrecoverable refresh failure).
+        /// </summary>
+        Task ClearTraktTokenAsync(string uid);
+
         /// <summary>
         /// Reads the user's configured stream addons. Empty list when the UID
         /// is unknown or no addons are configured. Order is preserved (the
