@@ -1,4 +1,5 @@
 using AnimeList.Models;
+using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
