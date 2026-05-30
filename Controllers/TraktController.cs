@@ -72,8 +72,9 @@ namespace AnimeList.Controllers
             if (string.IsNullOrEmpty(expectedState)
                 || !string.Equals(expectedState, state, StringComparison.Ordinal))
             {
-                _logger.LogWarning("Trakt callback rejected: state mismatch.");
-                return Redirect(SafeReturn(returnUrl) + "?trakt=error");
+                _logger.LogWarning("Trakt callback rejected: state mismatch (expected set={HasExpected}, got set={HasGot}).",
+                    !string.IsNullOrEmpty(expectedState), !string.IsNullOrEmpty(state));
+                return Redirect(SafeReturn(returnUrl) + "?trakt=state");
             }
 
             var (token, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
@@ -91,7 +92,7 @@ namespace AnimeList.Controllers
             var exchanged = await _trakt.ExchangeCodeAsync(code);
             if (exchanged == null || !exchanged.Connected)
             {
-                return Redirect(SafeReturn(returnUrl) + "?trakt=error");
+                return Redirect(SafeReturn(returnUrl) + "?trakt=exchange");
             }
 
             await _configStore.SetTraktTokenAsync(uid, exchanged);

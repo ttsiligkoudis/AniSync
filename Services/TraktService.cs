@@ -110,15 +110,24 @@ namespace AnimeList.Services
                 var client = _clientFactory.CreateClient();
                 client.Timeout = TimeSpan.FromSeconds(10);
 
-                using var content = new StringContent(body.ToString(), System.Text.Encoding.UTF8, "application/json");
-                var response = await client.PostAsync($"{ApiBase}/oauth/token", content);
+                using var req = new HttpRequestMessage(HttpMethod.Post, $"{ApiBase}/oauth/token")
+                {
+                    Content = new StringContent(body.ToString(), System.Text.Encoding.UTF8, "application/json"),
+                };
+                // Trakt's API sits behind Cloudflare, which 403s requests with no
+                // User-Agent. HttpClient sends none by default.
+                req.Headers.TryAddWithoutValidation("User-Agent", "AniSync/1.0");
+
+                var response = await client.SendAsync(req);
+                var payload = await response.Content.ReadAsStringAsync();
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("Trakt token endpoint returned {Status}.", (int)response.StatusCode);
+                    _logger.LogWarning("Trakt token endpoint returned {Status}: {Body}",
+                        (int)response.StatusCode, Truncate(payload, 500));
                     return null;
                 }
 
-                var json = JObject.Parse(await response.Content.ReadAsStringAsync());
+                var json = JObject.Parse(payload);
                 var accessToken = (string)json["access_token"];
                 if (string.IsNullOrEmpty(accessToken)) return null;
 
@@ -145,6 +154,9 @@ namespace AnimeList.Services
             }
         }
 
+        private static string Truncate(string s, int max) =>
+            string.IsNullOrEmpty(s) ? s : (s.Length <= max ? s : s.Substring(0, max));
+
         private async Task<string> FetchUsernameAsync(string accessToken)
         {
             try
@@ -153,6 +165,7 @@ namespace AnimeList.Services
                 client.Timeout = TimeSpan.FromSeconds(8);
 
                 using var req = new HttpRequestMessage(HttpMethod.Get, $"{ApiBase}/users/settings");
+                req.Headers.TryAddWithoutValidation("User-Agent", "AniSync/1.0");
                 req.Headers.Add("trakt-api-version", "2");
                 req.Headers.Add("trakt-api-key", ClientId);
                 req.Headers.Add("Authorization", $"Bearer {accessToken}");

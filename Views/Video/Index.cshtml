@@ -68,6 +68,18 @@
     {
         <p class="library-empty" style="color:#2ecc71">✓ Trakt connected.</p>
     }
+    else if (traktFeedback == "state")
+    {
+        <p class="library-empty" style="color:#ed094f">Trakt connect session expired — please try again.</p>
+    }
+    else if (traktFeedback == "exchange")
+    {
+        <p class="library-empty" style="color:#ed094f">Trakt rejected the token exchange — check the server logs.</p>
+    }
+    else if (traktFeedback == "denied")
+    {
+        <p class="library-empty" style="color:#ed094f">Trakt authorization was declined.</p>
+    }
     else if (traktFeedback == "error")
     {
         <p class="library-empty" style="color:#ed094f">Couldn't connect Trakt — please try again.</p>
