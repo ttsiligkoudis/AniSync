@@ -3671,6 +3671,19 @@ body.modal-open {
     border-radius: 0;
 }
 
+/* iOS Safari composites an inline <video> in a dedicated foreground overlay
+   plane that paints above page chrome regardless of z-index — so even with the
+   sticky header / bottom-nav promoted to their own layers (see .site-header)
+   the player's video + controls still bled over them. Forcing the player onto
+   a regular compositing layer pulls the video back into the normal layer tree,
+   where it sits at its in-flow level *below* the header and nav (z-index:60).
+   Skipped while fullscreen — web-fullscreen uses its own fixed positioning +
+   high z-index that a transform here (which would become its containing block)
+   could disrupt. */
+.watch-player .art-video-player:not(.art-fullscreen):not(.art-fullscreen-web) {
+    transform: translateZ(0);
+}
+
 /* ArtPlayer drops .art-bottom's opacity when controls auto-hide but
    leaves the element interactive — and worse, the gestureInit
    listener binds touchstart / touchmove to .art-progress
@@ -7570,7 +7583,7 @@ ol.anime-detail-episodes-busy {
 
 .notif-panel {
     /* Fixed + portaled to <body> by notifications.js so the panel escapes the
-       .site-header stacking context (sticky + z-index:50). Authored inside the
+       .site-header stacking context (sticky + z-index:60). Authored inside the
        header, its z-index would otherwise resolve *within* that context and be
        capped at the header's level, letting the watch-page video player paint
        over it — position:fixed alone does NOT escape an ancestor stacking
