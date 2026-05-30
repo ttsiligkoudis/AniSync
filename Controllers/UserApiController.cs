@@ -42,6 +42,7 @@ namespace AnimeList.Controllers
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
+        private readonly ITraktService _traktService;
         private readonly IConfigStore _configStore;
         private readonly ISyncService _syncService;
         private readonly IAnimeMappingService _mappingService;
@@ -55,6 +56,7 @@ namespace AnimeList.Controllers
             IAnilistService anilistService,
             IKitsuService kitsuService,
             IMalService malService,
+            ITraktService traktService,
             IConfigStore configStore,
             ISyncService syncService,
             IAnimeMappingService mappingService,
@@ -67,6 +69,7 @@ namespace AnimeList.Controllers
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
+            _traktService = traktService;
             _configStore = configStore;
             _syncService = syncService;
             _mappingService = mappingService;
@@ -155,6 +158,10 @@ namespace AnimeList.Controllers
                 {
                     AnimeService.Anilist => await _anilistService.GetAnimeEntryAsync(tokenData, id, season),
                     AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, id, season),
+                    // Trakt: reading a single anime entry back as an AnimeEntry isn't wired up
+                    // until the Trakt list integration lands (Phase 3), so report "not on list"
+                    // rather than calling Kitsu with a Trakt token. The write path still works.
+                    AnimeService.Trakt => null,
                     _ => await _kitsuService.GetAnimeEntryAsync(tokenData, id, season),
                 };
 
@@ -219,6 +226,9 @@ namespace AnimeList.Controllers
                         case AnimeService.MyAnimeList:
                             await _malService.DeleteAnimeEntryAsync(tokenData, id, season);
                             break;
+                        case AnimeService.Trakt:
+                            await _traktService.DeleteEntryAsync(tokenData, id, season);
+                            break;
                         default:
                             await _kitsuService.DeleteAnimeEntryAsync(tokenData, id, season);
                             break;
@@ -240,6 +250,12 @@ namespace AnimeList.Controllers
                     case AnimeService.MyAnimeList:
                         await _malService.SaveAnimeEntryAsync(tokenData, id, season, request.Progress,
                             translatedStatus, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                        break;
+                    case AnimeService.Trakt:
+                        // Trakt takes the canonical status, not the per-service string:
+                        // Planning → watchlist, otherwise progress → history.
+                        await _traktService.SaveEntryAsync(tokenData, id, season, request.Progress,
+                            planning: request.Status == ListStatus.Planning);
                         break;
                     default:
                         await _kitsuService.SaveAnimeEntryAsync(tokenData, id, season, request.Progress,
@@ -289,6 +305,9 @@ namespace AnimeList.Controllers
                         break;
                     case AnimeService.MyAnimeList:
                         await _malService.DeleteAnimeEntryAsync(tokenData, id, season);
+                        break;
+                    case AnimeService.Trakt:
+                        await _traktService.DeleteEntryAsync(tokenData, id, season);
                         break;
                     default:
                         await _kitsuService.DeleteAnimeEntryAsync(tokenData, id, season);
@@ -364,6 +383,9 @@ namespace AnimeList.Controllers
                                 case AnimeService.MyAnimeList:
                                     await _malService.DeleteAnimeEntryAsync(tokenData, entry.Id, entry.Season);
                                     break;
+                                case AnimeService.Trakt:
+                                    await _traktService.DeleteEntryAsync(tokenData, entry.Id, entry.Season);
+                                    break;
                                 default:
                                     await _kitsuService.DeleteAnimeEntryAsync(tokenData, entry.Id, entry.Season);
                                     break;
@@ -385,6 +407,10 @@ namespace AnimeList.Controllers
                             case AnimeService.MyAnimeList:
                                 await _malService.SaveAnimeEntryAsync(tokenData, entry.Id, entry.Season, entry.Progress,
                                     translatedStatus, entry.Score, entry.Notes, entry.RewatchCount, startedAt, finishedAt);
+                                break;
+                            case AnimeService.Trakt:
+                                await _traktService.SaveEntryAsync(tokenData, entry.Id, entry.Season, entry.Progress,
+                                    planning: entry.Status == ListStatus.Planning);
                                 break;
                             default:
                                 await _kitsuService.SaveAnimeEntryAsync(tokenData, entry.Id, entry.Season, entry.Progress,
