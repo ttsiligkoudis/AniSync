@@ -237,7 +237,10 @@ namespace AnimeList.Controllers
         /// </summary>
         private async Task<string> ResolveUidAsync()
         {
-            var (_, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+            // Name both elements rather than discarding the first — the
+            // discard form can't infer the tuple element types here.
+            var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+            _ = tokenData;
             return uid;
         }
 
