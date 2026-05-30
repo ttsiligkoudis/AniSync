@@ -9,6 +9,7 @@ namespace AnimeList.Services
         private readonly IHttpClientFactory _clientFactory;
         private readonly IConfiguration _configuration;
         private readonly IConfigStore _configStore;
+        private readonly IAnimeMappingService _mappingService;
         private readonly ILogger<TraktService> _logger;
 
         private const string ApiBase = "https://api.trakt.tv";
@@ -18,11 +19,13 @@ namespace AnimeList.Services
             IHttpClientFactory clientFactory,
             IConfiguration configuration,
             IConfigStore configStore,
+            IAnimeMappingService mappingService,
             ILogger<TraktService> logger)
         {
             _clientFactory = clientFactory;
             _configuration = configuration;
             _configStore = configStore;
+            _mappingService = mappingService;
             _logger = logger;
         }
 
@@ -258,6 +261,78 @@ namespace AnimeList.Services
             if (string.IsNullOrEmpty(imdbId) || (a != "start" && a != "pause" && a != "stop"))
                 return Task.FromResult(false);
             return PostAuthedAsync(uid, $"/scrobble/{a}", ScrobbleBody(type, imdbId, season, episode, progress));
+        }
+
+        // ── Unified-fan-out writes (token-based) ────────────────────────────
+        // These are the writes the SyncService fan-out + the manage-entry / auto-track
+        // paths use. They take the resolved Trakt TokenData directly (primary or linked)
+        // rather than a uid, since the caller already has the token in hand, and they
+        // map an anime id → its IMDb show id so anime tracked on AniSync lands on the
+        // right Trakt show. Best-effort: a mapping miss (no IMDb id) returns false rather
+        // than throwing, so a fan-out target that can't be mapped is skipped cleanly.
+
+        public async Task<bool> SaveEntryAsync(TokenData trakt, string animeId, int? season, int progress, bool planning)
+        {
+            if (trakt == null || string.IsNullOrEmpty(trakt.access_token)) return false;
+
+            var links = await _mappingService.BuildSourceLinksAsync(animeId);
+            var imdb = links?.ImdbId;
+            if (string.IsNullOrEmpty(imdb)) return false;
+
+            // Planning → the Trakt watchlist (the show, no episode). Any watched status →
+            // add the episode to history so "watched up to N" surfaces in Trakt. Anime are
+            // addressed as Trakt shows; the IMDb-side season (shared listing across cours)
+            // comes from the mapping, falling back to the caller's season then S1.
+            if (planning)
+                return await PostJsonAsync(trakt.access_token, "/sync/watchlist", SyncBody("series", imdb, null, null));
+
+            if (progress > 0)
+            {
+                var imdbSeason = links.ImdbSeason ?? season ?? 1;
+                return await PostJsonAsync(trakt.access_token, "/sync/history", SyncBody("series", imdb, imdbSeason, progress));
+            }
+
+            return false;
+        }
+
+        public async Task<bool> DeleteEntryAsync(TokenData trakt, string animeId, int? season)
+        {
+            if (trakt == null || string.IsNullOrEmpty(trakt.access_token)) return false;
+
+            var links = await _mappingService.BuildSourceLinksAsync(animeId);
+            var imdb = links?.ImdbId;
+            if (string.IsNullOrEmpty(imdb)) return false;
+
+            // Removing an entry maps to dropping it from the watchlist (the closest Trakt
+            // analogue). History removal would need the specific watched-episode ids and is
+            // left out — re-watching just re-adds to history anyway.
+            return await PostJsonAsync(trakt.access_token, "/sync/watchlist/remove", SyncBody("series", imdb, null, null));
+        }
+
+        // POST against an explicit access token (the token-based write path above), as
+        // opposed to PostAuthedAsync which resolves the token from a uid.
+        private async Task<bool> PostJsonAsync(string accessToken, string path, JObject body)
+        {
+            if (string.IsNullOrEmpty(accessToken)) return false;
+            try
+            {
+                var client = _clientFactory.CreateClient();
+                client.Timeout = TimeSpan.FromSeconds(10);
+                using var req = BuildApiRequest(HttpMethod.Post, path, accessToken, body);
+                var resp = await client.SendAsync(req);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var b = await resp.Content.ReadAsStringAsync();
+                    _logger.LogWarning("Trakt POST {Path} returned {Status}: {Body}", path, (int)resp.StatusCode, Truncate(b, 300));
+                    return false;
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Trakt POST {Path} failed.", path);
+                return false;
+            }
         }
 
         // ── Shared HTTP + body helpers ──────────────────────────────────────

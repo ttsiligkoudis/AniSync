@@ -22,18 +22,20 @@ namespace AnimeList.Services
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
+        private readonly ITraktService _traktService;
         private readonly ITokenService _tokenService;
         private readonly IUserListCache _listCache;
         private readonly ILogger<SyncService> _logger;
 
         public SyncService(IConfigStore configStore, IAnilistService anilistService,
-            IKitsuService kitsuService, IMalService malService, ITokenService tokenService,
-            IUserListCache listCache, ILogger<SyncService> logger)
+            IKitsuService kitsuService, IMalService malService, ITraktService traktService,
+            ITokenService tokenService, IUserListCache listCache, ILogger<SyncService> logger)
         {
             _configStore = configStore;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
+            _traktService = traktService;
             _tokenService = tokenService;
             _listCache = listCache;
             _logger = logger;
@@ -48,6 +50,11 @@ namespace AnimeList.Services
                     break;
                 case AnimeService.MyAnimeList:
                     await _malService.SaveAnimeEntryAsync(primary, animeId, season, episode);
+                    break;
+                case AnimeService.Trakt:
+                    // Trakt primary: the episode IS the progress, so add it to Trakt history
+                    // (planning:false). `primary` is the Trakt token.
+                    await _traktService.SaveEntryAsync(primary, animeId, season, episode, planning: false);
                     break;
                 default:
                     await _kitsuService.SaveAnimeEntryAsync(primary, animeId, season, episode);
@@ -255,6 +262,12 @@ namespace AnimeList.Services
                         await _malService.SaveAnimeEntryAsync(target.TokenData, animeId, season, progress,
                             targetStatus, score, notes, rewatchCount, startedAt, finishedAt);
                         break;
+                    case AnimeService.Trakt:
+                        // Trakt takes the canonical ListType directly (no per-service status
+                        // string): Planning → watchlist, anything else → history at `progress`.
+                        await _traktService.SaveEntryAsync(target.TokenData, animeId, season, progress,
+                            planning: sourceListType == ListType.Planning);
+                        break;
                 }
                 // Drop any cached list state we have for this linked tracker so a
                 // dashboard render driven by that account (multi-link union, or the
@@ -297,6 +310,9 @@ namespace AnimeList.Services
                         break;
                     case AnimeService.MyAnimeList:
                         await _malService.DeleteAnimeEntryAsync(target.TokenData, animeId, season);
+                        break;
+                    case AnimeService.Trakt:
+                        await _traktService.DeleteEntryAsync(target.TokenData, animeId, season);
                         break;
                 }
                 _listCache.Invalidate(target.TokenData);

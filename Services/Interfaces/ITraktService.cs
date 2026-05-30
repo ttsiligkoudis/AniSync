@@ -73,5 +73,23 @@ namespace AnimeList.Services.Interfaces
         /// progress (0–100). Trakt auto-marks watched on a "stop" past ~80%.
         /// </summary>
         Task<bool> ScrobbleAsync(string uid, string action, string type, string imdbId, int? season, int? episode, double progress);
+
+        // ── Unified-fan-out writes (token-based) ────────────────────────────
+
+        /// <summary>
+        /// Writes a tracked anime entry to Trakt using the resolved Trakt
+        /// <see cref="TokenData"/> (primary or linked): <paramref name="planning"/> adds the
+        /// show to the watchlist, otherwise a positive <paramref name="progress"/> adds that
+        /// episode to history. Maps the anime id → its IMDb show id internally; returns false
+        /// (no throw) when the id can't be mapped. Used by the SyncService fan-out and the
+        /// manage-entry / auto-track paths.
+        /// </summary>
+        Task<bool> SaveEntryAsync(TokenData trakt, string animeId, int? season, int progress, bool planning);
+
+        /// <summary>
+        /// Removes a tracked anime entry from Trakt (drops it from the watchlist). Maps the
+        /// anime id → its IMDb show id internally; returns false when unmappable.
+        /// </summary>
+        Task<bool> DeleteEntryAsync(TokenData trakt, string animeId, int? season);
     }
 }
