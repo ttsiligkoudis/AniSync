@@ -2937,6 +2937,16 @@ body.modal-open {
     flex-wrap: wrap;
 }
 
+/* Groups the Sign-up + Get-your-API-key links so they sit together on the
+   left while the Save button stays pushed to the right by the row's
+   justify-content: space-between. */
+.debrid-setup-links {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+}
+
 .debrid-apikey-link {
     font-size: 0.8rem;
     color: var(--accent);
