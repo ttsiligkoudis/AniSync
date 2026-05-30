@@ -1052,6 +1052,18 @@ body.drawer-open .drawer-backdrop {
     transform: scale(1) translateY(0);
 }
 
+/* While the bottom-nav "More" menu is open, suppress the floating page
+   controls (the Save-changes bar and the scroll-to-top button) so they don't
+   poke through / sit in front of the menu sheet. The sheet's own z-index
+   (49) is below both, and the scroll-top button lives in the bottom-right
+   corner outside the sheet's rounded shape, so hiding them is cleaner than a
+   z-index bump — the menu reads as the only active surface, and both controls
+   return to their normal scroll/dirty-driven state the moment it closes. */
+body.bottom-nav-more-open .floating-save-bar,
+body.bottom-nav-more-open .scroll-top-btn {
+    display: none;
+}
+
 .bottom-nav-more-sheet[hidden] {
     /* Keep the sheet rendered but invisible so the fade-out / scale-down
        transition runs cleanly when we re-apply [hidden] on close. The JS
