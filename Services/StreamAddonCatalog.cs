@@ -115,14 +115,16 @@ namespace AnimeList.Services
         // in the URL path, with the pipes percent-encoded as %7C exactly as
         // its own /configure page emits them. We bake in a curated default
         // set — sort by seeders, drop cam / screener / 480p junk via
-        // qualityfilter, cap at 5 results per query, and trim the catalog +
-        // download-link noise from the debrid output — then append the debrid
-        // credential as the final segment. No language priority: left neutral
-        // so the default suits any user. The API key isn't escaped: debrid
-        // tokens are URL-safe alphanumerics and Torrentio parses the raw
-        // segment, so escaping would corrupt it.
+        // qualityfilter, cap at 2 results per resolution (Torrentio's `limit`
+        // is a per-quality cap, matching the per-resolution limit we set on
+        // Comet / MediaFusion), and trim the catalog + download-link noise from
+        // the debrid output — then append the debrid credential as the final
+        // segment. No language priority: left neutral so the default suits any
+        // user. The API key isn't escaped: debrid tokens are URL-safe
+        // alphanumerics and Torrentio parses the raw segment, so escaping would
+        // corrupt it.
         private const string TorrentioOptions =
-            "sort=seeders%7Cqualityfilter=480p,scr,cam%7Climit=5%7Cdebridoptions=nocatalog,nodownloadlinks";
+            "sort=seeders%7Cqualityfilter=480p,scr,cam%7Climit=2%7Cdebridoptions=nocatalog,nodownloadlinks";
 
         private static string BuildTorrentio(DebridProvider provider, string key)
             => $"https://torrentio.strem.fun/{TorrentioOptions}%7C{provider.TorrentioKey}={key}/manifest.json";
@@ -142,7 +144,9 @@ namespace AnimeList.Services
         {
             var config = new
             {
-                maxResultsPerResolution = 0,
+                // Cap streams to 2 per resolution (0 would be unlimited),
+                // matching the per-resolution limit on Torrentio / MediaFusion.
+                maxResultsPerResolution = 2,
                 maxSize = 0,
                 cachedOnly = true,
                 sortCachedUncachedTogether = false,
@@ -241,7 +245,8 @@ namespace AnimeList.Services
                 enable_imdb_metadata = false,
                 max_size = "inf",
                 min_size = 0,
-                max_streams_per_resolution = 10,
+                // 2 per resolution, matching the cap set on Torrentio / Comet.
+                max_streams_per_resolution = 2,
                 nudity_filter = new[] { "Severe" },
                 certification_filter = new[] { "Adults+" },
                 language_sorting = new[]
