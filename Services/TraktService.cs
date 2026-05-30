@@ -238,6 +238,45 @@ namespace AnimeList.Services
                 .ToList();
         }
 
+        public async Task<List<TraktListItem>> GetHistoryAsync(string uid)
+        {
+            var arr = await GetAuthedAsync(uid, "/sync/history?extended=full&limit=100") as JArray;
+            if (arr == null) return new();
+
+            var items = new List<TraktListItem>();
+            foreach (var it in arr)
+            {
+                var t = (string)it["type"];
+                if (t == "movie") items.Add(MovieItem(it["movie"]));
+                else if (t == "episode") items.Add(ShowItem(it["show"]));
+            }
+            // History returns one row per watched movie/episode; collapse to one entry per
+            // imdb id (a binged series otherwise floods the grid with the same show).
+            return items
+                .Where(i => !string.IsNullOrEmpty(i.ImdbId))
+                .GroupBy(i => i.ImdbId)
+                .Select(g => g.First())
+                .ToList();
+        }
+
+        public async Task<List<TraktListItem>> GetListAsync(string uid, ListType list, MetaType mediaType)
+        {
+            // Map the AniSync list tabs onto Trakt's three relevant surfaces:
+            // Planning → watchlist, Completed → watched history, Current → in-progress
+            // playback (continue-watching). The remaining anime tabs (Paused / Dropped /
+            // Repeating) have no Trakt analogue, so they come back empty.
+            var items = list switch
+            {
+                ListType.Planning => await GetWatchlistAsync(uid),
+                ListType.Completed => await GetHistoryAsync(uid),
+                ListType.Current => await GetPlaybackAsync(uid),
+                _ => new List<TraktListItem>(),
+            };
+
+            var wantType = mediaType == MetaType.movie ? "movie" : "series";
+            return items.Where(i => i.Type == wantType).ToList();
+        }
+
         // ── Writes ──────────────────────────────────────────────────────────
 
         public Task<bool> AddToWatchlistAsync(string uid, string type, string imdbId) =>

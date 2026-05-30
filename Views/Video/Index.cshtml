@@ -17,7 +17,15 @@
     var browseAction = isMovies ? "/movies" : "/series";
     var here = browseAction;
     var traktFeedback = Context.Request.Query["trakt"].ToString();
+
+    ViewData["MtActive"] = isMovies ? MetaType.movie : MetaType.series;
+    ViewData["MtReturnUrl"] = "/discover";
 }
+
+@* Media-type switch — mirrors Discover / Library so the user can flip between
+   anime and movies / series from any browse surface. Switching persists the
+   preference; DiscoverController routes the chosen type to the right surface. *@
+@await Html.PartialAsync("_MediaTypeToggle")
 
 @* Trakt connection is now managed from the Account page (Trakt is a first-class
    provider — sign in with it or link it there), so the old inline connect/disconnect

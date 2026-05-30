@@ -1,0 +1,23 @@
+@{
+    // Shared Anime / Movies / Series switch. Each chip persists the preference
+    // (POST /Home/SetMediaType, antiforgery-protected) and lands on the supplied
+    // returnUrl. Callers pass the active type + where to land via ViewData:
+    //   ViewData["MtActive"]    — the MetaType to highlight (defaults to anime)
+    //   ViewData["MtReturnUrl"] — local URL to return to after the switch
+    // On Discover / the video browse this is "/discover" (DiscoverController then
+    // redirects movie/series prefs to /movies|/series); on Library it's "/library"
+    // so the user stays put and the pane just re-sources.
+    var mtActive = ViewData["MtActive"] is MetaType a ? a : MetaType.anime;
+    var mtReturnUrl = ViewData["MtReturnUrl"] as string ?? "/discover";
+}
+<div class="media-type-toggle">
+    @foreach (var (mt, mtLabel) in new[] { (MetaType.anime, "Anime"), (MetaType.movie, "Movies"), (MetaType.series, "Series") })
+    {
+        <form method="post" action="/Home/SetMediaType" class="media-type-form">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="mediaType" value="@((int)mt)" />
+            <input type="hidden" name="returnUrl" value="@mtReturnUrl" />
+            <button type="submit" class="label @(mtActive == mt ? "active" : "")">@mtLabel</button>
+        </form>
+    }
+</div>
