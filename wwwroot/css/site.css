@@ -918,7 +918,11 @@ body.drawer-open .drawer-backdrop {
     /* Side insets keep the outer nav cells off a landscape notch / gesture
        bar; bottom inset clears the home indicator (unchanged). */
     padding: 0.4rem env(safe-area-inset-right, 0) calc(0.4rem + env(safe-area-inset-bottom, 0)) env(safe-area-inset-left, 0);
-    z-index: 50;
+    z-index: 60;
+    /* Same fix as .site-header: promote to its own compositing layer so the
+       watch-page player's GPU-composited <video> can't bleed over the nav when
+       the player scrolls down near it. */
+    transform: translateZ(0);
 }
 
 .bottom-nav-item,
@@ -1624,16 +1628,23 @@ body.modal-open {
    so its dark background paints edge-to-edge on wide viewports while the
    inner .site-header-inner re-applies the container's max-width to keep
    the logo / nav / bell aligned with the rest of the page content.
-   z-index sits at the bottom-nav tier (50) — below the slide-in drawer
-   (100) and any modals; above ordinary page content. Sticky + z-index makes
-   this a stacking context, so the notif panel is portaled out to <body> by
-   notifications.js (see .notif-panel) — otherwise its z-index would be capped
-   here and the watch-page video player would paint over it. Reparented, it
-   floats globally at z-index 1200 above the player. */
+   z-index sits just above page content but below the slide-in drawer (100)
+   and any modals (200+). It's also promoted to its own compositing layer via
+   transform: a hardware-composited <video> (the watch-page player) renders in
+   a foreground GPU layer that ignores normal stacking, so it bled over the
+   sticky header — z-index alone can't beat a composited layer, the competing
+   element has to be promoted too. Sticky + z-index makes this a stacking
+   context, so the notif panel is portaled out to <body> by notifications.js
+   (see .notif-panel) — otherwise its z-index would be capped here and the
+   player would paint over it. Reparented, it floats globally at z-index 1200
+   above both the header and the player. */
 .site-header {
     position: sticky;
     top: 0;
-    z-index: 50;
+    z-index: 60;
+    /* Force a compositing layer so the header stacks above the player's
+       GPU-composited <video> layer (see note above), not just in z-order. */
+    transform: translateZ(0);
     width: 100%;
     background: var(--bg);
     padding-top: 0.5rem;
