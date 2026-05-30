@@ -767,6 +767,11 @@
     <script src="~/js/site-search.js" asp-append-version="true" defer></script>
     <script src="~/js/storage-sweep.js" asp-append-version="true" defer></script>
     <script src="~/js/tap-feedback.js" asp-append-version="true" defer></script>
+    @* D-pad / remote navigation for Android TV / Google TV / Fire TV. Self-gates
+       to "TV mode" (UA / capability / ?tv=1) and is inert everywhere else, so it
+       adds nothing for phone / desktop users. Pairs with the .tv-mode focus
+       styling in site.css. *@
+    <script src="~/js/tv-navigation.js" asp-append-version="true" defer></script>
     <script>
         // Universal back button. Lives in the layout so every page
         // has it — primarily a rescue valve for Stremio desktop's in-

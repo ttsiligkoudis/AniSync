@@ -1,0 +1,62 @@
+{
+    "//": "Bubblewrap config for packaging the AniSync PWA as an Android (TWA) APK/AAB.",
+    "//host": "Replace YOUR-DOMAIN.example everywhere below with the real production host that serves the PWA (no scheme, no trailing slash for `host`).",
+    "//build": "After editing, run `bubblewrap init --manifest ./twa/twa-manifest.json` (or `bubblewrap update`) then `bubblewrap build`. See twa/README.md.",
+
+    "packageId": "com.anisync.twa",
+    "host": "YOUR-DOMAIN.example",
+    "name": "AniSync",
+    "launcherName": "AniSync",
+    "display": "standalone",
+    "orientation": "default",
+
+    "themeColor": "#0A0A0A",
+    "themeColorDark": "#0A0A0A",
+    "navigationColor": "#0A0A0A",
+    "navigationColorDark": "#0A0A0A",
+    "navigationDividerColor": "#0A0A0A",
+    "navigationDividerColorDark": "#0A0A0A",
+    "backgroundColor": "#0A0A0A",
+
+    "startUrl": "/",
+    "webManifestUrl": "https://YOUR-DOMAIN.example/manifest.webmanifest",
+    "iconUrl": "https://YOUR-DOMAIN.example/icons/icon-512.png",
+    "maskableIconUrl": "https://YOUR-DOMAIN.example/icons/icon-maskable-512.png",
+
+    "splashScreenFadeOutDuration": 300,
+    "enableNotifications": true,
+    "enableSiteSettingsShortcut": true,
+
+    "shortcuts": [
+        {
+            "name": "Library",
+            "shortName": "Library",
+            "url": "/library",
+            "chosenIconUrl": "https://YOUR-DOMAIN.example/icons/icon-96.png"
+        },
+        {
+            "name": "Discover",
+            "shortName": "Discover",
+            "url": "/discover",
+            "chosenIconUrl": "https://YOUR-DOMAIN.example/icons/icon-96.png"
+        }
+    ],
+
+    "signingKey": {
+        "path": "./android.keystore",
+        "alias": "android"
+    },
+    "appVersionName": "1.0.0",
+    "appVersionCode": 1,
+    "minSdkVersion": 21,
+
+    "fallbackType": "customtabs",
+    "isChromeOSOnly": false,
+    "isMetaQuest": false,
+    "fullScopeUrl": "https://YOUR-DOMAIN.example/",
+    "features": {},
+    "alphaDependencies": {
+        "enabled": false
+    },
+    "generatorApp": "anisync-twa-template"
+}

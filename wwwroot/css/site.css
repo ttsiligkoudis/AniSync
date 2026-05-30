@@ -7821,3 +7821,51 @@ ol.anime-detail-episodes-busy {
     color: var(--accent-light);
     text-decoration: none;
 }
+
+/* ============================================================================
+   TV / D-pad remote mode.
+
+   tv-navigation.js adds `.tv-mode` to <html> on Android TV / Google TV / Fire
+   TV (and ?tv=1 for testing). From a couch the default 2px focus ring is
+   invisible, and focus is moved *programmatically* by the spatial-nav script —
+   so here we target plain :focus (not just :focus-visible) under .tv-mode and
+   paint a thick, high-contrast ring plus a lift, so "where am I" reads from
+   across the room. Scoped entirely under .tv-mode, so phone / desktop are
+   untouched.
+   ========================================================================== */
+.tv-mode :focus {
+    outline: 4px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 6px;
+}
+
+/* Non-form controls (cards, buttons, links) additionally pop forward with a
+   glow + slight scale so the selection is unmistakable at a distance. Form
+   fields keep just the ring — scaling an input mid-edit is distracting. */
+.tv-mode a:focus,
+.tv-mode button:focus,
+.tv-mode [role="button"]:focus,
+.tv-mode .library-card:focus {
+    box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.55), 0 0 24px 6px var(--accent);
+    transform: scale(1.04);
+    transition: transform 120ms ease-out;
+    position: relative;
+    z-index: 5;
+}
+
+/* There's no pointer on a remote — a stuck cursor floating mid-screen reads as
+   "frozen". Hide it everywhere in TV mode. */
+.tv-mode,
+.tv-mode * {
+    cursor: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tv-mode a:focus,
+    .tv-mode button:focus,
+    .tv-mode [role="button"]:focus,
+    .tv-mode .library-card:focus {
+        transform: none;
+        transition: none;
+    }
+}
