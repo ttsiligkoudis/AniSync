@@ -167,23 +167,24 @@ namespace AnimeList.Services
                     exclude = Array.Empty<string>(),
                     preferred = Array.Empty<string>(),
                 },
-                // Best-guess shape for Comet's resolution picker: a dict of
-                // resolution-key → enabled. Restricts to 2160p/1440p/1080p/
-                // 720p (+ Unknown) and drops the SD/LD tiers, mirroring the
-                // selection in Comet's UI. Keys lead with digits so this has
-                // to be a Dictionary, not an anonymous object. If Comet
-                // actually expects a different shape it'll fall back to its
-                // own defaults rather than break the blob.
+                // Comet's `resolutions` is dumped straight from rank-torrent-
+                // name's ResolutionConfig, whose keys are r-PREFIXED (RTN can't
+                // use bare digit-leading field names): r2160p / r1080p / r720p /
+                // r480p / r360p / unknown — there is NO r1440p / r576p / r240p.
+                // Our earlier digit-leading keys (2160p, 1440p, …) matched none
+                // of RTN's fields, so Comet silently fell back to its defaults
+                // and the exclusion never took effect. Enable the high tiers,
+                // drop 480p / 360p, and keep Unknown on (anime releases very
+                // often parse to "unknown", so excluding it would hide real
+                // results). Still a Dictionary so the exact key strings survive
+                // whatever property-naming policy the serializer applies.
                 resolutions = new Dictionary<string, bool>
                 {
-                    ["2160p"] = true,
-                    ["1440p"] = true,
-                    ["1080p"] = true,
-                    ["720p"] = true,
-                    ["576p"] = false,
-                    ["480p"] = false,
-                    ["360p"] = false,
-                    ["240p"] = false,
+                    ["r2160p"] = true,
+                    ["r1080p"] = true,
+                    ["r720p"] = true,
+                    ["r480p"] = false,
+                    ["r360p"] = false,
                     ["unknown"] = true,
                 },
                 options = new
