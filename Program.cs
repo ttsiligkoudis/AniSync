@@ -316,6 +316,7 @@ builder.Services.AddScoped<IKitsuService, KitsuService>();
 builder.Services.AddScoped<IMalService, MalService>();
 builder.Services.AddScoped<ITmdbService, TmdbService>();
 builder.Services.AddScoped<ICinemetaService, CinemetaService>();
+builder.Services.AddScoped<ITraktService, TraktService>();
 builder.Services.AddScoped<IAnilistFallback, AnilistFallback>();
 builder.Services.AddScoped<IAnimeMetaLoader, AnimeMetaLoader>();
 // Singleton so the (manifestUrl-fingerprint, stremio-id) → streams cache

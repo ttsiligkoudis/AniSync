@@ -157,6 +157,9 @@ namespace AnimeList.Services
             // CREATE IF NOT EXISTS doesn't alter existing tables. The
             // try/catch covers the "already exists" race on a fresh DB.
             EnsureColumn(conn, "configs", "stream_addons", "TEXT");
+            // Connected Trakt credentials (video section). Serialized TraktToken
+            // JSON; NULL when the user hasn't connected Trakt.
+            EnsureColumn(conn, "configs", "trakt_token_json", "TEXT");
         }
 
         private static void EnsureColumn(SqliteConnection conn, string table, string column, string typeAndConstraints)
@@ -508,6 +511,54 @@ namespace AnimeList.Services
             cmd.CommandText = "SELECT plex_username FROM configs WHERE uid = $uid LIMIT 1";
             cmd.Parameters.AddWithValue("$uid", uid);
             return await cmd.ExecuteScalarAsync() as string;
+        }
+
+        public async Task<TraktToken> GetTraktTokenAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return null;
+
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT trakt_token_json FROM configs WHERE uid = $uid LIMIT 1";
+            cmd.Parameters.AddWithValue("$uid", uid);
+            var json = await cmd.ExecuteScalarAsync() as string;
+            if (string.IsNullOrEmpty(json)) return null;
+            try { return DeserializeObject<TraktToken>(json); }
+            catch { return null; }
+        }
+
+        public async Task SetTraktTokenAsync(string uid, TraktToken token)
+        {
+            if (string.IsNullOrEmpty(uid)) return;
+
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE configs
+                   SET trakt_token_json = $j, updated_at = $ts
+                 WHERE uid = $uid
+                """;
+            cmd.Parameters.AddWithValue("$j",
+                token == null ? (object)DBNull.Value : SerializeObject(token));
+            cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$uid", uid);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task ClearTraktTokenAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return;
+
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE configs
+                   SET trakt_token_json = NULL, updated_at = $ts
+                 WHERE uid = $uid
+                """;
+            cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$uid", uid);
+            await cmd.ExecuteNonQueryAsync();
         }
 
         public async Task<List<StreamAddon>> GetStreamAddonsAsync(string uid)
