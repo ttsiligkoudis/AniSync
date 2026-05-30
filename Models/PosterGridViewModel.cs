@@ -19,5 +19,11 @@ namespace AnimeList.Models
         // watching" / shelf surfaces on the dashboard. Empty/null defaults to
         // grid in the partial so existing call sites stay intact.
         public string Variant { get; set; }
+
+        // When true, cards link into the video section (/movie/{id} or
+        // /series/{id}, chosen per item from Meta.type) instead of the default
+        // anime detail page (/anime/{id}). Set by the VideoController browse +
+        // pagination paths so Cinemeta cards route to the video detail page.
+        public bool VideoLinks { get; set; }
     }
 }

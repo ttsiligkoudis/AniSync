@@ -20,6 +20,30 @@ namespace AnimeList.Services.Interfaces
         Task<Meta> GetMetaAsync(string imdbId);
 
         /// <summary>
+        /// Fetches one of Cinemeta's discovery catalogs (the "top" popularity
+        /// list) for the video section's browse pages. Unlike
+        /// <see cref="GetMetaAsync"/> this does NOT gate on the anime IMDb-
+        /// mapping table — it talks to Cinemeta's <c>/catalog</c> endpoint
+        /// directly so general movies / series (not just anime) resolve.
+        /// </summary>
+        /// <param name="type">Cinemeta content type — "movie" or "series".</param>
+        /// <param name="genre">Optional genre filter (e.g. "Action"); null for all.</param>
+        /// <param name="search">Optional search query; when set, returns the
+        /// relevance-ranked search results instead of the popularity list.</param>
+        /// <param name="skip">Item offset for pagination (Cinemeta pages in
+        /// blocks of 100). 0 for the first page.</param>
+        Task<List<Meta>> GetVideoCatalogAsync(string type, string genre = null, string search = null, int skip = 0);
+
+        /// <summary>
+        /// Fetches full Cinemeta meta (title / poster / background / genres /
+        /// episodes) for a single title by (type, IMDb id), bypassing the
+        /// anime-mapping gate in <see cref="GetMetaAsync"/>. Backs the video
+        /// section's detail + watch pages. Returns null when Cinemeta has no
+        /// entry for the id.
+        /// </summary>
+        Task<Meta> GetVideoMetaAsync(string type, string imdbId);
+
+        /// <summary>
         /// Fetches Cinemeta's per-episode metadata (titles, thumbnails, synopses, air
         /// dates) for an IMDb-mapped show, optionally sliced to one cour. Used by the
         /// per-service GetAnimeByIdAsync paths so groupSeasons=false catalogs still get
