@@ -2163,6 +2163,11 @@
                 var messages = {
                     decode: "Your browser can't decode this stream — the codec isn't supported. Open it in an external player, or try a different source below.",
                     network: "The stream couldn't be reached. The debrid link may have expired — pick the source again, or try a different one.",
+                    // iOS Safari has no MKV / AVI demuxer at all, so we don't even
+                    // attempt inline playback for those containers — surfaced instantly
+                    // (no 8s black screen) with a nudge toward an MP4 source or an
+                    // external app.
+                    "ios-container": "Safari on iPhone / iPad can't play this file's container (MKV / AVI). Pick an MP4 source below if one's listed, or tap Open externally to watch in VLC, Infuse, or another video app.",
                     timeout: IS_IOS_SAFARI
                         // iPad / iPhone Safari refuses to play most
                         // MKV files outright. Don't pretend it's
@@ -2257,6 +2262,20 @@
                 return false;
             })();
             var STREAM_WATCHDOG_MS = IS_IOS_SAFARI ? 8000 : 25000;
+
+            // iOS Safari can't demux MKV / AVI / etc. at all (any codec), so an inline
+            // <video> attempt just sits black until the watchdog fires. Detect those
+            // containers from the release filename (first line of the stream title,
+            // e.g. "Show.S01E01.1080p.WEB.x264.mkv") so we can fail fast and route the
+            // user to an MP4 source or an external app. Gate on the CONTAINER only —
+            // HEVC-in-MP4 IS fine on iOS (VideoToolbox), so codec doesn't matter here.
+            var IOS_BAD_CONTAINER_RE = /\.(mkv|avi|wmv|flv|m2ts|ts|vob|ogm|divx|rmvb)(?=$|[^a-z0-9])/i;
+            function iosCannotPlayContainer(stream) {
+                if (!IS_IOS_SAFARI) return false;
+                var name = ((stream && (stream.title || stream.name)) || '').split('\n')[0];
+                return IOS_BAD_CONTAINER_RE.test(name);
+            }
+
             var streamWatchdog = null;
             function startStreamWatchdog(stream) {
                 cancelStreamWatchdog();
@@ -2279,6 +2298,15 @@
 
             function playStream(stream) {
                 destroyPlayer();
+
+                // iOS fast-fail: Safari can't demux MKV / AVI inline, so skip the
+                // doomed <video> attempt (which would just show ~8s of black screen
+                // before the watchdog) and surface the guidance + Open-externally
+                // path immediately. MP4 / M4V / MOV sources fall through and play.
+                if (iosCannotPlayContainer(stream)) {
+                    showFallback(stream, 'ios-container');
+                    return;
+                }
 
                 // Scroll the player into view so the user gets a
                 // visible signal that "click → play" happened, even
@@ -3618,6 +3646,21 @@
                         .map(function (s, i) { return { s: s, i: i, hevc: !!s.isHevc }; })
                         .sort(function (a, b) {
                             if (a.hevc !== b.hevc) return a.hevc ? 1 : -1;
+                            return a.i - b.i;
+                        })
+                        .map(function (x) { return x.s; });
+                }
+
+                // iOS Safari: MKV / AVI containers can't play inline at all, so push
+                // them below the MP4 / M4V sources — the default pick at the top is then
+                // one that actually plays in-app. Stable within each group (preserves the
+                // server's quality ranking). No-op off iOS. Runs after the HEVC sort so
+                // container-playability is the primary key on iOS.
+                if (IS_IOS_SAFARI && debrid.length > 1) {
+                    debrid = debrid
+                        .map(function (s, i) { return { s: s, i: i, bad: iosCannotPlayContainer(s) }; })
+                        .sort(function (a, b) {
+                            if (a.bad !== b.bad) return a.bad ? 1 : -1;
                             return a.i - b.i;
                         })
                         .map(function (x) { return x.s; });
