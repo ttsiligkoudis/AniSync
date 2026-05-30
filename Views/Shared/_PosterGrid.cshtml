@@ -23,11 +23,15 @@
     <div class="@wrapperClass">
         @foreach (var meta in Model.Items)
         {
-            // All cards link to the new /anime/{id} detail page regardless of
-            // login state. Anonymous users can browse anime detail; the Edit
-            // button on the detail page only renders for logged-in non-
-            // anonymous users with a resolved UID.
-            var detailHref = $"/anime/{meta.id}";
+            // Cards link to the detail page regardless of login state.
+            // Anonymous users can browse detail; the Edit / Manage Entry
+            // affordances on the detail page only render for logged-in
+            // non-anonymous users with a resolved UID. Video-section grids
+            // (Model.VideoLinks) route to /movie/{id} or /series/{id} per the
+            // item's Cinemeta type; everything else lands on /anime/{id}.
+            var detailHref = Model.VideoLinks
+                ? $"/{(meta.type == MetaType.movie.ToString() ? "movie" : "series")}/{meta.id}"
+                : $"/anime/{meta.id}";
 
             // Build the format · eps · year info row from whichever bits the
             // service surfaced. Joined with a middle-dot separator to match the

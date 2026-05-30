@@ -1324,6 +1324,14 @@ namespace AnimeList.Controllers
         public Video Next { get; set; }
         public string ConfigUid { get; set; }
         public bool AnonymousUser { get; set; }
+
+        // URL base for the page-navigation links (back-to-detail, prev/next
+        // episode). Defaults to "/anime" so the anime watch page is unchanged;
+        // the video section sets "/movie" or "/series" so the same shared
+        // Watch view renders links that stay inside the video URL space. The
+        // stream / subtitle API endpoints the page calls are id-keyed and
+        // remain under /anime/* — they work for any IMDb id regardless.
+        public string BasePath { get; set; } = "/anime";
         // True when the user has at least one Stremio stream addon
         // configured. The watch page renders the inline player only when
         // this is true — External services alone (Crunchyroll / Netflix

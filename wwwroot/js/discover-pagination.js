@@ -29,6 +29,11 @@
     var genre = paginator.getAttribute('data-genre') || '';
     var season = paginator.getAttribute('data-season') || '';
     var tag = paginator.getAttribute('data-tag') || '';
+    // Endpoint + type let the same script drive the video section's browse
+    // (/video/page?type=movie|series). Default to the anime discover endpoint
+    // so existing /discover pages are unaffected (they set neither attribute).
+    var endpoint = paginator.getAttribute('data-endpoint') || '/discover/page';
+    var type = paginator.getAttribute('data-type') || '';
     // Last page already rendered. JS bumps this before each fetch so
     // the next request asks for page+1. The view emits page=0 when
     // the grid only holds skeleton placeholders — first loadMore()
@@ -122,11 +127,12 @@
         if (genre) params += '&genre=' + encodeURIComponent(genre);
         if (season) params += '&season=' + encodeURIComponent(season);
         if (tag) params += '&tag=' + encodeURIComponent(tag);
+        if (type) params += '&type=' + encodeURIComponent(type);
 
         // skipLoader: true bypasses the global full-screen loader-overlay —
         // we render the inline paginator-loader (above) instead so scrolling
         // gets a calm in-flow cue rather than the page-wide scrim.
-        fetch('/discover/page?' + params, {
+        fetch(endpoint + '?' + params, {
             credentials: 'same-origin',
             headers: { 'Accept': 'text/html' },
             skipLoader: true

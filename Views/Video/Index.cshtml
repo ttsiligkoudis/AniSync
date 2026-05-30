@@ -1,0 +1,113 @@
+@model AnimeList.Controllers.VideoBrowseViewModel
+@{
+    ViewData["BodyClass"] = "library-page";
+    var isMovies = Model.Type == "movie";
+    ViewData["ActiveNav"] = isMovies ? "movies" : "series";
+
+    var label = isMovies ? "Movies" : "Series";
+    var hasSearch = !string.IsNullOrEmpty(Model.Search);
+    var hasGenre = !string.IsNullOrEmpty(Model.Genre);
+
+    ViewData["Title"] = hasSearch ? $"Search: {Model.Search} · {label}"
+        : hasGenre ? $"{Model.Genre} · {label}"
+        : $"{label} · AniSync";
+
+    // Browse + search both post back to the active type's route so the form's
+    // hidden state isn't needed — the action URL carries the type.
+    var browseAction = isMovies ? "/movies" : "/series";
+}
+
+@* Combined filter form — search input + genre dropdown + Search button. Same
+   visual language as the /discover filter bar; nothing auto-submits. *@
+<form method="get" action="@browseAction" class="filter-bar" role="search">
+    <input type="search"
+           name="search"
+           value="@Model.Search"
+           placeholder="Search @label.ToLower()…"
+           class="filter-bar-search"
+           autocomplete="off" />
+
+    <select name="genre" class="filter-bar-select" aria-label="Genre">
+        <option value="">All genres</option>
+        @foreach (var g in Model.AvailableGenres)
+        {
+            <option value="@g" selected="@(Model.Genre == g)">@g</option>
+        }
+    </select>
+
+    <button type="submit" class="filter-bar-submit">Search</button>
+
+    @if (hasSearch || hasGenre)
+    {
+        <a class="filter-bar-clear" href="@browseAction">Clear</a>
+    }
+</form>
+
+@{
+    var posterGridModel = new AnimeList.Models.PosterGridViewModel
+    {
+        Items = Model.Items,
+        ConfigUid = Model.ConfigUid,
+        VideoLinks = true,
+        EmptyMessage = hasSearch
+            ? $"No matches for \"{Model.Search}\"."
+            : hasGenre
+                ? $"No {Model.Genre.ToLower()} {label.ToLower()} right now."
+                : $"Couldn't load {label.ToLower()} — try again later.",
+    };
+}
+
+<div id="video-results-pane">
+    @if (hasSearch)
+    {
+        @* Search results aren't paginated here (single Cinemeta relevance
+           list), so render the bare grid server-side. *@
+        @await Html.PartialAsync("_PosterGrid", posterGridModel)
+    }
+    else
+    {
+        @* data-endpoint / data-type route the shared discover-pagination.js at
+           /video/page. data-list="top" satisfies the script's list guard (the
+           server ignores it for video and pages on type). data-page=0 +
+           data-needs-initial-load hand the first fetch to the script, which
+           swaps the skeletons below for real cards. *@
+        <div class="discover-paginator"
+             data-endpoint="/video/page"
+             data-type="@Model.Type"
+             data-list="top"
+             data-genre="@Model.Genre"
+             data-page="@(Model.NeedsClientLoad ? 0 : 1)"
+             data-needs-initial-load="@(Model.NeedsClientLoad ? "true" : null)">
+            @if (Model.NeedsClientLoad)
+            {
+                <div class="library-grid">
+                    @for (var i = 0; i < 12; i++)
+                    {
+                        <div class="library-card library-card-skeleton">
+                            <div class="library-card-poster-wrap">
+                                <div class="library-card-poster skeleton-shimmer"></div>
+                            </div>
+                            <span class="library-card-skeleton-line"></span>
+                            <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                @await Html.PartialAsync("_PosterGrid", posterGridModel)
+            }
+            <div class="paginator-loader" hidden aria-hidden="true">
+                <div class="paginator-loader-spinner"></div>
+            </div>
+            <div class="discover-sentinel" aria-hidden="true"></div>
+        </div>
+    }
+</div>
+
+@section Scripts {
+    @if (!hasSearch)
+    {
+        <script src="~/js/discover-pagination.js" asp-append-version="true" defer></script>
+    }
+}

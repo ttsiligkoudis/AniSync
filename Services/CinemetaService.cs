@@ -12,6 +12,11 @@ namespace AnimeList.Services
         private readonly IAnimeMappingService _animeMapping;
         private readonly ILogger<CinemetaService> _logger;
         private readonly string _cinemetaApi = "https://v3-cinemeta.strem.io/meta"; //"https://cinemeta-live.strem.io/meta";
+        // Root used by the video-section catalog + direct-meta calls. These
+        // intentionally bypass the anime-mapping gate GetAnimeByIdAsync applies
+        // (it returns null for any IMDb id absent from the anime mapping table),
+        // so general movies / series resolve for the /movies + /series browse.
+        private readonly string _cinemetaBase = "https://v3-cinemeta.strem.io";
 
         public CinemetaService(IHttpClientFactory clientFactory, ITokenService tokenService,
             IAnimeMappingService animeMapping, ILogger<CinemetaService> logger)
@@ -155,6 +160,148 @@ namespace AnimeList.Services
             {
                 return null;
             }
+        }
+
+        public async Task<List<Meta>> GetVideoCatalogAsync(string type, string genre = null, string search = null, int skip = 0)
+        {
+            // Only the two Cinemeta content types are valid catalog roots;
+            // anything else is a caller bug — fail closed with an empty list
+            // rather than building a 404-bound URL.
+            if (type != "movie" && type != "series") return [];
+
+            // Cinemeta encodes catalog "extra" props (search / genre / skip) as
+            // a single &-joined path segment before the .json suffix, e.g.
+            // /catalog/movie/top/genre=Action&skip=100.json. search and the
+            // popularity filters are mutually useful; we forward whatever's set.
+            var extras = new List<string>();
+            if (!string.IsNullOrWhiteSpace(search)) extras.Add($"search={Uri.EscapeDataString(search.Trim())}");
+            if (!string.IsNullOrWhiteSpace(genre)) extras.Add($"genre={Uri.EscapeDataString(genre.Trim())}");
+            if (skip > 0) extras.Add($"skip={skip}");
+            var extraSeg = extras.Count > 0 ? "/" + string.Join("&", extras) : string.Empty;
+            var url = $"{_cinemetaBase}/catalog/{type}/top{extraSeg}.json";
+
+            try
+            {
+                var client = _clientFactory.CreateClient();
+                client.Timeout = TimeSpan.FromSeconds(8);
+
+                var response = await client.GetAsync(url);
+                if (!response.IsSuccessStatusCode) return [];
+
+                var content = await response.Content.ReadAsStringAsync();
+                var result = JObject.Load(new JsonTextReader(new StringReader(content))
+                {
+                    DateParseHandling = DateParseHandling.None,
+                });
+
+                if (result["metas"] is not JArray metas) return [];
+
+                return metas
+                    .OfType<JObject>()
+                    .Select(m => BuildVideoMeta(m, type))
+                    .Where(m => m != null && !string.IsNullOrEmpty(m.id))
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Cinemeta catalog fetch failed for {Url}.", url);
+                return [];
+            }
+        }
+
+        public async Task<Meta> GetVideoMetaAsync(string type, string imdbId)
+        {
+            if (string.IsNullOrEmpty(imdbId)) return null;
+            if (type != "movie" && type != "series") return null;
+
+            try
+            {
+                var client = _clientFactory.CreateClient();
+                client.Timeout = TimeSpan.FromSeconds(8);
+
+                var response = await client.GetAsync($"{_cinemetaBase}/meta/{type}/{imdbId}.json");
+                if (!response.IsSuccessStatusCode) return null;
+
+                var content = await response.Content.ReadAsStringAsync();
+                var result = JObject.Load(new JsonTextReader(new StringReader(content))
+                {
+                    DateParseHandling = DateParseHandling.None,
+                });
+
+                if (result["meta"] is not JObject m) return null;
+                return BuildVideoMeta(m, type, includeVideos: true);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Cinemeta meta fetch failed for {Type}/{Id}.", type, imdbId);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Parses a Cinemeta meta JSON node into the in-app <see cref="Meta"/>.
+        /// Shared by the catalog (slim card data) and direct-meta (full, with
+        /// videos) paths. Mirrors the field handling in GetMetaAsync — kept as
+        /// a separate parser so the anime-mapping-gated GetMetaAsync stays
+        /// untouched. <paramref name="includeVideos"/> is false for catalog
+        /// items (the list response carries no per-episode data anyway).
+        /// </summary>
+        private static Meta BuildVideoMeta(JObject m, string fallbackType, bool includeVideos = false)
+        {
+            if (m == null) return null;
+
+            var description = (string)m["description"] ?? string.Empty;
+            var meta = new Meta(description)
+            {
+                id = (string)m["id"],
+                name = (string)m["name"],
+                poster = (string)m["poster"],
+                background = (string)m["background"],
+                type = (string)m["type"] ?? fallbackType,
+            };
+
+            // Cinemeta hands imdbRating back as a string ("8.4"). 0/empty means
+            // "no rating" — surface null so the card's score badge stays clean.
+            var ratingRaw = (string)m["imdbRating"];
+            if (!string.IsNullOrEmpty(ratingRaw)
+                && double.TryParse(ratingRaw, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var rating)
+                && rating > 0)
+            {
+                meta.score = Math.Round(rating, 1);
+            }
+
+            // releaseInfo shapes: "2020", "2020-", "2020-2024" — the four-digit
+            // prefix is always the start year.
+            var releaseInfo = (string)m["releaseInfo"];
+            if (!string.IsNullOrEmpty(releaseInfo) && releaseInfo.Length >= 4
+                && int.TryParse(releaseInfo[..4], out var year))
+            {
+                meta.year = year;
+            }
+
+            // Runtime is "2h 28min" / "148 min" / null — take the leading int so
+            // the info row's runtime suffix renders when known.
+            var runtime = (string)m["runtime"];
+            if (!string.IsNullOrEmpty(runtime))
+            {
+                var digits = new string(runtime.TakeWhile(char.IsDigit).ToArray());
+                if (int.TryParse(digits, out var mins) && mins > 0) meta.avgDuration = mins;
+            }
+
+            if (m["genres"] is JArray genres)
+            {
+                meta.genres = genres.Select(t => (string)t)
+                    .Where(s => !string.IsNullOrEmpty(s))
+                    .ToList();
+            }
+
+            if (includeVideos && m["videos"] is JArray)
+            {
+                meta.videos = SafeGet<List<Video>>(m, "videos") ?? [];
+            }
+
+            return meta;
         }
 
         public async Task<List<Video>> GetEpisodesAsync(string imdbId, int? cinemetaSeason)
