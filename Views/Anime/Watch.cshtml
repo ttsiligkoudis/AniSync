@@ -183,20 +183,9 @@
     {
         <span class="watch-nav-btn watch-nav-btn-disabled" aria-hidden="true"></span>
     }
-    @* Mark-watched → Trakt history. Video section only; no-ops with a toast
-       when Trakt isn't connected. Scrobble also auto-marks at ≥80%, but this
-       is the explicit "I finished this" affordance. *@
-    @if (basePath == "/movie" || basePath == "/series")
-    {
-        var traktKind = basePath == "/movie" ? "movie" : "series";
-        var traktSeason = Model.Current.season > 0 ? Model.Current.season : 1;
-        <button type="button" class="watch-nav-btn" id="traktMarkWatched"
-                data-type="@traktKind" data-id="@a.id"
-                data-season="@traktSeason" data-episode="@Model.Current.episode">
-            <span class="watch-nav-direction">Trakt</span>
-            <span class="watch-nav-label">Mark watched</span>
-        </button>
-    }
+    @* Video (movie / series) now auto-tracks to Trakt history via the shared
+       70 %-progress mark-watched hook below — no separate manual button or live
+       scrobble (those routed through the retired /api/trakt/* endpoints). *@
     @if (Model.Next != null)
     {
         <a class="watch-nav-btn watch-nav-next" href="@NextHref()">
@@ -210,45 +199,6 @@
     }
 </nav>
 
-@if (basePath == "/movie" || basePath == "/series")
-{
-    <script>
-        (function () {
-            var btn = document.getElementById('traktMarkWatched');
-            if (!btn) return;
-            function toast(m) {
-                if (window.AniSyncToast && window.AniSyncToast.show) window.AniSyncToast.show(m);
-            }
-            btn.addEventListener('click', function () {
-                btn.disabled = true;
-                var isSeries = btn.dataset.type === 'series';
-                fetch('/api/trakt/history', {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                    body: JSON.stringify({
-                        type: btn.dataset.type,
-                        id: btn.dataset.id,
-                        season: isSeries ? parseInt(btn.dataset.season, 10) : null,
-                        episode: isSeries ? parseInt(btn.dataset.episode, 10) : null
-                    })
-                })
-                    .then(function (r) { return r.json(); })
-                    .then(function (d) {
-                        if (d && d.success) {
-                            btn.querySelector('.watch-nav-label').textContent = 'Watched ✓';
-                            toast('Marked watched on Trakt');
-                        } else if (d && d.reason === 'not_connected') {
-                            toast('Connect Trakt first'); btn.disabled = false;
-                        } else {
-                            toast('Couldn’t mark watched'); btn.disabled = false;
-                        }
-                    })
-                    .catch(function () { toast('Network error'); btn.disabled = false; });
-            });
-        })();
-    </script>
-}
 
 <section class="watch-sources" id="watchSources">
     <div class="watch-section-header">
@@ -660,6 +610,10 @@
                             id: animeId,
                             season: hasSeasons ? season : null,
                             episode: episode,
+                            // "movie" / "series" for the video watch page (animeId is an
+                            // IMDb id) → server routes the mark to Trakt history; null on
+                            // the anime watch page → the normal tracker dispatch.
+                            type: traktType || null,
                             // Optional: when provided, the server
                             // probes the URL with Range 0-0 and
                             // refuses to mark if the response looks
@@ -2893,55 +2847,11 @@
                 // last frame.
                 art.on('video:ended', clearResumePosition);
 
-                // ── Trakt scrobble (video section only) ───────────────
-                // Mirrors Trakt's start/pause/stop model: start on play,
-                // pause on pause, stop on finish / page-away (Trakt files
-                // a sub-80% stop as paused playback → continue-watching,
-                // and ≥80% as watched). animeId is the IMDb id for video.
-                // No-op on the anime watch page (traktType empty).
-                if (traktType === 'movie' || traktType === 'series') {
-                    var _scrobbleLast = null;
-                    var _scrobblePct = function () {
-                        var v = art && art.video;
-                        if (!v || !v.duration || !isFinite(v.duration) || v.duration <= 0) return 0;
-                        return Math.min(100, Math.max(0, (v.currentTime / v.duration) * 100));
-                    };
-                    var _scrobble = function (action) {
-                        fetch('/api/trakt/scrobble', {
-                            method: 'POST',
-                            credentials: 'same-origin',
-                            keepalive: true,
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'X-Requested-With': 'XMLHttpRequest'
-                            },
-                            body: JSON.stringify({
-                                type: traktType,
-                                id: animeId,
-                                season: traktType === 'series' ? season : null,
-                                episode: traktType === 'series' ? episode : null,
-                                progress: _scrobblePct(),
-                                action: action
-                            })
-                        }).catch(function () { });
-                    };
-                    art.on('video:playing', function () {
-                        if (_scrobbleLast !== 'start') { _scrobbleLast = 'start'; _scrobble('start'); }
-                    });
-                    art.on('video:pause', function () {
-                        if (_scrobbleLast === 'start') { _scrobbleLast = 'pause'; _scrobble('pause'); }
-                    });
-                    art.on('video:ended', function () {
-                        _scrobbleLast = 'stop'; _scrobble('stop');
-                    });
-                    // Leaving the page mid-playback files a stop with the
-                    // current position so the title lands in continue-watching.
-                    window.addEventListener('pagehide', function () {
-                        if (_scrobbleLast === 'start' || _scrobbleLast === 'pause') {
-                            _scrobbleLast = 'stop'; _scrobble('stop');
-                        }
-                    });
-                }
+                // Trakt tracking for video now rides the shared 70 %-progress
+                // mark-watched hook (→ Trakt history), the same auto-track the anime
+                // path uses — the old live start/pause/stop scrobble (which populated
+                // Trakt's in-progress playback for continue-watching) went out with the
+                // /api/trakt/* endpoints.
 
                 // Move the skip-intro overlay button into ArtPlayer's
                 // own .art-video-player container ($player) rather

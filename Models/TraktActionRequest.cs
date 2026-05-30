@@ -1,9 +1,9 @@
 namespace AnimeList.Models
 {
     /// <summary>
-    /// Body for the cookie-session Trakt write endpoints (history / watchlist /
-    /// scrobble). The video section keys everything off the IMDb id + type, with
-    /// optional season/episode for series and progress for scrobble.
+    /// Body for the cookie-session Trakt watchlist toggle (/anime/trakt-watchlist).
+    /// Keys off the IMDb id + type; action is add|remove. (History now rides the
+    /// unified /anime/mark-watched auto-track; live scrobble was retired.)
     /// </summary>
     public class TraktActionRequest
     {
@@ -11,7 +11,6 @@ namespace AnimeList.Models
         public string id { get; set; }       // IMDb tt id
         public int? season { get; set; }
         public int? episode { get; set; }
-        public double? progress { get; set; }
-        public string action { get; set; }   // watchlist: add|remove · scrobble: start|pause|stop
+        public string action { get; set; }   // watchlist: add|remove
     }
 }

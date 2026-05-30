@@ -83,12 +83,6 @@ namespace AnimeList.Services.Interfaces
         /// </summary>
         Task<bool> AddToHistoryAsync(string uid, string type, string imdbId, int? season, int? episode);
 
-        /// <summary>
-        /// Sends a scrobble action ("start" | "pause" | "stop") with playback
-        /// progress (0–100). Trakt auto-marks watched on a "stop" past ~80%.
-        /// </summary>
-        Task<bool> ScrobbleAsync(string uid, string action, string type, string imdbId, int? season, int? episode, double progress);
-
         // ── Unified-fan-out writes (token-based) ────────────────────────────
 
         /// <summary>
