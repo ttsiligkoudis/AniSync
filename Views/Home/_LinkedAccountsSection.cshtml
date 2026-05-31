@@ -17,10 +17,12 @@
    Link / Unlink / Re-link. *@
 @if (Model.IsLoggedIn && !Model.AnonymousUser)
 {
-    // Which providers are offered as sync targets depends on the media type: the anime
-    // trackers (Kitsu / AniList / MAL) only track anime, while Trakt tracks anime, movies
-    // and series. So anime → all four; movies / series → Trakt only.
-    var allServices = Model.PreferredMediaType == MetaType.anime
+    // Which providers are offered as sync targets depends on the enabled modes
+    // (the chooser-modal cookie): the anime trackers (Kitsu / AniList / MAL) only
+    // track anime, while Trakt tracks anime, movies and series. So anime enabled
+    // → all four; video-only → Trakt only. Default to all when nothing's chosen.
+    var enabledModes = AnimeList.Services.MediaTypePreference.EnabledFromCookie(Context);
+    var allServices = enabledModes.Count == 0 || enabledModes.Contains(MetaType.anime)
         ? new[] { AnimeService.Kitsu, AnimeService.Anilist, AnimeService.MyAnimeList, AnimeService.Trakt }
         : new[] { AnimeService.Trakt };
 
