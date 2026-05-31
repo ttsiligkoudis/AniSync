@@ -7924,7 +7924,7 @@ ol.anime-detail-episodes-busy {
     transform: translate(-50%, -50%);
     width: min(92vw, 460px);
     max-height: 90vh;
-    overflow-y: auto;
+    max-height: 90dvh;
     z-index: 251;
 }
 /* Lock background scroll while the chooser is open. */
@@ -7933,11 +7933,16 @@ body.mt-modal-open {
 }
 .mt-modal-card {
     position: relative;
+    display: flex;
+    flex-direction: column;
+    max-height: 90vh;
+    max-height: 90dvh;
     background: var(--surface);
     border: 1px solid var(--overlay-10);
     border-radius: 1rem;
     padding: 1.5rem 1.4rem 1.6rem;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
 }
 .mt-modal-close {
     position: absolute;
@@ -7973,6 +7978,12 @@ body.mt-modal-open {
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
+    /* Scroll the options if they'd push the modal past the viewport. */
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
 }
 .mt-modal-option {
     display: flex;
@@ -8145,18 +8156,25 @@ body.mt-modal-open {
     left: 50%;
     transform: translate(-50%, -50%);
     width: min(94vw, 480px);
+    /* Never taller than the viewport; the list inside scrolls instead. dvh
+       tracks mobile browser chrome (address bar) better than vh. */
     max-height: 90vh;
-    overflow-y: auto;
+    max-height: 90dvh;
     z-index: 251;
 }
 body.dash-modal-open { overflow: hidden; }
 .dash-modal-card {
     position: relative;
+    display: flex;
+    flex-direction: column;
+    max-height: 90vh;
+    max-height: 90dvh;
     background: var(--surface);
     border: 1px solid var(--overlay-10);
     border-radius: 1rem;
     padding: 1.5rem 1.4rem 1.4rem;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
 }
 .dash-modal-close {
     position: absolute;
@@ -8177,23 +8195,32 @@ body.dash-modal-open { overflow: hidden; }
 }
 .dash-modal-close:hover { color: var(--text-strong); background: var(--overlay-08); }
 .dash-modal-title {
+    flex: 0 0 auto;
     margin: 0 0 0.3rem;
     font-size: var(--text-xl);
     font-weight: 700;
     color: var(--text-strong);
 }
 .dash-modal-subtitle {
+    flex: 0 0 auto;
     margin: 0 0 1rem;
     font-size: var(--text-sm);
     color: var(--text-muted);
 }
 .dash-modal-list {
     list-style: none;
-    margin: 0;
-    padding: 0;
+    margin: 0 -0.4rem;          /* offset padding so the scrollbar sits at the edge */
+    padding: 0.1rem 0.4rem;
     display: flex;
     flex-direction: column;
     gap: 0.45rem;
+    /* The internal scroller: only the section list scrolls, so the title +
+       footer stay pinned and the modal can't outgrow the screen. */
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
 }
 .dash-modal-row {
     display: flex;
@@ -8250,6 +8277,7 @@ body.dash-modal-open { overflow: hidden; }
     color: var(--on-accent, #fff);
 }
 .dash-modal-footer {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: space-between;
