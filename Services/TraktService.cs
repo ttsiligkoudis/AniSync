@@ -367,27 +367,42 @@ namespace AnimeList.Services
             switch ((status ?? string.Empty).ToLowerInvariant())
             {
                 case "planning":
+                    // A lingering movie playback would otherwise still read as
+                    // "watching" (playback outranks watchlist), so clear it.
+                    if (type == "movie") await ClearMoviePlaybackAsync(uid, imdbId);
                     await AddToWatchlistAsync(uid, type, imdbId);
                     break;
 
                 case "watching":
                     // Moving into "watching" means it's no longer just queued.
                     await RemoveFromWatchlistAsync(uid, type, imdbId);
-                    if (type != "movie" && watchedEpisodes is { Count: > 0 })
+                    if (type == "movie")
+                    {
+                        // A movie's "watching" state lives in Trakt playback.
+                        // Seed one at the midpoint only when none exists, so a
+                        // real resume position the user already has isn't reset.
+                        if (await FindMoviePlaybackIdAsync(uid, imdbId) == null)
+                            await PauseScrobbleAsync(uid, "movie", imdbId, null, null, 50);
+                    }
+                    else if (watchedEpisodes is { Count: > 0 })
                         await PostAuthedAsync(uid, "/sync/history", HistoryEpisodesBody(imdbId, watchedEpisodes));
                     break;
 
                 case "completed":
                     await RemoveFromWatchlistAsync(uid, type, imdbId);
                     if (type == "movie")
+                    {
+                        await ClearMoviePlaybackAsync(uid, imdbId);   // no longer in progress
                         await PostAuthedAsync(uid, "/sync/history", SyncBody("movie", imdbId, null, null));
+                    }
                     else if (watchedEpisodes is { Count: > 0 })
                         await PostAuthedAsync(uid, "/sync/history", HistoryEpisodesBody(imdbId, watchedEpisodes));
                     break;
 
-                default: // "" → None: drop from watchlist. History isn't unwound
-                         // (Trakt has no clean "unwatch everything" and the user
-                         // can manage history on Trakt directly).
+                default: // "" → None: drop from watchlist + any in-progress
+                         // playback. History isn't unwound (Trakt has no clean
+                         // "unwatch everything"; the user can do that on Trakt).
+                    if (type == "movie") await ClearMoviePlaybackAsync(uid, imdbId);
                     await RemoveFromWatchlistAsync(uid, type, imdbId);
                     break;
             }
@@ -527,6 +542,53 @@ namespace AnimeList.Services
                 _logger.LogWarning(ex, "Trakt POST {Path} failed.", path);
                 return false;
             }
+        }
+
+        private async Task<bool> DeleteAuthedAsync(string uid, string path)
+        {
+            var token = await GetValidTokenAsync(uid);
+            if (token == null) return false;
+            try
+            {
+                var client = _clientFactory.CreateClient();
+                client.Timeout = TimeSpan.FromSeconds(10);
+                using var req = BuildApiRequest(HttpMethod.Delete, path, token.access_token);
+                var resp = await client.SendAsync(req);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Trakt DELETE {Path} returned {Status}.", path, (int)resp.StatusCode);
+                    return false;
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Trakt DELETE {Path} failed.", path);
+                return false;
+            }
+        }
+
+        // Trakt playback ("continue watching") id for a movie, or null when the
+        // movie has no in-progress playback. Needed because /sync/playback/:id
+        // deletion keys off the playback id, not the movie id.
+        private async Task<long?> FindMoviePlaybackIdAsync(string uid, string imdbId)
+        {
+            var arr = await GetAuthedAsync(uid, "/sync/playback?extended=full") as JArray;
+            if (arr == null) return null;
+            foreach (var it in arr)
+            {
+                if ((string)it["type"] != "movie") continue;
+                if (string.Equals((string)it["movie"]?["ids"]?["imdb"], imdbId, StringComparison.OrdinalIgnoreCase))
+                    return (long?)it["id"];
+            }
+            return null;
+        }
+
+        // Drops a movie's in-progress playback so it stops reading as "watching".
+        private async Task ClearMoviePlaybackAsync(string uid, string imdbId)
+        {
+            var id = await FindMoviePlaybackIdAsync(uid, imdbId);
+            if (id != null) await DeleteAuthedAsync(uid, $"/sync/playback/{id}");
         }
 
         private static TraktListItem MovieItem(JToken m) => new()
