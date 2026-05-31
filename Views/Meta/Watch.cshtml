@@ -672,7 +672,8 @@
             // hook owns that tail). sendBeacon survives the unload; the keepalive
             // fetch is the fallback. Fire-and-forget — never blocks the leave.
             function reportTraktProgress() {
-                if (!traktType || episodeMarkedAsWatched) return;
+                if (!traktType) { return; }
+                if (episodeMarkedAsWatched) { return; }
                 var v = art && art.video;
                 if (!v || !isFinite(v.duration) || v.duration <= 0) return;
                 var pct = (v.currentTime || 0) / v.duration * 100;
@@ -684,10 +685,13 @@
                     episode: episode,
                     progress: Math.round(pct * 10) / 10
                 });
-                try {
-                    var blob = new Blob([payload], { type: 'application/json' });
-                    if (navigator.sendBeacon && navigator.sendBeacon('/meta/scrobble-progress', blob)) return;
-                } catch (_) { /* fall through to fetch */ }
+                try { console.info('[AniSync] trakt continue-watching beacon', payload); } catch (_) {}
+                // keepalive fetch is the primary transport: it's reliable on both
+                // visibilitychange (page still alive) and pagehide (unload) for
+                // small bodies, and — unlike navigator.sendBeacon — isn't silently
+                // no-op'd by Brave's tracker shield. sendBeacon is a best-effort
+                // secondary for the rare browser without fetch-keepalive.
+                var sent = false;
                 try {
                     fetch('/meta/scrobble-progress', {
                         method: 'POST',
@@ -697,7 +701,14 @@
                         keepalive: true,
                         skipLoader: true,
                     });
-                } catch (_) { /* best-effort */ }
+                    sent = true;
+                } catch (_) { /* fall through to beacon */ }
+                if (!sent) {
+                    try {
+                        var blob = new Blob([payload], { type: 'application/json' });
+                        if (navigator.sendBeacon) navigator.sendBeacon('/meta/scrobble-progress', blob);
+                    } catch (_) { /* best-effort */ }
+                }
             }
 
             var sourcesBody = document.getElementById('watchSourcesBody');
