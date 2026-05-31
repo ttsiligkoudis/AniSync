@@ -233,10 +233,23 @@ namespace AnimeList.Controllers
 
             var uid = await ResolveUidAsync();
             var traktToken = string.IsNullOrEmpty(uid) ? null : await _configStore.GetTraktTokenAsync(uid);
+            var traktConnected = traktToken?.Connected == true;
 
             var imdbId = meta.id != null && meta.id.StartsWith(Utils.imdbPrefix, StringComparison.Ordinal)
                 ? meta.id
                 : null;
+
+            // Pre-resolve watchlist membership so the toggle renders in the right
+            // state on load. One list fetch (movies + series) we filter by id +
+            // type; only when connected and we have an IMDb id to match on.
+            var inWatchlist = false;
+            if (traktConnected && !string.IsNullOrEmpty(imdbId))
+            {
+                var watchlist = await _traktService.GetWatchlistAsync(uid);
+                inWatchlist = watchlist.Any(i =>
+                    i.Type == cinemetaType &&
+                    string.Equals(i.ImdbId, imdbId, StringComparison.OrdinalIgnoreCase));
+            }
 
             return View("Detail", new AnimeDetailViewModel
             {
@@ -245,7 +258,8 @@ namespace AnimeList.Controllers
                 BasePath = "/meta",
                 AnonymousUser = string.IsNullOrEmpty(uid),
                 ConfigUid = uid,
-                TraktConnected = traktToken?.Connected == true,
+                TraktConnected = traktConnected,
+                TraktInWatchlist = inWatchlist,
                 SourceLinks = new AnimeSourceLinks { ImdbId = imdbId },
             });
         }
@@ -1487,6 +1501,10 @@ namespace AnimeList.Controllers
         // connected, so the hero can show a Trakt watchlist toggle in place of
         // the anime-tracker Manage Entry pill. Ignored on the anime path.
         public bool TraktConnected { get; set; }
+        // True when this movie / series is already on the viewer's Trakt
+        // watchlist, so the toggle renders in its "✓ In Watchlist" state on load
+        // instead of always starting at "＋ Watchlist". Video path only.
+        public bool TraktInWatchlist { get; set; }
 
         // User's tracking state for this entry — null for anonymous visitors,
         // not-yet-tracked entries, or transient fetch failures (the hero
