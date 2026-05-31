@@ -9,7 +9,11 @@
     //   ViewData["MtReturnUrl"] — local URL to return to after the switch
     var mtActive = ViewData["MtActive"] is MetaType a ? a : MetaType.anime;
     var mtReturnUrl = ViewData["MtReturnUrl"] as string ?? "/discover";
-    var mtEnabled = AnimeList.Services.MediaTypePreference.EnabledForToggle(Context, mtActive);
+    // Controllers resolve the enabled set (account-backed for logged-in users)
+    // and pass it via ViewData; fall back to the cookie when absent.
+    var mtEnabledSet = ViewData["MtEnabled"] as List<MetaType>
+        ?? AnimeList.Services.MediaTypePreference.EnabledFromCookie(Context);
+    var mtEnabled = AnimeList.Services.MediaTypePreference.ForToggle(mtEnabledSet, mtActive);
     var mtLabels = new Dictionary<MetaType, string>
     {
         [MetaType.anime] = "Anime",

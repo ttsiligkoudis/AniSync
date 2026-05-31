@@ -61,6 +61,13 @@ namespace AnimeList.Services
                     -- config (keys, encrypted blobs, indexer toggles)
                     -- lives inside each manifest URL now.
                     stream_addons     TEXT,
+                    -- Web-UI preferences (not part of the Stremio addon config):
+                    -- enabled_media_types is the comma-separated mode set from the
+                    -- chooser modal (e.g. "anime,movie,series"); dashboard_layout
+                    -- is the JSON section order + visibility. Persisted so they
+                    -- follow the account across devices alongside localStorage.
+                    enabled_media_types TEXT,
+                    dashboard_layout    TEXT,
                     created_at        INTEGER NOT NULL,
                     updated_at        INTEGER NOT NULL
                 );
@@ -164,6 +171,9 @@ namespace AnimeList.Services
             // `trakt_token_json` column (a separate Trakt silo) is no longer read or
             // written; it's left orphaned on databases that predate this change.
             EnsureColumn(conn, "configs", "trakt_user_key", "TEXT");
+            // Web-UI preference columns (see CREATE TABLE comment).
+            EnsureColumn(conn, "configs", "enabled_media_types", "TEXT");
+            EnsureColumn(conn, "configs", "dashboard_layout", "TEXT");
 
             // Created after EnsureColumn so it works on databases that predate the
             // trakt_user_key column (the CREATE TABLE block above won't add a column to
@@ -568,6 +578,45 @@ namespace AnimeList.Services
                 expiration_date = trakt.expiration_date,
                 username = trakt.username,
             };
+        }
+
+        public async Task<WebSettings> GetWebSettingsAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return new WebSettings();
+
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT enabled_media_types, dashboard_layout FROM configs WHERE uid = $uid LIMIT 1";
+            cmd.Parameters.AddWithValue("$uid", uid);
+            using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+                return new WebSettings
+                {
+                    EnabledMediaTypes = r.IsDBNull(0) ? null : r.GetString(0),
+                    DashboardLayout = r.IsDBNull(1) ? null : r.GetString(1),
+                };
+            return new WebSettings();
+        }
+
+        public Task SetEnabledMediaTypesAsync(string uid, string csv) =>
+            SetWebSettingColumnAsync(uid, "enabled_media_types", csv);
+
+        public Task SetDashboardLayoutAsync(string uid, string json) =>
+            SetWebSettingColumnAsync(uid, "dashboard_layout", json);
+
+        // Shared single-column update for the web-UI preference columns. The
+        // column name is a fixed internal literal (never user input), so the
+        // interpolation is safe.
+        private async Task SetWebSettingColumnAsync(string uid, string column, string value)
+        {
+            if (string.IsNullOrEmpty(uid)) return;
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"UPDATE configs SET {column} = $v, updated_at = $ts WHERE uid = $uid";
+            cmd.Parameters.AddWithValue("$v", (object)value ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$uid", uid);
+            await cmd.ExecuteNonQueryAsync();
         }
 
         public async Task<List<StreamAddon>> GetStreamAddonsAsync(string uid)

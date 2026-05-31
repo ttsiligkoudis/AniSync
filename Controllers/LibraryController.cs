@@ -86,7 +86,9 @@ namespace AnimeList.Controllers
             // Media-type preference decides what the library shows: anime (the user's
             // merged tracker lists) or movies / series (their Trakt lists). The tab strip
             // narrows for video since the anime-only statuses don't map onto Trakt.
-            var mediaType = MediaTypePreference.ResolveActive(HttpContext);
+            var enabledModes = await MediaTypePreference.ResolveEnabledAsync(HttpContext, uid, _configStore);
+            var mediaType = MediaTypePreference.ResolveActive(HttpContext, enabledModes);
+            ViewData["MtEnabled"] = enabledModes;   // drives the media-type toggle's chips
             var isVideo = mediaType != MetaType.anime;
             var tabs = isVideo ? VideoListTypes : UserListTypes;
 
@@ -171,7 +173,7 @@ namespace AnimeList.Controllers
 
             // Movies / series come from Trakt (watchlist / history / playback) hydrated to
             // posters via Cinemeta, rather than the anime merged-list path below.
-            var mediaType = MediaTypePreference.ResolveActive(HttpContext);
+            var mediaType = await MediaTypePreference.ResolveActiveAsync(HttpContext, uid, _configStore);
             if (mediaType != MetaType.anime)
                 return await VideoPaneAsync(uid, activeList, mediaType, search, hasSearch);
 

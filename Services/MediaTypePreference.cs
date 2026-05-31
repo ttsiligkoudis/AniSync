@@ -1,29 +1,29 @@
+using AnimeList.Models;
+using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Http;
 
 namespace AnimeList.Services
 {
     /// <summary>
     /// Source of truth for the web UI's media-type modes (anime / movies /
-    /// series). Entirely COOKIE-BACKED — there is no per-user DB setting; the
-    /// chooser modal writes localStorage + cookies and media-type.js keeps the
-    /// cookies in sync, so server-side rendering honours the choice for anonymous
-    /// and logged-in visitors alike.
+    /// series). Two related preferences:
+    ///   • ENABLED SET — the modes the user multi-selected in the chooser modal.
+    ///     The dashboard combines shelves across them; the Discover / Library
+    ///     toggle only offers these.
+    ///   • ACTIVE mode — the single mode Discover / Library currently render.
+    ///     Always clamped into the enabled set.
     ///
-    /// Two related preferences:
-    ///   • ENABLED SET (<see cref="EnabledCookieName"/>) — the modes the user
-    ///     multi-selected. The dashboard combines shelves across them; the
-    ///     Discover / Library toggle only offers these.
-    ///   • ACTIVE mode (<see cref="CookieName"/>) — the single mode Discover /
-    ///     Library currently render. Always clamped into the enabled set.
+    /// Persistence: for LOGGED-IN users the account setting (DB
+    /// <see cref="IConfigStore.GetWebSettingsAsync"/>) is the source of truth so
+    /// the choice follows them across devices; anonymous visitors fall back to a
+    /// cookie (kept in sync by media-type.js, so SSR honours their choice too).
+    /// The ACTIVE mode is a transient view preference and stays cookie-only.
     /// </summary>
     public static class MediaTypePreference
     {
-        // Active single mode.
-        public const string CookieName = "anisync_media_type";
-        // Multi-selected enabled set (comma-separated mode names).
-        public const string EnabledCookieName = "anisync_media_types";
+        public const string CookieName = "anisync_media_type";        // active single
+        public const string EnabledCookieName = "anisync_media_types"; // enabled set (csv)
 
-        // Display order for the toggle chips + combined dashboard groups.
         private static readonly MetaType[] DisplayOrder =
             { MetaType.anime, MetaType.movie, MetaType.series };
 
@@ -35,30 +35,11 @@ namespace AnimeList.Services
             _ => null,
         };
 
-        // Request cookies are written URL-encoded by media-type.js because
-        // ASP.NET Core's request-cookie parser treats a raw comma as a cookie
-        // separator — an unencoded "anime,movie,series" would be read as just
-        // "anime". Decode on the way in.
-        private static string DecodeCookie(string raw) =>
-            string.IsNullOrEmpty(raw) ? raw : Uri.UnescapeDataString(raw);
-
-        /// <summary>Parses the ACTIVE media-type cookie; anime when absent/unrecognised.</summary>
-        public static MetaType FromCookie(HttpContext ctx) =>
-            Parse(DecodeCookie(ctx?.Request?.Cookies[CookieName])) ?? MetaType.anime;
-
-        /// <summary>True once the visitor has made (and persisted) a choice.</summary>
-        public static bool HasChosen(HttpContext ctx) =>
-            ctx?.Request?.Cookies?.ContainsKey(EnabledCookieName) == true;
-
-        /// <summary>
-        /// The enabled set from its cookie, de-duped + display-ordered. Empty
-        /// when the cookie is absent (caller decides the fallback).
-        /// </summary>
-        public static List<MetaType> EnabledFromCookie(HttpContext ctx)
+        // Parses + de-dupes + display-orders a comma-separated mode list.
+        private static List<MetaType> ParseCsv(string csv)
         {
-            var raw = DecodeCookie(ctx?.Request?.Cookies[EnabledCookieName]);
-            if (string.IsNullOrEmpty(raw)) return new();
-            var set = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            if (string.IsNullOrEmpty(csv)) return new();
+            var set = csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(Parse)
                 .Where(t => t.HasValue)
                 .Select(t => t!.Value)
@@ -66,38 +47,58 @@ namespace AnimeList.Services
             return DisplayOrder.Where(set.Contains).ToList();
         }
 
+        // Request cookies are written URL-encoded by media-type.js (commas would
+        // otherwise be read as a cookie separator), so decode on the way in.
+        private static string DecodeCookie(string raw) =>
+            string.IsNullOrEmpty(raw) ? raw : Uri.UnescapeDataString(raw);
+
+        /// <summary>Active media-type cookie; anime when absent/unrecognised.</summary>
+        public static MetaType FromCookie(HttpContext ctx) =>
+            Parse(DecodeCookie(ctx?.Request?.Cookies[CookieName])) ?? MetaType.anime;
+
+        /// <summary>Enabled set from its cookie, de-duped + display-ordered. Empty when absent.</summary>
+        public static List<MetaType> EnabledFromCookie(HttpContext ctx) =>
+            ParseCsv(DecodeCookie(ctx?.Request?.Cookies[EnabledCookieName]));
+
         /// <summary>
-        /// Enabled set for the Discover / Library toggle chips. Cookie-based;
-        /// always includes <paramref name="active"/> so the current surface's
-        /// chip is offered even if the cookie is stale, and is never empty.
+        /// Enabled set for the Discover / Library toggle chips. Always includes
+        /// <paramref name="active"/> so the current surface's chip is offered,
+        /// and is never empty.
         /// </summary>
-        public static List<MetaType> EnabledForToggle(HttpContext ctx, MetaType active)
+        public static List<MetaType> ForToggle(IEnumerable<MetaType> enabled, MetaType active)
         {
-            var set = EnabledFromCookie(ctx).ToHashSet();
+            var set = (enabled ?? Enumerable.Empty<MetaType>()).ToHashSet();
             set.Add(active);
             return DisplayOrder.Where(set.Contains).ToList();
         }
 
         /// <summary>
-        /// The enabled set for a render. Falls back to the active mode as a
-        /// singleton when the cookie is absent (pre-modal visitors) so the
-        /// dashboard still shows something. Never empty.
+        /// The enabled set, given an already-fetched <see cref="WebSettings"/>
+        /// (null for anonymous). Account setting wins; else the cookie; else the
+        /// active mode as a singleton (pre-modal users) so a dashboard still
+        /// shows something. Never empty.
         /// </summary>
-        public static List<MetaType> ResolveEnabled(HttpContext ctx)
+        public static List<MetaType> ResolveEnabled(HttpContext ctx, WebSettings ws)
         {
-            var enabled = EnabledFromCookie(ctx);
-            return enabled.Count > 0 ? enabled : new() { ResolveActive(ctx) };
+            var fromDb = ParseCsv(ws?.EnabledMediaTypes);
+            if (fromDb.Count > 0) return fromDb;
+            var cookie = EnabledFromCookie(ctx);
+            return cookie.Count > 0 ? cookie : new() { FromCookie(ctx) };
         }
 
-        /// <summary>
-        /// The single active mode for Discover / Library, clamped into the
-        /// enabled set so the two preferences can't drift apart.
-        /// </summary>
-        public static MetaType ResolveActive(HttpContext ctx)
+        /// <summary>The active mode clamped into the supplied enabled set.</summary>
+        public static MetaType ResolveActive(HttpContext ctx, List<MetaType> enabled)
         {
             var active = FromCookie(ctx);
-            var enabled = EnabledFromCookie(ctx);
-            return enabled.Count == 0 || enabled.Contains(active) ? active : enabled[0];
+            return enabled.Contains(active) ? active : enabled[0];
         }
+
+        /// <summary>Enabled set for a render — reads the account setting for logged-in users.</summary>
+        public static async Task<List<MetaType>> ResolveEnabledAsync(HttpContext ctx, string uid, IConfigStore store) =>
+            ResolveEnabled(ctx, string.IsNullOrEmpty(uid) ? null : await store.GetWebSettingsAsync(uid));
+
+        /// <summary>Active mode for a render — reads the account setting for logged-in users.</summary>
+        public static async Task<MetaType> ResolveActiveAsync(HttpContext ctx, string uid, IConfigStore store) =>
+            ResolveActive(ctx, await ResolveEnabledAsync(ctx, uid, store));
     }
 }

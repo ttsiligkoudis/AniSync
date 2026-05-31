@@ -33,6 +33,29 @@
        _ConfigurePageScript's bitFor() reads. *@
     @await Html.PartialAsync("_PreferencesSection", Model)
 
+    @* Display preferences — the media-type modes (anime / movies / series) and
+       the dashboard layout. Both also reachable from the header / dashboard, but
+       surfaced here as account settings; they save to the account + this device. *@
+    <section class="section-card">
+        <span class="section-title">Display</span>
+        <p class="section-description">
+            Choose which modes you track (anime / movies / series) and reorder or hide
+            the sections on your dashboard. Saved to your account.
+        </p>
+        <div class="display-settings-actions">
+            <button type="button" class="dash-customize-btn" data-media-type-open>
+                <span>Choose modes</span>
+            </button>
+            <button type="button" class="dash-customize-btn" data-dash-customize-open>
+                <span>Customize dashboard</span>
+            </button>
+        </div>
+    </section>
+
+    @* Layout chooser modal + its script, so "Customize dashboard" works here too
+       (no dashboard sections on this page — the modal then lists every section). *@
+    @await Html.PartialAsync("_DashCustomize")
+
     @* Stremio-addon-specific config (catalogs, streams, install URL) lives
        on its own page at /stremio so /configure stays focused on the
        site-side identity bits (provider, linked accounts). *@
