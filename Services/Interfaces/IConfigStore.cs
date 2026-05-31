@@ -154,6 +154,14 @@ namespace AnimeList.Services.Interfaces
         /// </summary>
         Task<TraktToken> GetTraktTokenAsync(string uid);
 
+        // ── Web-UI preferences (media-type modes + dashboard layout) ────────
+        /// <summary>Reads the account's web-UI preferences (empty fields when unset/unknown UID).</summary>
+        Task<WebSettings> GetWebSettingsAsync(string uid);
+        /// <summary>Persists the enabled media-type set (comma-separated). No-op for an empty UID.</summary>
+        Task SetEnabledMediaTypesAsync(string uid, string csv);
+        /// <summary>Persists the dashboard layout JSON. No-op for an empty UID.</summary>
+        Task SetDashboardLayoutAsync(string uid, string json);
+
         /// <summary>
         /// Reads the user's configured stream addons. Empty list when the UID
         /// is unknown or no addons are configured. Order is preserved (the

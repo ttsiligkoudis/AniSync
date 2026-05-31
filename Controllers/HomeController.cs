@@ -204,8 +204,8 @@ public class HomeController : Controller
         // (multi-selected in the chooser modal); the active single mode still
         // drives the hero copy + Browse By. Logged-in users' account setting +
         // the enabled-set cookie back this; anonymous visitors use cookies only.
-        var mediaType = MediaTypePreference.ResolveActive(HttpContext);
-        var enabledMediaTypes = MediaTypePreference.ResolveEnabled(HttpContext);
+        var enabledMediaTypes = await MediaTypePreference.ResolveEnabledAsync(HttpContext, uid, _configStore);
+        var mediaType = MediaTypePreference.ResolveActive(HttpContext, enabledMediaTypes);
 
         // Video shelves ("Your stats" + Continue Watching) need a connected
         // Trakt account, same as the anime stats need AniList. One cheap
@@ -1057,6 +1057,51 @@ public class HomeController : Controller
         if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
             return Redirect(returnUrl);
         return RedirectToAction("Account");
+    }
+
+    /// <summary>
+    /// Persists the enabled media-type set (the chooser modal's multi-select) to
+    /// the account so it follows the user across devices. AJAX-only — the modal
+    /// also writes localStorage + the cookie and reloads itself. No-op (still 204)
+    /// for anonymous callers, who only have the cookie.
+    /// </summary>
+    [HttpPost("Home/SetEnabledMediaTypes")]
+    public async Task<IActionResult> SetEnabledMediaTypes([FromForm] string enabled)
+    {
+        var uid = await ResolveCurrentUidAsync();
+        if (!string.IsNullOrEmpty(uid))
+            await _configStore.SetEnabledMediaTypesAsync(uid, NormalizeModes(enabled));
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Persists the dashboard layout (section order + visibility JSON) to the
+    /// account. AJAX-only; the layout also lives in localStorage. Length-capped
+    /// so a hostile client can't store an arbitrarily large blob.
+    /// </summary>
+    [HttpPost("Home/SetDashboardLayout")]
+    public async Task<IActionResult> SetDashboardLayout([FromForm] string layout)
+    {
+        var uid = await ResolveCurrentUidAsync();
+        if (!string.IsNullOrEmpty(uid))
+        {
+            var json = string.IsNullOrWhiteSpace(layout) || layout.Length > 4000 ? null : layout;
+            await _configStore.SetDashboardLayoutAsync(uid, json);
+        }
+        return NoContent();
+    }
+
+    // Sanitises a client-supplied mode csv to the known modes, de-duped + in a
+    // stable order; null when nothing valid remains.
+    private static string NormalizeModes(string csv)
+    {
+        if (string.IsNullOrWhiteSpace(csv)) return null;
+        var order = new[] { "anime", "movie", "series" };
+        var set = csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(s => s.ToLowerInvariant())
+            .Where(order.Contains)
+            .ToHashSet();
+        return set.Count == 0 ? null : string.Join(",", order.Where(set.Contains));
     }
 
     /// <summary>

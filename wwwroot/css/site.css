@@ -8274,3 +8274,10 @@ body.dash-modal-open { overflow: hidden; }
     cursor: pointer;
 }
 .dash-modal-done:hover { background: var(--accent-hover, var(--accent)); }
+
+/* Account "Display" settings — media-type + dashboard-layout entry buttons. */
+.display-settings-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}

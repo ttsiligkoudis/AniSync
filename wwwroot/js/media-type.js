@@ -106,7 +106,24 @@
             localStorage.removeItem('anisync.videoContinueWatching.v1');
         } catch (_) { /* ignore */ }
 
-        // Cookie-only — SSR reads the cookies on the reload; no DB round-trip.
+        // Persist to the account too (logged-in) so the choice follows the user
+        // across devices; fire-and-forget, the cookie already drives this reload.
+        if (window.AniSync && window.AniSync.loggedIn) {
+            try {
+                fetch('/Home/SetEnabledMediaTypes', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: 'enabled=' + encodeURIComponent(set.join(',')),
+                    skipLoader: true,
+                    keepalive: true
+                });
+            } catch (_) { /* best-effort */ }
+        }
+
         location.reload();
     }
 
@@ -124,6 +141,19 @@
     document.querySelectorAll('[data-media-type-open]').forEach(function (el) {
         el.addEventListener('click', function (e) { e.preventDefault(); open(false); });
     });
+
+    // Account settings (logged-in) are the source of truth: seed localStorage +
+    // the cookie from them so the choice follows the user across devices. The
+    // server also resolves SSR from the account, so this just keeps the client
+    // (modal preselect, first-visit check) in step.
+    var boot = (window.AniSync && window.AniSync.settings) || null;
+    if (boot && boot.enabledMediaTypes) {
+        var dbSet = ordered(String(boot.enabledMediaTypes).split(',').filter(valid));
+        if (dbSet.length) {
+            try { localStorage.setItem(SET_KEY, dbSet.join(',')); } catch (_) { /* private mode */ }
+            setCookie(SET_COOKIE, dbSet.join(','));
+        }
+    }
 
     // First visit (no stored set) → forced selection. Otherwise keep the SSR
     // cookies in step with localStorage (covers cleared cookies / older builds).

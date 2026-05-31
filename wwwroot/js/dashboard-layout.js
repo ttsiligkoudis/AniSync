@@ -33,7 +33,13 @@
     // rather than vanishing.
     function load() {
         var saved = [];
-        try { saved = JSON.parse(localStorage.getItem(KEY)) || []; } catch (_) { saved = []; }
+        // Account layout (logged-in, bootstrapped by the server) is the source of
+        // truth so it follows the user across devices; otherwise localStorage.
+        var boot = (window.AniSync && window.AniSync.settings && window.AniSync.settings.dashboardLayout) || null;
+        var raw = boot;
+        if (!raw) { try { raw = localStorage.getItem(KEY); } catch (_) { raw = null; } }
+        try { saved = JSON.parse(raw) || []; } catch (_) { saved = []; }
+        if (boot) { try { localStorage.setItem(KEY, boot); } catch (_) { /* mirror locally */ } }
         if (!Array.isArray(saved)) saved = [];
         var seen = {};
         var out = [];
@@ -97,11 +103,18 @@
         return document.querySelector('[data-dash-section="' + key + '"]') != null;
     }
 
+    // On the dashboard, only offer sections that actually rendered (gated by the
+    // enabled modes). On /account there are no dashboard sections present, so
+    // offer every section so the user can still configure the layout there.
+    function pageHasSections() { return document.querySelector('[data-dash-section]') != null; }
+    function displayedRows() {
+        return pageHasSections() ? layout.filter(function (e) { return present(e.key); }) : layout.slice();
+    }
+
     function renderRows() {
         if (!list) return;
         list.innerHTML = '';
-        // Only offer sections that actually rendered (gated by enabled modes).
-        var rows = layout.filter(function (e) { return present(e.key); });
+        var rows = displayedRows();
         rows.forEach(function (entry, i) {
             var li = document.createElement('li');
             li.className = 'dash-modal-row' + (entry.visible ? '' : ' is-hidden');
@@ -136,14 +149,14 @@
         });
     }
 
-    // Move a key one step among the PRESENT rows (so disabled-by-mode keys
-    // between them don't swallow the step), then persist + re-apply.
+    // Move a key one step among the DISPLAYED rows (so non-shown keys between
+    // them don't swallow the step), then persist + re-apply.
     function move(key, dir) {
-        var presentKeys = layout.filter(function (e) { return present(e.key); }).map(function (e) { return e.key; });
-        var pi = presentKeys.indexOf(key);
+        var keys = displayedRows().map(function (e) { return e.key; });
+        var pi = keys.indexOf(key);
         var ni = pi + dir;
-        if (pi < 0 || ni < 0 || ni >= presentKeys.length) return;
-        var swapKey = presentKeys[ni];
+        if (pi < 0 || ni < 0 || ni >= keys.length) return;
+        var swapKey = keys[ni];
         var ai = layout.findIndex(function (e) { return e.key === key; });
         var bi = layout.findIndex(function (e) { return e.key === swapKey; });
         var tmp = layout[ai]; layout[ai] = layout[bi]; layout[bi] = tmp;
@@ -158,6 +171,23 @@
         save(layout);
         apply(layout);
         renderRows();
+        // Persist to the account too (logged-in) so the layout follows the user
+        // across devices. Fire-and-forget; localStorage already has it.
+        if (window.AniSync && window.AniSync.loggedIn) {
+            try {
+                fetch('/Home/SetDashboardLayout', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: 'layout=' + encodeURIComponent(JSON.stringify(layout)),
+                    skipLoader: true,
+                    keepalive: true
+                });
+            } catch (_) { /* best-effort */ }
+        }
     }
 
     function openModal() {

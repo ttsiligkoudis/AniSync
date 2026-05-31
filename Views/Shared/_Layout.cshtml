@@ -52,9 +52,17 @@
     }
     var layoutConnectedLabel = string.Join(" · ", layoutConnectedServices);
 
-    // The viewer's active media-type mode (cookie-backed) drives the header
-    // mode button's icon/label. The button reopens the multi-select chooser.
-    var layoutMediaType = AnimeList.Services.MediaTypePreference.ResolveActive(Context);
+    // Web-UI preferences (media-type modes + dashboard layout). For logged-in
+    // users the account row is the source of truth (so settings follow them
+    // across devices); the values are also bootstrapped to the client below.
+    AnimeList.Models.WebSettings layoutWebSettings = null;
+    if (layoutLoggedIn && !string.IsNullOrEmpty(layoutUid))
+    {
+        try { layoutWebSettings = await _layoutConfigStore.GetWebSettingsAsync(layoutUid); }
+        catch { /* fall back to cookie below */ }
+    }
+    var layoutEnabled = AnimeList.Services.MediaTypePreference.ResolveEnabled(Context, layoutWebSettings);
+    var layoutMediaType = AnimeList.Services.MediaTypePreference.ResolveActive(Context, layoutEnabled);
     var layoutMediaTypeLabel = layoutMediaType == MetaType.movie ? "Movies"
         : layoutMediaType == MetaType.series ? "Series"
         : "Anime";
@@ -781,7 +789,7 @@
        logged in) and reloads so the whole site re-renders for the chosen mode. *@
     @await Html.PartialAsync("_MediaTypeModal", new ViewDataDictionary(ViewData)
     {
-        ["MediaTypeEnabled"] = AnimeList.Services.MediaTypePreference.EnabledFromCookie(Context),
+        ["MediaTypeEnabled"] = layoutEnabled,
         ["MediaTypeLoggedIn"] = layoutLoggedIn,
     })
 
@@ -809,6 +817,29 @@
         </svg>
     </button>
 
+    @* Bootstrap the client with the account's web-UI preferences (logged-in
+       only) so media-type.js + dashboard-layout.js can prefer them over (or
+       seed) localStorage — this is how the settings follow the user across
+       devices. Values ride data-attributes (Razor encodes them safely, incl.
+       the layout JSON); the inline reader below lifts them into window.AniSync
+       before the deferred scripts run. *@
+    <div id="anisync-settings" hidden
+         data-logged-in="@(layoutLoggedIn ? "true" : "false")"
+         data-enabled-modes="@(layoutWebSettings?.EnabledMediaTypes)"
+         data-dashboard-layout="@(layoutWebSettings?.DashboardLayout)"></div>
+    <script>
+        (function () {
+            var el = document.getElementById('anisync-settings');
+            window.AniSync = window.AniSync || {};
+            window.AniSync.loggedIn = !!el && el.getAttribute('data-logged-in') === 'true';
+            if (el) {
+                window.AniSync.settings = {
+                    enabledMediaTypes: el.getAttribute('data-enabled-modes') || null,
+                    dashboardLayout: el.getAttribute('data-dashboard-layout') || null
+                };
+            }
+        })();
+    </script>
     <script src="~/js/toast.js" asp-append-version="true" defer></script>
     <script src="~/js/media-type.js" asp-append-version="true" defer></script>
     <script src="~/js/theme-toggle.js" asp-append-version="true" defer></script>
@@ -910,7 +941,17 @@
             // that don't full-reload (rare here, but bfcache restores
             // count) still see the live path.
             el.addEventListener('click', function () {
-                try { localStorage.clear(); } catch (_) { /* quota / private mode — best-effort */ }
+                // Wipe per-identity caches on disconnect, but KEEP the user's UI
+                // preferences (media-type modes + dashboard layout) — those are
+                // device settings, not the previous account's data, and should
+                // survive a sign-out so the next visit keeps the same layout.
+                try {
+                    var keep = ['anisync-media-types', 'anisync-media-type', 'anisync.dashboardLayout.v1'];
+                    var saved = {};
+                    keep.forEach(function (k) { var v = localStorage.getItem(k); if (v != null) saved[k] = v; });
+                    localStorage.clear();
+                    Object.keys(saved).forEach(function (k) { localStorage.setItem(k, saved[k]); });
+                } catch (_) { /* quota / private mode — best-effort */ }
                 try { sessionStorage.clear(); } catch (_) { /* same */ }
                 if (el.tagName === 'A') {
                     var base = el.getAttribute('href') || '';
