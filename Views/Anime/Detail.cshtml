@@ -154,24 +154,21 @@
                         wouldn't open and there's no "you" to talk about).
                    data-open-modal is the global hook intercepted by
                    manage-entry-modal.js. *@
-                @if (isVideo)
+                @* Video (movie / series) tracking is Trakt, not the anime
+                   trackers — surface a watchlist toggle in the same badge slot
+                   the anime Manage Entry pill would occupy. Shown only when
+                   Trakt is connected (parity with the anonymous-anime "no pill"
+                   case). Wired by the script near the page foot. The anime
+                   user-state pill below is guarded with !isVideo so it never
+                   renders on the video path. *@
+                @if (isVideo && Model.TraktConnected)
                 {
-                    @* Video (movie / series) tracking is Trakt, not the anime
-                       trackers — surface a watchlist toggle in the same badge
-                       slot the anime Manage Entry pill would occupy. Shown only
-                       when Trakt is connected (parity with the anonymous-anime
-                       "no pill" case). Wired by the script near the page foot. *@
-                    @if (Model.TraktConnected)
-                    {
-                        <button type="button" class="anime-detail-user-state" id="traktWatchlistBtn"
-                                data-type="@(Model.MediaType == MetaType.movie ? "movie" : "series")"
-                                data-id="@a.id" data-in="false">
-                            <span>＋ Watchlist</span>
-                        </button>
-                    }
+                    <button type="button" class="anime-detail-user-state" id="traktWatchlistBtn"
+                            data-type="@(Model.MediaType == MetaType.movie ? "movie" : "series")"
+                            data-id="@a.id" data-in="false">
+                        <span>＋ Watchlist</span>
+                    </button>
                 }
-                else
-                {
                 @{
                     // Override info — non-null when the requested anime has no mapping
                     // to the user's primary but lives on a linked secondary the user
@@ -193,7 +190,7 @@
                     // token; otherwise PrettyStatus uses the primary's labels.
                     var statusService = overrideService ?? Model.AnimeService;
                 }
-                @if (Model.EntryUnavailable && canEdit)
+                @if (!isVideo && Model.EntryUnavailable && canEdit)
                 {
                     @* No mapping to the user's primary AND the source provider
                        (anilist: / kitsu: / mal:) isn't linked as a secondary —
@@ -261,7 +258,7 @@
                         }
                     }
                 }
-                else if (canEdit)
+                else if (!isVideo && canEdit)
                 {
                     <button type="button" class="anime-detail-user-state"
                             data-open-modal data-meta-id="@a.id" data-meta-name="@a.name"
@@ -274,7 +271,6 @@
                             <path d="M5 12h14"></path>
                         </svg>
                     </button>
-                }
                 }
             </div>
 
