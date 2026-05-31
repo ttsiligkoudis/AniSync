@@ -7,9 +7,10 @@
     var labels = isVideo
         ? new Dictionary<ListType, string>
         {
-            [ListType.Current]    = "Continue Watching",
-            [ListType.Completed]  = "Watched",
-            [ListType.Planning]   = "Watchlist",
+            // Same vocabulary as anime (Trakt can represent these three).
+            [ListType.Current]    = "Watching",
+            [ListType.Completed]  = "Completed",
+            [ListType.Planning]   = "Planning",
         }
         : new Dictionary<ListType, string>
         {

@@ -651,9 +651,6 @@ namespace AnimeList.Controllers
         // Cinemeta pages its catalogs in blocks of 100. The browse JS sends
         // 1-indexed page numbers; we convert page → item offset with this.
         private const int CatalogPageSize = 100;
-        // Cap on items hydrated for a Trakt shelf — each costs a Cinemeta meta
-        // lookup, so keep the per-shelf fan-out bounded.
-        private const int TraktShelfSize = 18;
 
         /// <summary>
         /// Infinite-scroll pagination endpoint for the browse grids. Returns
@@ -676,62 +673,6 @@ namespace AnimeList.Controllers
                 ConfigUid = uid,
                 VideoLinks = true,
             });
-        }
-
-        /// <summary>
-        /// Client-loaded Trakt shelf (kind = "continue" | "watchlist") for the
-        /// browse pages. Returns 204 when Trakt isn't connected so the shelf
-        /// simply doesn't appear.
-        /// </summary>
-        [Route("/video/trakt-shelf")]
-        public async Task<IActionResult> VideoTraktShelf(string kind)
-        {
-            var uid = await ResolveVideoUidAsync();
-            if (string.IsNullOrEmpty(uid)) return NoContent();
-
-            var trakt = await _configStore.GetTraktTokenAsync(uid);
-            if (trakt?.Connected != true) return NoContent();
-
-            var watchlist = string.Equals(kind, "watchlist", StringComparison.OrdinalIgnoreCase);
-            var items = watchlist
-                ? await _trakt.GetWatchlistAsync(uid)
-                : await _trakt.GetPlaybackAsync(uid);
-
-            var metas = await BuildVideoMetasAsync(items.Take(TraktShelfSize).ToList());
-            if (metas.Count == 0) return NoContent();
-
-            return PartialView("_PosterGrid", new PosterGridViewModel
-            {
-                Items = metas,
-                ConfigUid = uid,
-                Variant = "scroll",
-                VideoLinks = true,
-            });
-        }
-
-        // Hydrates Trakt list items (imdb id + type) into poster-bearing Meta
-        // via Cinemeta, in parallel, preserving Trakt order and dropping any id
-        // Cinemeta can't resolve. Forces Meta.type from the Trakt item so the
-        // _PosterGrid VideoLinks routing picks the right ?type=.
-        private async Task<List<Meta>> BuildVideoMetasAsync(List<TraktListItem> items)
-        {
-            var lookups = items.Select(async it =>
-            {
-                try
-                {
-                    var meta = await _cinemeta.GetVideoMetaAsync(it.Type, it.ImdbId);
-                    if (meta == null) return null;
-                    meta.type = it.Type == "movie" ? MetaType.movie.ToString() : MetaType.series.ToString();
-                    return meta;
-                }
-                catch
-                {
-                    return null;
-                }
-            });
-
-            var resolved = await Task.WhenAll(lookups);
-            return resolved.Where(m => m != null).ToList();
         }
 
         // UID resolution mirroring Index() — anonymous visitors get null.

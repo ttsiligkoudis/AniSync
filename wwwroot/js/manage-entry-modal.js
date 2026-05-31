@@ -333,14 +333,17 @@
         var opts;
         if (service === 3) {
             // Trakt uses the same status vocabulary as the anime trackers
-            // (Planning / Watching / Completed) for consistency — only these
-            // three round-trip, since Trakt state is derived from watchlist
-            // (planning), history (watching/completed) and ratings. There's no
-            // On Hold / Dropped / Rewatching to persist. A movie is a single
-            // unit, so it drops "Watching".
-            opts = activeMediaType === 'movie'
-                ? [['', '— None (not in list) —'], ['planning', 'Planning'], ['completed', 'Completed']]
-                : [['', '— None (not in list) —'], ['planning', 'Planning'], ['watching', 'Watching'], ['completed', 'Completed']];
+            // (Watching / Planning / Completed) for consistency — only these
+            // three round-trip, since Trakt state is derived from history /
+            // playback (watching), watchlist (planning) and history (completed).
+            // There's no On Hold / Dropped / Rewatching to persist. Movies get
+            // "Watching" too (a movie left part-way via a paused playback).
+            opts = [
+                ['', '— None (not in list) —'],
+                ['watching', 'Watching'],
+                ['planning', 'Planning'],
+                ['completed', 'Completed'],
+            ];
         } else {
             opts = STATUS_OPTIONS[service] || STATUS_OPTIONS[1];
         }
