@@ -239,16 +239,25 @@ namespace AnimeList.Controllers
                 ? meta.id
                 : null;
 
-            // Pre-resolve watchlist membership so the toggle renders in the right
-            // state on load. One list fetch (movies + series) we filter by id +
-            // type; only when connected and we have an IMDb id to match on.
-            var inWatchlist = false;
+            // Current Trakt state → the hero's Manage Entry pill (status +
+            // progress + rating), mirroring how the anime path fills Model.Entry.
+            // Only when connected and we have an IMDb id to key off.
+            EntryViewState entry = null;
             if (traktConnected && !string.IsNullOrEmpty(imdbId))
             {
-                var watchlist = await _traktService.GetWatchlistAsync(uid);
-                inWatchlist = watchlist.Any(i =>
-                    i.Type == cinemetaType &&
-                    string.Equals(i.ImdbId, imdbId, StringComparison.OrdinalIgnoreCase));
+                var v = await _traktService.GetVideoEntryAsync(uid, cinemetaType, imdbId);
+                int? total = cinemetaType == "series" ? meta.videos?.Count : 1;
+                var (status, progress) = DeriveTraktVideoStatus(cinemetaType, v, total);
+                if (!string.IsNullOrEmpty(status))
+                {
+                    entry = new EntryViewState
+                    {
+                        Status = status,
+                        Progress = progress,
+                        TotalEpisodes = total > 0 ? total : null,
+                        UserScore = v.Rating,
+                    };
+                }
             }
 
             return View("Detail", new AnimeDetailViewModel
@@ -258,10 +267,30 @@ namespace AnimeList.Controllers
                 BasePath = "/meta",
                 AnonymousUser = string.IsNullOrEmpty(uid),
                 ConfigUid = uid,
+                // Trakt is the tracker for general video — surfaces the right
+                // status vocabulary on the shared detail view.
+                AnimeService = AnimeService.Trakt,
                 TraktConnected = traktConnected,
-                TraktInWatchlist = inWatchlist,
+                Entry = entry,
                 SourceLinks = new AnimeSourceLinks { ImdbId = imdbId },
             });
+        }
+
+        // Projects a TraktVideoEntry onto the modal/pill's (status, progress)
+        // shape. Shared by VideoDetail (hero pill) and GetTraktVideoEntryAsync
+        // (modal GET) so both agree. Status vocabulary matches the modal's Trakt
+        // option set: planning / watching / completed (or "" = not tracked).
+        private static (string Status, int Progress) DeriveTraktVideoStatus(string type, TraktVideoEntry e, int? total)
+        {
+            if (type == "movie")
+                return (e.Watched ? "completed" : (e.InWatchlist ? "planning" : ""), e.Watched ? 1 : 0);
+
+            var progress = e.WatchedEpisodes;
+            var status = total is int t && t > 0 && progress >= t ? "completed"
+                : progress > 0 ? "watching"
+                : e.InWatchlist ? "planning"
+                : "";
+            return (status, progress);
         }
 
         /// <summary>
@@ -1501,10 +1530,6 @@ namespace AnimeList.Controllers
         // connected, so the hero can show a Trakt watchlist toggle in place of
         // the anime-tracker Manage Entry pill. Ignored on the anime path.
         public bool TraktConnected { get; set; }
-        // True when this movie / series is already on the viewer's Trakt
-        // watchlist, so the toggle renders in its "✓ In Watchlist" state on load
-        // instead of always starting at "＋ Watchlist". Video path only.
-        public bool TraktInWatchlist { get; set; }
 
         // User's tracking state for this entry — null for anonymous visitors,
         // not-yet-tracked entries, or transient fetch failures (the hero

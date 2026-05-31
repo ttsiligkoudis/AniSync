@@ -96,6 +96,29 @@ namespace AnimeList.Services.Interfaces
         /// </summary>
         Task<bool> StopScrobbleAsync(string uid, string type, string imdbId, int? season, int? episode, double progress);
 
+        /// <summary>
+        /// Aggregate Trakt state (watchlist / watched / rating) for one movie or
+        /// series, for the Manage Entry modal. type is "movie" / "series";
+        /// imdbId is the tt-prefixed id. Returns an empty entry (no throw) when
+        /// Trakt isn't connected or the id is empty.
+        /// </summary>
+        Task<TraktVideoEntry> GetVideoEntryAsync(string uid, string type, string imdbId);
+
+        /// <summary>
+        /// Applies a Manage Entry save for a movie / series to Trakt:
+        ///   status ""        → remove from watchlist;
+        ///   "planning"       → add to watchlist;
+        ///   "watching"       → remove from watchlist + mark watchedEpisodes watched;
+        ///   "completed"      → remove from watchlist + mark watched (movie) / all
+        ///                      supplied episodes watched (series).
+        /// watchedEpisodes are the (season, episode) coords to add to history
+        /// (series only; the caller derives them from the Cinemeta episode list).
+        /// rating (1-10) is written to /sync/ratings; null/0 removes any rating.
+        /// Best-effort: false (no throw) when Trakt isn't connected.
+        /// </summary>
+        Task<bool> SaveVideoEntryAsync(string uid, string type, string imdbId, string status,
+            IReadOnlyList<(int Season, int Episode)> watchedEpisodes, int? rating);
+
         // ── Unified-fan-out writes (token-based) ────────────────────────────
 
         /// <summary>

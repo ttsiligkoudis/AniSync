@@ -158,19 +158,46 @@
                         wouldn't open and there's no "you" to talk about).
                    data-open-modal is the global hook intercepted by
                    manage-entry-modal.js. *@
-                @* Video (movie / series) tracking is Trakt, not the anime
-                   trackers — surface a watchlist toggle in the same badge slot
-                   the anime Manage Entry pill would occupy. Shown only when
-                   Trakt is connected (parity with the anonymous-anime "no pill"
-                   case). Wired by the script near the page foot. The anime
-                   user-state pill below is guarded with !isVideo so it never
-                   renders on the video path. *@
+                @* Video (movie / series) tracking is Trakt — surface the SAME
+                   Manage Entry modal the anime path uses (data-open-modal +
+                   data-meta-media-type routes the GET / save through Trakt:
+                   watchlist / history / rating). The pill shows the current
+                   Trakt status from Model.Entry, or "Add to List" when none.
+                   Only when Trakt is connected; the anime chain below is guarded
+                   with !isVideo so exactly one pill renders. *@
                 @if (isVideo && Model.TraktConnected)
                 {
-                    <button type="button" class="anime-detail-user-state" id="traktWatchlistBtn"
-                            data-type="@(Model.MediaType == MetaType.movie ? "movie" : "series")"
-                            data-id="@a.id" data-in="@(Model.TraktInWatchlist ? "true" : "false")">
-                        <span>@(Model.TraktInWatchlist ? "✓ In Watchlist" : "＋ Watchlist")</span>
+                    var vStatus = Model.Entry?.Status;
+                    string vLabel;
+                    if (string.IsNullOrEmpty(vStatus)) { vLabel = "Add to List"; }
+                    else if (vStatus == "planning") { vLabel = "Watchlist"; }
+                    else if (vStatus == "completed") { vLabel = "Watched"; }
+                    else
+                    {
+                        // "watching" — show episode progress for series only;
+                        // a movie is a single unit.
+                        vLabel = Model.MediaType == MetaType.series && Model.Entry?.TotalEpisodes is int vt && vt > 0
+                            ? $"Watching · Ep {Model.Entry.Progress}/{vt}"
+                            : "Watching";
+                    }
+                    var vIsAdd = string.IsNullOrEmpty(vStatus);
+                    <button type="button" class="anime-detail-user-state"
+                            data-open-modal data-meta-id="@a.id" data-meta-name="@a.name"
+                            data-meta-media-type="@(Model.MediaType == MetaType.movie ? "movie" : "series")">
+                        <span>@vLabel</span>
+                        <svg class="anime-detail-user-state-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
+                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            @if (vIsAdd)
+                            {
+                                <path d="M12 5v14"></path>
+                                <path d="M5 12h14"></path>
+                            }
+                            else
+                            {
+                                <path d="M12 20h9"></path>
+                                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                            }
+                        </svg>
                     </button>
                 }
                 @{
@@ -208,7 +235,7 @@
                         Not available
                     </span>
                 }
-                else if (Model.IsMultiSeasonGroup && canEdit)
+                else if (!isVideo && Model.IsMultiSeasonGroup && canEdit)
                 {
                     @* Multi-cour grouped (id is imdb:tt..., franchise spans
                        more than one season) → the user's per-cour entry can't
@@ -229,7 +256,7 @@
                         </svg>
                     </button>
                 }
-                else if (Model.Entry != null)
+                else if (!isVideo && Model.Entry != null)
                 {
                     var statusLabel = PrettyStatus(statusService, Model.Entry.Status);
                     var userBits = new List<string>();
@@ -1281,46 +1308,6 @@ else
                 fillSupplementary(supplementaryHost, data.supplementaryLinks);
             })
             .catch(function () { /* silent — sections just stay hidden */ });
-    })();
-</script>
-}
-
-@* Trakt watchlist toggle for the video (movie / series) hero pill. Idempotent
-   add/remove against /anime/trakt-watchlist; the label flips optimistically and
-   the toast reports the outcome. Anime tracking uses the Manage Entry modal
-   instead, so this only renders on the video path with Trakt connected. *@
-@if (isVideo && Model.TraktConnected)
-{
-<script>
-    (function () {
-        var btn = document.getElementById('traktWatchlistBtn');
-        if (!btn) return;
-        function toast(msg) {
-            if (window.AniSyncToast && window.AniSyncToast.show) window.AniSyncToast.show(msg);
-        }
-        btn.addEventListener('click', function () {
-            var inList = btn.dataset.in === 'true';
-            var action = inList ? 'remove' : 'add';
-            btn.disabled = true;
-            fetch('/meta/trakt-watchlist', {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                body: JSON.stringify({ type: btn.dataset.type, id: btn.dataset.id, action: action })
-            })
-                .then(function (r) { return r.json(); })
-                .then(function (d) {
-                    if (d && d.success) {
-                        btn.dataset.in = inList ? 'false' : 'true';
-                        btn.textContent = inList ? '＋ Watchlist' : '✓ In Watchlist';
-                        toast(inList ? 'Removed from watchlist' : 'Added to watchlist');
-                    } else {
-                        toast('Couldn’t update watchlist');
-                    }
-                })
-                .catch(function () { toast('Network error'); })
-                .finally(function () { btn.disabled = false; });
-        });
     })();
 </script>
 }
