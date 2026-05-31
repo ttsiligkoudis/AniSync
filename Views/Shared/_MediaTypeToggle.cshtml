@@ -1,0 +1,33 @@
+@{
+    // Single-select Anime / Movies / Series toggle for Discover & Library. Shows
+    // ONLY the modes the user enabled in the chooser modal (the enabled-set
+    // cookie), so it's the per-surface switch between them. Each chip persists
+    // the active mode (POST /Home/SetMediaType — sets the account setting +
+    // active cookie, antiforgery-protected) and reloads via returnUrl. Hidden
+    // when only one mode is enabled (nothing to switch). Callers pass:
+    //   ViewData["MtActive"]    — the active MetaType to highlight
+    //   ViewData["MtReturnUrl"] — local URL to return to after the switch
+    var mtActive = ViewData["MtActive"] is MetaType a ? a : MetaType.anime;
+    var mtReturnUrl = ViewData["MtReturnUrl"] as string ?? "/discover";
+    var mtEnabled = AnimeList.Services.MediaTypePreference.EnabledForToggle(Context, mtActive);
+    var mtLabels = new Dictionary<MetaType, string>
+    {
+        [MetaType.anime] = "Anime",
+        [MetaType.movie] = "Movies",
+        [MetaType.series] = "Series",
+    };
+}
+@if (mtEnabled.Count > 1)
+{
+    <div class="media-type-toggle">
+        @foreach (var mt in mtEnabled)
+        {
+            <form method="post" action="/Home/SetMediaType" class="media-type-form">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="mediaType" value="@((int)mt)" />
+                <input type="hidden" name="returnUrl" value="@mtReturnUrl" />
+                <button type="submit" class="label @(mtActive == mt ? "active" : "")">@mtLabels[mt]</button>
+            </form>
+        }
+    </div>
+}

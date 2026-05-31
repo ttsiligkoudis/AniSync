@@ -200,17 +200,18 @@ public class HomeController : Controller
                 .ToList()
             : [];
 
-        // Resolve the viewer's mode so the dashboard renders the matching
-        // shelves: anime (AniList) or video (Trakt/Cinemeta). Logged-in users'
-        // stored setting wins; anonymous visitors fall back to the media-type
-        // cookie the first-visit chooser stamps.
-        var mediaType = await MediaTypePreference.ResolveAsync(HttpContext, uid, _configStore);
+        // Resolve the viewer's modes. The dashboard COMBINES every enabled mode
+        // (multi-selected in the chooser modal); the active single mode still
+        // drives the hero copy + Browse By. Logged-in users' account setting +
+        // the enabled-set cookie back this; anonymous visitors use cookies only.
+        var mediaType = await MediaTypePreference.ResolveActiveAsync(HttpContext, uid, _configStore);
+        var enabledMediaTypes = await MediaTypePreference.ResolveEnabledAsync(HttpContext, uid, _configStore);
 
-        // Video mode's "Your stats" + "Continue watching" need a connected
+        // Video shelves ("Your stats" + Continue Watching) need a connected
         // Trakt account, same as the anime stats need AniList. One cheap
-        // projection read, and only when actually in video mode for a real user.
+        // projection read, and only when a video mode is enabled for a real user.
         var traktConnected = false;
-        if (mediaType != MetaType.anime && !string.IsNullOrEmpty(uid))
+        if (!string.IsNullOrEmpty(uid) && enabledMediaTypes.Any(t => t != MetaType.anime))
         {
             var traktToken = await _configStore.GetTraktTokenAsync(uid);
             traktConnected = traktToken?.Connected == true;
@@ -225,6 +226,7 @@ public class HomeController : Controller
             HasStreamAddons = hasStreamAddons,
             ContributingServices = contributingNames,
             MediaType = mediaType,
+            EnabledMediaTypes = enabledMediaTypes,
             TraktConnected = traktConnected,
         });
     }
@@ -694,12 +696,17 @@ public class HomeController : Controller
     // Video "Continue watching" — Trakt's in-progress playback (paused movies +
     // episodes), hydrated via Cinemeta. Trakt-connected users only.
     [HttpGet("Home/VideoContinueWatchingData")]
-    public async Task<IActionResult> VideoContinueWatchingData()
+    public async Task<IActionResult> VideoContinueWatchingData(string type = null)
     {
         var uid = await ResolveCurrentUidAsync();
         if (string.IsNullOrEmpty(uid)) return Unauthorized();
-        var items = (await _trakt.GetPlaybackAsync(uid)).Take(ContinueWatchingMaxItems).ToList();
-        var metas = await HydrateVideoMetasAsync(items);
+        IEnumerable<TraktListItem> playback = await _trakt.GetPlaybackAsync(uid);
+        // The combined dashboard renders a per-type Continue Watching shelf, so
+        // filter the mixed playback feed (movies + episodes) to the requested
+        // type when one is given.
+        if (type is "movie" or "series")
+            playback = playback.Where(i => i.Type == type);
+        var metas = await HydrateVideoMetasAsync(playback.Take(ContinueWatchingMaxItems).ToList());
         return VideoShelfPartial(metas, uid);
     }
 
@@ -1038,8 +1045,22 @@ public class HomeController : Controller
     public async Task<IActionResult> SetMediaType([FromForm] int mediaType, [FromForm] string returnUrl = null)
     {
         var uid = await ResolveCurrentUidAsync();
-        if (!string.IsNullOrEmpty(uid) && Enum.IsDefined(typeof(MetaType), mediaType))
-            await _configStore.SetMediaTypeAsync(uid, (MetaType)mediaType);
+        if (Enum.IsDefined(typeof(MetaType), mediaType))
+        {
+            // Persist the active mode to the account setting (logged-in) AND
+            // stamp the active cookie so anonymous visitors' Discover / Library
+            // toggle switches the surface on the next render too.
+            if (!string.IsNullOrEmpty(uid))
+                await _configStore.SetMediaTypeAsync(uid, (MetaType)mediaType);
+
+            Response.Cookies.Append(MediaTypePreference.CookieName, ((MetaType)mediaType).ToString(), new CookieOptions
+            {
+                Path = "/",
+                MaxAge = TimeSpan.FromDays(365),
+                SameSite = SameSiteMode.Lax,
+                IsEssential = true,
+            });
+        }
 
         // The first-visit / reopen media-type modal persists via fetch and
         // reloads the page itself, so an AJAX caller wants a bare 204 rather

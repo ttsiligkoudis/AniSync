@@ -14,10 +14,19 @@
         ? string.Join(" · ", new[] { serviceLabel }.Concat(Model.LinkedServices ?? []))
         : serviceLabel;
 
-    // Media-type mode drives which dashboard renders: anime (AniList shelves)
-    // or video (Trakt/Cinemeta shelves). The hero copy + Browse By adapt too.
+    // The dashboard COMBINES every enabled mode (multi-selected in the chooser
+    // modal): the anime block renders when anime is enabled, and one set of
+    // video shelves renders per enabled video type. The single "active" mode
+    // (Model.MediaType) still drives the hero copy + Browse By. When more than
+    // one mode is enabled, shelf titles carry a "· Anime / · Movies / · Series"
+    // suffix so the combined view stays legible.
+    var enabledTypes = Model.EnabledMediaTypes;
+    var animeEnabled = enabledTypes.Contains(MetaType.anime);
+    var videoTypes = enabledTypes.Where(t => t != MetaType.anime).ToList();
+    var combined = enabledTypes.Count > 1;
+    var animeSuffix = combined ? " · Anime" : "";
+
     var isAnime = Model.MediaType == MetaType.anime;
-    var videoType = Model.MediaType == MetaType.movie ? "movie" : "series";
     var modeNoun = Model.MediaType == MetaType.movie ? "movies"
         : Model.MediaType == MetaType.series ? "series"
         : "anime";
@@ -86,7 +95,7 @@
    the strip would feel like a placeholder. v1 will add Hours Watched + Mean
    Score once the per-service queries surface episode counts and per-entry
    scores; v0 sticks to what's already in the existing list-catalog response. *@
-@if (isLoggedIn && !anonymousUser && Model.HasStats && isAnime)
+@if (isLoggedIn && !anonymousUser && Model.HasStats && animeEnabled)
 {
     <section class="dashboard-section stats-section" data-stats-section data-stats-loading>
         @{
@@ -107,7 +116,7 @@
             var statsAttribution = $"via {statsSourceLabel}";
         }
         <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">Your stats</h2>
+            <h2 class="dashboard-section-title">Your stats@animeSuffix</h2>
             <span class="dashboard-section-actions">
                 <span class="dashboard-section-link-muted">@statsAttribution</span>
                 @* Info popover. AniList re-aggregates User.statistics on
@@ -343,11 +352,11 @@
    of skeleton placeholder cards inside; the JS swaps them for the real
    HTML once it lands, or hides the whole section if the user's
    Currently Watching list comes back empty. *@
-@if (isLoggedIn && !anonymousUser && isAnime)
+@if (isLoggedIn && !anonymousUser && animeEnabled)
 {
     <section class="dashboard-section" data-continue-watching-section>
         <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">Continue watching</h2>
+            <h2 class="dashboard-section-title">Continue watching@animeSuffix</h2>
             <a class="dashboard-section-link" href="/library?list=current">
                 <span>View all</span>
                 <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -470,7 +479,7 @@
 @* The anime-only "This Season" strip + AniList discovery shelves below render
    only in anime mode; video mode swaps in its own Trakt/Cinemeta shelves
    (further down) via the same [data-shelf] loader. *@
-@if (isAnime)
+@if (animeEnabled)
 {
 @* "This Season" stat strip — applies to every visitor since the counts
    describe the whole AniList catalog, not the viewer's list. Numbers load
@@ -482,7 +491,7 @@
    dashboard never shows a placeholder row of zeros. *@
 <section class="dashboard-section stats-section" data-season-stats data-stats-loading>
     <div class="dashboard-section-header">
-        <h2 class="dashboard-section-title">This Season</h2>
+        <h2 class="dashboard-section-title">This Season@animeSuffix</h2>
         <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(CurrentSeasonLabel())">
             <span>View all</span>
             <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -567,7 +576,7 @@
    not yet populated). *@
 <section class="dashboard-section" data-shelf data-shelf-src="/Home/NewEpisodesTodayData">
     <div class="dashboard-section-header">
-        <h2 class="dashboard-section-title">New Episodes Today</h2>
+        <h2 class="dashboard-section-title">New Episodes Today@animeSuffix</h2>
         <span class="dashboard-section-link-muted">Refreshes daily</span>
     </div>
     <div data-shelf-container>
@@ -577,7 +586,7 @@
 
 <section class="dashboard-section" data-shelf data-shelf-src="/Home/PopularThisSeasonData">
     <div class="dashboard-section-header">
-        <h2 class="dashboard-section-title">Most Popular this Season</h2>
+        <h2 class="dashboard-section-title">Most Popular this Season@animeSuffix</h2>
         <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(CurrentSeasonLabel())">
             <span>View all</span>
             <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -593,7 +602,7 @@
 
 <section class="dashboard-section" data-shelf data-shelf-src="/Home/MostAnticipatedData">
     <div class="dashboard-section-header">
-        <h2 class="dashboard-section-title">Most Anticipated</h2>
+        <h2 class="dashboard-section-title">Most Anticipated@animeSuffix</h2>
         <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(NextSeasonLabel())">
             <span>View all</span>
             <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -613,7 +622,7 @@
    stats" strip + Continue Watching need a connected account (like the anime
    stats need AniList); the Trending / Popular / Anticipated shelves are
    public. All shelves reuse the same [data-shelf] loader below. *@
-@if (!isAnime)
+@if (videoTypes.Count > 0)
 {
     @if (isLoggedIn && !anonymousUser && Model.TraktConnected)
     {
@@ -692,10 +701,71 @@
             })();
         </script>
 
-        <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoContinueWatchingData">
+    }
+
+    @* One labelled set of video shelves per enabled video type. When more than
+       one mode is enabled the titles carry the "· Movies / · Series" suffix. *@
+    @foreach (var vt in videoTypes)
+    {
+        var vtSlug = vt == MetaType.movie ? "movie" : "series";
+        var vtLabel = vt == MetaType.movie ? "Movies" : "Series";
+        var vtSuffix = combined ? " · " + vtLabel : "";
+
+        if (isLoggedIn && !anonymousUser && Model.TraktConnected)
+        {
+            <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoContinueWatchingData?type=@vtSlug">
+                <div class="dashboard-section-header">
+                    <h2 class="dashboard-section-title">Continue watching@vtSuffix</h2>
+                    <a class="dashboard-section-link" href="/library?list=current">
+                        <span>View all</span>
+                        <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                            <polyline points="12 5 19 12 12 19"></polyline>
+                        </svg>
+                    </a>
+                </div>
+                <div data-shelf-container>
+                    @await Html.PartialAsync("_PosterScrollSkeleton")
+                </div>
+            </section>
+        }
+
+        <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=trending">
             <div class="dashboard-section-header">
-                <h2 class="dashboard-section-title">Continue watching</h2>
-                <a class="dashboard-section-link" href="/library?list=current">
+                <h2 class="dashboard-section-title">Trending@vtSuffix</h2>
+                <a class="dashboard-section-link" href="/discover?mode=trending">
+                    <span>View all</span>
+                    <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                        <polyline points="12 5 19 12 12 19"></polyline>
+                    </svg>
+                </a>
+            </div>
+            <div data-shelf-container>
+                @await Html.PartialAsync("_PosterScrollSkeleton")
+            </div>
+        </section>
+
+        <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=popular">
+            <div class="dashboard-section-header">
+                <h2 class="dashboard-section-title">Most Popular@vtSuffix</h2>
+                <a class="dashboard-section-link" href="/discover">
+                    <span>View all</span>
+                    <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                        <polyline points="12 5 19 12 12 19"></polyline>
+                    </svg>
+                </a>
+            </div>
+            <div data-shelf-container>
+                @await Html.PartialAsync("_PosterScrollSkeleton")
+            </div>
+        </section>
+
+        <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=anticipated">
+            <div class="dashboard-section-header">
+                <h2 class="dashboard-section-title">Most Anticipated@vtSuffix</h2>
+                <a class="dashboard-section-link" href="/discover?mode=anticipated">
                     <span>View all</span>
                     <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -708,54 +778,6 @@
             </div>
         </section>
     }
-
-    <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoShelfData?type=@videoType&amp;mode=trending">
-        <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">Trending</h2>
-            <a class="dashboard-section-link" href="/discover?mode=trending">
-                <span>View all</span>
-                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                    <polyline points="12 5 19 12 12 19"></polyline>
-                </svg>
-            </a>
-        </div>
-        <div data-shelf-container>
-            @await Html.PartialAsync("_PosterScrollSkeleton")
-        </div>
-    </section>
-
-    <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoShelfData?type=@videoType&amp;mode=popular">
-        <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">Most Popular</h2>
-            <a class="dashboard-section-link" href="/discover">
-                <span>View all</span>
-                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                    <polyline points="12 5 19 12 12 19"></polyline>
-                </svg>
-            </a>
-        </div>
-        <div data-shelf-container>
-            @await Html.PartialAsync("_PosterScrollSkeleton")
-        </div>
-    </section>
-
-    <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoShelfData?type=@videoType&amp;mode=anticipated">
-        <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">Most Anticipated</h2>
-            <a class="dashboard-section-link" href="/discover?mode=anticipated">
-                <span>View all</span>
-                <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                    <polyline points="12 5 19 12 12 19"></polyline>
-                </svg>
-            </a>
-        </div>
-        <div data-shelf-container>
-            @await Html.PartialAsync("_PosterScrollSkeleton")
-        </div>
-    </section>
 }
 
 <script>

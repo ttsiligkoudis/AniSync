@@ -30,9 +30,12 @@
     var currentPath = Context.Request.Path + Context.Request.QueryString;
 }
 
-@* The media-type switch lives in the site header now (the "mode" button that
-   reopens the chooser modal), so Library just renders for whatever mode the
-   viewer is in — no per-page toggle. *@
+@{
+    ViewData["MtActive"] = Model.MediaType;
+    ViewData["MtReturnUrl"] = "/library";
+}
+@* Single-select switch between the modes enabled in the chooser modal. *@
+@await Html.PartialAsync("_MediaTypeToggle")
 @{
     ViewData["Title"] = hasSearch
         ? $"Search: {Model.Search} · Library"
