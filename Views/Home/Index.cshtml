@@ -703,16 +703,17 @@
 
     }
 
-    @* One labelled set of video shelves per enabled video type. When more than
-       one mode is enabled the titles carry the "· Movies / · Series" suffix. *@
-    @foreach (var vt in videoTypes)
+    @* Video shelves grouped by LIST TYPE, not media type: each list type renders
+       one tile per enabled video type (Watching · Movies, Watching · Series, then
+       Trending · Movies, Trending · Series, …) so the page reads down the list
+       types. Titles carry the "· Movies / · Series" suffix only when more than one
+       mode is enabled. *@
+    @if (isLoggedIn && !anonymousUser && Model.TraktConnected)
     {
-        var vtSlug = vt == MetaType.movie ? "movie" : "series";
-        var vtLabel = vt == MetaType.movie ? "Movies" : "Series";
-        var vtSuffix = combined ? " · " + vtLabel : "";
-
-        if (isLoggedIn && !anonymousUser && Model.TraktConnected)
+        @foreach (var vt in videoTypes)
         {
+            var vtSlug = vt == MetaType.movie ? "movie" : "series";
+            var vtSuffix = combined ? " · " + (vt == MetaType.movie ? "Movies" : "Series") : "";
             <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoContinueWatchingData?type=@vtSlug">
                 <div class="dashboard-section-header">
                     <h2 class="dashboard-section-title">Continue watching@(vtSuffix)</h2>
@@ -729,7 +730,12 @@
                 </div>
             </section>
         }
+    }
 
+    @foreach (var vt in videoTypes)
+    {
+        var vtSlug = vt == MetaType.movie ? "movie" : "series";
+        var vtSuffix = combined ? " · " + (vt == MetaType.movie ? "Movies" : "Series") : "";
         <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=trending">
             <div class="dashboard-section-header">
                 <h2 class="dashboard-section-title">Trending@(vtSuffix)</h2>
@@ -745,7 +751,12 @@
                 @await Html.PartialAsync("_PosterScrollSkeleton")
             </div>
         </section>
+    }
 
+    @foreach (var vt in videoTypes)
+    {
+        var vtSlug = vt == MetaType.movie ? "movie" : "series";
+        var vtSuffix = combined ? " · " + (vt == MetaType.movie ? "Movies" : "Series") : "";
         <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=popular">
             <div class="dashboard-section-header">
                 <h2 class="dashboard-section-title">Most Popular@(vtSuffix)</h2>
@@ -761,7 +772,12 @@
                 @await Html.PartialAsync("_PosterScrollSkeleton")
             </div>
         </section>
+    }
 
+    @foreach (var vt in videoTypes)
+    {
+        var vtSlug = vt == MetaType.movie ? "movie" : "series";
+        var vtSuffix = combined ? " · " + (vt == MetaType.movie ? "Movies" : "Series") : "";
         <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=anticipated">
             <div class="dashboard-section-header">
                 <h2 class="dashboard-section-title">Most Anticipated@(vtSuffix)</h2>
