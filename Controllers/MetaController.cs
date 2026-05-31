@@ -1103,6 +1103,10 @@ namespace AnimeList.Controllers
             // the watched prefix so "watched up to N" lands on the right episodes
             // even across multiple seasons.
             IReadOnlyList<(int Season, int Episode)> episodes = Array.Empty<(int, int)>();
+            // Series + "watching": the episode to leave in-progress so Trakt
+            // surfaces the show as continue-watching (not completed) — the next
+            // unwatched episode after the watched prefix.
+            (int Season, int Episode)? inProgress = null;
             if (request.Type == "series" && (status == "watching" || status == "completed"))
             {
                 var meta = await _cinemeta.GetVideoMetaAsync("series", request.Id);
@@ -1113,13 +1117,15 @@ namespace AnimeList.Controllers
                     .ToList();
                 var take = status == "completed" ? ordered.Count : Math.Clamp(request.Progress, 0, ordered.Count);
                 episodes = ordered.Take(take).ToList();
+                if (status == "watching" && ordered.Count > 0)
+                    inProgress = ordered[Math.Min(take, ordered.Count - 1)];
             }
 
             int? rating = request.Score.HasValue && request.Score.Value > 0
                 ? (int)Math.Round(request.Score.Value)
                 : null;
 
-            var ok = await _traktService.SaveVideoEntryAsync(uid, request.Type, request.Id, status, episodes, rating);
+            var ok = await _traktService.SaveVideoEntryAsync(uid, request.Type, request.Id, status, episodes, rating, inProgress);
             return new JsonResult(new { success = ok, error = ok ? null : "trakt-not-connected" });
         }
 

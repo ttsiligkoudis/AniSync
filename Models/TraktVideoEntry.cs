@@ -14,7 +14,9 @@ namespace AnimeList.Models
         public bool InWatchlist { get; set; }
         /// <summary>Movie only: the movie is in the user's watched history.</summary>
         public bool Watched { get; set; }
-        /// <summary>Movie only: the movie has an in-progress playback (left part-watched).</summary>
+        /// <summary>The title has an in-progress playback (continue-watching) — a
+        /// part-watched movie or a series with an active episode position. The
+        /// "watching" signal for both types.</summary>
         public bool InPlayback { get; set; }
         /// <summary>Series only: count of distinct watched episodes in history.</summary>
         public int WatchedEpisodes { get; set; }

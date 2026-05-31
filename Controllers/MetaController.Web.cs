@@ -290,9 +290,14 @@ namespace AnimeList.Controllers
                     : e.InWatchlist ? "planning"
                     : "", e.Watched ? 1 : 0);
 
+            // An active episode playback means "watching" (continue-watching);
+            // watched history without one means "completed". This mirrors movies
+            // and avoids comparing Trakt's watched count to Cinemeta's episode
+            // total (different sources that rarely match, which made finished
+            // shows read as "watching" forever).
             var progress = e.WatchedEpisodes;
-            var status = total is int t && t > 0 && progress >= t ? "completed"
-                : progress > 0 ? "watching"
+            var status = e.InPlayback ? "watching"
+                : progress > 0 ? "completed"
                 : e.InWatchlist ? "planning"
                 : "";
             return (status, progress);
