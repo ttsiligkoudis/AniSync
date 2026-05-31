@@ -289,15 +289,15 @@ namespace AnimeList.Services
                 ? Task.FromResult(false)
                 : PostAuthedAsync(uid, "/sync/watchlist/remove", SyncBody(type, imdbId, null, null));
 
-        public Task<bool> AddToHistoryAsync(string uid, string type, string imdbId, int? season, int? episode) =>
-            string.IsNullOrEmpty(imdbId)
-                ? Task.FromResult(false)
-                : PostAuthedAsync(uid, "/sync/history", SyncBody(type, imdbId, season, episode));
-
         public Task<bool> PauseScrobbleAsync(string uid, string type, string imdbId, int? season, int? episode, double progress) =>
             string.IsNullOrEmpty(imdbId) || progress <= 0 || progress >= 100
                 ? Task.FromResult(false)
                 : PostAuthedAsync(uid, "/scrobble/pause", ScrobbleBody(type, imdbId, season, episode, progress));
+
+        public Task<bool> StopScrobbleAsync(string uid, string type, string imdbId, int? season, int? episode, double progress) =>
+            string.IsNullOrEmpty(imdbId) || progress <= 0
+                ? Task.FromResult(false)
+                : PostAuthedAsync(uid, "/scrobble/stop", ScrobbleBody(type, imdbId, season, episode, Math.Min(progress, 100)));
 
         // ── Unified-fan-out writes (token-based) ────────────────────────────
         // These are the writes the SyncService fan-out + the manage-entry / auto-track
