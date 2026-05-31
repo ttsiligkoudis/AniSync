@@ -4,23 +4,17 @@
     ViewData["ActiveNav"] = "library";
 
     var isVideo = Model.MediaType != MetaType.anime;
-    var labels = isVideo
-        ? new Dictionary<ListType, string>
-        {
-            // Same vocabulary as anime (Trakt can represent these three).
-            [ListType.Current]    = "Watching",
-            [ListType.Completed]  = "Completed",
-            [ListType.Planning]   = "Planning",
-        }
-        : new Dictionary<ListType, string>
-        {
-            [ListType.Current]    = "Watching",
-            [ListType.Completed]  = "Completed",
-            [ListType.Planning]   = "Planning",
-            [ListType.Paused]     = "Paused",
-            [ListType.Dropped]    = "Dropped",
-            [ListType.Repeating]  = "Rewatching",
-        };
+    // Same vocabulary for both anime and video now — video's Paused / Dropped /
+    // Rewatching ride AniSync-managed Trakt personal lists.
+    var labels = new Dictionary<ListType, string>
+    {
+        [ListType.Current]    = "Watching",
+        [ListType.Completed]  = "Completed",
+        [ListType.Planning]   = "Planning",
+        [ListType.Paused]     = "On Hold",
+        [ListType.Dropped]    = "Dropped",
+        [ListType.Repeating]  = "Rewatching",
+    };
     var noun = Model.MediaType == MetaType.movie ? "movies" : Model.MediaType == MetaType.series ? "series" : "anime";
 
     var hasSearch = !string.IsNullOrEmpty(Model.Search);

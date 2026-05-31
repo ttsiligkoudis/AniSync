@@ -284,6 +284,11 @@ namespace AnimeList.Controllers
         // option set: planning / watching / completed (or "" = not tracked).
         private static (string Status, int Progress) DeriveTraktVideoStatus(string type, TraktVideoEntry e, int? total)
         {
+            // Custom-status personal lists (On Hold / Dropped / Rewatching) win
+            // over the native surfaces — that's the explicit status the user set.
+            if (!string.IsNullOrEmpty(e.CustomStatus))
+                return (e.CustomStatus, e.WatchedEpisodes);
+
             if (type == "movie")
                 return (e.Watched ? "completed"
                     : e.InPlayback ? "watching"   // left part-watched (paused playback)
