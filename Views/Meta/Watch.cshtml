@@ -663,6 +663,43 @@
                 }
             }
 
+            // Park the current position in Trakt's in-progress playback
+            // (Continue Watching) when the user leaves mid-episode — the
+            // counterpart to markEpisodeAsWatched. Video-only (traktType set;
+            // the anime path tracks via its own primary). Skips when already
+            // marked watched (it's in history now, not "continue"), when there's
+            // no meaningful progress, or near completion (the 70 %+ mark-watched
+            // hook owns that tail). sendBeacon survives the unload; the keepalive
+            // fetch is the fallback. Fire-and-forget — never blocks the leave.
+            function reportTraktProgress() {
+                if (!traktType || episodeMarkedAsWatched) return;
+                var v = art && art.video;
+                if (!v || !isFinite(v.duration) || v.duration <= 0) return;
+                var pct = (v.currentTime || 0) / v.duration * 100;
+                if (!isFinite(pct) || pct < 1 || pct >= 95) return;
+                var payload = JSON.stringify({
+                    id: animeId,
+                    type: traktType,
+                    season: hasSeasons ? season : null,
+                    episode: episode,
+                    progress: Math.round(pct * 10) / 10
+                });
+                try {
+                    var blob = new Blob([payload], { type: 'application/json' });
+                    if (navigator.sendBeacon && navigator.sendBeacon('/meta/scrobble-progress', blob)) return;
+                } catch (_) { /* fall through to fetch */ }
+                try {
+                    fetch('/meta/scrobble-progress', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: payload,
+                        keepalive: true,
+                        skipLoader: true,
+                    });
+                } catch (_) { /* best-effort */ }
+            }
+
             var sourcesBody = document.getElementById('watchSourcesBody');
             var playerHost  = document.getElementById('watchPlayer');
             var fallbackHost = document.getElementById('watchPlayerFallback');
@@ -702,6 +739,8 @@
                     // the same second on re-open, not at the throttled
                     // last-tick mark.
                     saveResumeNow();
+                    // Mirror that snapshot to Trakt's Continue Watching.
+                    reportTraktProgress();
                     var v = art && art.video;
                     if (v && !v.paused) v.pause();
                 } catch (_) { /* defensive — non-fatal */ }
@@ -713,6 +752,7 @@
             window.addEventListener('pagehide', function () {
                 try {
                     saveResumeNow();
+                    reportTraktProgress();
                     var v = art && art.video;
                     if (v && !v.paused) v.pause();
                 } catch (_) { /* defensive — non-fatal */ }

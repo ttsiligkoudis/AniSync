@@ -1205,6 +1205,46 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
+        /// In-progress playback for movies / series → Trakt's /scrobble/pause, so
+        /// the title surfaces in Continue Watching (/sync/playback). Fired by the
+        /// watch player on page-leave (beacon) with the current progress %, the
+        /// counterpart to the 70 %-mark-watched hook: below that threshold the
+        /// title belongs in "continue", at/above it moves to history. Video-only
+        /// (anime tracks via its own primary); honours the auto-track opt-out.
+        /// </summary>
+        [HttpPost("/meta/scrobble-progress")]
+        public async Task<IActionResult> ScrobbleProgress([FromBody] ScrobbleProgressRequest req)
+        {
+            if (req is null || string.IsNullOrWhiteSpace(req.Id))
+                return BadRequest(new { ok = false, reason = "invalid-request" });
+            if (req.Type != "movie" && req.Type != "series")
+                return Json(new { ok = false, reason = "not-video" });
+            // Trakt's playback progress is a 0-100 percentage; the client already
+            // skips <1 % and the 95 %+ tail (the latter is mark-watched territory).
+            if (req.Progress <= 0 || req.Progress >= 100)
+                return Json(new { ok = false, reason = "out-of-range" });
+
+            var tokenData = await _tokenService.GetAccessTokenAsync();
+            if (tokenData is null || tokenData.anonymousUser || string.IsNullOrWhiteSpace(tokenData.access_token))
+                return Json(new { ok = false, reason = "no-auth" });
+
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+            if (string.IsNullOrEmpty(uid))
+                return Json(new { ok = false, reason = "no-uid" });
+
+            // Same opt-out the mark-watched hook honours — continue-watching is
+            // still tracking, so a user who turned auto-track off gets neither.
+            var cfg = await GetConfigByUidAsync(uid, _configStore);
+            if (cfg?.disableAutoTrack == true)
+                return Json(new { ok = false, reason = "opted-out" });
+
+            var season = req.Type == "series" ? req.Season : (int?)null;
+            var episode = req.Type == "series" ? req.Episode : (int?)null;
+            var ok = await _traktService.PauseScrobbleAsync(uid, req.Type, req.Id, season, episode, req.Progress);
+            return Json(new { ok, reason = ok ? null : "trakt-not-connected" });
+        }
+
+        /// <summary>
         /// Trakt watchlist toggle for a movie / series (video detail page). Replaces the
         /// retired /api/trakt/watchlist endpoint — resolves the current session's uid and
         /// adds / removes the title on the user's Trakt watchlist (primary or linked Trakt).
@@ -1300,6 +1340,23 @@ namespace AnimeList.Controllers
             /// client-side.
             /// </summary>
             public string SourceUrl { get; set; }
+        }
+
+        /// <summary>
+        /// Body for /meta/scrobble-progress — the player's page-leave beacon that
+        /// parks a movie / series position in Trakt's Continue Watching.
+        /// </summary>
+        public class ScrobbleProgressRequest
+        {
+            public string Id { get; set; }
+            /// <summary>"movie" / "series" (video only — anime is rejected).</summary>
+            public string Type { get; set; }
+            /// <summary>Cour/season for series; null on single-season (defaults to 1 server-side).</summary>
+            public int? Season { get; set; }
+            /// <summary>Episode number for series; ignored for movies.</summary>
+            public int Episode { get; set; }
+            /// <summary>Playback progress as a 0-100 percentage.</summary>
+            public double Progress { get; set; }
         }
 
         /// <summary>

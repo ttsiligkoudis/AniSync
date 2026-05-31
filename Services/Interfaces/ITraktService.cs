@@ -83,6 +83,15 @@ namespace AnimeList.Services.Interfaces
         /// </summary>
         Task<bool> AddToHistoryAsync(string uid, string type, string imdbId, int? season, int? episode);
 
+        /// <summary>
+        /// Saves in-progress playback via Trakt's /scrobble/pause so the title
+        /// surfaces in the user's Continue Watching (/sync/playback). progress is
+        /// a 0-100 percentage; season/episode target a specific series episode
+        /// (ignored for movies). Best-effort: returns false (no throw) when Trakt
+        /// isn't connected, the id is empty, or progress is out of (0,100).
+        /// </summary>
+        Task<bool> PauseScrobbleAsync(string uid, string type, string imdbId, int? season, int? episode, double progress);
+
         // ── Unified-fan-out writes (token-based) ────────────────────────────
 
         /// <summary>

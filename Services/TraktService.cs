@@ -294,6 +294,11 @@ namespace AnimeList.Services
                 ? Task.FromResult(false)
                 : PostAuthedAsync(uid, "/sync/history", SyncBody(type, imdbId, season, episode));
 
+        public Task<bool> PauseScrobbleAsync(string uid, string type, string imdbId, int? season, int? episode, double progress) =>
+            string.IsNullOrEmpty(imdbId) || progress <= 0 || progress >= 100
+                ? Task.FromResult(false)
+                : PostAuthedAsync(uid, "/scrobble/pause", ScrobbleBody(type, imdbId, season, episode, progress));
+
         // ── Unified-fan-out writes (token-based) ────────────────────────────
         // These are the writes the SyncService fan-out + the manage-entry / auto-track
         // paths use. They take the resolved Trakt TokenData directly (primary or linked)
@@ -467,6 +472,37 @@ namespace AnimeList.Services
                 };
             }
             return new JObject { ["shows"] = new JArray { show } };
+        }
+
+        // Body for the /scrobble/* endpoints — distinct from SyncBody's grouped
+        // movies/shows arrays. Scrobble wants a SINGULAR movie/show plus a
+        // sibling episode object (season+number) and a top-level progress
+        // percentage (0-100). Trakt records the progress so the title shows up
+        // in /sync/playback (Continue Watching).
+        private static JObject ScrobbleBody(string type, string imdbId, int? season, int? episode, double progress)
+        {
+            var ids = new JObject { ["imdb"] = imdbId };
+            var body = new JObject { ["progress"] = Math.Round(progress, 2) };
+            if (type == "movie")
+            {
+                body["movie"] = new JObject { ["ids"] = ids };
+            }
+            else
+            {
+                body["show"] = new JObject { ["ids"] = ids };
+                if (episode.HasValue)
+                {
+                    // Default to season 1 when the caller didn't tag a cour —
+                    // single-season series carry a null season but a real
+                    // episode number, and Trakt needs both to address it.
+                    body["episode"] = new JObject
+                    {
+                        ["season"] = season ?? 1,
+                        ["number"] = episode.Value,
+                    };
+                }
+            }
+            return body;
         }
 
         private static string Truncate(string s, int max) =>
