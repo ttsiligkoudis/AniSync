@@ -364,28 +364,42 @@ namespace AnimeList.Services
             else
                 await PostAuthedAsync(uid, "/sync/ratings/remove", SyncBody(type, imdbId, null, null));
 
+            // Each branch makes the target status exclusive — it removes the
+            // title from the OTHER Trakt surfaces (watchlist / playback /
+            // history) so a movie/series never shows under two lists at once
+            // (e.g. Completed AND Watching after a status change).
             switch ((status ?? string.Empty).ToLowerInvariant())
             {
                 case "planning":
-                    // A lingering movie playback would otherwise still read as
-                    // "watching" (playback outranks watchlist), so clear it.
+                    // Only on the watchlist.
                     if (type == "movie") await ClearMoviePlaybackAsync(uid, imdbId);
+                    await PostAuthedAsync(uid, "/sync/history/remove", SyncBody(type, imdbId, null, null));
                     await AddToWatchlistAsync(uid, type, imdbId);
                     break;
 
                 case "watching":
-                    // Moving into "watching" means it's no longer just queued.
                     await RemoveFromWatchlistAsync(uid, type, imdbId);
                     if (type == "movie")
                     {
-                        // A movie's "watching" state lives in Trakt playback.
-                        // Seed one at the midpoint only when none exists, so a
-                        // real resume position the user already has isn't reset.
+                        // Drop any completed record, then ensure an in-progress
+                        // playback (a movie's only "watching" signal). Seed at
+                        // the midpoint only when none exists, so a real resume
+                        // position the user already has isn't reset.
+                        await PostAuthedAsync(uid, "/sync/history/remove", SyncBody("movie", imdbId, null, null));
                         if (await FindMoviePlaybackIdAsync(uid, imdbId) == null)
                             await PauseScrobbleAsync(uid, "movie", imdbId, null, null, 50);
                     }
-                    else if (watchedEpisodes is { Count: > 0 })
-                        await PostAuthedAsync(uid, "/sync/history", HistoryEpisodesBody(imdbId, watchedEpisodes));
+                    else
+                    {
+                        // Reset history to exactly the watched prefix (1..N):
+                        // wipe the show's history, then re-add the prefix. Makes
+                        // progress exact rather than additive, so lowering it
+                        // (or coming down from Completed) really un-watches the
+                        // rest.
+                        await PostAuthedAsync(uid, "/sync/history/remove", SyncBody("series", imdbId, null, null));
+                        if (watchedEpisodes is { Count: > 0 })
+                            await PostAuthedAsync(uid, "/sync/history", HistoryEpisodesBody(imdbId, watchedEpisodes));
+                    }
                     break;
 
                 case "completed":
@@ -399,10 +413,9 @@ namespace AnimeList.Services
                         await PostAuthedAsync(uid, "/sync/history", HistoryEpisodesBody(imdbId, watchedEpisodes));
                     break;
 
-                default: // "" → None: drop from watchlist + any in-progress
-                         // playback. History isn't unwound (Trakt has no clean
-                         // "unwatch everything"; the user can do that on Trakt).
+                default: // "" → None: remove from every surface.
                     if (type == "movie") await ClearMoviePlaybackAsync(uid, imdbId);
+                    await PostAuthedAsync(uid, "/sync/history/remove", SyncBody(type, imdbId, null, null));
                     await RemoveFromWatchlistAsync(uid, type, imdbId);
                     break;
             }
