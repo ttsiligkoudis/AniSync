@@ -36,6 +36,14 @@ namespace AnimeList.Services.Extensions
             {
                 if (string.IsNullOrEmpty(r?.AnimeId)) continue;
 
+                // Legacy rows were minted with the /anime/ prefix (pre-MetaController
+                // consolidation); normalise to the unified /meta/ route so old + new
+                // notifications both resolve. The id-space rewrites below already emit
+                // /meta/ when they rebuild the path, so this only matters for the
+                // "keep the stored link" short-circuits.
+                if (!string.IsNullOrEmpty(r.LinkPath) && r.LinkPath.StartsWith("/anime/", StringComparison.Ordinal))
+                    r.LinkPath = "/meta/" + r.LinkPath.Substring("/anime/".Length);
+
                 // Group-seasons branch first — when on, every notification
                 // should resolve to the imdb-grouped franchise umbrella,
                 // even when the stored AnimeId already matches the user's
