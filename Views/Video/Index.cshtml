@@ -28,6 +28,26 @@
    preference; DiscoverController routes the chosen type to the right surface. *@
 @await Html.PartialAsync("_MediaTypeToggle")
 
+@* Browse-mode tabs (Popular + Trakt feeds). Mirrors the anime discover tab
+   strip. Plain links to /discover?mode=… preserving the active genre/search;
+   only shown when more than Popular is available (Trakt configured). *@
+@if (Model.Modes.Count > 1)
+{
+    <nav class="library-tabs" role="tablist" aria-label="Discover modes">
+        @foreach (var (slug, lbl) in Model.Modes)
+        {
+            var isActive = Model.Mode == slug;
+            var parts = new List<string> { $"mode={slug}" };
+            if (hasGenre) parts.Add($"genre={Uri.EscapeDataString(Model.Genre)}");
+            if (hasSearch) parts.Add($"search={Uri.EscapeDataString(Model.Search)}");
+            <a class="library-tab @(isActive ? "library-tab-active" : "")"
+               href="/discover?@string.Join("&", parts)"
+               role="tab"
+               aria-selected="@(isActive ? "true" : "false")">@lbl</a>
+        }
+    </nav>
+}
+
 @* Trakt connection is now managed from the Account page (Trakt is a first-class
    provider — sign in with it or link it there). The user's Trakt lists live on
    the Library page; Discover stays focused on browsing, so the old
@@ -42,6 +62,9 @@
            placeholder="Search @label.ToLower()…"
            class="filter-bar-search"
            autocomplete="off" />
+
+    @* Keep search / genre submits within the active browse mode. *@
+    <input type="hidden" name="mode" value="@Model.Mode" />
 
     <select name="genre" class="filter-bar-select" aria-label="Genre">
         <option value="">All genres</option>
@@ -91,6 +114,7 @@
              data-endpoint="/video/page"
              data-type="@Model.Type"
              data-list="top"
+             data-mode="@Model.Mode"
              data-genre="@Model.Genre"
              data-page="@(Model.NeedsClientLoad ? 0 : 1)"
              data-needs-initial-load="@(Model.NeedsClientLoad ? "true" : null)">
