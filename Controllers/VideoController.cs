@@ -163,12 +163,27 @@ namespace AnimeList.Controllers
             var uid = await ResolveUidAsync();
             var traktToken = string.IsNullOrEmpty(uid) ? null : await _configStore.GetTraktTokenAsync(uid);
 
-            return View("Detail", new VideoDetailViewModel
+            // Movies & series render through the shared anime detail view
+            // (Views/Anime/Detail.cshtml) so the whole site has one detail
+            // layout. The view is media-type-aware: MediaType / BasePath drive
+            // the video-shaped watch URLs and swap the anime Manage Entry pill
+            // for a Trakt watchlist toggle. SourceLinks carries the IMDb id (the
+            // Cinemeta id is the tt-prefixed IMDb id) so the IMDb + Stremio
+            // source chips light up; the AniList / MAL / Kitsu chips stay dark
+            // because there's no anime-tracker mapping for general video.
+            var imdbId = meta.id != null && meta.id.StartsWith(Utils.imdbPrefix, StringComparison.Ordinal)
+                ? meta.id
+                : null;
+
+            return View("/Views/Anime/Detail.cshtml", new AnimeDetailViewModel
             {
-                Type = type,
-                Meta = meta,
+                Anime = meta,
+                MediaType = type == "movie" ? MetaType.movie : MetaType.series,
+                BasePath = type == "movie" ? "/movie" : "/series",
+                AnonymousUser = string.IsNullOrEmpty(uid),
                 ConfigUid = uid,
                 TraktConnected = traktToken?.Connected == true,
+                SourceLinks = new AnimeSourceLinks { ImdbId = imdbId },
             });
         }
 
@@ -320,16 +335,5 @@ namespace AnimeList.Controllers
         public bool TraktConfigured { get; set; }
         public bool TraktConnected { get; set; }
         public string TraktUsername { get; set; }
-    }
-
-    /// <summary>
-    /// View model for the video detail page (Views/Video/Detail.cshtml).
-    /// </summary>
-    public class VideoDetailViewModel
-    {
-        public string Type { get; set; }
-        public Meta Meta { get; set; }
-        public string ConfigUid { get; set; }
-        public bool TraktConnected { get; set; }
     }
 }

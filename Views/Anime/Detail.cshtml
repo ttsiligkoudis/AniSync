@@ -48,6 +48,16 @@
     // empty, so this view never gets rendered against a null anime.
     var a = Model.Anime;
 
+    // This view is shared with the video (movie / series) section — see
+    // VideoController.Detail. isVideo flips the anime-tracker chrome off
+    // (Manage Entry → Trakt watchlist, no AniList extras hydration) and routes
+    // the watch links through basePath (/movie · /series instead of /anime).
+    var isVideo = Model.MediaType != MetaType.anime;
+    var basePath = string.IsNullOrEmpty(Model.BasePath) ? "/anime" : Model.BasePath;
+    // Highlight Discover in the nav for the video detail pages, matching where
+    // the old Views/Video/Detail.cshtml lived.
+    if (isVideo) { ViewData["ActiveNav"] = "discover"; }
+
     // Surface the anime name as the page title so browser history / bookmarks /
     // tab labels show the show being viewed instead of a generic "AniSync".
     ViewData["Title"] = a.name;
@@ -144,6 +154,24 @@
                         wouldn't open and there's no "you" to talk about).
                    data-open-modal is the global hook intercepted by
                    manage-entry-modal.js. *@
+                @if (isVideo)
+                {
+                    @* Video (movie / series) tracking is Trakt, not the anime
+                       trackers — surface a watchlist toggle in the same badge
+                       slot the anime Manage Entry pill would occupy. Shown only
+                       when Trakt is connected (parity with the anonymous-anime
+                       "no pill" case). Wired by the script near the page foot. *@
+                    @if (Model.TraktConnected)
+                    {
+                        <button type="button" class="anime-detail-user-state" id="traktWatchlistBtn"
+                                data-type="@(Model.MediaType == MetaType.movie ? "movie" : "series")"
+                                data-id="@a.id" data-in="false">
+                            <span>＋ Watchlist</span>
+                        </button>
+                    }
+                }
+                else
+                {
                 @{
                     // Override info — non-null when the requested anime has no mapping
                     // to the user's primary but lives on a linked secondary the user
@@ -247,6 +275,7 @@
                         </svg>
                     </button>
                 }
+                }
             </div>
 
             @* Continue-watching CTA. Lives on its own centered row beneath the
@@ -324,8 +353,8 @@
                 // instead of the first-occurrence default.
                 var watchHref = targetVideo != null
                         && (a.videos?.Select(v => v.season > 0 ? v.season : 1).Distinct().Count() ?? 0) > 1
-                    ? $"/anime/{a.id}/watch/{(targetVideo.season > 0 ? targetVideo.season : 1)}/{nextEp}"
-                    : $"/anime/{a.id}/watch/{nextEp}";
+                    ? $"{basePath}/{a.id}/watch/{(targetVideo.season > 0 ? targetVideo.season : 1)}/{nextEp}"
+                    : $"{basePath}/{a.id}/watch/{nextEp}";
             }
             @if (showWatchCta)
             {
@@ -769,7 +798,10 @@ else if (a.type == MetaType.movie.ToString())
        stream addon / External services wired up, the watch page surfaces
        the source picker and a "set up streaming" prompt. *@
     <section class="anime-detail-section anime-detail-movie-cta-wrap">
-        <a class="anime-detail-movie-cta" href="@($"/anime/{a.id}/watch/1")">
+        @* Anime movies route to /anime/{id}/watch/1 (the watch route treats
+           episode 1 as the movie body); video movies use VideoController's
+           /movie/{id}/watch, which has no episode segment. *@
+        <a class="anime-detail-movie-cta" href="@(isVideo ? $"{basePath}/{a.id}/watch" : $"/anime/{a.id}/watch/1")">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polygon points="6 4 20 12 6 20 6 4"></polygon>
@@ -1074,7 +1106,11 @@ else
    (for non-AniList pages) supplementary chip rows from /anime/{id}/extras
    after the page paints, then reveals the placeholder sections. Skips the
    fetch entirely when there's nothing to populate (no placeholders on the
-   page = no upstream call). *@
+   page = no upstream call). Anime-only: /anime/extras is an AniList-backed
+   endpoint, so the video (movie / series) path skips it — its deferred
+   placeholders stay hidden. *@
+@if (!isVideo)
+{
 <script>
     (function () {
         var relatedSection         = document.querySelector('[data-anime-related]');
@@ -1246,6 +1282,47 @@ else
             .catch(function () { /* silent — sections just stay hidden */ });
     })();
 </script>
+}
+
+@* Trakt watchlist toggle for the video (movie / series) hero pill. Idempotent
+   add/remove against /anime/trakt-watchlist; the label flips optimistically and
+   the toast reports the outcome. Anime tracking uses the Manage Entry modal
+   instead, so this only renders on the video path with Trakt connected. *@
+@if (isVideo && Model.TraktConnected)
+{
+<script>
+    (function () {
+        var btn = document.getElementById('traktWatchlistBtn');
+        if (!btn) return;
+        function toast(msg) {
+            if (window.AniSyncToast && window.AniSyncToast.show) window.AniSyncToast.show(msg);
+        }
+        btn.addEventListener('click', function () {
+            var inList = btn.dataset.in === 'true';
+            var action = inList ? 'remove' : 'add';
+            btn.disabled = true;
+            fetch('/anime/trakt-watchlist', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                body: JSON.stringify({ type: btn.dataset.type, id: btn.dataset.id, action: action })
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (d && d.success) {
+                        btn.dataset.in = inList ? 'false' : 'true';
+                        btn.textContent = inList ? '＋ Watchlist' : '✓ In Watchlist';
+                        toast(inList ? 'Removed from watchlist' : 'Added to watchlist');
+                    } else {
+                        toast('Couldn’t update watchlist');
+                    }
+                })
+                .catch(function () { toast('Network error'); })
+                .finally(function () { btn.disabled = false; });
+        });
+    })();
+</script>
+}
 
 @* Episode rows navigate to the dedicated /anime/{id}/watch/{ep} page
    (Plyr-based player + source picker + prev/next nav). Future-dated
@@ -1291,6 +1368,9 @@ else
 
     (function () {
         var animeId = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.Anime?.id));
+        // "/anime" for anime, "/movie" · "/series" for the video section, so the
+        // episode rows navigate to the right watch route.
+        var basePath = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(basePath));
         if (!animeId) return;
 
         // Episode rows always navigate to /watch now — even without a
@@ -1318,8 +1398,8 @@ else
             if (!ep || ep <= 0) return;
             var idSeg = encodeURIComponent(animeId);
             var href = hasMultipleSeasons && !isNaN(season)
-                ? '/anime/' + idSeg + '/watch/' + season + '/' + ep
-                : '/anime/' + idSeg + '/watch/' + ep;
+                ? basePath + '/' + idSeg + '/watch/' + season + '/' + ep
+                : basePath + '/' + idSeg + '/watch/' + ep;
             window.location.assign(href);
         }
 
