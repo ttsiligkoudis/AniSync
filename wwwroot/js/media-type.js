@@ -33,6 +33,12 @@
         } catch (_) { return []; }
     }
     function readActive() { try { return localStorage.getItem(ACTIVE_KEY); } catch (_) { return null; } }
+    function readCookie(name) {
+        try {
+            var m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+            return m ? decodeURIComponent(m[1]) : null;
+        } catch (_) { return null; }
+    }
     function setCookie(name, v) {
         // URL-encode the value: the enabled set is comma-joined, and ASP.NET
         // Core's request-cookie parser treats a raw comma as a cookie separator
@@ -125,8 +131,17 @@
     if (storedSet.length === 0) {
         open(true);
     } else {
+        // The enabled set is only ever changed by the modal, so keep its cookie
+        // in sync with localStorage (covers a cleared cookie + the comma fix).
         setCookie(SET_COOKIE, storedSet.join(','));
-        var a = readActive();
-        if (valid(a)) setCookie(ACTIVE_COOKIE, a);
+        // The ACTIVE mode is owned by the Discover/Library toggle (a server-set
+        // cookie) and the modal. Mirror the cookie's value INTO localStorage so
+        // the modal reflects toggle switches — but never write the cookie FROM
+        // localStorage here: that overwrote the toggle's choice on the next
+        // navigation, making a list-tab click revert the media type.
+        var cookieActive = readCookie(ACTIVE_COOKIE);
+        if (valid(cookieActive)) {
+            try { localStorage.setItem(ACTIVE_KEY, cookieActive); } catch (_) { /* private mode */ }
+        }
     }
 })();
