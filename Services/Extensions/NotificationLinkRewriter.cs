@@ -68,8 +68,8 @@ namespace AnimeList.Services.Extensions
                         var watchEp = r.EpisodeNumber;
                         var season = rowMapping.Season;
                         r.LinkPath = (season.HasValue && season.Value > 0)
-                            ? $"/anime/{rowMapping.ImdbId}/watch/{season.Value}/{watchEp}"
-                            : $"/anime/{rowMapping.ImdbId}/watch/{watchEp}";
+                            ? $"/meta/{rowMapping.ImdbId}/watch/{season.Value}/{watchEp}"
+                            : $"/meta/{rowMapping.ImdbId}/watch/{watchEp}";
                         r.AnimeId = rowMapping.ImdbId;
                         continue;
                     }
@@ -95,7 +95,7 @@ namespace AnimeList.Services.Extensions
                 // the canonical format rather than string-replacing the
                 // old id, which would silently break if the dispatcher
                 // ever evolves the URL shape.
-                r.LinkPath = $"/anime/{translated}/watch/{r.EpisodeNumber}";
+                r.LinkPath = $"/meta/{translated}/watch/{r.EpisodeNumber}";
                 r.AnimeId = translated;
             }
         }

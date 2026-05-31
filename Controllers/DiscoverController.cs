@@ -641,6 +641,133 @@ namespace AnimeList.Controllers
                 ConfigUid = uid,
             });
         }
+
+        // ===== Video (movie / series) browse data endpoints =====
+        // The /discover/{movies,series} browse view (Views/Video/Index.cshtml)
+        // is rendered by VideoBrowseAsync above; these are its client-loaded
+        // data feeds, moved here from the removed VideoController so Discover
+        // owns the whole browse surface.
+
+        // Cinemeta pages its catalogs in blocks of 100. The browse JS sends
+        // 1-indexed page numbers; we convert page → item offset with this.
+        private const int CatalogPageSize = 100;
+        // Cap on items hydrated for a Trakt shelf — each costs a Cinemeta meta
+        // lookup, so keep the per-shelf fan-out bounded.
+        private const int TraktShelfSize = 18;
+
+        /// <summary>
+        /// Infinite-scroll pagination endpoint for the browse grids. Returns
+        /// just the next chunk of poster cards via the shared _PosterGrid
+        /// partial (VideoLinks on so cards route to /meta/{id}?type=…).
+        /// </summary>
+        [Route("/video/page")]
+        public async Task<IActionResult> VideoPage(string type, string genre = null, int page = 1)
+        {
+            if (type != "movie" && type != "series") type = "movie";
+            if (page < 1) page = 1;
+            var skip = (page - 1) * CatalogPageSize;
+
+            var uid = await ResolveVideoUidAsync();
+            var items = await _cinemeta.GetVideoCatalogAsync(type, genre, search: null, skip: skip);
+
+            return PartialView("_PosterGrid", new PosterGridViewModel
+            {
+                Items = items,
+                ConfigUid = uid,
+                VideoLinks = true,
+            });
+        }
+
+        /// <summary>
+        /// Client-loaded Trakt shelf (kind = "continue" | "watchlist") for the
+        /// browse pages. Returns 204 when Trakt isn't connected so the shelf
+        /// simply doesn't appear.
+        /// </summary>
+        [Route("/video/trakt-shelf")]
+        public async Task<IActionResult> VideoTraktShelf(string kind)
+        {
+            var uid = await ResolveVideoUidAsync();
+            if (string.IsNullOrEmpty(uid)) return NoContent();
+
+            var trakt = await _configStore.GetTraktTokenAsync(uid);
+            if (trakt?.Connected != true) return NoContent();
+
+            var watchlist = string.Equals(kind, "watchlist", StringComparison.OrdinalIgnoreCase);
+            var items = watchlist
+                ? await _trakt.GetWatchlistAsync(uid)
+                : await _trakt.GetPlaybackAsync(uid);
+
+            var metas = await BuildVideoMetasAsync(items.Take(TraktShelfSize).ToList());
+            if (metas.Count == 0) return NoContent();
+
+            return PartialView("_PosterGrid", new PosterGridViewModel
+            {
+                Items = metas,
+                ConfigUid = uid,
+                Variant = "scroll",
+                VideoLinks = true,
+            });
+        }
+
+        // Hydrates Trakt list items (imdb id + type) into poster-bearing Meta
+        // via Cinemeta, in parallel, preserving Trakt order and dropping any id
+        // Cinemeta can't resolve. Forces Meta.type from the Trakt item so the
+        // _PosterGrid VideoLinks routing picks the right ?type=.
+        private async Task<List<Meta>> BuildVideoMetasAsync(List<TraktListItem> items)
+        {
+            var lookups = items.Select(async it =>
+            {
+                try
+                {
+                    var meta = await _cinemeta.GetVideoMetaAsync(it.Type, it.ImdbId);
+                    if (meta == null) return null;
+                    meta.type = it.Type == "movie" ? MetaType.movie.ToString() : MetaType.series.ToString();
+                    return meta;
+                }
+                catch
+                {
+                    return null;
+                }
+            });
+
+            var resolved = await Task.WhenAll(lookups);
+            return resolved.Where(m => m != null).ToList();
+        }
+
+        // UID resolution mirroring Index() — anonymous visitors get null.
+        private async Task<string> ResolveVideoUidAsync()
+        {
+            var tokenData = await _tokenService.GetAccessTokenAsync();
+            if (tokenData == null || tokenData.anonymousUser) return null;
+            var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+            return resolved;
+        }
+    }
+
+    /// <summary>
+    /// View model for the video browse pages (Views/Video/Index.cshtml).
+    /// Type is the Cinemeta content type ("movie" / "series") and drives the
+    /// page title, active-nav highlight and the pagination endpoint's type
+    /// parameter.
+    /// </summary>
+    public class VideoBrowseViewModel
+    {
+        public string Type { get; set; }
+        public string ConfigUid { get; set; }
+        public string Genre { get; set; }
+        public string Search { get; set; }
+        public IReadOnlyList<string> AvailableGenres { get; set; } = [];
+        public List<Meta> Items { get; set; } = [];
+        // True for the popularity browse — the view emits skeleton placeholders
+        // and video-pagination.js fetches page 1 on load. False for search,
+        // which is rendered server-side from Items.
+        public bool NeedsClientLoad { get; set; }
+
+        // Trakt connection status for the header strip.
+        public bool SignedIn { get; set; }
+        public bool TraktConfigured { get; set; }
+        public bool TraktConnected { get; set; }
+        public string TraktUsername { get; set; }
     }
 
     public class StudioDetailViewModel

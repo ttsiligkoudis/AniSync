@@ -7,18 +7,29 @@ using Newtonsoft.Json.Linq;
 
 namespace AnimeList.Controllers
 {
-    public class MetaController : Controller
+    // Split across two files (this + MetaController.Web.cs). This file holds the
+    // Stremio addon JSON surface ({config}/meta/...); the .Web.cs partial holds
+    // the session-based web pages (/meta/{id} detail + watch + streams / subs /
+    // mark-watched / trakt-watchlist). Both share this merged constructor + DI.
+    public partial class MetaController : Controller
     {
         private readonly ITokenService _tokenService;
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
+        private readonly ITmdbService _tmdbService;
         private readonly IAnimeMappingService _mappingService;
         private readonly ISyncService _syncService;
         private readonly IConfigStore _configStore;
         private readonly IUserListCache _listCache;
         private readonly IAnilistFallback _anilistFallback;
         private readonly IAnimeMetaLoader _animeMetaLoader;
+        private readonly IAddonStreamService _addonStreamService;
+        private readonly IAniSkipService _aniSkipService;
+        private readonly ISubtitleService _subtitleService;
+        private readonly IHttpClientFactory _httpClientFactory;
+        private readonly ITraktService _traktService;
+        private readonly ICinemetaService _cinemeta;
         private readonly ILogger<MetaController> _logger;
 
         public MetaController(
@@ -26,24 +37,38 @@ namespace AnimeList.Controllers
             IAnilistService anilistService,
             IKitsuService kitsuService,
             IMalService malService,
+            ITmdbService tmdbService,
             IAnimeMappingService mappingService,
             ISyncService syncService,
             IConfigStore configStore,
             IUserListCache listCache,
             IAnilistFallback anilistFallback,
             IAnimeMetaLoader animeMetaLoader,
+            IAddonStreamService addonStreamService,
+            IAniSkipService aniSkipService,
+            ISubtitleService subtitleService,
+            IHttpClientFactory httpClientFactory,
+            ITraktService traktService,
+            ICinemetaService cinemeta,
             ILogger<MetaController> logger)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
+            _tmdbService = tmdbService;
             _mappingService = mappingService;
             _syncService = syncService;
             _configStore = configStore;
             _listCache = listCache;
             _anilistFallback = anilistFallback;
             _animeMetaLoader = animeMetaLoader;
+            _addonStreamService = addonStreamService;
+            _aniSkipService = aniSkipService;
+            _subtitleService = subtitleService;
+            _httpClientFactory = httpClientFactory;
+            _traktService = traktService;
+            _cinemeta = cinemeta;
             _logger = logger;
         }
 

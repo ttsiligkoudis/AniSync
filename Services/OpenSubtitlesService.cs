@@ -336,11 +336,11 @@ namespace AnimeList.Services
 
         private static string ProxyUrl(string upstreamUrl)
         {
-            // Relative /anime/subtitle?url=... — same-origin as the
+            // Relative /meta/subtitle?url=... — same-origin as the
             // host page so the <track> tag loads without needing a
-            // CORS opt-in on the player.
+            // CORS opt-in on the player. The endpoint is id-agnostic.
             var encoded = Uri.EscapeDataString(upstreamUrl);
-            return $"/anime/subtitle?url={encoded}";
+            return $"/meta/subtitle?url={encoded}";
         }
 
         private static bool IsAllowedSubtitleHost(string url)

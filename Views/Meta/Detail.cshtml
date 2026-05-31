@@ -53,9 +53,13 @@
     // (Manage Entry → Trakt watchlist, no AniList extras hydration) and routes
     // the watch links through basePath (/movie · /series instead of /anime).
     var isVideo = Model.MediaType != MetaType.anime;
-    var basePath = string.IsNullOrEmpty(Model.BasePath) ? "/anime" : Model.BasePath;
-    // Highlight Discover in the nav for the video detail pages, matching where
-    // the old Views/Video/Detail.cshtml lived.
+    var basePath = string.IsNullOrEmpty(Model.BasePath) ? "/meta" : Model.BasePath;
+    // The media type rides the ?type= query on every watch link (omitted for
+    // anime, the route default). Append typeQuery to every {basePath}/{id}/watch
+    // URL the page builds so navigation stays in the right Cinemeta-backed
+    // branch for movie / series.
+    var typeQuery = isVideo ? $"?type={Model.MediaType}" : "";
+    // Highlight Discover in the nav for the video detail pages.
     if (isVideo) { ViewData["ActiveNav"] = "discover"; }
 
     // Surface the anime name as the page title so browser history / bookmarks /
@@ -349,8 +353,8 @@
                 // instead of the first-occurrence default.
                 var watchHref = targetVideo != null
                         && (a.videos?.Select(v => v.season > 0 ? v.season : 1).Distinct().Count() ?? 0) > 1
-                    ? $"{basePath}/{a.id}/watch/{(targetVideo.season > 0 ? targetVideo.season : 1)}/{nextEp}"
-                    : $"{basePath}/{a.id}/watch/{nextEp}";
+                    ? $"{basePath}/{a.id}/watch/{(targetVideo.season > 0 ? targetVideo.season : 1)}/{nextEp}{typeQuery}"
+                    : $"{basePath}/{a.id}/watch/{nextEp}{typeQuery}";
             }
             @if (showWatchCta)
             {
@@ -794,10 +798,10 @@ else if (a.type == MetaType.movie.ToString())
        stream addon / External services wired up, the watch page surfaces
        the source picker and a "set up streaming" prompt. *@
     <section class="anime-detail-section anime-detail-movie-cta-wrap">
-        @* Anime movies route to /anime/{id}/watch/1 (the watch route treats
-           episode 1 as the movie body); video movies use VideoController's
-           /movie/{id}/watch, which has no episode segment. *@
-        <a class="anime-detail-movie-cta" href="@(isVideo ? $"{basePath}/{a.id}/watch" : $"/anime/{a.id}/watch/1")">
+        @* Anime movies route to /meta/{id}/watch/1 (the watch route treats
+           episode 1 as the movie body); video movies use /meta/{id}/watch
+           (no episode segment) with ?type=. *@
+        <a class="anime-detail-movie-cta" href="@(isVideo ? $"{basePath}/{a.id}/watch{typeQuery}" : $"/meta/{a.id}/watch/1")">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polygon points="6 4 20 12 6 20 6 4"></polygon>
@@ -1120,12 +1124,13 @@ else
         // mapping don't pay for a 200-empty round-trip.
         if (!relatedSection && !recommendationsSection && !supplementaryHost) return;
 
-        // Route shape: /anime/extras/{*id}. Pull the id slug off the current
-        // pathname (anything after /anime/) and prepend /anime/extras/. Trim
-        // any trailing slash so /anime/anilist:123/ resolves the same as
-        // /anime/anilist:123.
-        var idSlug = window.location.pathname.replace(/^\/anime\//, '').replace(/\/$/, '');
-        var extrasPath = '/anime/extras/' + idSlug;
+        // Route shape: /meta/extras/{*id}. Pull the id slug off the current
+        // pathname (anything after /meta/) and prepend /meta/extras/. Trim
+        // any trailing slash so /meta/anilist:123/ resolves the same as
+        // /meta/anilist:123. Extras is anime-only (this script only runs for
+        // the anime path), so no ?type= is needed.
+        var idSlug = window.location.pathname.replace(/^\/meta\//, '').replace(/\/$/, '');
+        var extrasPath = '/meta/extras/' + idSlug;
 
         // Render a single Meta card matching the markup _PosterGrid emits for
         // the scroll variant — same class names + nesting so the existing CSS
@@ -1134,7 +1139,7 @@ else
             if (!meta || !meta.id) return null;
             var card = document.createElement('a');
             card.className = 'library-card';
-            card.href = '/anime/' + meta.id;
+            card.href = '/meta/' + meta.id;
             card.title = meta.name || '';
             card.setAttribute('data-meta-id', meta.id);
             card.setAttribute('data-meta-name', meta.name || '');
@@ -1297,7 +1302,7 @@ else
             var inList = btn.dataset.in === 'true';
             var action = inList ? 'remove' : 'add';
             btn.disabled = true;
-            fetch('/anime/trakt-watchlist', {
+            fetch('/meta/trakt-watchlist', {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -1364,9 +1369,9 @@ else
 
     (function () {
         var animeId = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.Anime?.id));
-        // "/anime" for anime, "/movie" · "/series" for the video section, so the
-        // episode rows navigate to the right watch route.
+        // Always "/meta"; the media type rides the ?type= query (empty for anime).
         var basePath = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(basePath));
+        var typeQuery = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(typeQuery));
         if (!animeId) return;
 
         // Episode rows always navigate to /watch now — even without a
@@ -1394,8 +1399,8 @@ else
             if (!ep || ep <= 0) return;
             var idSeg = encodeURIComponent(animeId);
             var href = hasMultipleSeasons && !isNaN(season)
-                ? basePath + '/' + idSeg + '/watch/' + season + '/' + ep
-                : basePath + '/' + idSeg + '/watch/' + ep;
+                ? basePath + '/' + idSeg + '/watch/' + season + '/' + ep + typeQuery
+                : basePath + '/' + idSeg + '/watch/' + ep + typeQuery;
             window.location.assign(href);
         }
 

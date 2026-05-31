@@ -135,7 +135,7 @@ namespace AnimeList.Services
                     EpisodeNumber = episode.Episode,
                     Season = null,
                     ThumbnailUrl = episode.CoverImage,
-                    LinkPath = $"/anime/{idInUserSpace}/watch/{episode.Episode}",
+                    LinkPath = $"/meta/{idInUserSpace}/watch/{episode.Episode}",
                     CreatedAt = createdAt,
                 };
 
