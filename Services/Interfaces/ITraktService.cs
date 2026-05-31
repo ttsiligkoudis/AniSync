@@ -131,11 +131,15 @@ namespace AnimeList.Services.Interfaces
         ///                      supplied episodes watched (series).
         /// watchedEpisodes are the (season, episode) coords to add to history
         /// (series only; the caller derives them from the Cinemeta episode list).
-        /// rating (1-10) is written to /sync/ratings; null/0 removes any rating.
-        /// Best-effort: false (no throw) when Trakt isn't connected.
+        /// inProgress (series + "watching" only) is the episode to seed an
+        /// in-progress playback on, so the show surfaces as continue-watching
+        /// rather than completed. rating (1-10) is written to /sync/ratings;
+        /// null/0 removes any rating. Best-effort: false (no throw) when Trakt
+        /// isn't connected.
         /// </summary>
         Task<bool> SaveVideoEntryAsync(string uid, string type, string imdbId, string status,
-            IReadOnlyList<(int Season, int Episode)> watchedEpisodes, int? rating);
+            IReadOnlyList<(int Season, int Episode)> watchedEpisodes, int? rating,
+            (int Season, int Episode)? inProgress = null);
 
         // ── Unified-fan-out writes (token-based) ────────────────────────────
 

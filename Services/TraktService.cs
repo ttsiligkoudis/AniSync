@@ -290,13 +290,32 @@ namespace AnimeList.Services
             // Planning → watchlist, Completed → watched history, Current → in-progress
             // playback (continue-watching). The remaining anime tabs (Paused / Dropped /
             // Repeating) have no Trakt analogue, so they come back empty.
-            var items = list switch
+            List<TraktListItem> items;
+            if (list == ListType.Planning)
             {
-                ListType.Planning => await GetWatchlistAsync(uid),
-                ListType.Completed => await GetHistoryAsync(uid),
-                ListType.Current => await GetPlaybackAsync(uid),
-                _ => new List<TraktListItem>(),
-            };
+                items = await GetWatchlistAsync(uid);
+            }
+            else if (list == ListType.Current)
+            {
+                items = await GetPlaybackAsync(uid);
+            }
+            else if (list == ListType.Completed)
+            {
+                // Completed = watched history MINUS anything still in progress
+                // (in playback). A series you're part-way through has watched
+                // episodes in history but an active playback, so it belongs under
+                // Watching (Current), not Completed.
+                var history = await GetHistoryAsync(uid);
+                var inProgress = (await GetPlaybackAsync(uid))
+                    .Select(i => i.ImdbId)
+                    .Where(s => !string.IsNullOrEmpty(s))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                items = history.Where(h => !inProgress.Contains(h.ImdbId)).ToList();
+            }
+            else
+            {
+                items = new List<TraktListItem>();
+            }
 
             var wantType = mediaType == MetaType.movie ? "movie" : "series";
             return items.Where(i => i.Type == wantType).ToList();
@@ -420,6 +439,14 @@ namespace AnimeList.Services
                         if (s["episodes"] is JArray eps) count += eps.Count;
                     entry.WatchedEpisodes = count;
                 }
+
+                // In-progress signal: a series with an active episode playback is
+                // "watching" (continue-watching), the same way a paused movie is.
+                // Lets the detail page distinguish watching from completed without
+                // relying on a (cross-source, often-mismatched) episode total.
+                var playback = await GetPlaybackAsync(uid);
+                entry.InPlayback = playback.Any(i =>
+                    i.Type == "series" && string.Equals(i.ImdbId, imdbId, StringComparison.OrdinalIgnoreCase));
             }
 
             // User rating.
@@ -433,7 +460,8 @@ namespace AnimeList.Services
         }
 
         public async Task<bool> SaveVideoEntryAsync(string uid, string type, string imdbId, string status,
-            IReadOnlyList<(int Season, int Episode)> watchedEpisodes, int? rating)
+            IReadOnlyList<(int Season, int Episode)> watchedEpisodes, int? rating,
+            (int Season, int Episode)? inProgress = null)
         {
             if (string.IsNullOrEmpty(imdbId)) return false;
             var token = await GetValidTokenAsync(uid);
@@ -453,8 +481,8 @@ namespace AnimeList.Services
             switch ((status ?? string.Empty).ToLowerInvariant())
             {
                 case "planning":
-                    // Only on the watchlist.
-                    if (type == "movie") await ClearMoviePlaybackAsync(uid, imdbId);
+                    // Only on the watchlist — clear history + any in-progress playback.
+                    await ClearPlaybackAsync(uid, type, imdbId);
                     await PostAuthedAsync(uid, "/sync/history/remove", SyncBody(type, imdbId, null, null));
                     await AddToWatchlistAsync(uid, type, imdbId);
                     break;
@@ -476,27 +504,32 @@ namespace AnimeList.Services
                         // Reset history to exactly the watched prefix (1..N):
                         // wipe the show's history, then re-add the prefix. Makes
                         // progress exact rather than additive, so lowering it
-                        // (or coming down from Completed) really un-watches the
-                        // rest.
+                        // (or coming down from Completed) really un-watches the rest.
                         await PostAuthedAsync(uid, "/sync/history/remove", SyncBody("series", imdbId, null, null));
                         if (watchedEpisodes is { Count: > 0 })
                             await PostAuthedAsync(uid, "/sync/history", HistoryEpisodesBody(imdbId, watchedEpisodes));
+
+                        // Seed an in-progress episode playback so the show reads as
+                        // "watching" (continue-watching) rather than completed — the
+                        // series analogue of the movie midpoint-seed above. Reset to
+                        // exactly one in-progress entry on the supplied episode.
+                        await ClearShowPlaybackAsync(uid, imdbId);
+                        if (inProgress is { } ip)
+                            await PauseScrobbleAsync(uid, "series", imdbId, ip.Season, ip.Episode, 50);
                     }
                     break;
 
                 case "completed":
                     await RemoveFromWatchlistAsync(uid, type, imdbId);
+                    await ClearPlaybackAsync(uid, type, imdbId);   // no longer in progress
                     if (type == "movie")
-                    {
-                        await ClearMoviePlaybackAsync(uid, imdbId);   // no longer in progress
                         await PostAuthedAsync(uid, "/sync/history", SyncBody("movie", imdbId, null, null));
-                    }
                     else if (watchedEpisodes is { Count: > 0 })
                         await PostAuthedAsync(uid, "/sync/history", HistoryEpisodesBody(imdbId, watchedEpisodes));
                     break;
 
                 default: // "" → None: remove from every surface.
-                    if (type == "movie") await ClearMoviePlaybackAsync(uid, imdbId);
+                    await ClearPlaybackAsync(uid, type, imdbId);
                     await PostAuthedAsync(uid, "/sync/history/remove", SyncBody(type, imdbId, null, null));
                     await RemoveFromWatchlistAsync(uid, type, imdbId);
                     break;
@@ -714,6 +747,33 @@ namespace AnimeList.Services
             var id = await FindMoviePlaybackIdAsync(uid, imdbId);
             if (id != null) await DeleteAuthedAsync(uid, $"/sync/playback/{id}");
         }
+
+        // Every in-progress episode playback id for a show (a show can have one
+        // per episode the user left part-way).
+        private async Task<List<long>> FindShowPlaybackIdsAsync(string uid, string imdbId)
+        {
+            var ids = new List<long>();
+            var arr = await GetAuthedAsync(uid, "/sync/playback?extended=full") as JArray;
+            if (arr == null) return ids;
+            foreach (var it in arr)
+            {
+                if ((string)it["type"] != "episode") continue;
+                if (!string.Equals((string)it["show"]?["ids"]?["imdb"], imdbId, StringComparison.OrdinalIgnoreCase)) continue;
+                if ((long?)it["id"] is long id) ids.Add(id);
+            }
+            return ids;
+        }
+
+        // Drops a show's in-progress episode playback(s) so it stops reading as "watching".
+        private async Task ClearShowPlaybackAsync(string uid, string imdbId)
+        {
+            foreach (var id in await FindShowPlaybackIdsAsync(uid, imdbId))
+                await DeleteAuthedAsync(uid, $"/sync/playback/{id}");
+        }
+
+        // Clears in-progress playback for either media type.
+        private Task ClearPlaybackAsync(string uid, string type, string imdbId) =>
+            type == "movie" ? ClearMoviePlaybackAsync(uid, imdbId) : ClearShowPlaybackAsync(uid, imdbId);
 
         private static TraktListItem MovieItem(JToken m) => new()
         {
