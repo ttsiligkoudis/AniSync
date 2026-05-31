@@ -89,8 +89,9 @@
         1: { 'CURRENT': 'current', 'PLANNING': 'planning', 'COMPLETED': 'completed', 'PAUSED': 'paused', 'DROPPED': 'dropped', 'REPEATING': 'repeating' },
         2: { 'watching': 'current', 'plan_to_watch': 'planning', 'completed': 'completed', 'on_hold': 'paused', 'dropped': 'dropped', 'rewatching': 'repeating' },
         // Trakt (movies / series): Watchlist→planning, Watching→Continue
-        // Watching (current), Watched→completed.
-        3: { 'planning': 'planning', 'watching': 'current', 'completed': 'completed' },
+        // Watching (current), Watched→completed; On Hold / Dropped / Rewatching
+        // ride AniSync-managed Trakt personal lists.
+        3: { 'planning': 'planning', 'watching': 'current', 'completed': 'completed', 'onhold': 'paused', 'dropped': 'dropped', 'rewatching': 'repeating' },
     };
 
     // The currently-active per-cour entry id (anilist:N / kitsu:N / mal:N).
@@ -332,17 +333,18 @@
     function populateStatusOptions(service) {
         var opts;
         if (service === 3) {
-            // Trakt uses the same status vocabulary as the anime trackers
-            // (Watching / Planning / Completed) for consistency — only these
-            // three round-trip, since Trakt state is derived from history /
-            // playback (watching), watchlist (planning) and history (completed).
-            // There's no On Hold / Dropped / Rewatching to persist. Movies get
+            // Trakt's native surfaces cover Watching (playback), Planning
+            // (watchlist) and Completed (history); On Hold / Dropped /
+            // Rewatching ride AniSync-managed Trakt personal lists. Movies get
             // "Watching" too (a movie left part-way via a paused playback).
             opts = [
                 ['', '— None (not in list) —'],
                 ['watching', 'Watching'],
                 ['planning', 'Planning'],
                 ['completed', 'Completed'],
+                ['onhold', 'On Hold'],
+                ['dropped', 'Dropped'],
+                ['rewatching', 'Rewatching'],
             ];
         } else {
             opts = STATUS_OPTIONS[service] || STATUS_OPTIONS[1];

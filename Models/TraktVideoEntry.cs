@@ -20,6 +20,13 @@ namespace AnimeList.Models
         public bool InPlayback { get; set; }
         /// <summary>Series only: count of distinct watched episodes in history.</summary>
         public int WatchedEpisodes { get; set; }
+        /// <summary>
+        /// Set when the title sits in one of the AniSync-managed Trakt personal
+        /// lists that back the statuses Trakt has no native surface for —
+        /// "onhold" / "dropped" / "rewatching". Null otherwise. Takes precedence
+        /// over the watchlist/playback/history-derived status.
+        /// </summary>
+        public string CustomStatus { get; set; }
         /// <summary>The user's Trakt rating (1-10), or null when unrated.</summary>
         public int? Rating { get; set; }
     }

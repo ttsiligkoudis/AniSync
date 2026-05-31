@@ -286,10 +286,10 @@ namespace AnimeList.Services
 
         public async Task<List<TraktListItem>> GetListAsync(string uid, ListType list, MetaType mediaType)
         {
-            // Map the AniSync list tabs onto Trakt's three relevant surfaces:
-            // Planning → watchlist, Completed → watched history, Current → in-progress
-            // playback (continue-watching). The remaining anime tabs (Paused / Dropped /
-            // Repeating) have no Trakt analogue, so they come back empty.
+            // Map the AniSync list tabs onto Trakt: Planning → watchlist, Completed
+            // → watched history, Current → in-progress playback (continue-watching).
+            // Paused / Dropped / Repeating have no native Trakt surface, so they're
+            // backed by the AniSync-managed personal lists.
             List<TraktListItem> items;
             if (list == ListType.Planning)
             {
@@ -311,6 +311,18 @@ namespace AnimeList.Services
                     .Where(s => !string.IsNullOrEmpty(s))
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
                 items = history.Where(h => !inProgress.Contains(h.ImdbId)).ToList();
+            }
+            else if (list == ListType.Paused)
+            {
+                items = await GetCustomStatusItemsAsync(uid, CustomStatusListName("onhold"));
+            }
+            else if (list == ListType.Dropped)
+            {
+                items = await GetCustomStatusItemsAsync(uid, CustomStatusListName("dropped"));
+            }
+            else if (list == ListType.Repeating)
+            {
+                items = await GetCustomStatusItemsAsync(uid, CustomStatusListName("rewatching"));
             }
             else
             {
@@ -449,6 +461,10 @@ namespace AnimeList.Services
                     i.Type == "series" && string.Equals(i.ImdbId, imdbId, StringComparison.OrdinalIgnoreCase));
             }
 
+            // Custom-status lists (On Hold / Dropped / Rewatching) — Trakt has no
+            // native surface for these, so check the AniSync personal lists.
+            entry.CustomStatus = await ResolveCustomStatusAsync(uid, type, imdbId);
+
             // User rating.
             var ratingsArr = await GetAuthedAsync(uid, type == "movie" ? "/sync/ratings/movies" : "/sync/ratings/shows") as JArray;
             var key = type == "movie" ? "movie" : "show";
@@ -484,11 +500,13 @@ namespace AnimeList.Services
                     // Only on the watchlist — clear history + any in-progress playback.
                     await ClearPlaybackAsync(uid, type, imdbId);
                     await PostAuthedAsync(uid, "/sync/history/remove", SyncBody(type, imdbId, null, null));
+                    await ClearCustomStatusAsync(uid, type, imdbId, null);
                     await AddToWatchlistAsync(uid, type, imdbId);
                     break;
 
                 case "watching":
                     await RemoveFromWatchlistAsync(uid, type, imdbId);
+                    await ClearCustomStatusAsync(uid, type, imdbId, null);
                     if (type == "movie")
                     {
                         // Drop any completed record, then ensure an in-progress
@@ -522,16 +540,32 @@ namespace AnimeList.Services
                 case "completed":
                     await RemoveFromWatchlistAsync(uid, type, imdbId);
                     await ClearPlaybackAsync(uid, type, imdbId);   // no longer in progress
+                    await ClearCustomStatusAsync(uid, type, imdbId, null);
                     if (type == "movie")
                         await PostAuthedAsync(uid, "/sync/history", SyncBody("movie", imdbId, null, null));
                     else if (watchedEpisodes is { Count: > 0 })
                         await PostAuthedAsync(uid, "/sync/history", HistoryEpisodesBody(imdbId, watchedEpisodes));
                     break;
 
+                case "onhold":
+                case "dropped":
+                case "rewatching":
+                    // No native Trakt surface — clear them all and park the title
+                    // in the matching AniSync personal list (created on demand).
+                    await RemoveFromWatchlistAsync(uid, type, imdbId);
+                    await ClearPlaybackAsync(uid, type, imdbId);
+                    await PostAuthedAsync(uid, "/sync/history/remove", SyncBody(type, imdbId, null, null));
+                    var statusKey = (status ?? string.Empty).ToLowerInvariant();
+                    await ClearCustomStatusAsync(uid, type, imdbId, statusKey);
+                    var listId = await EnsureListIdAsync(uid, CustomStatusListName(statusKey));
+                    if (listId != null) await AddToListAsync(uid, listId.Value, type, imdbId);
+                    break;
+
                 default: // "" → None: remove from every surface.
                     await ClearPlaybackAsync(uid, type, imdbId);
                     await PostAuthedAsync(uid, "/sync/history/remove", SyncBody(type, imdbId, null, null));
                     await RemoveFromWatchlistAsync(uid, type, imdbId);
+                    await ClearCustomStatusAsync(uid, type, imdbId, null);
                     break;
             }
             return true;
@@ -774,6 +808,105 @@ namespace AnimeList.Services
         // Clears in-progress playback for either media type.
         private Task ClearPlaybackAsync(string uid, string type, string imdbId) =>
             type == "movie" ? ClearMoviePlaybackAsync(uid, imdbId) : ClearShowPlaybackAsync(uid, imdbId);
+
+        // ── Custom-status Trakt personal lists ──────────────────────────────
+        // Trakt has native surfaces only for planning (watchlist), watching
+        // (playback) and completed (history). The remaining AniSync statuses are
+        // backed by per-user personal lists so they round-trip to the user's
+        // Trakt account (and show up in Trakt apps too).
+        private static readonly (string Status, string Name)[] CustomStatusLists =
+        {
+            ("onhold",     "AniSync On Hold"),
+            ("dropped",    "AniSync Dropped"),
+            ("rewatching", "AniSync Rewatching"),
+        };
+
+        // status → list name (null when the status isn't custom-list backed).
+        private static string CustomStatusListName(string status) =>
+            CustomStatusLists.FirstOrDefault(l => l.Status == status).Name;
+
+        // (uid|name) → Trakt list id. List ids are stable, so cache them to skip
+        // the /users/me/lists round-trip on subsequent reads/writes.
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _listIdCache = new();
+
+        // Finds the user's personal list id by name (cached). Does NOT create it.
+        private async Task<long?> FindListIdAsync(string uid, string name)
+        {
+            if (_listIdCache.TryGetValue(uid + "|" + name, out var cached)) return cached;
+            if (await GetAuthedAsync(uid, "/users/me/lists") is not JArray arr) return null;
+            foreach (var it in arr)
+            {
+                if (!string.Equals((string)it["name"], name, StringComparison.OrdinalIgnoreCase)) continue;
+                if ((long?)it["ids"]?["trakt"] is long id)
+                {
+                    _listIdCache[uid + "|" + name] = id;
+                    return id;
+                }
+            }
+            return null;
+        }
+
+        // Find-or-create the named private personal list.
+        private async Task<long?> EnsureListIdAsync(string uid, string name)
+        {
+            var existing = await FindListIdAsync(uid, name);
+            if (existing != null) return existing;
+            await PostAuthedAsync(uid, "/users/me/lists", new JObject
+            {
+                ["name"] = name,
+                ["description"] = "Managed by AniSync.",
+                ["privacy"] = "private",
+            });
+            // Re-resolve (and cache) the freshly-created list.
+            return await FindListIdAsync(uid, name);
+        }
+
+        private Task<bool> AddToListAsync(string uid, long listId, string type, string imdbId) =>
+            PostAuthedAsync(uid, $"/users/me/lists/{listId}/items", SyncBody(type, imdbId, null, null));
+
+        private Task<bool> RemoveFromListAsync(string uid, long listId, string type, string imdbId) =>
+            PostAuthedAsync(uid, $"/users/me/lists/{listId}/items/remove", SyncBody(type, imdbId, null, null));
+
+        // Items of the named custom-status list (empty when the list doesn't exist).
+        private async Task<List<TraktListItem>> GetCustomStatusItemsAsync(string uid, string name)
+        {
+            var id = await FindListIdAsync(uid, name);
+            if (id == null) return new();
+            if (await GetAuthedAsync(uid, $"/users/me/lists/{id}/items?extended=full") is not JArray arr) return new();
+            var items = new List<TraktListItem>();
+            foreach (var it in arr)
+            {
+                var t = (string)it["type"];
+                if (t == "movie") items.Add(MovieItem(it["movie"]));
+                else if (t == "show") items.Add(ShowItem(it["show"]));
+            }
+            return items.Where(i => !string.IsNullOrEmpty(i.ImdbId)).ToList();
+        }
+
+        // Removes the title from every custom-status list except the target one
+        // (find-only — a list that was never created is simply skipped).
+        private async Task ClearCustomStatusAsync(string uid, string type, string imdbId, string exceptStatus)
+        {
+            foreach (var (st, name) in CustomStatusLists)
+            {
+                if (st == exceptStatus) continue;
+                var id = await FindListIdAsync(uid, name);
+                if (id != null) await RemoveFromListAsync(uid, id.Value, type, imdbId);
+            }
+        }
+
+        // Which custom-status list (if any) currently holds the title.
+        private async Task<string> ResolveCustomStatusAsync(string uid, string type, string imdbId)
+        {
+            var checks = CustomStatusLists.Select(async l =>
+            {
+                var items = await GetCustomStatusItemsAsync(uid, l.Name);
+                return items.Any(i => i.Type == type && string.Equals(i.ImdbId, imdbId, StringComparison.OrdinalIgnoreCase))
+                    ? l.Status : null;
+            });
+            var results = await Task.WhenAll(checks);
+            return results.FirstOrDefault(s => s != null);
+        }
 
         private static TraktListItem MovieItem(JToken m) => new()
         {
