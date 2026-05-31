@@ -18,7 +18,13 @@
     var browseAction = "/discover";
     var here = "/discover";
     var traktFeedback = Context.Request.Query["trakt"].ToString();
+
+    ViewData["MtActive"] = isMovies ? MetaType.movie : MetaType.series;
+    ViewData["MtReturnUrl"] = "/discover";
 }
+
+@* Single-select switch between the modes enabled in the chooser modal. *@
+@await Html.PartialAsync("_MediaTypeToggle")
 
 @* Browse-mode tabs (Popular + Trakt feeds). Mirrors the anime discover tab
    strip. Plain links to /discover?mode=… preserving the active genre/search;

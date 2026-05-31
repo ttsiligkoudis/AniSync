@@ -31,7 +31,13 @@
         : hasGenre ? $"{Model.Genre} · Discover"
         : isSeasonal ? $"{Model.Season} · Discover"
         : $"{activeLabel} · Discover";
+
+    ViewData["MtActive"] = MetaType.anime;
+    ViewData["MtReturnUrl"] = "/discover";
 }
+
+@* Single-select switch between the modes enabled in the chooser modal. *@
+@await Html.PartialAsync("_MediaTypeToggle")
 
 @if (hasTag)
 {

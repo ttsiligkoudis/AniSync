@@ -791,7 +791,7 @@
        logged in) and reloads so the whole site re-renders for the chosen mode. *@
     @await Html.PartialAsync("_MediaTypeModal", new ViewDataDictionary(ViewData)
     {
-        ["MediaTypeCurrent"] = layoutMediaType,
+        ["MediaTypeEnabled"] = AnimeList.Services.MediaTypePreference.EnabledFromCookie(Context),
         ["MediaTypeLoggedIn"] = layoutLoggedIn,
     })
 

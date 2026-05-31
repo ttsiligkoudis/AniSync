@@ -50,6 +50,12 @@ namespace AnimeList.Models
         // setting (logged-in) or the media-type cookie (anonymous).
         public MetaType MediaType { get; set; } = MetaType.anime;
 
+        // Every mode the user multi-selected in the chooser modal. The dashboard
+        // renders a combined view across these (per-type shelves), while the
+        // single MediaType above stays the "active" surface for hero / Browse By.
+        // Display-ordered (anime, movie, series); never empty.
+        public List<MetaType> EnabledMediaTypes { get; set; } = new() { MetaType.anime };
+
         // True when the viewer has a connected Trakt account. Gates the
         // video-mode "Your stats" + "Continue watching" sections the same way
         // HasStats gates the anime ones — public video shelves (Trending /

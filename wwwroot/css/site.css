@@ -7993,10 +7993,55 @@ body.mt-modal-open {
     border-color: var(--accent);
 }
 .mt-modal-option:active { transform: scale(0.99); }
-.mt-modal-option.is-current {
+.mt-modal-option.is-selected {
     border-color: var(--accent);
     background: var(--accent-light, var(--overlay-08));
 }
+/* Trailing check — only on selected options. */
+.mt-modal-option-check {
+    flex: 0 0 auto;
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-pill);
+    background: var(--accent);
+    color: var(--on-accent, #fff);
+    opacity: 0;
+    transform: scale(0.6);
+    transition: opacity 0.12s, transform 0.12s;
+}
+.mt-modal-option.is-selected .mt-modal-option-check {
+    opacity: 1;
+    transform: scale(1);
+}
+.mt-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.8rem;
+    margin-top: 1.2rem;
+}
+.mt-modal-hint {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    margin-right: auto;
+}
+.mt-modal-confirm {
+    padding: 0.6rem 1.4rem;
+    border: none;
+    border-radius: var(--radius-pill);
+    background: var(--accent);
+    color: var(--on-accent, #fff);
+    font-size: var(--text-sm);
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+}
+.mt-modal-confirm:hover { background: var(--accent-hover, var(--accent)); }
+.mt-modal-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
 .mt-modal-option-icon {
     flex: 0 0 auto;
     width: 44px;
