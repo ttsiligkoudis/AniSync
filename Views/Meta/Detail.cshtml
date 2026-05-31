@@ -169,8 +169,8 @@
                 {
                     <button type="button" class="anime-detail-user-state" id="traktWatchlistBtn"
                             data-type="@(Model.MediaType == MetaType.movie ? "movie" : "series")"
-                            data-id="@a.id" data-in="false">
-                        <span>＋ Watchlist</span>
+                            data-id="@a.id" data-in="@(Model.TraktInWatchlist ? "true" : "false")">
+                        <span>@(Model.TraktInWatchlist ? "✓ In Watchlist" : "＋ Watchlist")</span>
                     </button>
                 }
                 @{
