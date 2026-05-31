@@ -76,7 +76,7 @@ namespace AnimeList.Controllers
         ];
 
         [Route("/discover")]
-        public async Task<IActionResult> Index(string list = null, string search = null, string genre = null, string season = null, string tag = null)
+        public async Task<IActionResult> Index(string list = null, string search = null, string genre = null, string season = null, string tag = null, string mode = null)
         {
             // Anonymous fresh-visit: GetAccessTokenAsync returns null. Synthesise an
             // anonymous TokenData with the Kitsu default so the per-service dispatch
@@ -111,7 +111,7 @@ namespace AnimeList.Controllers
             {
                 var preferredMediaType = await _configStore.GetMediaTypeAsync(uid);
                 if (preferredMediaType != MetaType.anime)
-                    return await VideoBrowseAsync(preferredMediaType, uid, search, genre);
+                    return await VideoBrowseAsync(preferredMediaType, uid, search, genre, mode);
             }
 
             // Honor the "Hide unaired from Watching" pref. Only affects the
@@ -258,17 +258,33 @@ namespace AnimeList.Controllers
         /// hands page 1 to discover-pagination.js (which pages via /video/page). Folded in
         /// from the retired standalone /movies · /series controller.
         /// </summary>
-        private async Task<IActionResult> VideoBrowseAsync(MetaType mediaType, string uid, string search, string genre)
+        private async Task<IActionResult> VideoBrowseAsync(MetaType mediaType, string uid, string search, string genre, string mode)
         {
             var type = mediaType == MetaType.movie ? "movie" : "series";
             var hasSearch = !string.IsNullOrWhiteSpace(search);
 
+            // Trakt connection status for the header strip — cheap projection read, display only.
+            var traktToken = await _configStore.GetTraktTokenAsync(uid);
+            var traktConnected = traktToken?.Connected == true;
+
+            // Available browse modes: Popular (Cinemeta) is always present; the
+            // Trakt feeds appear when Trakt is configured, and "For You" only
+            // when the user has Trakt connected.
+            var modes = new List<(string Slug, string Label)> { ("popular", "Popular") };
+            if (_trakt.IsConfigured)
+            {
+                modes.Add(("trending", "Trending"));
+                modes.Add(("anticipated", "Anticipated"));
+                modes.Add(("watched", "Most Watched"));
+                if (traktConnected) modes.Add(("recommended", "For You"));
+            }
+            // Resolve the active mode; fall back to Popular for anything unknown
+            // or not currently available to this user.
+            var activeMode = modes.Any(m => m.Slug == mode) ? mode : "popular";
+
             var items = hasSearch
                 ? await _cinemeta.GetVideoCatalogAsync(type, genre, search.Trim())
                 : new List<Meta>();
-
-            // Trakt connection status for the header strip — cheap projection read, display only.
-            var traktToken = await _configStore.GetTraktTokenAsync(uid);
 
             return View("/Views/Video/Index.cshtml", new VideoBrowseViewModel
             {
@@ -279,9 +295,11 @@ namespace AnimeList.Controllers
                 AvailableGenres = VideoGenres,
                 Items = items,
                 NeedsClientLoad = !hasSearch,
+                Mode = activeMode,
+                Modes = modes,
                 SignedIn = true,
                 TraktConfigured = _trakt.IsConfigured,
-                TraktConnected = traktToken?.Connected == true,
+                TraktConnected = traktConnected,
                 TraktUsername = traktToken?.username,
             });
         }
@@ -651,6 +669,9 @@ namespace AnimeList.Controllers
         // Cinemeta pages its catalogs in blocks of 100. The browse JS sends
         // 1-indexed page numbers; we convert page → item offset with this.
         private const int CatalogPageSize = 100;
+        // Trakt discovery modes page in small chunks — each item costs a Cinemeta
+        // meta lookup for its poster, so keep the per-page fan-out bounded.
+        private const int VideoModeSize = 20;
 
         /// <summary>
         /// Infinite-scroll pagination endpoint for the browse grids. Returns
@@ -658,14 +679,35 @@ namespace AnimeList.Controllers
         /// partial (VideoLinks on so cards route to /meta/{id}?type=…).
         /// </summary>
         [Route("/video/page")]
-        public async Task<IActionResult> VideoPage(string type, string genre = null, int page = 1)
+        public async Task<IActionResult> VideoPage(string type, string genre = null, int page = 1, string mode = null)
         {
             if (type != "movie" && type != "series") type = "movie";
             if (page < 1) page = 1;
-            var skip = (page - 1) * CatalogPageSize;
 
             var uid = await ResolveVideoUidAsync();
-            var items = await _cinemeta.GetVideoCatalogAsync(type, genre, search: null, skip: skip);
+
+            List<Meta> items;
+            if (mode is "trending" or "anticipated" or "watched" or "recommended")
+            {
+                // "recommended" needs a connected user; all Trakt feeds need a
+                // configured client. Bail to an empty page (paginator stops) when
+                // the request can't be served, so the grid ends cleanly.
+                if (!_trakt.IsConfigured || (mode == "recommended" && string.IsNullOrEmpty(uid)))
+                {
+                    items = new List<Meta>();
+                }
+                else
+                {
+                    var traktItems = await _trakt.GetDiscoveryAsync(uid, type, mode, genre, page, VideoModeSize);
+                    items = await BuildVideoMetasAsync(traktItems);
+                }
+            }
+            else
+            {
+                // Popular (default) — Cinemeta's "top" catalog, paged by skip.
+                var skip = (page - 1) * CatalogPageSize;
+                items = await _cinemeta.GetVideoCatalogAsync(type, genre, search: null, skip: skip);
+            }
 
             return PartialView("_PosterGrid", new PosterGridViewModel
             {
@@ -673,6 +715,31 @@ namespace AnimeList.Controllers
                 ConfigUid = uid,
                 VideoLinks = true,
             });
+        }
+
+        // Hydrates Trakt list items (imdb id + type) into poster-bearing Meta via
+        // Cinemeta, in parallel, preserving Trakt's ranked order and dropping any
+        // id Cinemeta can't resolve. Forces Meta.type from the Trakt item so the
+        // _PosterGrid VideoLinks routing picks the right ?type=.
+        private async Task<List<Meta>> BuildVideoMetasAsync(List<TraktListItem> items)
+        {
+            var lookups = items.Select(async it =>
+            {
+                try
+                {
+                    var meta = await _cinemeta.GetVideoMetaAsync(it.Type, it.ImdbId);
+                    if (meta == null) return null;
+                    meta.type = it.Type == "movie" ? MetaType.movie.ToString() : MetaType.series.ToString();
+                    return meta;
+                }
+                catch
+                {
+                    return null;
+                }
+            });
+
+            var resolved = await Task.WhenAll(lookups);
+            return resolved.Where(m => m != null).ToList();
         }
 
         // UID resolution mirroring Index() — anonymous visitors get null.
@@ -703,6 +770,12 @@ namespace AnimeList.Controllers
         // and video-pagination.js fetches page 1 on load. False for search,
         // which is rendered server-side from Items.
         public bool NeedsClientLoad { get; set; }
+
+        // Active browse mode slug (popular | trending | anticipated | watched |
+        // recommended) and the modes available to this user (Popular always;
+        // Trakt feeds when configured; "For You" when connected).
+        public string Mode { get; set; } = "popular";
+        public IReadOnlyList<(string Slug, string Label)> Modes { get; set; } = [];
 
         // Trakt connection status for the header strip.
         public bool SignedIn { get; set; }

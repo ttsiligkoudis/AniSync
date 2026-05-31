@@ -102,6 +102,16 @@ namespace AnimeList.Services.Interfaces
         /// imdbId is the tt-prefixed id. Returns an empty entry (no throw) when
         /// Trakt isn't connected or the id is empty.
         /// </summary>
+        /// <summary>
+        /// One of Trakt's discovery feeds for the video Discover modes.
+        /// type is "movie"/"series"; mode is trending | anticipated | watched |
+        /// recommended. genre is a Cinemeta genre name (mapped to a Trakt slug
+        /// internally) or null. Public feeds run unauthenticated; "recommended"
+        /// needs the user's token (empty list when uid is null). Returns ranked
+        /// items (imdb id + title + year) for poster hydration via Cinemeta.
+        /// </summary>
+        Task<List<TraktListItem>> GetDiscoveryAsync(string uid, string type, string mode, string genre, int page, int limit);
+
         Task<TraktVideoEntry> GetVideoEntryAsync(string uid, string type, string imdbId);
 
         /// <summary>

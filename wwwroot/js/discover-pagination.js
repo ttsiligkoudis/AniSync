@@ -34,6 +34,9 @@
     // so existing /discover pages are unaffected (they set neither attribute).
     var endpoint = paginator.getAttribute('data-endpoint') || '/discover/page';
     var type = paginator.getAttribute('data-type') || '';
+    // Video browse mode (popular | trending | anticipated | watched |
+    // recommended). Anime discover sets none, so it's omitted there.
+    var mode = paginator.getAttribute('data-mode') || '';
     // Last page already rendered. JS bumps this before each fetch so
     // the next request asks for page+1. The view emits page=0 when
     // the grid only holds skeleton placeholders — first loadMore()
@@ -128,6 +131,7 @@
         if (season) params += '&season=' + encodeURIComponent(season);
         if (tag) params += '&tag=' + encodeURIComponent(tag);
         if (type) params += '&type=' + encodeURIComponent(type);
+        if (mode) params += '&mode=' + encodeURIComponent(mode);
 
         // skipLoader: true bypasses the global full-screen loader-overlay —
         // we render the inline paginator-loader (above) instead so scrolling

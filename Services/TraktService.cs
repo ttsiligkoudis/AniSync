@@ -299,6 +299,63 @@ namespace AnimeList.Services
                 ? Task.FromResult(false)
                 : PostAuthedAsync(uid, "/scrobble/stop", ScrobbleBody(type, imdbId, season, episode, Math.Min(progress, 100)));
 
+        public async Task<List<TraktListItem>> GetDiscoveryAsync(string uid, string type, string mode, string genre, int page, int limit)
+        {
+            if (!IsConfigured) return new();
+            var traktType = type == "movie" ? "movies" : "shows";
+
+            var path = mode switch
+            {
+                "trending"    => $"/{traktType}/trending",
+                "anticipated" => $"/{traktType}/anticipated",
+                "watched"     => $"/{traktType}/watched/weekly",
+                "recommended" => $"/recommendations/{traktType}",
+                _             => null,
+            };
+            if (path == null) return new();
+
+            var qs = new List<string> { "extended=full", $"page={Math.Max(1, page)}", $"limit={limit}" };
+            var slug = TraktGenreSlug(genre);
+            if (!string.IsNullOrEmpty(slug)) qs.Add($"genres={Uri.EscapeDataString(slug)}");
+            if (mode == "recommended") qs.Add("ignore_collected=true");
+            var url = $"{path}?{string.Join("&", qs)}";
+
+            JToken json;
+            if (mode == "recommended")
+            {
+                // Personalized — requires the user's token.
+                if (string.IsNullOrEmpty(uid)) return new();
+                json = await GetAuthedAsync(uid, url);
+            }
+            else
+            {
+                json = await GetPublicAsync(url);
+            }
+
+            if (json is not JArray arr) return new();
+
+            var items = new List<TraktListItem>();
+            foreach (var it in arr)
+            {
+                // trending/anticipated/watched wrap the title under movie/show;
+                // recommendations return the bare object.
+                var node = it["movie"] ?? it["show"] ?? it;
+                var item = type == "movie" ? MovieItem(node) : ShowItem(node);
+                if (!string.IsNullOrEmpty(item.ImdbId)) items.Add(item);
+            }
+            return items;
+        }
+
+        // Maps a Cinemeta genre name to a Trakt genre slug so the existing video
+        // genre dropdown can filter the Trakt feeds. Most are just lowercased;
+        // Cinemeta's "Sci-Fi" is Trakt's "science-fiction".
+        private static string TraktGenreSlug(string cinemetaGenre)
+        {
+            if (string.IsNullOrWhiteSpace(cinemetaGenre)) return null;
+            var g = cinemetaGenre.Trim();
+            return g == "Sci-Fi" ? "science-fiction" : g.ToLowerInvariant();
+        }
+
         public async Task<TraktVideoEntry> GetVideoEntryAsync(string uid, string type, string imdbId)
         {
             var entry = new TraktVideoEntry();
@@ -502,7 +559,10 @@ namespace AnimeList.Services
             req.Headers.TryAddWithoutValidation("User-Agent", "AniSync/1.0");
             req.Headers.Add("trakt-api-version", "2");
             req.Headers.Add("trakt-api-key", ClientId);
-            req.Headers.Add("Authorization", $"Bearer {accessToken}");
+            // Public discovery endpoints (trending / anticipated / watched) need
+            // only the api-key — accessToken is null for those.
+            if (!string.IsNullOrEmpty(accessToken))
+                req.Headers.Add("Authorization", $"Bearer {accessToken}");
             if (body != null)
                 req.Content = new StringContent(body.ToString(), System.Text.Encoding.UTF8, "application/json");
             return req;
@@ -528,6 +588,32 @@ namespace AnimeList.Services
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Trakt GET {Path} failed.", path);
+                return null;
+            }
+        }
+
+        // GET against a public Trakt endpoint (no user token — api-key only).
+        // Used by the discovery feeds (trending / anticipated / watched) which
+        // work for anonymous / non-connected users.
+        private async Task<JToken> GetPublicAsync(string path)
+        {
+            if (!IsConfigured) return null;
+            try
+            {
+                var client = _clientFactory.CreateClient();
+                client.Timeout = TimeSpan.FromSeconds(10);
+                using var req = BuildApiRequest(HttpMethod.Get, path, accessToken: null);
+                var resp = await client.SendAsync(req);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Trakt public GET {Path} returned {Status}.", path, (int)resp.StatusCode);
+                    return null;
+                }
+                return JToken.Parse(await resp.Content.ReadAsStringAsync());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Trakt public GET {Path} failed.", path);
                 return null;
             }
         }
