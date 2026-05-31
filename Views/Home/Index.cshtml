@@ -116,7 +116,7 @@
             var statsAttribution = $"via {statsSourceLabel}";
         }
         <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">Your stats@animeSuffix</h2>
+            <h2 class="dashboard-section-title">Your stats@(animeSuffix)</h2>
             <span class="dashboard-section-actions">
                 <span class="dashboard-section-link-muted">@statsAttribution</span>
                 @* Info popover. AniList re-aggregates User.statistics on
@@ -356,7 +356,7 @@
 {
     <section class="dashboard-section" data-continue-watching-section>
         <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">Continue watching@animeSuffix</h2>
+            <h2 class="dashboard-section-title">Continue watching@(animeSuffix)</h2>
             <a class="dashboard-section-link" href="/library?list=current">
                 <span>View all</span>
                 <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -491,7 +491,7 @@
    dashboard never shows a placeholder row of zeros. *@
 <section class="dashboard-section stats-section" data-season-stats data-stats-loading>
     <div class="dashboard-section-header">
-        <h2 class="dashboard-section-title">This Season@animeSuffix</h2>
+        <h2 class="dashboard-section-title">This Season@(animeSuffix)</h2>
         <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(CurrentSeasonLabel())">
             <span>View all</span>
             <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -576,7 +576,7 @@
    not yet populated). *@
 <section class="dashboard-section" data-shelf data-shelf-src="/Home/NewEpisodesTodayData">
     <div class="dashboard-section-header">
-        <h2 class="dashboard-section-title">New Episodes Today@animeSuffix</h2>
+        <h2 class="dashboard-section-title">New Episodes Today@(animeSuffix)</h2>
         <span class="dashboard-section-link-muted">Refreshes daily</span>
     </div>
     <div data-shelf-container>
@@ -586,7 +586,7 @@
 
 <section class="dashboard-section" data-shelf data-shelf-src="/Home/PopularThisSeasonData">
     <div class="dashboard-section-header">
-        <h2 class="dashboard-section-title">Most Popular this Season@animeSuffix</h2>
+        <h2 class="dashboard-section-title">Most Popular this Season@(animeSuffix)</h2>
         <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(CurrentSeasonLabel())">
             <span>View all</span>
             <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -602,7 +602,7 @@
 
 <section class="dashboard-section" data-shelf data-shelf-src="/Home/MostAnticipatedData">
     <div class="dashboard-section-header">
-        <h2 class="dashboard-section-title">Most Anticipated@animeSuffix</h2>
+        <h2 class="dashboard-section-title">Most Anticipated@(animeSuffix)</h2>
         <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(NextSeasonLabel())">
             <span>View all</span>
             <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -715,7 +715,7 @@
         {
             <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoContinueWatchingData?type=@vtSlug">
                 <div class="dashboard-section-header">
-                    <h2 class="dashboard-section-title">Continue watching@vtSuffix</h2>
+                    <h2 class="dashboard-section-title">Continue watching@(vtSuffix)</h2>
                     <a class="dashboard-section-link" href="/library?list=current">
                         <span>View all</span>
                         <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -732,7 +732,7 @@
 
         <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=trending">
             <div class="dashboard-section-header">
-                <h2 class="dashboard-section-title">Trending@vtSuffix</h2>
+                <h2 class="dashboard-section-title">Trending@(vtSuffix)</h2>
                 <a class="dashboard-section-link" href="/discover?mode=trending">
                     <span>View all</span>
                     <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -748,7 +748,7 @@
 
         <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=popular">
             <div class="dashboard-section-header">
-                <h2 class="dashboard-section-title">Most Popular@vtSuffix</h2>
+                <h2 class="dashboard-section-title">Most Popular@(vtSuffix)</h2>
                 <a class="dashboard-section-link" href="/discover">
                     <span>View all</span>
                     <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -764,7 +764,7 @@
 
         <section class="dashboard-section" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=anticipated">
             <div class="dashboard-section-header">
-                <h2 class="dashboard-section-title">Most Anticipated@vtSuffix</h2>
+                <h2 class="dashboard-section-title">Most Anticipated@(vtSuffix)</h2>
                 <a class="dashboard-section-link" href="/discover?mode=anticipated">
                     <span>View all</span>
                     <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
