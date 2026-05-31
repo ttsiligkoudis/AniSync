@@ -238,6 +238,31 @@ namespace AnimeList.Services
                 .ToList();
         }
 
+        public async Task<TraktUserStats> GetUserStatsAsync(string uid)
+        {
+            if (await GetAuthedAsync(uid, "/users/me/stats") is not JObject o) return null;
+            try
+            {
+                var movies = o["movies"];
+                var shows = o["shows"];
+                var episodes = o["episodes"];
+                var movieMinutes = (long?)movies?["minutes"] ?? 0;
+                var episodeMinutes = (long?)episodes?["minutes"] ?? 0;
+                return new TraktUserStats
+                {
+                    MoviesWatched = (int?)movies?["watched"] ?? 0,
+                    ShowsWatched = (int?)shows?["watched"] ?? 0,
+                    EpisodesWatched = (int?)episodes?["watched"] ?? 0,
+                    TotalHoursWatched = (int)((movieMinutes + episodeMinutes) / 60),
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Trakt user stats parse failed.");
+                return null;
+            }
+        }
+
         public async Task<List<TraktListItem>> GetHistoryAsync(string uid)
         {
             var arr = await GetAuthedAsync(uid, "/sync/history?extended=full&limit=100") as JArray;

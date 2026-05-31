@@ -22,6 +22,11 @@ public class HomeController : Controller
     private readonly IUserListCache _listCache;
     private readonly IMemoryCache _dashboardCache;
     private readonly IMergedListService _mergedListService;
+    // Video-mode dashboard shelves (movies / series) source from Cinemeta's
+    // catalog + Trakt's discovery / playback feeds, mirroring how Discover's
+    // video browse already works.
+    private readonly ICinemetaService _cinemeta;
+    private readonly ITraktService _trakt;
 
     // Day-stale rankings are indistinguishable from live ones for the
     // popularity shelves — same TTL the seasonal-stats cache uses inside
@@ -37,7 +42,9 @@ public class HomeController : Controller
         IAddonStreamService addonStreamService,
         IUserListCache listCache,
         IMemoryCache dashboardCache,
-        IMergedListService mergedListService)
+        IMergedListService mergedListService,
+        ICinemetaService cinemeta,
+        ITraktService trakt)
     {
         _tokenService = tokenService;
         _configStore = configStore;
@@ -47,6 +54,8 @@ public class HomeController : Controller
         _listCache = listCache;
         _dashboardCache = dashboardCache;
         _mergedListService = mergedListService;
+        _cinemeta = cinemeta;
+        _trakt = trakt;
     }
 
     /// <summary>
@@ -191,6 +200,22 @@ public class HomeController : Controller
                 .ToList()
             : [];
 
+        // Resolve the viewer's mode so the dashboard renders the matching
+        // shelves: anime (AniList) or video (Trakt/Cinemeta). Logged-in users'
+        // stored setting wins; anonymous visitors fall back to the media-type
+        // cookie the first-visit chooser stamps.
+        var mediaType = await MediaTypePreference.ResolveAsync(HttpContext, uid, _configStore);
+
+        // Video mode's "Your stats" + "Continue watching" need a connected
+        // Trakt account, same as the anime stats need AniList. One cheap
+        // projection read, and only when actually in video mode for a real user.
+        var traktConnected = false;
+        if (mediaType != MetaType.anime && !string.IsNullOrEmpty(uid))
+        {
+            var traktToken = await _configStore.GetTraktTokenAsync(uid);
+            traktConnected = traktToken?.Connected == true;
+        }
+
         return View(new DashboardViewModel
         {
             TokenData = tokenData,
@@ -199,6 +224,8 @@ public class HomeController : Controller
             HasStats = hasStats,
             HasStreamAddons = hasStreamAddons,
             ContributingServices = contributingNames,
+            MediaType = mediaType,
+            TraktConnected = traktConnected,
         });
     }
 
@@ -593,6 +620,107 @@ public class HomeController : Controller
             Variant = "scroll",
         });
 
+    // ── Video-mode dashboard shelves (movies / series) ───────────────────
+    // Mirror the anime shelf endpoints but source from Cinemeta + Trakt and
+    // emit VideoLinks cards (so clicks carry ?type=). Same scroll partial +
+    // generic [data-shelf] loader the anime shelves use; an empty body hides
+    // the section. Trakt items carry no posters, so they're hydrated through
+    // Cinemeta in parallel (preserving Trakt's ranked order).
+
+    // Per-shelf cap — each Trakt item costs a Cinemeta meta lookup for its
+    // poster, so keep the dashboard fan-out bounded (matches the anime shelves'
+    // top-15 slice).
+    private const int VideoShelfSize = 15;
+
+    private PartialViewResult VideoShelfPartial(List<Meta> metas, string uid) =>
+        PartialView("_PosterGrid", new PosterGridViewModel
+        {
+            Items = metas ?? [],
+            ConfigUid = uid,
+            Variant = "scroll",
+            VideoLinks = true,
+        });
+
+    private async Task<List<Meta>> HydrateVideoMetasAsync(List<TraktListItem> items)
+    {
+        if (items == null || items.Count == 0) return [];
+        var lookups = items.Select(async it =>
+        {
+            try
+            {
+                var meta = await _cinemeta.GetVideoMetaAsync(it.Type, it.ImdbId);
+                if (meta == null) return null;
+                // Force the card's type from the Trakt item so _PosterGrid's
+                // VideoLinks routing emits the right ?type=.
+                meta.type = it.Type == "movie" ? MetaType.movie.ToString() : MetaType.series.ToString();
+                return meta;
+            }
+            catch
+            {
+                return null;
+            }
+        });
+        var resolved = await Task.WhenAll(lookups);
+        return resolved.Where(m => m != null).ToList();
+    }
+
+    // Trending / Most Popular / Most Anticipated for the video dashboard.
+    // Public feeds (no user identity required); "popular" is Cinemeta's top
+    // catalog, the others are Trakt's ranked discovery feeds.
+    [HttpGet("Home/VideoShelfData")]
+    public async Task<IActionResult> VideoShelfData(string type, string mode)
+    {
+        if (type != "movie" && type != "series") type = "movie";
+        var uid = await ResolveCurrentUidAsync();
+
+        List<Meta> metas;
+        if (mode == "popular")
+        {
+            metas = (await _cinemeta.GetVideoCatalogAsync(type)).Take(VideoShelfSize).ToList();
+        }
+        else if (mode is "trending" or "anticipated")
+        {
+            if (!_trakt.IsConfigured) return VideoShelfPartial([], uid);
+            var items = await _trakt.GetDiscoveryAsync(uid, type, mode, genre: null, page: 1, limit: VideoShelfSize);
+            metas = await HydrateVideoMetasAsync(items);
+        }
+        else
+        {
+            metas = [];
+        }
+        return VideoShelfPartial(metas, uid);
+    }
+
+    // Video "Continue watching" — Trakt's in-progress playback (paused movies +
+    // episodes), hydrated via Cinemeta. Trakt-connected users only.
+    [HttpGet("Home/VideoContinueWatchingData")]
+    public async Task<IActionResult> VideoContinueWatchingData()
+    {
+        var uid = await ResolveCurrentUidAsync();
+        if (string.IsNullOrEmpty(uid)) return Unauthorized();
+        var items = (await _trakt.GetPlaybackAsync(uid)).Take(ContinueWatchingMaxItems).ToList();
+        var metas = await HydrateVideoMetasAsync(items);
+        return VideoShelfPartial(metas, uid);
+    }
+
+    // Aggregate Trakt stats for the video dashboard's "Your stats" strip.
+    // Returns success=false (and the client keeps placeholders / hides the
+    // panel) when Trakt isn't connected or the upstream blips.
+    [HttpGet("Home/TraktStatsData")]
+    public async Task<JsonResult> TraktStatsData()
+    {
+        var uid = await ResolveCurrentUidAsync();
+        if (string.IsNullOrEmpty(uid))
+        {
+            Response.StatusCode = 401;
+            return new JsonResult(new { success = false });
+        }
+        var stats = await _trakt.GetUserStatsAsync(uid);
+        return stats == null
+            ? new JsonResult(new { success = false })
+            : new JsonResult(new { success = true, stats });
+    }
+
     // Resolves the per-viewer context every dashboard shelf needs: the
     // primary service (drives the id space card clicks land on), the resolved
     // UID (per-card Manage Entry hand-off), and the season-grouping pref.
@@ -912,6 +1040,13 @@ public class HomeController : Controller
         var uid = await ResolveCurrentUidAsync();
         if (!string.IsNullOrEmpty(uid) && Enum.IsDefined(typeof(MetaType), mediaType))
             await _configStore.SetMediaTypeAsync(uid, (MetaType)mediaType);
+
+        // The first-visit / reopen media-type modal persists via fetch and
+        // reloads the page itself, so an AJAX caller wants a bare 204 rather
+        // than a redirect it would pointlessly follow. The non-AJAX path keeps
+        // the redirect for any plain form submit (e.g. the account selector).
+        if (string.Equals(Request.Headers["X-Requested-With"], "XMLHttpRequest", StringComparison.OrdinalIgnoreCase))
+            return NoContent();
 
         if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
             return Redirect(returnUrl);

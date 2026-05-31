@@ -7905,3 +7905,157 @@ ol.anime-detail-episodes-busy {
         transition: none;
     }
 }
+
+/* ── Media-type chooser modal + header mode button ──────────────────────────
+   First-visit forced selector + on-demand reopen (header "mode" button). Built
+   to match the entry modal's chrome (same backdrop blur / surface / z-index
+   band) so it feels native to the app. */
+.mt-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 250;
+}
+.mt-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(92vw, 460px);
+    max-height: 90vh;
+    overflow-y: auto;
+    z-index: 251;
+}
+/* Lock background scroll while the chooser is open. */
+body.mt-modal-open {
+    overflow: hidden;
+}
+.mt-modal-card {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--overlay-10);
+    border-radius: 1rem;
+    padding: 1.5rem 1.4rem 1.6rem;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+.mt-modal-close {
+    position: absolute;
+    top: 0.7rem;
+    right: 0.8rem;
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 1.5rem;
+    line-height: 1;
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+}
+.mt-modal-close:hover { color: var(--text-strong); background: var(--overlay-08); }
+.mt-modal-title {
+    margin: 0 0 0.35rem;
+    font-size: var(--text-xl);
+    font-weight: 700;
+    color: var(--text-strong);
+}
+.mt-modal-subtitle {
+    margin: 0 0 1.2rem;
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+.mt-modal-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+.mt-modal-option {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    width: 100%;
+    padding: 0.85rem 1rem;
+    text-align: left;
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-10);
+    border-radius: var(--radius-lg);
+    color: inherit;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, transform 0.05s;
+}
+.mt-modal-option:hover {
+    background: var(--overlay-08);
+    border-color: var(--accent);
+}
+.mt-modal-option:active { transform: scale(0.99); }
+.mt-modal-option.is-current {
+    border-color: var(--accent);
+    background: var(--accent-light, var(--overlay-08));
+}
+.mt-modal-option-icon {
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-md);
+    background: var(--overlay-08);
+    color: var(--accent);
+}
+.mt-modal-option-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+}
+.mt-modal-option-title {
+    font-size: var(--text-base);
+    font-weight: 600;
+    color: var(--text-strong);
+}
+.mt-modal-option-blurb {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
+
+/* Header "mode" button — mirrors the theme-toggle pill beside it but carries a
+   label (Anime / Movies / Series). Reopens the chooser modal. */
+.media-type-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    height: 36px;
+    padding: 0 0.7rem;
+    border: 1px solid var(--overlay-12);
+    border-radius: var(--radius-pill);
+    background: var(--overlay-04);
+    color: var(--text-2);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    white-space: nowrap;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+}
+.media-type-btn:hover {
+    background: var(--overlay-08);
+    border-color: var(--accent);
+    color: var(--text-strong);
+}
+.media-type-btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+/* Drop the label on narrow viewports so the header stays uncrowded — the icon
+   alone carries the meaning, like the theme toggle. */
+@media (max-width: 560px) {
+    .media-type-btn-label { display: none; }
+    .media-type-btn { padding: 0; width: 36px; justify-content: center; }
+}

@@ -55,6 +55,14 @@ namespace AnimeList.Services.Interfaces
         Task<List<TraktListItem>> GetPlaybackAsync(string uid);
 
         /// <summary>
+        /// The user's aggregate Trakt stats (movies / shows / episodes watched +
+        /// total watch hours) for the video-mode dashboard's "Your stats" strip.
+        /// Returns null when Trakt isn't connected or the call fails, so the
+        /// caller hides the panel rather than showing zeros.
+        /// </summary>
+        Task<TraktUserStats> GetUserStatsAsync(string uid);
+
+        /// <summary>
         /// The user's watched history (movies + episodes), de-duplicated to one
         /// entry per IMDb id. Empty when not connected.
         /// </summary>
