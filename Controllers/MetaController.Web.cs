@@ -27,16 +27,18 @@ namespace AnimeList.Controllers
         // Without the catch-all the colon would be url-decoded into a
         // route-segment delimiter.
         [Route("/meta/{*id}")]
-        public async Task<IActionResult> Detail(string id, [FromQuery] MetaType type = MetaType.anime)
+        public async Task<IActionResult> Detail(string id, [FromQuery] MetaType? type = null)
         {
             if (string.IsNullOrEmpty(id)) return NotFound();
-            // One detail route for every media type. ?type= defaults to anime
-            // (so /meta/{id} alone is the anime page); movie / series flow
-            // through Cinemeta in VideoDetail. The view + AnimeDetailViewModel
-            // are shared — only the data source and tracking chrome differ.
-            return type == MetaType.anime
+            // One detail route for every media type. Poster cards pass ?type=
+            // explicitly (a movie card links ?type=movie); when it's omitted —
+            // e.g. a bare /meta/{id} deep link — fall back to the viewer's
+            // chosen media-type (the cookie media-type.js keeps in sync) so the
+            // page matches the mode they're browsing in rather than always anime.
+            var effectiveType = type ?? MediaTypePreference.FromCookie(HttpContext);
+            return effectiveType == MetaType.anime
                 ? await AnimeDetail(id)
-                : await VideoDetail(type, id);
+                : await VideoDetail(effectiveType, id);
         }
 
         private async Task<IActionResult> AnimeDetail(string id)
@@ -414,16 +416,20 @@ namespace AnimeList.Controllers
         [Route("/meta/{id}/watch")]
         [Route("/meta/{id}/watch/{episode:int}")]
         [Route("/meta/{id}/watch/{season:int}/{episode:int}")]
-        public async Task<IActionResult> Watch(string id, int episode = 1, int? season = null, [FromQuery] MetaType type = MetaType.anime)
+        public async Task<IActionResult> Watch(string id, int episode = 1, int? season = null, [FromQuery] MetaType? type = null)
         {
             if (string.IsNullOrEmpty(id) || episode <= 0)
             {
                 Response.StatusCode = 404;
                 return View("NotFound");
             }
-            return type == MetaType.anime
+            // ?type= is carried through from the detail page's episode links;
+            // when absent, fall back to the viewer's chosen media-type cookie
+            // (see Detail) rather than defaulting to anime.
+            var effectiveType = type ?? MediaTypePreference.FromCookie(HttpContext);
+            return effectiveType == MetaType.anime
                 ? await AnimeWatch(id, episode, season)
-                : await VideoWatch(type, id, episode, season);
+                : await VideoWatch(effectiveType, id, episode, season);
         }
 
         private async Task<IActionResult> AnimeWatch(string id, int episode, int? season)

@@ -105,14 +105,12 @@ namespace AnimeList.Controllers
 
             // Media-type preference: Discover IS the browse surface for movies / series too
             // (the standalone /movies · /series routes are gone). For a video preference we
-            // render the Cinemeta-backed browse view right here. Anonymous users (uid null)
-            // always get anime — they can't have set a preference.
-            if (uid != null)
-            {
-                var preferredMediaType = await _configStore.GetMediaTypeAsync(uid);
-                if (preferredMediaType != MetaType.anime)
-                    return await VideoBrowseAsync(preferredMediaType, uid, search, genre, mode);
-            }
+            // render the Cinemeta-backed browse view right here. Logged-in users' stored
+            // setting wins; anonymous visitors fall back to the media-type cookie the
+            // first-visit chooser stamps — so anonymous movie/series mode works too.
+            var preferredMediaType = await MediaTypePreference.ResolveAsync(HttpContext, uid, _configStore);
+            if (preferredMediaType != MetaType.anime)
+                return await VideoBrowseAsync(preferredMediaType, uid, search, genre, mode);
 
             // Honor the "Hide unaired from Watching" pref. Only affects the
             // ListType.Current discover-only tab; harmless on every other list.
@@ -297,7 +295,7 @@ namespace AnimeList.Controllers
                 NeedsClientLoad = !hasSearch,
                 Mode = activeMode,
                 Modes = modes,
-                SignedIn = true,
+                SignedIn = !string.IsNullOrEmpty(uid),
                 TraktConfigured = _trakt.IsConfigured,
                 TraktConnected = traktConnected,
                 TraktUsername = traktToken?.username,

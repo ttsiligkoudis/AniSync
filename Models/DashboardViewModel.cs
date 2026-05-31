@@ -44,6 +44,18 @@ namespace AnimeList.Models
         // multi-source aggregation without breaking the view contract.
         public List<string> ContributingServices { get; set; } = [];
 
+        // The viewer's chosen mode (anime / movies / series). Drives which
+        // dashboard the view renders: the AniList-backed anime shelves, or the
+        // Trakt/Cinemeta-backed video shelves. Resolved from the account
+        // setting (logged-in) or the media-type cookie (anonymous).
+        public MetaType MediaType { get; set; } = MetaType.anime;
+
+        // True when the viewer has a connected Trakt account. Gates the
+        // video-mode "Your stats" + "Continue watching" sections the same way
+        // HasStats gates the anime ones — public video shelves (Trending /
+        // Popular / Anticipated) render regardless.
+        public bool TraktConnected { get; set; }
+
         // The "This Season" stat strip and the discovery shelves (New
         // Episodes Today, Most Popular this Season, Most Anticipated) are no
         // longer rendered server-side — they're fetched client-side after

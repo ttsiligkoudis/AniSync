@@ -30,20 +30,9 @@
     var currentPath = Context.Request.Path + Context.Request.QueryString;
 }
 
-@* Media-type switch — anime (merged tracker lists) vs movies / series (Trakt lists).
-   Each chip persists the preference (POST /Home/SetMediaType) and reloads. Mirrors the
-   account-page selector. *@
-<div class="media-type-toggle library-media-toggle">
-    @foreach (var (mt, mtLabel) in new[] { (MetaType.anime, "Anime"), (MetaType.movie, "Movies"), (MetaType.series, "Series") })
-    {
-        <form method="post" action="/Home/SetMediaType" class="media-type-form">
-            @Html.AntiForgeryToken()
-            <input type="hidden" name="mediaType" value="@((int)mt)" />
-            <input type="hidden" name="returnUrl" value="/library" />
-            <button type="submit" class="label @(Model.MediaType == mt ? "active" : "")">@mtLabel</button>
-        </form>
-    }
-</div>
+@* The media-type switch lives in the site header now (the "mode" button that
+   reopens the chooser modal), so Library just renders for whatever mode the
+   viewer is in — no per-page toggle. *@
 @{
     ViewData["Title"] = hasSearch
         ? $"Search: {Model.Search} · Library"

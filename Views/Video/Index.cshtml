@@ -18,15 +18,7 @@
     var browseAction = "/discover";
     var here = "/discover";
     var traktFeedback = Context.Request.Query["trakt"].ToString();
-
-    ViewData["MtActive"] = isMovies ? MetaType.movie : MetaType.series;
-    ViewData["MtReturnUrl"] = "/discover";
 }
-
-@* Media-type switch — mirrors Discover / Library so the user can flip between
-   anime and movies / series from any browse surface. Switching persists the
-   preference; DiscoverController routes the chosen type to the right surface. *@
-@await Html.PartialAsync("_MediaTypeToggle")
 
 @* Browse-mode tabs (Popular + Trakt feeds). Mirrors the anime discover tab
    strip. Plain links to /discover?mode=… preserving the active genre/search;
