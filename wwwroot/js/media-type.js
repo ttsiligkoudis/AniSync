@@ -6,9 +6,8 @@
 //     Clamped to stay within the enabled set.
 // On first visit (no stored set) the modal forces a selection; a
 // [data-media-type-open] trigger in the chrome reopens it. Choices are written
-// to localStorage AND cookies (so SSR honours them, anonymous included), the
-// active mode persisted to the account setting when logged in, then the page
-// reloads so every surface re-renders.
+// to localStorage AND cookies (so SSR honours them, anonymous included) — there
+// is no account/DB setting — then the page reloads so every surface re-renders.
 (function () {
     var SET_KEY = 'anisync-media-types';   // enabled set (comma list)
     var ACTIVE_KEY = 'anisync-media-type';  // active single
@@ -23,7 +22,6 @@
     var confirmBtn = modal.querySelector('[data-media-type-confirm]');
     var hint = modal.querySelector('[data-media-type-hint]');
     var options = Array.prototype.slice.call(modal.querySelectorAll('[data-media-type-choice]'));
-    var loggedIn = modal.getAttribute('data-logged-in') === 'true';
 
     function valid(v) { return ALL.indexOf(v) !== -1; }
     function ordered(list) { return ALL.filter(function (t) { return list.indexOf(t) !== -1; }); }
@@ -39,8 +37,6 @@
         try { document.cookie = name + '=' + v + '; path=/; max-age=31536000; SameSite=Lax'; }
         catch (_) { /* cookies blocked — SSR falls back to anime */ }
     }
-    function codeOf(v) { return v === 'movie' ? 1 : v === 'series' ? 2 : 0; }
-
     // ── selection state (reflected by .is-selected on the option buttons) ──
     function selected() {
         return ordered(options
@@ -78,7 +74,7 @@
         document.body.classList.remove('mt-modal-open');
     }
 
-    async function confirm() {
+    function confirm() {
         var set = selected();
         if (set.length === 0) { syncConfirm(); return; }
 
@@ -100,23 +96,7 @@
             localStorage.removeItem('anisync.videoContinueWatching.v1');
         } catch (_) { /* ignore */ }
 
-        if (loggedIn) {
-            // Persist the active mode to the account setting (CsrfOrAjaxFilter
-            // accepts same-origin AJAX via X-Requested-With).
-            try {
-                await fetch('/Home/SetMediaType', {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    body: 'mediaType=' + codeOf(active),
-                    skipLoader: true
-                });
-            } catch (_) { /* best-effort — cookies still drive SSR */ }
-        }
-
+        // Cookie-only — SSR reads the cookies on the reload; no DB round-trip.
         location.reload();
     }
 

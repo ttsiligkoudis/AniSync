@@ -154,18 +154,6 @@ namespace AnimeList.Services.Interfaces
         /// </summary>
         Task<TraktToken> GetTraktTokenAsync(string uid);
 
-        // ── Media-type preference ───────────────────────────────────────────
-
-        /// <summary>
-        /// The user's preferred media type (anime / movie / series). Drives which
-        /// providers the account page offers. Defaults to <see cref="MetaType.anime"/>
-        /// for unknown UIDs and rows that predate the column.
-        /// </summary>
-        Task<MetaType> GetMediaTypeAsync(string uid);
-
-        /// <summary>Persists the user's preferred media type. No-op for an empty UID.</summary>
-        Task SetMediaTypeAsync(string uid, MetaType mediaType);
-
         /// <summary>
         /// Reads the user's configured stream addons. Empty list when the UID
         /// is unknown or no addons are configured. Order is preserved (the

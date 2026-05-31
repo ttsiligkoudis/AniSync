@@ -108,7 +108,7 @@ namespace AnimeList.Controllers
             // render the Cinemeta-backed browse view right here. Logged-in users' stored
             // setting wins; anonymous visitors fall back to the media-type cookie the
             // first-visit chooser stamps — so anonymous movie/series mode works too.
-            var preferredMediaType = await MediaTypePreference.ResolveActiveAsync(HttpContext, uid, _configStore);
+            var preferredMediaType = MediaTypePreference.ResolveActive(HttpContext);
             if (preferredMediaType != MetaType.anime)
                 return await VideoBrowseAsync(preferredMediaType, uid, search, genre, mode);
 

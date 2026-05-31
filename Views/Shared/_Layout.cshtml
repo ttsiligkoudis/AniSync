@@ -52,19 +52,9 @@
     }
     var layoutConnectedLabel = string.Join(" · ", layoutConnectedServices);
 
-    // Resolve the viewer's media-type mode for the chooser modal + the header
-    // mode button. Logged-in users' stored setting wins; anonymous visitors
-    // (and logged-in users whose row read failed) fall back to the cookie the
-    // first-visit chooser stamps. Drives the modal's "current" highlight and
-    // the header button's icon/label.
-    var layoutMediaType = MetaType.anime;
-    try
-    {
-        layoutMediaType = !string.IsNullOrEmpty(layoutUid)
-            ? await _layoutConfigStore.GetMediaTypeAsync(layoutUid)
-            : AnimeList.Services.MediaTypePreference.FromCookie(Context);
-    }
-    catch { layoutMediaType = AnimeList.Services.MediaTypePreference.FromCookie(Context); }
+    // The viewer's active media-type mode (cookie-backed) drives the header
+    // mode button's icon/label. The button reopens the multi-select chooser.
+    var layoutMediaType = AnimeList.Services.MediaTypePreference.ResolveActive(Context);
     var layoutMediaTypeLabel = layoutMediaType == MetaType.movie ? "Movies"
         : layoutMediaType == MetaType.series ? "Series"
         : "Anime";

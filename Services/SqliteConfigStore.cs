@@ -49,12 +49,6 @@ namespace AnimeList.Services
                     trakt_user_key    TEXT,
 
                     flags             INTEGER NOT NULL DEFAULT 0,
-                    -- Preferred media type (MetaType enum int: anime=0, movie=1,
-                    -- series=2). Drives which providers the account page offers and,
-                    -- in later phases, what Discover / Library surface. Website-only
-                    -- preference — deliberately NOT packed into `flags` (which is full
-                    -- and also rides the Stremio install URL).
-                    media_type        INTEGER NOT NULL DEFAULT 0,
                     revision          INTEGER NOT NULL DEFAULT 0,
                     scrobble_token    TEXT,
                     plex_username     TEXT,
@@ -170,8 +164,6 @@ namespace AnimeList.Services
             // `trakt_token_json` column (a separate Trakt silo) is no longer read or
             // written; it's left orphaned on databases that predate this change.
             EnsureColumn(conn, "configs", "trakt_user_key", "TEXT");
-            // Website-only media-type preference (MetaType int). See CREATE TABLE comment.
-            EnsureColumn(conn, "configs", "media_type", "INTEGER NOT NULL DEFAULT 0");
 
             // Created after EnsureColumn so it works on databases that predate the
             // trakt_user_key column (the CREATE TABLE block above won't add a column to
@@ -576,37 +568,6 @@ namespace AnimeList.Services
                 expiration_date = trakt.expiration_date,
                 username = trakt.username,
             };
-        }
-
-        public async Task<MetaType> GetMediaTypeAsync(string uid)
-        {
-            if (string.IsNullOrEmpty(uid)) return MetaType.anime;
-
-            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT media_type FROM configs WHERE uid = $uid LIMIT 1";
-            cmd.Parameters.AddWithValue("$uid", uid);
-            var raw = await cmd.ExecuteScalarAsync();
-            return raw is long l && Enum.IsDefined(typeof(MetaType), (int)l)
-                ? (MetaType)(int)l
-                : MetaType.anime;
-        }
-
-        public async Task SetMediaTypeAsync(string uid, MetaType mediaType)
-        {
-            if (string.IsNullOrEmpty(uid)) return;
-
-            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                UPDATE configs
-                   SET media_type = $m, updated_at = $ts
-                 WHERE uid = $uid
-                """;
-            cmd.Parameters.AddWithValue("$m", (int)mediaType);
-            cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-            cmd.Parameters.AddWithValue("$uid", uid);
-            await cmd.ExecuteNonQueryAsync();
         }
 
         public async Task<List<StreamAddon>> GetStreamAddonsAsync(string uid)

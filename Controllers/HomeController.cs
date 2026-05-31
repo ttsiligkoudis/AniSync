@@ -204,8 +204,8 @@ public class HomeController : Controller
         // (multi-selected in the chooser modal); the active single mode still
         // drives the hero copy + Browse By. Logged-in users' account setting +
         // the enabled-set cookie back this; anonymous visitors use cookies only.
-        var mediaType = await MediaTypePreference.ResolveActiveAsync(HttpContext, uid, _configStore);
-        var enabledMediaTypes = await MediaTypePreference.ResolveEnabledAsync(HttpContext, uid, _configStore);
+        var mediaType = MediaTypePreference.ResolveActive(HttpContext);
+        var enabledMediaTypes = MediaTypePreference.ResolveEnabled(HttpContext);
 
         // Video shelves ("Your stats" + Continue Watching) need a connected
         // Trakt account, same as the anime stats need AniList. One cheap
@@ -428,12 +428,6 @@ public class HomeController : Controller
         configuration ??= anonymousUser
             ? new Configuration { showTrending = true, showSeasonal = true, discoverOnlySeasonal = true }
             : new Configuration();
-
-        // Media-type preference is a per-user website setting stored in its own column
-        // (not the packed flags). Hydrate it for logged-in users so the account page's
-        // provider list renders for the right media type.
-        if (!string.IsNullOrEmpty(configUid))
-            configuration.preferredMediaType = await _configStore.GetMediaTypeAsync(configUid);
 
         // /configure renders the Stremio addon page (catalogs / streams /
         // install URL + the shared Account header) because that's the URL
@@ -1035,24 +1029,17 @@ public class HomeController : Controller
     }
 
     /// <summary>
-    /// Persists the signed-in user's preferred media type (anime / movie / series), then
-    /// reloads the page they triggered it from so the account-page provider list re-renders
-    /// for the new type. Form POST (antiforgery-protected) rather than JSON because the
-    /// account-page selector is a plain submit that wants a full reload, and the preference
-    /// changes which providers/UI are shown server-side.
+    /// Sets the ACTIVE media-type cookie (anime / movie / series) then reloads
+    /// the page the Discover / Library toggle was triggered from. Cookie-only —
+    /// there is no DB setting; the chooser modal owns the enabled set, and this
+    /// just switches which enabled mode the current surface renders. Form POST
+    /// (antiforgery-protected) so the toggle works without JS.
     /// </summary>
     [HttpPost("Home/SetMediaType")]
-    public async Task<IActionResult> SetMediaType([FromForm] int mediaType, [FromForm] string returnUrl = null)
+    public IActionResult SetMediaType([FromForm] int mediaType, [FromForm] string returnUrl = null)
     {
-        var uid = await ResolveCurrentUidAsync();
         if (Enum.IsDefined(typeof(MetaType), mediaType))
         {
-            // Persist the active mode to the account setting (logged-in) AND
-            // stamp the active cookie so anonymous visitors' Discover / Library
-            // toggle switches the surface on the next render too.
-            if (!string.IsNullOrEmpty(uid))
-                await _configStore.SetMediaTypeAsync(uid, (MetaType)mediaType);
-
             Response.Cookies.Append(MediaTypePreference.CookieName, ((MetaType)mediaType).ToString(), new CookieOptions
             {
                 Path = "/",
@@ -1062,10 +1049,8 @@ public class HomeController : Controller
             });
         }
 
-        // The first-visit / reopen media-type modal persists via fetch and
-        // reloads the page itself, so an AJAX caller wants a bare 204 rather
-        // than a redirect it would pointlessly follow. The non-AJAX path keeps
-        // the redirect for any plain form submit (e.g. the account selector).
+        // An AJAX caller (the modal) reloads itself, so hand it a bare 204
+        // rather than a redirect it would pointlessly follow.
         if (string.Equals(Request.Headers["X-Requested-With"], "XMLHttpRequest", StringComparison.OrdinalIgnoreCase))
             return NoContent();
 

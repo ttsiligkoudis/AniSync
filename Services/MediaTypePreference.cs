@@ -1,27 +1,20 @@
-using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Http;
 
 namespace AnimeList.Services
 {
     /// <summary>
     /// Source of truth for the web UI's media-type modes (anime / movies /
-    /// series). There are two related preferences:
+    /// series). Entirely COOKIE-BACKED — there is no per-user DB setting; the
+    /// chooser modal writes localStorage + cookies and media-type.js keeps the
+    /// cookies in sync, so server-side rendering honours the choice for anonymous
+    /// and logged-in visitors alike.
     ///
-    ///   • the ENABLED SET — the modes the user multi-selected in the chooser
-    ///     modal. The dashboard combines shelves across every enabled mode, and
-    ///     the Discover / Library toggles only offer these. Stored in a cookie
-    ///     (<see cref="EnabledCookieName"/>) + localStorage, kept in sync by
-    ///     media-type.js so SSR sees it for anonymous and logged-in visitors.
-    ///
-    ///   • the ACTIVE mode — the single mode Discover / Library currently render.
-    ///     Stored in a cookie (<see cref="CookieName"/>, set client-side AND by
-    ///     SetMediaType) and, for logged-in users, the durable account setting
-    ///     (<see cref="IConfigStore.GetMediaTypeAsync"/>). Always clamped into
-    ///     the enabled set.
-    ///
-    /// Resolution precedence for ACTIVE: logged-in account setting wins, else the
-    /// cookie, else anime; then clamp to the enabled set. ENABLED falls back to
-    /// the active mode as a singleton when its cookie is absent (pre-modal users).
+    /// Two related preferences:
+    ///   • ENABLED SET (<see cref="EnabledCookieName"/>) — the modes the user
+    ///     multi-selected. The dashboard combines shelves across them; the
+    ///     Discover / Library toggle only offers these.
+    ///   • ACTIVE mode (<see cref="CookieName"/>) — the single mode Discover /
+    ///     Library currently render. Always clamped into the enabled set.
     /// </summary>
     public static class MediaTypePreference
     {
@@ -78,30 +71,24 @@ namespace AnimeList.Services
             return DisplayOrder.Where(set.Contains).ToList();
         }
 
-        // Raw active (unclamped): logged-in setting, else cookie.
-        private static MetaType ResolveRaw(HttpContext ctx, MetaType? storedForUser) =>
-            storedForUser ?? FromCookie(ctx);
-
         /// <summary>
-        /// The enabled set for a render. Logged-in / anonymous both read the
-        /// cookie; when absent (pre-modal users) falls back to the active mode
-        /// as a singleton so the dashboard still shows something. Never empty.
+        /// The enabled set for a render. Falls back to the active mode as a
+        /// singleton when the cookie is absent (pre-modal visitors) so the
+        /// dashboard still shows something. Never empty.
         /// </summary>
-        public static async Task<List<MetaType>> ResolveEnabledAsync(HttpContext ctx, string uid, IConfigStore store)
+        public static List<MetaType> ResolveEnabled(HttpContext ctx)
         {
             var enabled = EnabledFromCookie(ctx);
-            if (enabled.Count > 0) return enabled;
-            return new() { await ResolveActiveAsync(ctx, uid, store) };
+            return enabled.Count > 0 ? enabled : new() { ResolveActive(ctx) };
         }
 
         /// <summary>
         /// The single active mode for Discover / Library, clamped into the
         /// enabled set so the two preferences can't drift apart.
         /// </summary>
-        public static async Task<MetaType> ResolveActiveAsync(HttpContext ctx, string uid, IConfigStore store)
+        public static MetaType ResolveActive(HttpContext ctx)
         {
-            MetaType? stored = string.IsNullOrEmpty(uid) ? null : await store.GetMediaTypeAsync(uid);
-            var active = ResolveRaw(ctx, stored);
+            var active = FromCookie(ctx);
             var enabled = EnabledFromCookie(ctx);
             return enabled.Count == 0 || enabled.Contains(active) ? active : enabled[0];
         }
