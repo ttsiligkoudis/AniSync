@@ -26,13 +26,6 @@
 @if (Model.IsLoggedIn)
 {
 
-    @* Preferences — shared card hosted on both /configure and /stremio.
-       The partial owns the canonical toggle set + visibility rules so a
-       new pref only needs to be added in one place; this page just
-       renders it. Save click on either page persists the full set via
-       _ConfigurePageScript's bitFor() reads. *@
-    @await Html.PartialAsync("_PreferencesSection", Model)
-
     @* Display preferences — the media-type modes (anime / movies / series) and
        the dashboard layout. Both also reachable from the header / dashboard, but
        surfaced here as account settings; they save to the account + this device. *@
@@ -55,6 +48,13 @@
     @* Layout chooser modal + its script, so "Customize dashboard" works here too
        (no dashboard sections on this page — the modal then lists every section). *@
     @await Html.PartialAsync("_DashCustomize")
+
+    @* Preferences — shared card hosted on both /configure and /stremio.
+       The partial owns the canonical toggle set + visibility rules so a
+       new pref only needs to be added in one place; this page just
+       renders it. Save click on either page persists the full set via
+       _ConfigurePageScript's bitFor() reads. *@
+    @await Html.PartialAsync("_PreferencesSection", Model)
 
     @* Stremio-addon-specific config (catalogs, streams, install URL) lives
        on its own page at /stremio so /configure stays focused on the
