@@ -57,7 +57,7 @@
     // (and logged-in users whose row read failed) fall back to the cookie the
     // first-visit chooser stamps. Drives the modal's "current" highlight and
     // the header button's icon/label.
-    var layoutMediaType = AnimeList.MetaType.anime;
+    var layoutMediaType = MetaType.anime;
     try
     {
         layoutMediaType = !string.IsNullOrEmpty(layoutUid)
@@ -65,8 +65,8 @@
             : AnimeList.Services.MediaTypePreference.FromCookie(Context);
     }
     catch { layoutMediaType = AnimeList.Services.MediaTypePreference.FromCookie(Context); }
-    var layoutMediaTypeLabel = layoutMediaType == AnimeList.MetaType.movie ? "Movies"
-        : layoutMediaType == AnimeList.MetaType.series ? "Series"
+    var layoutMediaTypeLabel = layoutMediaType == MetaType.movie ? "Movies"
+        : layoutMediaType == MetaType.series ? "Series"
         : "Anime";
 }
 <!DOCTYPE html>
@@ -427,7 +427,7 @@
                 <button type="button" class="media-type-btn" data-media-type-open
                         aria-label="Change mode (currently @layoutMediaTypeLabel)" title="Change mode">
                     <span class="media-type-btn-icon" aria-hidden="true">
-                        @if (layoutMediaType == AnimeList.MetaType.movie)
+                        @if (layoutMediaType == MetaType.movie)
                         {
                             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <rect x="3" y="4" width="18" height="16" rx="2" />
@@ -435,7 +435,7 @@
                                 <line x1="3" y1="12" x2="21" y2="12" />
                             </svg>
                         }
-                        else if (layoutMediaType == AnimeList.MetaType.series)
+                        else if (layoutMediaType == MetaType.series)
                         {
                             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <rect x="2" y="7" width="20" height="13" rx="2" />
