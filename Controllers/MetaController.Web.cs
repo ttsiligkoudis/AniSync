@@ -1226,21 +1226,33 @@ namespace AnimeList.Controllers
 
             var tokenData = await _tokenService.GetAccessTokenAsync();
             if (tokenData is null || tokenData.anonymousUser || string.IsNullOrWhiteSpace(tokenData.access_token))
+            {
+                _logger.LogInformation("scrobble-progress: no-auth (id={Id}).", req.Id);
                 return Json(new { ok = false, reason = "no-auth" });
+            }
 
             var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
             if (string.IsNullOrEmpty(uid))
+            {
+                _logger.LogInformation("scrobble-progress: no-uid (id={Id}).", req.Id);
                 return Json(new { ok = false, reason = "no-uid" });
+            }
 
             // Same opt-out the mark-watched hook honours — continue-watching is
             // still tracking, so a user who turned auto-track off gets neither.
             var cfg = await GetConfigByUidAsync(uid, _configStore);
             if (cfg?.disableAutoTrack == true)
+            {
+                _logger.LogInformation("scrobble-progress: opted-out (id={Id}).", req.Id);
                 return Json(new { ok = false, reason = "opted-out" });
+            }
 
             var season = req.Type == "series" ? req.Season : (int?)null;
             var episode = req.Type == "series" ? req.Episode : (int?)null;
             var ok = await _traktService.PauseScrobbleAsync(uid, req.Type, req.Id, season, episode, req.Progress);
+            _logger.LogInformation(
+                "scrobble-progress: Trakt /scrobble/pause ok={Ok} (id={Id}, type={Type}, s={Season}, e={Episode}, progress={Progress}).",
+                ok, req.Id, req.Type, season, episode, req.Progress);
             return Json(new { ok, reason = ok ? null : "trakt-not-connected" });
         }
 
