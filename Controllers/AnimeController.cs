@@ -1292,6 +1292,22 @@ namespace AnimeList.Controllers
         public AnimeService AnimeService { get; set; }
         public bool AnonymousUser { get; set; }
         public string ConfigUid { get; set; }
+
+        // Media type this detail page is rendering. Defaults to anime so the
+        // existing /anime/{id} path is unchanged; VideoController sets movie /
+        // series so the same view can render Cinemeta movies & series. Drives
+        // the view's isVideo branches (Trakt watchlist instead of anime Manage
+        // Entry, no AniList extras hydration, video-shaped watch URLs).
+        public MetaType MediaType { get; set; } = MetaType.anime;
+        // URL base for the watch links the page builds. "/anime" for anime,
+        // "/movie" / "/series" for the video section so the episode rows /
+        // play CTA point at VideoController's watch routes.
+        public string BasePath { get; set; } = "/anime";
+        // For the video (movie / series) path: whether the viewer has Trakt
+        // connected, so the hero can show a Trakt watchlist toggle in place of
+        // the anime-tracker Manage Entry pill. Ignored on the anime path.
+        public bool TraktConnected { get; set; }
+
         // User's tracking state for this entry — null for anonymous visitors,
         // not-yet-tracked entries, or transient fetch failures (the hero
         // gracefully omits the user-state panel when this is null).
