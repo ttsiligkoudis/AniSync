@@ -115,19 +115,18 @@
         if (!list) return;
         list.innerHTML = '';
         var rows = displayedRows();
-        rows.forEach(function (entry, i) {
+        rows.forEach(function (entry) {
             var li = document.createElement('li');
             li.className = 'dash-modal-row' + (entry.visible ? '' : ' is-hidden');
+            li.setAttribute('data-key', entry.key);
 
-            var up = document.createElement('button');
-            up.type = 'button'; up.className = 'dash-row-move'; up.setAttribute('aria-label', 'Move up');
-            up.textContent = '↑'; up.disabled = i === 0;
-            up.addEventListener('click', function () { move(entry.key, -1); });
-
-            var down = document.createElement('button');
-            down.type = 'button'; down.className = 'dash-row-move'; down.setAttribute('aria-label', 'Move down');
-            down.textContent = '↓'; down.disabled = i === rows.length - 1;
-            down.addEventListener('click', function () { move(entry.key, 1); });
+            // Drag handle — the only reorder trigger (pointer events below),
+            // matching the stream-addon list. Touch + mouse via one path.
+            var handle = document.createElement('span');
+            handle.className = 'dash-row-handle';
+            handle.setAttribute('aria-label', 'Drag to reorder');
+            handle.setAttribute('title', 'Drag to reorder');
+            handle.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>';
 
             var name = document.createElement('span');
             name.className = 'dash-row-label';
@@ -141,25 +140,25 @@
             toggle.textContent = entry.visible ? 'Shown' : 'Hidden';
             toggle.addEventListener('click', function () { toggleVisible(entry.key); });
 
-            li.appendChild(up);
-            li.appendChild(down);
+            li.appendChild(handle);
             li.appendChild(name);
             li.appendChild(toggle);
             list.appendChild(li);
         });
     }
 
-    // Move a key one step among the DISPLAYED rows (so non-shown keys between
-    // them don't swallow the step), then persist + re-apply.
-    function move(key, dir) {
-        var keys = displayedRows().map(function (e) { return e.key; });
-        var pi = keys.indexOf(key);
-        var ni = pi + dir;
-        if (pi < 0 || ni < 0 || ni >= keys.length) return;
-        var swapKey = keys[ni];
-        var ai = layout.findIndex(function (e) { return e.key === key; });
-        var bi = layout.findIndex(function (e) { return e.key === swapKey; });
-        var tmp = layout[ai]; layout[ai] = layout[bi]; layout[bi] = tmp;
+    // Reorder the layout to match a new on-screen key order from a drag. Only
+    // the displayed keys move; non-displayed entries (hidden by mode) keep their
+    // slots, and every entry keeps its visible flag.
+    function applyDraggedOrder(newKeys) {
+        var byKey = {};
+        layout.forEach(function (e) { byKey[e.key] = e; });
+        var inDrag = {};
+        newKeys.forEach(function (k) { inDrag[k] = true; });
+        var queue = newKeys.slice();
+        layout = layout.map(function (e) {
+            return inDrag[e.key] ? byKey[queue.shift()] : e;
+        });
         commit();
     }
     function toggleVisible(key) {
@@ -222,4 +221,63 @@
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape' && modal && !modal.hidden) closeModal();
     });
+
+    // ── drag-to-reorder (mirrors the stream-addon list) ──
+    // Pointer events on the row's drag handle, captured so they keep firing as
+    // the finger/mouse moves; a drop indicator marks the target gap; on release
+    // the row is moved and the new order persisted. One path for mouse + touch.
+    if (list) {
+        var drag = null;
+        var rowsIn = function () {
+            return Array.prototype.slice.call(list.querySelectorAll('.dash-modal-row'));
+        };
+        var clearIndicators = function () {
+            rowsIn().forEach(function (r) { r.classList.remove('drop-above', 'drop-below'); });
+        };
+        var findDrop = function (clientY) {
+            var rows = rowsIn().filter(function (r) { return !r.classList.contains('is-dragging'); });
+            for (var i = 0; i < rows.length; i++) {
+                var rect = rows[i].getBoundingClientRect();
+                if (clientY < rect.top) return { row: rows[i], before: true };
+                if (clientY <= rect.bottom) return { row: rows[i], before: clientY < rect.top + rect.height / 2 };
+            }
+            return rows.length ? { row: rows[rows.length - 1], before: false } : null;
+        };
+
+        list.addEventListener('pointerdown', function (e) {
+            var handle = e.target.closest ? e.target.closest('.dash-row-handle') : null;
+            if (!handle) return;
+            if (e.button !== undefined && e.button !== 0) return;
+            var row = handle.closest('.dash-modal-row');
+            if (!row) return;
+            e.preventDefault();
+            drag = { row: row, handle: handle, pointerId: e.pointerId };
+            row.classList.add('is-dragging');
+            try { handle.setPointerCapture(e.pointerId); } catch (_) { /* old browsers */ }
+        });
+        list.addEventListener('pointermove', function (e) {
+            if (!drag) return;
+            e.preventDefault();
+            clearIndicators();
+            var drop = findDrop(e.clientY);
+            if (drop) drop.row.classList.add(drop.before ? 'drop-above' : 'drop-below');
+        });
+        var endDrag = function (e) {
+            if (!drag) return;
+            var row = drag.row, handle = drag.handle;
+            var drop = (e && typeof e.clientY === 'number') ? findDrop(e.clientY) : null;
+            if (drop) {
+                if (drop.before) list.insertBefore(row, drop.row);
+                else list.insertBefore(row, drop.row.nextSibling);
+            }
+            row.classList.remove('is-dragging');
+            clearIndicators();
+            try { handle.releasePointerCapture(drag.pointerId); } catch (_) { }
+            drag = null;
+            // Commit the new on-screen order (rebuilds the rows).
+            applyDraggedOrder(rowsIn().map(function (r) { return r.getAttribute('data-key'); }));
+        };
+        list.addEventListener('pointerup', endDrag);
+        list.addEventListener('pointercancel', endDrag);
+    }
 })();

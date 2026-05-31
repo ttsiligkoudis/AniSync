@@ -8205,22 +8205,24 @@ body.dash-modal-open { overflow: hidden; }
     border-radius: var(--radius-md);
 }
 .dash-modal-row.is-hidden { opacity: 0.55; }
-.dash-row-move {
+/* Drag handle + drag states — mirrors the stream-addon list. */
+.dash-row-handle {
     flex: 0 0 auto;
-    width: 30px;
-    height: 30px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid var(--overlay-12);
-    border-radius: var(--radius-sm);
-    background: var(--overlay-04);
-    color: var(--text-2);
-    font-size: 1rem;
-    cursor: pointer;
+    width: 2rem;
+    height: 2rem;
+    color: var(--text-muted);
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
 }
-.dash-row-move:hover:not(:disabled) { background: var(--overlay-08); color: var(--text-strong); }
-.dash-row-move:disabled { opacity: 0.3; cursor: default; }
+.dash-row-handle:active { cursor: grabbing; color: var(--text-strong); }
+.dash-modal-row.is-dragging { opacity: 0.4; }
+.dash-modal-row.drop-above { box-shadow: inset 0 2px 0 0 var(--accent); }
+.dash-modal-row.drop-below { box-shadow: inset 0 -2px 0 0 var(--accent); }
 .dash-row-label {
     flex: 1 1 auto;
     min-width: 0;
