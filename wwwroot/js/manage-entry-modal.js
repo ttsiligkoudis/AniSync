@@ -554,7 +554,7 @@
             });
     }
 
-    // Quick-mark-watched on /anime/{id}'s episode list. Bumps progress to
+    // Quick-mark-watched on /meta/{id}'s episode list. Bumps progress to
     // the clicked episode's number (preserving status), updates checkmarks
     // on rows ≤ new progress, refreshes the user-state panel in the hero,
     // and bumps the dashboard stats if applicable. No reload — same
@@ -636,9 +636,9 @@
     //   3. li.anime-detail-episode inside a click-enabled list → quick-
     //      mark-watched: bumps progress to that episode's number.
     //   4. [data-open-modal] anywhere (typically the Edit button on the
-    //      /anime/{id} detail page) → open the modal for that meta id.
+    //      /meta/{id} detail page) → open the modal for that meta id.
     //
-    // Cards themselves are <a href="/anime/{id}"> and click-navigate to the
+    // Cards themselves are <a href="/meta/{id}"> and click-navigate to the
     // detail page by default — no JS interception. The modal is reserved
     // for explicit edit-intent actions (Edit button, +1 quick-action,
     // episode click) so the card surface stays predictable.

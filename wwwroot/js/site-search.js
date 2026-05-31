@@ -51,7 +51,7 @@
                 return;
             }
 
-            // Build each result row manually. Each anchor links to /anime/{id};
+            // Build each result row manually. Each anchor links to /meta/{id};
             // AnimeController.Detail resolves cross-service ids on click, so
             // we can hand back whatever id the /api/v1/match scored highest
             // for the user's primary service.
@@ -78,7 +78,7 @@
                     typeBadge = '<span class="site-search-result-type site-search-result-type-tv">TV</span>';
                 }
 
-                return '<a class="site-search-result" role="option" href="/anime/' + encodeURIComponent(id) + '">'
+                return '<a class="site-search-result" role="option" href="/meta/' + encodeURIComponent(id) + '">'
                     + posterHtml
                     + '<span class="site-search-result-name">' + escapeHtml(name) + '</span>'
                     + typeBadge

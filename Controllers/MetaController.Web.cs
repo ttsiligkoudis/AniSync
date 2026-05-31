@@ -7,76 +7,40 @@ using Microsoft.AspNetCore.Mvc;
 namespace AnimeList.Controllers
 {
     /// <summary>
-    /// Web-app detail page for an individual anime. Mirrors what
-    /// MetaController.GetByIDInternal does for the Stremio addon, but
-    /// session-based (no path-config) and rendering an HTML page rather
-    /// than the addon's JSON. Cards across /library / /discover / the
-    /// dashboard's Continue Watching shelf all link here on click.
+    /// Session-based web surface for the unified /meta/{id} detail + watch
+    /// pages (anime by default; movie / series via ?type=). Mirrors what
+    /// MetaController.GetByIDInternal does for the Stremio addon JSON, but
+    /// renders HTML. Cards across /library / /discover / the dashboard's
+    /// Continue Watching shelf all link here on click. The id-keyed stream /
+    /// subtitle endpoints below work for any IMDb id regardless of type.
     /// </summary>
-    public class AnimeController : Controller
+    public partial class MetaController : Controller
     {
-        private readonly ITokenService _tokenService;
-        private readonly IAnilistService _anilistService;
-        private readonly IKitsuService _kitsuService;
-        private readonly IMalService _malService;
-        private readonly ITmdbService _tmdbService;
-        private readonly IAnimeMappingService _mappingService;
-        private readonly IConfigStore _configStore;
-        private readonly IAnilistFallback _anilistFallback;
-        private readonly IAnimeMetaLoader _animeMetaLoader;
-        private readonly IAddonStreamService _addonStreamService;
-        private readonly IAniSkipService _aniSkipService;
-        private readonly ISubtitleService _subtitleService;
-        private readonly IHttpClientFactory _httpClientFactory;
-        private readonly ISyncService _syncService;
-        private readonly ITraktService _traktService;
-        private readonly ILogger<AnimeController> _logger;
-
-        public AnimeController(
-            ITokenService tokenService,
-            IAnilistService anilistService,
-            IKitsuService kitsuService,
-            IMalService malService,
-            ITmdbService tmdbService,
-            IAnimeMappingService mappingService,
-            IConfigStore configStore,
-            IAnilistFallback anilistFallback,
-            IAnimeMetaLoader animeMetaLoader,
-            IAddonStreamService addonStreamService,
-            IAniSkipService aniSkipService,
-            ISubtitleService subtitleService,
-            IHttpClientFactory httpClientFactory,
-            ISyncService syncService,
-            ITraktService traktService,
-            ILogger<AnimeController> logger)
-        {
-            _tokenService = tokenService;
-            _anilistService = anilistService;
-            _kitsuService = kitsuService;
-            _malService = malService;
-            _tmdbService = tmdbService;
-            _mappingService = mappingService;
-            _configStore = configStore;
-            _anilistFallback = anilistFallback;
-            _animeMetaLoader = animeMetaLoader;
-            _addonStreamService = addonStreamService;
-            _aniSkipService = aniSkipService;
-            _subtitleService = subtitleService;
-            _httpClientFactory = httpClientFactory;
-            _syncService = syncService;
-            _traktService = traktService;
-            _logger = logger;
-        }
+        // DI fields + the merged constructor live in MetaController.cs (this is
+        // a partial of the same controller). This file holds the session-based
+        // web surface (detail / watch / streams / subtitles / mark-watched /
+        // trakt-watchlist), shared across anime + movie + series via the
+        // ?type= query (defaulting to anime).
 
         // {*id} catches any id shape including the colon-prefixed ones
         // (anilist:123 / kitsu:456 / mal:789 / imdb:tt... / tmdb:...).
         // Without the catch-all the colon would be url-decoded into a
         // route-segment delimiter.
-        [Route("/anime/{*id}")]
-        public async Task<IActionResult> Detail(string id)
+        [Route("/meta/{*id}")]
+        public async Task<IActionResult> Detail(string id, [FromQuery] MetaType type = MetaType.anime)
         {
             if (string.IsNullOrEmpty(id)) return NotFound();
+            // One detail route for every media type. ?type= defaults to anime
+            // (so /meta/{id} alone is the anime page); movie / series flow
+            // through Cinemeta in VideoDetail. The view + AnimeDetailViewModel
+            // are shared — only the data source and tracking chrome differ.
+            return type == MetaType.anime
+                ? await AnimeDetail(id)
+                : await VideoDetail(type, id);
+        }
 
+        private async Task<IActionResult> AnimeDetail(string id)
+        {
             // Session for personalisation (link badges, Edit button visibility);
             // anonymous fresh-visitors get a Kitsu-default synthetic token like
             // /discover does so the per-service dispatch below has a service
@@ -94,7 +58,7 @@ namespace AnimeList.Controllers
             var detailConfig = await GetConfigByUidAsync(uid, _configStore);
             var showAdultContent = detailConfig?.showAdultContent == true;
 
-            // /anime/{id} is per-cour by default — the per-service detail
+            // /meta/{id} is per-cour by default — the per-service detail
             // page wants the cour-specific data (videos, score, status) for
             // the entry the user clicked, not the franchise umbrella. The
             // grouped-imdb path inside the loader overrides this when the
@@ -214,13 +178,13 @@ namespace AnimeList.Controllers
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "AnimeController.Detail: entry fetch failed for {Id}.", anime.id);
+                    _logger.LogWarning(ex, "MetaController.AnimeDetail: entry fetch failed for {Id}.", anime.id);
                 }
             }
 
             // Related + recommendations + supplementary chip rows (Tag / Studio /
             // director / writer / Composer / Artist / Producer / Staff) are now
-            // fetched client-side after page render via /anime/{id}/extras — see
+            // fetched client-side after page render via /meta/{id}/extras — see
             // the Extras action below. Keeps the hero + episodes painting on the
             // GetAnimeByIdAsync result alone instead of waiting for the extra
             // AniList round-trip.
@@ -250,6 +214,55 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
+        /// Movie / series detail. Sourced from Cinemeta (general video, keyed by
+        /// IMDb id) rather than the anime trackers, but rendered through the same
+        /// Views/Meta/Detail.cshtml — MediaType / BasePath drive the video-shaped
+        /// watch URLs and the Trakt watchlist toggle (in place of the anime
+        /// Manage Entry pill). SourceLinks carries the IMDb id so the IMDb +
+        /// Stremio source chips light up.
+        /// </summary>
+        private async Task<IActionResult> VideoDetail(MetaType type, string id)
+        {
+            var cinemetaType = type == MetaType.movie ? "movie" : "series";
+            var meta = await _cinemeta.GetVideoMetaAsync(cinemetaType, id);
+            if (meta == null)
+            {
+                Response.StatusCode = 404;
+                return View("NotFound");
+            }
+
+            var uid = await ResolveUidAsync();
+            var traktToken = string.IsNullOrEmpty(uid) ? null : await _configStore.GetTraktTokenAsync(uid);
+
+            var imdbId = meta.id != null && meta.id.StartsWith(Utils.imdbPrefix, StringComparison.Ordinal)
+                ? meta.id
+                : null;
+
+            return View("Detail", new AnimeDetailViewModel
+            {
+                Anime = meta,
+                MediaType = type,
+                BasePath = "/meta",
+                AnonymousUser = string.IsNullOrEmpty(uid),
+                ConfigUid = uid,
+                TraktConnected = traktToken?.Connected == true,
+                SourceLinks = new AnimeSourceLinks { ImdbId = imdbId },
+            });
+        }
+
+        /// <summary>
+        /// Resolves the current session's config UID (null for anonymous /
+        /// unauthenticated visitors). The video detail + watch pages render fine
+        /// without one; it gates the per-user stream-addon + Trakt lookups.
+        /// </summary>
+        private async Task<string> ResolveUidAsync()
+        {
+            var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+            _ = tokenData;
+            return uid;
+        }
+
+        /// <summary>
         /// Maps a service-prefixed id (anilist:N / mal:N / kitsu:N) back to its
         /// source <see cref="AnimeService"/>. Returns null for unknown / cross-
         /// service prefixes (imdb:, tmdb:, …) where the source-provider
@@ -270,7 +283,7 @@ namespace AnimeList.Controllers
             try { return await _anilistFallback.GetRelatedAsync(anilistId, translateTo, groupSeasons); }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "AnimeController.Detail: related fetch failed for anilist {Id}.", anilistId);
+                _logger.LogWarning(ex, "MetaController.AnimeDetail: related fetch failed for anilist {Id}.", anilistId);
                 return [];
             }
         }
@@ -285,10 +298,10 @@ namespace AnimeList.Controllers
         // separate client endpoints wouldn't actually parallelise upstream
         // work — one combined response is the right shape.
         // Route shape note: a catch-all parameter must be the last segment, so
-        // we use /anime/extras/{*id} rather than /anime/{*id}/extras (the
+        // we use /meta/extras/{*id} rather than /meta/{*id}/extras (the
         // latter is invalid in ASP.NET Core routing). The placeholder script
         // in Detail.cshtml builds the URL accordingly.
-        [Route("/anime/extras/{*id}")]
+        [Route("/meta/extras/{*id}")]
         public async Task<IActionResult> Extras(string id)
         {
             if (string.IsNullOrEmpty(id)) return Json(new AnimeExtrasResponse());
@@ -307,7 +320,7 @@ namespace AnimeList.Controllers
             var groupSeasons = configuration?.enableSeasonGrouping == true;
 
             // Cross-service id resolution mirrors what Detail does so the
-            // same /anime/{id}/extras URL works regardless of which service-
+            // same /meta/{id}/extras URL works regardless of which service-
             // prefix the page was loaded against.
             var resolvedId = await _animeMetaLoader.ResolveToServiceIdAsync(id, animeService) ?? id;
             var sourceLinks = await _mappingService.BuildSourceLinksAsync(resolvedId);
@@ -341,24 +354,34 @@ namespace AnimeList.Controllers
 
         /// <summary>
         /// Dedicated per-episode "watch" page. Replaces the in-page modal on
-        /// /anime/{id}: episode rows on Detail.cshtml now navigate here so the
+        /// /meta/{id}: episode rows on Detail.cshtml now navigate here so the
         /// user lands on a full screen with the Plyr-styled player, source
         /// picker, and prev / next episode buttons. The id segment carries
-        /// the same colon-prefixed shapes /anime/{id} accepts
+        /// the same colon-prefixed shapes /meta/{id} accepts
         /// (anilist:N / kitsu:N / mal:N / tt12345 / tmdb:N) — kept as a
-        /// single segment because the existing /anime/{id} card links work
+        /// single segment because the existing /meta/{id} card links work
         /// the same way and Detail's catch-all is for absorbing slugs.
         /// </summary>
-        [Route("/anime/{id}/watch/{episode:int}")]
-        [Route("/anime/{id}/watch/{season:int}/{episode:int}")]
-        public async Task<IActionResult> Watch(string id, int episode, int? season = null)
+        // /meta/{id}/watch (no episode) is the movie shape — episode defaults
+        // to 1. /meta/{id}/watch/{ep} and /{season}/{ep} cover series + anime
+        // cours. ?type= defaults to anime.
+        [Route("/meta/{id}/watch")]
+        [Route("/meta/{id}/watch/{episode:int}")]
+        [Route("/meta/{id}/watch/{season:int}/{episode:int}")]
+        public async Task<IActionResult> Watch(string id, int episode = 1, int? season = null, [FromQuery] MetaType type = MetaType.anime)
         {
             if (string.IsNullOrEmpty(id) || episode <= 0)
             {
                 Response.StatusCode = 404;
                 return View("NotFound");
             }
+            return type == MetaType.anime
+                ? await AnimeWatch(id, episode, season)
+                : await VideoWatch(type, id, episode, season);
+        }
 
+        private async Task<IActionResult> AnimeWatch(string id, int episode, int? season)
+        {
             var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
             var animeService = tokenData.anime_service;
@@ -388,13 +411,13 @@ namespace AnimeList.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "AnimeController.Watch failed (id={Id}).", id);
+                _logger.LogError(ex, "MetaController.AnimeWatch failed (id={Id}).", id);
                 Response.StatusCode = 404;
                 return View("NotFound");
             }
 
             // 18+ gate — same as Detail. A deep-link to
-            // /anime/{adult}/watch/N must 404 for viewers without the
+            // /meta/{adult}/watch/N must 404 for viewers without the
             // showAdultContent opt-in so the toggle can't be bypassed
             // via the watch URL.
             if (anime != null && anime.isAdult)
@@ -494,6 +517,103 @@ namespace AnimeList.Controllers
                 HasStreamAddons = hasAddons,
                 ExternalStreamsEnabled = externalEnabled,
             });
+        }
+
+        /// <summary>
+        /// Movie / series watch. Cinemeta's season/episode ARE the IMDb
+        /// coordinates the stream addons expect — no cour normalisation (unlike
+        /// the anime path), so we match the requested episode directly. Renders
+        /// the same Views/Meta/Watch.cshtml; the id-keyed stream / subtitle
+        /// endpoints resolve debrid sources for any IMDb id. External-services
+        /// links are anime-tracker-sourced, so the video source panel relies on
+        /// stream addons alone (ExternalStreamsEnabled = false).
+        /// </summary>
+        private async Task<IActionResult> VideoWatch(MetaType type, string id, int episode, int? season)
+        {
+            var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+            tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
+
+            var cinemetaType = type == MetaType.movie ? "movie" : "series";
+            var meta = await _cinemeta.GetVideoMetaAsync(cinemetaType, id);
+            if (meta == null)
+            {
+                Response.StatusCode = 404;
+                return View("NotFound");
+            }
+
+            if (type == MetaType.movie)
+            {
+                // Movies collapse to a single streamable unit — synthesise one
+                // Video for episode 1 so the shared per-episode Watch view
+                // renders.
+                meta.videos = [new Video
+                {
+                    episode = 1,
+                    season = 1,
+                    title = meta.name,
+                    thumbnail = meta.poster ?? meta.background,
+                }];
+            }
+            else if (meta.videos == null || meta.videos.Count == 0)
+            {
+                Response.StatusCode = 404;
+                return View("NotFound");
+            }
+
+            var current = type == MetaType.movie
+                ? meta.videos[0]
+                : meta.videos.FirstOrDefault(v =>
+                    v.episode == episode &&
+                    (season == null || (v.season > 0 ? v.season : 1) == season.Value));
+            if (current == null)
+            {
+                Response.StatusCode = 404;
+                return View("NotFound");
+            }
+
+            var (prev, next) = ComputePrevNext(meta.videos, current, cinemetaType);
+
+            bool hasAddons = false;
+            if (!string.IsNullOrEmpty(uid))
+            {
+                hasAddons = (await _configStore.GetStreamAddonsAsync(uid)).Count > 0;
+            }
+
+            return View("Watch", new WatchViewModel
+            {
+                Anime = meta,
+                Current = current,
+                Prev = prev,
+                Next = next,
+                ConfigUid = uid,
+                AnonymousUser = tokenData.anonymousUser,
+                HasStreamAddons = hasAddons,
+                ExternalStreamsEnabled = false,
+                BasePath = "/meta",
+                Type = type,
+            });
+        }
+
+        // Prev/next neighbours in (season, episode) order for the video path.
+        // Movies never have neighbours. Mirrors the anime watch nav but without
+        // the future-episode skipping — Cinemeta's `released` dates aren't
+        // reliable enough for upcoming-episode gating on general series.
+        private static (Video Prev, Video Next) ComputePrevNext(List<Video> videos, Video current, string type)
+        {
+            if (type == "movie") return (null, null);
+
+            var ordered = videos
+                .OrderBy(v => v.season > 0 ? v.season : 1)
+                .ThenBy(v => v.episode)
+                .ToList();
+            var idx = ordered.FindIndex(v =>
+                v.episode == current.episode &&
+                (v.season > 0 ? v.season : 1) == (current.season > 0 ? current.season : 1));
+            if (idx < 0) return (null, null);
+
+            var prev = idx > 0 ? ordered[idx - 1] : null;
+            var next = idx < ordered.Count - 1 ? ordered[idx + 1] : null;
+            return (prev, next);
         }
 
         /// <summary>
@@ -641,9 +761,9 @@ namespace AnimeList.Controllers
         /// state.
         ///
         /// Query-string route on purpose: the Detail action above is bound to
-        /// /anime/{*id} which would otherwise swallow any literal sub-path.
+        /// /meta/{*id} which would otherwise swallow any literal sub-path.
         /// </summary>
-        [HttpGet("/anime/episode-streams")]
+        [HttpGet("/meta/episode-streams")]
         public async Task<IActionResult> EpisodeStreams(string id, int? season, int episode, string type = null, int? addonIndex = null)
         {
             if (string.IsNullOrWhiteSpace(id))
@@ -677,7 +797,7 @@ namespace AnimeList.Controllers
             // on the slowest addon to complete. This branch skips
             // every bootstrap-only field (externalLinks, skipTimes,
             // addon list) since the client already has them from
-            // its initial /anime/episode-streams call. The index is
+            // its initial /meta/episode-streams call. The index is
             // taken against the same addon list the bootstrap
             // returned moments earlier; if the user added/removed
             // an addon mid-load we'd silently return an empty list
@@ -834,7 +954,7 @@ namespace AnimeList.Controllers
         /// empty list so the player initialises without subs rather
         /// than 500ing.
         /// </summary>
-        [HttpGet("/anime/episode-subtitles")]
+        [HttpGet("/meta/episode-subtitles")]
         public async Task<IActionResult> EpisodeSubtitles(string id, int? season, int episode, string filename = null)
         {
             if (string.IsNullOrWhiteSpace(id) || episode <= 0)
@@ -896,8 +1016,8 @@ namespace AnimeList.Controllers
         /// <c>crossorigin</c> attribute (which can break some RD URLs
         /// that reject anonymous CORS requests).
         /// </summary>
-        [HttpGet("/anime/subtitle")]
-        [HttpGet("/anime/subtitle.vtt")]
+        [HttpGet("/meta/subtitle")]
+        [HttpGet("/meta/subtitle.vtt")]
         public async Task<IActionResult> Subtitle(string url)
         {
             if (string.IsNullOrWhiteSpace(url))
@@ -920,7 +1040,7 @@ namespace AnimeList.Controllers
         /// the encoded payload BEFORE the filename keeps the .vtt as
         /// the very last segment.
         /// </summary>
-        [HttpGet("/anime/sub/{encoded}/subtitle.vtt")]
+        [HttpGet("/meta/sub/{encoded}/subtitle.vtt")]
         public async Task<IActionResult> SubtitleByPath(string encoded)
         {
             if (string.IsNullOrWhiteSpace(encoded)) return BadRequest();
@@ -960,7 +1080,7 @@ namespace AnimeList.Controllers
             // Suggest a sensible filename for external players that
             // sniff Content-Disposition (VLC does this when the URL
             // path itself doesn't end in a known subtitle extension).
-            // Combined with the /anime/subtitle.vtt path alias this
+            // Combined with the /meta/subtitle.vtt path alias this
             // gives VLC two strong format signals so it actually
             // auto-loads our HTTP sidecar instead of fetching and
             // ignoring it.
@@ -986,7 +1106,7 @@ namespace AnimeList.Controllers
         /// rather than 401 so the client doesn't surface anything
         /// alarming for users who chose to watch without an account.
         /// </summary>
-        [HttpPost("/anime/mark-watched")]
+        [HttpPost("/meta/mark-watched")]
         public async Task<IActionResult> MarkWatched([FromBody] MarkWatchedRequest req)
         {
             if (req is null || string.IsNullOrWhiteSpace(req.Id) || req.Episode <= 0)
@@ -1089,7 +1209,7 @@ namespace AnimeList.Controllers
         /// retired /api/trakt/watchlist endpoint — resolves the current session's uid and
         /// adds / removes the title on the user's Trakt watchlist (primary or linked Trakt).
         /// </summary>
-        [HttpPost("/anime/trakt-watchlist")]
+        [HttpPost("/meta/trakt-watchlist")]
         public async Task<IActionResult> TraktWatchlist([FromBody] TraktActionRequest req)
         {
             if (req is null || string.IsNullOrWhiteSpace(req.id) || string.IsNullOrWhiteSpace(req.type))
@@ -1193,7 +1313,7 @@ namespace AnimeList.Controllers
         /// own server — which Torrentio doesn't bot-block — we hand
         /// the client a CDN URL the Worker can stream from.
         /// </summary>
-        [HttpGet("/anime/resolve-stream")]
+        [HttpGet("/meta/resolve-stream")]
         public async Task<IActionResult> ResolveStream(string url, CancellationToken ct)
         {
             if (string.IsNullOrWhiteSpace(url) ||
@@ -1264,7 +1384,7 @@ namespace AnimeList.Controllers
             try { return await _anilistFallback.GetRecommendationMetasAsync(anilistId, translateTo, groupSeasons); }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "AnimeController.Extras: recommendations fetch failed for anilist {Id}.", anilistId);
+                _logger.LogWarning(ex, "MetaController.Extras: recommendations fetch failed for anilist {Id}.", anilistId);
                 return [];
             }
         }
@@ -1274,7 +1394,7 @@ namespace AnimeList.Controllers
             try { return await _anilistFallback.GetSupplementaryLinksAsync(anilistId); }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "AnimeController.Extras: supplementary-links fetch failed for anilist {Id}.", anilistId);
+                _logger.LogWarning(ex, "MetaController.Extras: supplementary-links fetch failed for anilist {Id}.", anilistId);
                 return [];
             }
         }
@@ -1282,7 +1402,7 @@ namespace AnimeList.Controllers
     }
 
     /// <summary>
-    /// View model for the /anime/{id} detail page. Carries the resolved Meta
+    /// View model for the /meta/{id} detail page. Carries the resolved Meta
     /// (or null for the not-found render) plus the session-derived bits the
     /// view needs to decide whether to render the Edit button + user-state.
     /// </summary>
@@ -1294,15 +1414,14 @@ namespace AnimeList.Controllers
         public string ConfigUid { get; set; }
 
         // Media type this detail page is rendering. Defaults to anime so the
-        // existing /anime/{id} path is unchanged; VideoController sets movie /
-        // series so the same view can render Cinemeta movies & series. Drives
-        // the view's isVideo branches (Trakt watchlist instead of anime Manage
-        // Entry, no AniList extras hydration, video-shaped watch URLs).
+        // anime (default) renders the tracker chrome; movie / series render the
+        // Cinemeta data through the same view. Drives the view's isVideo
+        // branches (Trakt watchlist instead of anime Manage Entry, no AniList
+        // extras hydration, video-shaped watch URLs with ?type=).
         public MetaType MediaType { get; set; } = MetaType.anime;
-        // URL base for the watch links the page builds. "/anime" for anime,
-        // "/movie" / "/series" for the video section so the episode rows /
-        // play CTA point at VideoController's watch routes.
-        public string BasePath { get; set; } = "/anime";
+        // URL base for the watch links the page builds — always "/meta" now;
+        // the media type rides the ?type= query (omitted for anime).
+        public string BasePath { get; set; } = "/meta";
         // For the video (movie / series) path: whether the viewer has Trakt
         // connected, so the hero can show a Trakt watchlist toggle in place of
         // the anime-tracker Manage Entry pill. Ignored on the anime path.
@@ -1314,7 +1433,7 @@ namespace AnimeList.Controllers
         public EntryViewState Entry { get; set; }
         // Set when the requested anime has no mapping to the user's primary
         // service but DOES live on a linked secondary the user has connected
-        // (e.g. /anime/anilist:211495 viewed by an MAL-primary user who has
+        // (e.g. /meta/anilist:211495 viewed by an MAL-primary user who has
         // AniList linked). The Manage Entry button + modal route through the
         // linked token instead of the primary; null means "use primary" as
         // before.
@@ -1330,7 +1449,7 @@ namespace AnimeList.Controllers
         // (e.g. obscure shows, donghua) simply omit the corresponding link.
         public AnimeSourceLinks SourceLinks { get; set; } = new();
 
-        // True when the page should fire a client-side fetch of /anime/{id}/extras
+        // True when the page should fire a client-side fetch of /meta/{id}/extras
         // to populate the supplementary chip rows (Tag/Studio/director/staff/etc.).
         // The data lives behind AniList's GraphQL; only fetch when we have an
         // anilist id to query against AND the page wasn't loaded against an AniList
@@ -1350,7 +1469,7 @@ namespace AnimeList.Controllers
     }
 
     /// <summary>
-    /// JSON payload for the /anime/{id}/extras endpoint — the three lists the
+    /// JSON payload for the /meta/{id}/extras endpoint — the three lists the
     /// detail view hydrates after page load. All three share one underlying
     /// AnilistFallback.FetchSidedataAsync GraphQL call, so the controller can
     /// kick them off in parallel without paying for separate upstream round-
@@ -1379,7 +1498,7 @@ namespace AnimeList.Controllers
     }
 
     /// <summary>
-    /// View model for the dedicated /anime/{id}/watch/{episode} page.
+    /// View model for the dedicated /meta/{id}/watch/{episode} page.
     /// Carries the resolved anime, the current episode, and pre-computed
     /// prev / next neighbour episodes so the view can render the nav
     /// without re-walking the episode list at request time. Prev / Next
@@ -1395,12 +1514,15 @@ namespace AnimeList.Controllers
         public bool AnonymousUser { get; set; }
 
         // URL base for the page-navigation links (back-to-detail, prev/next
-        // episode). Defaults to "/anime" so the anime watch page is unchanged;
-        // the video section sets "/movie" or "/series" so the same shared
-        // Watch view renders links that stay inside the video URL space. The
-        // stream / subtitle API endpoints the page calls are id-keyed and
-        // remain under /anime/* — they work for any IMDb id regardless.
-        public string BasePath { get; set; } = "/anime";
+        // episode) — always "/meta" now; the media type rides the ?type= query
+        // (see Type below, omitted for anime). The stream / subtitle API
+        // endpoints the page calls are id-keyed and live under /meta/* — they
+        // work for any IMDb id regardless of media type.
+        public string BasePath { get; set; } = "/meta";
+        // Media type for the ?type= query the nav links append (omitted for
+        // anime, the default). movie / series keep the watch page inside the
+        // right Cinemeta-backed branch on navigation.
+        public MetaType Type { get; set; } = MetaType.anime;
         // True when the user has at least one Stremio stream addon
         // configured. The watch page renders the inline player only when
         // this is true — External services alone (Crunchyroll / Netflix
