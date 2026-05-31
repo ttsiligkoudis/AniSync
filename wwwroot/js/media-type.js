@@ -34,7 +34,11 @@
     }
     function readActive() { try { return localStorage.getItem(ACTIVE_KEY); } catch (_) { return null; } }
     function setCookie(name, v) {
-        try { document.cookie = name + '=' + v + '; path=/; max-age=31536000; SameSite=Lax'; }
+        // URL-encode the value: the enabled set is comma-joined, and ASP.NET
+        // Core's request-cookie parser treats a raw comma as a cookie separator
+        // (it would read only the first mode). encodeURIComponent turns the
+        // commas into %2C; the server URL-decodes on read.
+        try { document.cookie = name + '=' + encodeURIComponent(v) + '; path=/; max-age=31536000; SameSite=Lax'; }
         catch (_) { /* cookies blocked — SSR falls back to anime */ }
     }
     // ── selection state (reflected by .is-selected on the option buttons) ──

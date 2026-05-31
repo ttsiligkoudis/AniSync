@@ -35,9 +35,16 @@ namespace AnimeList.Services
             _ => null,
         };
 
+        // Request cookies are written URL-encoded by media-type.js because
+        // ASP.NET Core's request-cookie parser treats a raw comma as a cookie
+        // separator — an unencoded "anime,movie,series" would be read as just
+        // "anime". Decode on the way in.
+        private static string DecodeCookie(string raw) =>
+            string.IsNullOrEmpty(raw) ? raw : Uri.UnescapeDataString(raw);
+
         /// <summary>Parses the ACTIVE media-type cookie; anime when absent/unrecognised.</summary>
         public static MetaType FromCookie(HttpContext ctx) =>
-            Parse(ctx?.Request?.Cookies[CookieName]) ?? MetaType.anime;
+            Parse(DecodeCookie(ctx?.Request?.Cookies[CookieName])) ?? MetaType.anime;
 
         /// <summary>True once the visitor has made (and persisted) a choice.</summary>
         public static bool HasChosen(HttpContext ctx) =>
@@ -49,7 +56,7 @@ namespace AnimeList.Services
         /// </summary>
         public static List<MetaType> EnabledFromCookie(HttpContext ctx)
         {
-            var raw = ctx?.Request?.Cookies[EnabledCookieName];
+            var raw = DecodeCookie(ctx?.Request?.Cookies[EnabledCookieName]);
             if (string.IsNullOrEmpty(raw)) return new();
             var set = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(Parse)
