@@ -5939,16 +5939,52 @@ a.stats-cell-link:hover {
     width: 100%;
 }
 
+/* Layered over the placeholder (which sets the 2:3 box). When the image is
+   absent or its onerror strips it, the placeholder beneath shows through. */
 .library-card-poster {
+    position: absolute;
+    inset: 0;
     width: 100%;
-    aspect-ratio: 2 / 3;
+    height: 100%;
     object-fit: cover;
     display: block;
     background: var(--overlay-04);
 }
 
+/* Intentional "no artwork" tile: a centered image-glyph over a subtle gradient
+   with the title beneath, instead of an empty black box / broken-image icon.
+   Stays in normal flow so it establishes the card's 2:3 aspect ratio. */
 .library-card-poster-placeholder {
-    background: var(--overlay-04);
+    aspect-ratio: 2 / 3;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    padding: 0.75rem;
+    box-sizing: border-box;
+    text-align: center;
+    background: linear-gradient(150deg, var(--overlay-08), var(--overlay-04));
+    color: var(--text-muted);
+}
+
+.library-card-poster-placeholder-icon {
+    width: 28%;
+    max-width: 48px;
+    height: auto;
+    opacity: 0.6;
+}
+
+.library-card-poster-placeholder-title {
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--text-secondary);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 
 /* Score badge overlay — bottom-left of the poster, ★ + 0-10 with one decimal.
