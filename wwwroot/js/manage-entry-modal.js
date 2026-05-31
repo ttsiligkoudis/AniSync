@@ -332,12 +332,15 @@
     function populateStatusOptions(service) {
         var opts;
         if (service === 3) {
-            // Trakt: a movie is a single unit (no "Watching"); a series gets the
-            // full set. Values map server-side: planning→watchlist,
-            // watching→history up to N, completed→full history.
+            // Trakt uses the same status vocabulary as the anime trackers
+            // (Planning / Watching / Completed) for consistency — only these
+            // three round-trip, since Trakt state is derived from watchlist
+            // (planning), history (watching/completed) and ratings. There's no
+            // On Hold / Dropped / Rewatching to persist. A movie is a single
+            // unit, so it drops "Watching".
             opts = activeMediaType === 'movie'
-                ? [['', '— None (not in list) —'], ['planning', 'Watchlist'], ['completed', 'Watched']]
-                : [['', '— None (not in list) —'], ['planning', 'Watchlist'], ['watching', 'Watching'], ['completed', 'Watched']];
+                ? [['', '— None (not in list) —'], ['planning', 'Planning'], ['completed', 'Completed']]
+                : [['', '— None (not in list) —'], ['planning', 'Planning'], ['watching', 'Watching'], ['completed', 'Completed']];
         } else {
             opts = STATUS_OPTIONS[service] || STATUS_OPTIONS[1];
         }

@@ -170,8 +170,8 @@
                     var vStatus = Model.Entry?.Status;
                     string vLabel;
                     if (string.IsNullOrEmpty(vStatus)) { vLabel = "Add to List"; }
-                    else if (vStatus == "planning") { vLabel = "Watchlist"; }
-                    else if (vStatus == "completed") { vLabel = "Watched"; }
+                    else if (vStatus == "planning") { vLabel = "Planning"; }
+                    else if (vStatus == "completed") { vLabel = "Completed"; }
                     else
                     {
                         // "watching" — show episode progress for series only;
