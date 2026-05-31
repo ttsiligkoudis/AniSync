@@ -685,7 +685,6 @@
                     episode: episode,
                     progress: Math.round(pct * 10) / 10
                 });
-                try { console.info('[AniSync] trakt continue-watching beacon', payload); } catch (_) {}
                 // keepalive fetch is the primary transport: it's reliable on both
                 // visibilitychange (page still alive) and pagehide (unload) for
                 // small bodies, and — unlike navigator.sendBeacon — isn't silently
