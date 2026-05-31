@@ -88,6 +88,9 @@
         0: { 'current': 'current', 'planned': 'planning', 'completed': 'completed', 'on_hold': 'paused', 'dropped': 'dropped' },
         1: { 'CURRENT': 'current', 'PLANNING': 'planning', 'COMPLETED': 'completed', 'PAUSED': 'paused', 'DROPPED': 'dropped', 'REPEATING': 'repeating' },
         2: { 'watching': 'current', 'plan_to_watch': 'planning', 'completed': 'completed', 'on_hold': 'paused', 'dropped': 'dropped', 'rewatching': 'repeating' },
+        // Trakt (movies / series): Watchlist→planning, Watching→Continue
+        // Watching (current), Watched→completed.
+        3: { 'planning': 'planning', 'watching': 'current', 'completed': 'completed' },
     };
 
     // The currently-active per-cour entry id (anilist:N / kitsu:N / mal:N).
@@ -112,6 +115,11 @@
     // server-side instead of the primary. null means "use primary" as
     // before.
     var activeServiceOverride = null;
+    // "movie" / "series" when the modal was opened from a Cinemeta video detail
+    // page — appended to the GET as &type= and sent in the save payload so the
+    // server routes through Trakt (watchlist / history / ratings). null for the
+    // anime-tracker path.
+    var activeMediaType = null;
     // Bumped on every loadEntry() call; the in-flight response checks its
     // captured value against this and bails when a newer load has started.
     // Stops the Season dropdown's two-fetches-in-flight race from rendering
@@ -126,10 +134,11 @@
     // element type that should participate in Tab cycling inside the modal.
     var FOCUSABLE_SEL = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-    function openModal(id, name, card, serviceOverride) {
+    function openModal(id, name, card, serviceOverride, mediaType) {
         activeServiceOverride = (typeof serviceOverride === 'number' && !isNaN(serviceOverride))
             ? serviceOverride
             : null;
+        activeMediaType = (mediaType === 'movie' || mediaType === 'series') ? mediaType : null;
         // Remember which element opened the modal so close can restore focus
         // there. Falls back to body if there's no active element (rare —
         // would require the modal to be triggered by something other than a
@@ -187,6 +196,7 @@
         activeCard = null;
         activeOriginalStatus = null;
         activeServiceOverride = null;
+        activeMediaType = null;
         saveBtn.disabled = false;
         deleteBtn.hidden = true;
         deleteBtn.disabled = false;
@@ -240,6 +250,9 @@
         var entryUrl = '/api/library/entry?id=' + encodeURIComponent(id);
         if (activeServiceOverride !== null) {
             entryUrl += '&service=' + encodeURIComponent(activeServiceOverride);
+        }
+        if (activeMediaType) {
+            entryUrl += '&type=' + encodeURIComponent(activeMediaType);
         }
         var mySeq = ++loadSeq;
         return fetch(entryUrl, {
@@ -317,7 +330,17 @@
     }
 
     function populateStatusOptions(service) {
-        var opts = STATUS_OPTIONS[service] || STATUS_OPTIONS[1];
+        var opts;
+        if (service === 3) {
+            // Trakt: a movie is a single unit (no "Watching"); a series gets the
+            // full set. Values map server-side: planning→watchlist,
+            // watching→history up to N, completed→full history.
+            opts = activeMediaType === 'movie'
+                ? [['', '— None (not in list) —'], ['planning', 'Watchlist'], ['completed', 'Watched']]
+                : [['', '— None (not in list) —'], ['planning', 'Watchlist'], ['watching', 'Watching'], ['completed', 'Watched']];
+        } else {
+            opts = STATUS_OPTIONS[service] || STATUS_OPTIONS[1];
+        }
         statusSelect.innerHTML = '';
         opts.forEach(function (pair) {
             var opt = document.createElement('option');
@@ -677,10 +700,13 @@
             // that back to null so the primary-token path stays the default.
             var serviceAttr = modalTrigger.getAttribute('data-meta-service-override');
             var serviceOverride = serviceAttr ? parseInt(serviceAttr, 10) : null;
+            // data-meta-media-type ("movie"/"series") on a video detail page
+            // routes the modal through Trakt instead of the anime trackers.
             openModal(modalTrigger.getAttribute('data-meta-id'),
                       modalTrigger.getAttribute('data-meta-name'),
                       /* card */ null,
-                      serviceOverride);
+                      serviceOverride,
+                      modalTrigger.getAttribute('data-meta-media-type'));
         }
     });
 
@@ -760,9 +786,10 @@
             },
             // service: <int> when the modal opened via a linked-secondary
             // override; omitted otherwise so the server defaults to primary.
-            body: JSON.stringify(activeServiceOverride !== null
-                ? { id: activeEntryId, status: '', service: activeServiceOverride }
-                : { id: activeEntryId, status: '' }),
+            body: JSON.stringify(Object.assign(
+                { id: activeEntryId, status: '' },
+                activeServiceOverride !== null ? { service: activeServiceOverride } : null,
+                activeMediaType ? { type: activeMediaType } : null)),
         })
             .then(function (r) { return r.json(); })
             .then(function (data) {
@@ -872,6 +899,11 @@
         // the server defaults to writing to the primary as before.
         if (activeServiceOverride !== null) {
             payload.service = activeServiceOverride;
+        }
+        // type routes the save through Trakt (watchlist / history / ratings)
+        // for a video detail page; omitted for anime entries.
+        if (activeMediaType) {
+            payload.type = activeMediaType;
         }
 
         // Capture state for the optimistic update before closing the modal

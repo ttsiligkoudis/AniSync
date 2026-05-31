@@ -857,7 +857,7 @@ namespace AnimeList.Controllers
         // flow links to (different browser context, no shared session cookie).
 
         [HttpGet("/api/library/entry")]
-        public async Task<JsonResult> GetEntryByApi(string id, int? season, int? service)
+        public async Task<JsonResult> GetEntryByApi(string id, int? season, int? service, string type = null)
         {
             try
             {
@@ -865,6 +865,12 @@ namespace AnimeList.Controllers
                 if (tokenData == null || tokenData.anonymousUser ||
                     string.IsNullOrWhiteSpace(tokenData.access_token))
                     return new JsonResult(new { success = false, error = "not-authenticated" });
+
+                // type=movie|series → this is a Cinemeta video tracked on Trakt,
+                // not an anime-tracker entry. Read the aggregate Trakt state and
+                // project it onto the modal's status/progress/score shape.
+                if (type == "movie" || type == "series")
+                    return await GetTraktVideoEntryAsync(tokenData, type, id);
 
                 // service: <int> override — the detail page stamps it on the
                 // Manage Entry button when the requested anime has no mapping
@@ -933,6 +939,51 @@ namespace AnimeList.Controllers
             }
         }
 
+        /// <summary>
+        /// Manage-Entry GET for a Cinemeta video tracked on Trakt. Projects the
+        /// aggregate Trakt state (watchlist / watched / rating) onto the modal's
+        /// status / progress / score / totalEpisodes shape. service is reported
+        /// as <see cref="AnimeService.Trakt"/> so the modal picks the Trakt
+        /// status set; seasons is always empty (no cross-service franchise
+        /// picker for general video).
+        /// </summary>
+        private async Task<JsonResult> GetTraktVideoEntryAsync(TokenData tokenData, string type, string id)
+        {
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+            if (string.IsNullOrEmpty(uid))
+                return new JsonResult(new { success = false, error = "no-uid" });
+
+            // Series total comes from Cinemeta's episode list; a movie is one unit.
+            int? totalEpisodes = 1;
+            if (type == "series")
+            {
+                var meta = await _cinemeta.GetVideoMetaAsync(type, id);
+                totalEpisodes = meta?.videos?.Count;
+            }
+
+            var entry = await _traktService.GetVideoEntryAsync(uid, type, id);
+            var (status, progress) = DeriveTraktVideoStatus(type, entry, totalEpisodes);
+
+            return new JsonResult(new
+            {
+                success = true,
+                service = (int)AnimeService.Trakt,
+                // Echo the media type so the modal can tailor its status set
+                // (movies have no "Watching") and round-trip it to the save.
+                mediaType = type,
+                selectedEntryId = id,
+                seasons = Array.Empty<object>(),
+                status,
+                progress,
+                totalEpisodes,
+                score = entry.Rating,
+                notes = (string)null,
+                rewatchCount = 0,
+                startedAt = (string)null,
+                finishedAt = (string)null,
+            });
+        }
+
         [HttpPost("/api/library/entry/save")]
         public async Task<JsonResult> SaveEntryByApi([FromBody] SaveEntryRequest request)
         {
@@ -942,6 +993,11 @@ namespace AnimeList.Controllers
                 if (tokenData == null || tokenData.anonymousUser ||
                     string.IsNullOrWhiteSpace(tokenData.access_token))
                     return new JsonResult(new { success = false, error = "not-authenticated" });
+
+                // type=movie|series → Cinemeta video tracked on Trakt; route to
+                // the Trakt save instead of the anime-tracker dispatch below.
+                if (request.Type == "movie" || request.Type == "series")
+                    return await SaveTraktVideoEntryAsync(tokenData, request);
 
                 // service: <int> override — the modal sends it when the entry
                 // was loaded through a linked-secondary token (anime had no
@@ -1028,6 +1084,46 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
+        /// Manage-Entry save for a Cinemeta video tracked on Trakt. Maps the
+        /// modal's status onto Trakt watchlist / history actions and the score
+        /// onto a Trakt rating. For a series, "watching" marks episodes 1..N and
+        /// "completed" marks them all watched — the (season, episode) coords come
+        /// from Cinemeta's ordered episode list (handles multi-season shows).
+        /// </summary>
+        private async Task<JsonResult> SaveTraktVideoEntryAsync(TokenData tokenData, SaveEntryRequest request)
+        {
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+            if (string.IsNullOrEmpty(uid))
+                return new JsonResult(new { success = false, error = "no-uid" });
+
+            var status = (request.Status ?? string.Empty).ToLowerInvariant();
+
+            // Resolve the episode coords to mark watched (series only). Cinemeta's
+            // videos carry the real season/episode numbers; order them and take
+            // the watched prefix so "watched up to N" lands on the right episodes
+            // even across multiple seasons.
+            IReadOnlyList<(int Season, int Episode)> episodes = Array.Empty<(int, int)>();
+            if (request.Type == "series" && (status == "watching" || status == "completed"))
+            {
+                var meta = await _cinemeta.GetVideoMetaAsync("series", request.Id);
+                var ordered = (meta?.videos ?? new List<Video>())
+                    .OrderBy(v => v.season > 0 ? v.season : 1)
+                    .ThenBy(v => v.episode)
+                    .Select(v => (Season: v.season > 0 ? v.season : 1, Episode: v.episode))
+                    .ToList();
+                var take = status == "completed" ? ordered.Count : Math.Clamp(request.Progress, 0, ordered.Count);
+                episodes = ordered.Take(take).ToList();
+            }
+
+            int? rating = request.Score.HasValue && request.Score.Value > 0
+                ? (int)Math.Round(request.Score.Value)
+                : null;
+
+            var ok = await _traktService.SaveVideoEntryAsync(uid, request.Type, request.Id, status, episodes, rating);
+            return new JsonResult(new { success = ok, error = ok ? null : "trakt-not-connected" });
+        }
+
+        /// <summary>
         /// Resolves a service-override int (the integer value of
         /// <see cref="AnimeService"/>) to the user's matching linked-secondary
         /// token. Returns null when the override is missing, points at the
@@ -1073,6 +1169,12 @@ namespace AnimeList.Controllers
         // linked secondary (anilist:N viewed by an MAL-primary user with
         // AniList linked).
         public int? Service { get; set; }
+
+        // "movie" / "series" when the Manage Entry modal was opened from a
+        // Cinemeta video detail page — routes the save to Trakt (watchlist /
+        // history / ratings) instead of the anime-tracker dispatch. Null/empty
+        // for anime entries.
+        public string? Type { get; set; }
     }
 }
 

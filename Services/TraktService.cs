@@ -299,6 +299,92 @@ namespace AnimeList.Services
                 ? Task.FromResult(false)
                 : PostAuthedAsync(uid, "/scrobble/stop", ScrobbleBody(type, imdbId, season, episode, Math.Min(progress, 100)));
 
+        public async Task<TraktVideoEntry> GetVideoEntryAsync(string uid, string type, string imdbId)
+        {
+            var entry = new TraktVideoEntry();
+            if (string.IsNullOrEmpty(imdbId)) return entry;
+
+            // Watchlist membership.
+            var watchlist = await GetWatchlistAsync(uid);
+            entry.InWatchlist = watchlist.Any(i =>
+                i.Type == type && string.Equals(i.ImdbId, imdbId, StringComparison.OrdinalIgnoreCase));
+
+            // Watched history — a movie is all-or-nothing; a show carries a
+            // seasons→episodes tree we count to get progress.
+            if (type == "movie")
+            {
+                var arr = await GetAuthedAsync(uid, "/sync/watched/movies") as JArray;
+                entry.Watched = arr?.Any(it =>
+                    string.Equals((string)it["movie"]?["ids"]?["imdb"], imdbId, StringComparison.OrdinalIgnoreCase)) == true;
+            }
+            else
+            {
+                var arr = await GetAuthedAsync(uid, "/sync/watched/shows") as JArray;
+                var show = arr?.FirstOrDefault(it =>
+                    string.Equals((string)it["show"]?["ids"]?["imdb"], imdbId, StringComparison.OrdinalIgnoreCase));
+                if (show?["seasons"] is JArray seasons)
+                {
+                    var count = 0;
+                    foreach (var s in seasons)
+                        if (s["episodes"] is JArray eps) count += eps.Count;
+                    entry.WatchedEpisodes = count;
+                }
+            }
+
+            // User rating.
+            var ratingsArr = await GetAuthedAsync(uid, type == "movie" ? "/sync/ratings/movies" : "/sync/ratings/shows") as JArray;
+            var key = type == "movie" ? "movie" : "show";
+            var rated = ratingsArr?.FirstOrDefault(it =>
+                string.Equals((string)it[key]?["ids"]?["imdb"], imdbId, StringComparison.OrdinalIgnoreCase));
+            entry.Rating = (int?)rated?["rating"];
+
+            return entry;
+        }
+
+        public async Task<bool> SaveVideoEntryAsync(string uid, string type, string imdbId, string status,
+            IReadOnlyList<(int Season, int Episode)> watchedEpisodes, int? rating)
+        {
+            if (string.IsNullOrEmpty(imdbId)) return false;
+            var token = await GetValidTokenAsync(uid);
+            if (token == null) return false;
+
+            // Rating is independent of status — set it (clamped to Trakt's 1-10)
+            // when provided, otherwise clear any existing rating.
+            if (rating is int r && r > 0)
+                await PostAuthedAsync(uid, "/sync/ratings", RatingBody(type, imdbId, Math.Clamp(r, 1, 10)));
+            else
+                await PostAuthedAsync(uid, "/sync/ratings/remove", SyncBody(type, imdbId, null, null));
+
+            switch ((status ?? string.Empty).ToLowerInvariant())
+            {
+                case "planning":
+                    await AddToWatchlistAsync(uid, type, imdbId);
+                    break;
+
+                case "watching":
+                    // Moving into "watching" means it's no longer just queued.
+                    await RemoveFromWatchlistAsync(uid, type, imdbId);
+                    if (type != "movie" && watchedEpisodes is { Count: > 0 })
+                        await PostAuthedAsync(uid, "/sync/history", HistoryEpisodesBody(imdbId, watchedEpisodes));
+                    break;
+
+                case "completed":
+                    await RemoveFromWatchlistAsync(uid, type, imdbId);
+                    if (type == "movie")
+                        await PostAuthedAsync(uid, "/sync/history", SyncBody("movie", imdbId, null, null));
+                    else if (watchedEpisodes is { Count: > 0 })
+                        await PostAuthedAsync(uid, "/sync/history", HistoryEpisodesBody(imdbId, watchedEpisodes));
+                    break;
+
+                default: // "" → None: drop from watchlist. History isn't unwound
+                         // (Trakt has no clean "unwatch everything" and the user
+                         // can manage history on Trakt directly).
+                    await RemoveFromWatchlistAsync(uid, type, imdbId);
+                    break;
+            }
+            return true;
+        }
+
         // ── Unified-fan-out writes (token-based) ────────────────────────────
         // These are the writes the SyncService fan-out + the manage-entry / auto-track
         // paths use. They take the resolved Trakt TokenData directly (primary or linked)
@@ -503,6 +589,38 @@ namespace AnimeList.Services
                 }
             }
             return body;
+        }
+
+        // /sync/history body marking specific episodes watched: shows → seasons
+        // → episodes, grouped by season number. Used by SaveVideoEntryAsync to
+        // mark "watched up to N" for a series.
+        private static JObject HistoryEpisodesBody(string imdbId, IEnumerable<(int Season, int Episode)> eps)
+        {
+            var seasons = eps
+                .GroupBy(e => e.Season)
+                .Select(g => new JObject
+                {
+                    ["number"] = g.Key,
+                    ["episodes"] = new JArray(g.Select(e => new JObject { ["number"] = e.Episode })),
+                });
+            var show = new JObject
+            {
+                ["ids"] = new JObject { ["imdb"] = imdbId },
+                ["seasons"] = new JArray(seasons),
+            };
+            return new JObject { ["shows"] = new JArray { show } };
+        }
+
+        // /sync/ratings body — a singular movie/show id + the 1-10 rating, under
+        // the grouped movies/shows array the endpoint expects.
+        private static JObject RatingBody(string type, string imdbId, int rating)
+        {
+            var item = new JObject
+            {
+                ["ids"] = new JObject { ["imdb"] = imdbId },
+                ["rating"] = rating,
+            };
+            return new JObject { [type == "movie" ? "movies" : "shows"] = new JArray { item } };
         }
 
         private static string Truncate(string s, int max) =>
