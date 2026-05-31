@@ -283,7 +283,10 @@ namespace AnimeList.Controllers
         private static (string Status, int Progress) DeriveTraktVideoStatus(string type, TraktVideoEntry e, int? total)
         {
             if (type == "movie")
-                return (e.Watched ? "completed" : (e.InWatchlist ? "planning" : ""), e.Watched ? 1 : 0);
+                return (e.Watched ? "completed"
+                    : e.InPlayback ? "watching"   // left part-watched (paused playback)
+                    : e.InWatchlist ? "planning"
+                    : "", e.Watched ? 1 : 0);
 
             var progress = e.WatchedEpisodes;
             var status = total is int t && t > 0 && progress >= t ? "completed"

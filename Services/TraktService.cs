@@ -316,6 +316,15 @@ namespace AnimeList.Services
                 var arr = await GetAuthedAsync(uid, "/sync/watched/movies") as JArray;
                 entry.Watched = arr?.Any(it =>
                     string.Equals((string)it["movie"]?["ids"]?["imdb"], imdbId, StringComparison.OrdinalIgnoreCase)) == true;
+
+                // A movie has no episode count to derive "watching" from — the
+                // only in-progress signal is a paused playback (left part-way).
+                if (!entry.Watched)
+                {
+                    var playback = await GetPlaybackAsync(uid);
+                    entry.InPlayback = playback.Any(i =>
+                        i.Type == "movie" && string.Equals(i.ImdbId, imdbId, StringComparison.OrdinalIgnoreCase));
+                }
             }
             else
             {
