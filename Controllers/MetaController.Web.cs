@@ -1179,7 +1179,11 @@ namespace AnimeList.Controllers
 
                     var season = req.Type == "series" ? req.Season : null;
                     var episode = req.Type == "series" ? req.Episode : (int?)null;
-                    var ok = await _traktService.AddToHistoryAsync(videoUid, req.Type, req.Id, season, episode);
+                    // /scrobble/stop at 100 % rather than a bare /sync/history add: Trakt
+                    // both adds it to history AND clears the in-progress playback entry
+                    // our pause-scrobble created, so a finished title leaves Continue
+                    // Watching instead of lingering there.
+                    var ok = await _traktService.StopScrobbleAsync(videoUid, req.Type, req.Id, season, episode, 100);
                     return Json(new { ok, reason = ok ? null : "trakt-not-connected" });
                 }
 

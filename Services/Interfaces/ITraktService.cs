@@ -78,12 +78,6 @@ namespace AnimeList.Services.Interfaces
         Task<bool> RemoveFromWatchlistAsync(string uid, string type, string imdbId);
 
         /// <summary>
-        /// Marks a movie (or a specific series episode when season+episode are
-        /// supplied) as watched — adds it to the Trakt history.
-        /// </summary>
-        Task<bool> AddToHistoryAsync(string uid, string type, string imdbId, int? season, int? episode);
-
-        /// <summary>
         /// Saves in-progress playback via Trakt's /scrobble/pause so the title
         /// surfaces in the user's Continue Watching (/sync/playback). progress is
         /// a 0-100 percentage; season/episode target a specific series episode
@@ -91,6 +85,16 @@ namespace AnimeList.Services.Interfaces
         /// isn't connected, the id is empty, or progress is out of (0,100).
         /// </summary>
         Task<bool> PauseScrobbleAsync(string uid, string type, string imdbId, int? season, int? episode, double progress);
+
+        /// <summary>
+        /// Completes playback via Trakt's /scrobble/stop. At progress ≥ 80 Trakt
+        /// scrobbles the item as watched (adds to history) AND clears its
+        /// in-progress playback entry — so a finished title leaves Continue
+        /// Watching and lands in Watched in one call. Callers marking something
+        /// watched should pass 100. season/episode target a series episode
+        /// (ignored for movies). Best-effort: false (no throw) on miss.
+        /// </summary>
+        Task<bool> StopScrobbleAsync(string uid, string type, string imdbId, int? season, int? episode, double progress);
 
         // ── Unified-fan-out writes (token-based) ────────────────────────────
 
