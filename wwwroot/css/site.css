@@ -8600,3 +8600,208 @@ a.video-cast-card[href]:hover .video-cast-name {
 .mt-filter-hidden {
     display: none !important;
 }
+
+/* ── Calendar page (month grid) ─────────────────────────────────────────
+   Recent + upcoming episodes for the user's tracked anime (AniList) and
+   series (Trakt), bucketed by UTC day. Server-rendered; ?y=&m= links drive
+   month navigation. Anime vs. series are colour-coded via the left accent
+   bar (desktop chips) / dot (mobile). */
+.cal-page {
+    padding-top: 1rem;
+    padding-bottom: 4rem;
+}
+.cal-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+}
+.cal-title {
+    font-size: var(--text-xl);
+    margin: 0;
+    color: var(--text-strong);
+}
+.cal-sub {
+    margin: 0.25rem 0 0;
+    color: var(--text-dim);
+    font-size: var(--text-sm);
+}
+.cal-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.cal-nav-btn,
+.cal-today-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--tap);
+    height: var(--tap);
+    padding: 0 0.7rem;
+    border-radius: var(--radius);
+    background: var(--surface-raised);
+    color: var(--text);
+    text-decoration: none;
+    border: 1px solid var(--border);
+}
+.cal-today-btn {
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+.cal-nav-btn:hover,
+.cal-today-btn:hover {
+    background: var(--surface-overlay);
+    color: var(--text-strong);
+}
+.cal-month-label {
+    font-weight: 700;
+    min-width: 9.5rem;
+    text-align: center;
+    color: var(--text-strong);
+}
+.cal-legend {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 0.6rem;
+    font-size: var(--text-xs);
+    color: var(--text-dim);
+}
+.cal-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.cal-dot {
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    display: inline-block;
+}
+.cal-dot-anime { background: var(--accent); }
+.cal-dot-series { background: #a855f7; }
+.cal-empty {
+    padding: 1rem 1.1rem;
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    margin-bottom: 1rem;
+    font-size: var(--text-sm);
+}
+.cal-grid {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--surface);
+}
+.cal-weekdays,
+.cal-days {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.cal-weekday {
+    padding: 0.5rem;
+    text-align: center;
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    background: var(--surface-raised);
+    border-bottom: 1px solid var(--border);
+}
+.cal-day {
+    min-height: 7rem;
+    padding: 0.35rem;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    background: var(--surface);
+}
+.cal-day:nth-child(7n) { border-right: none; }
+.cal-day-out {
+    background: var(--bg);
+    opacity: 0.55;
+}
+.cal-day-today {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.cal-day-num {
+    font-size: var(--text-xs);
+    font-weight: 700;
+    color: var(--text-dim);
+}
+.cal-day-today .cal-day-num { color: var(--accent); }
+.cal-day-eps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+.cal-ep {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.2rem;
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+    color: var(--text);
+    background: var(--surface-raised);
+    border-left: 3px solid var(--accent);
+    overflow: hidden;
+}
+.cal-ep-series { border-left-color: #a855f7; }
+.cal-ep:hover {
+    background: var(--surface-overlay);
+    color: var(--text-strong);
+}
+.cal-ep-thumb {
+    width: 1.7rem;
+    height: 2.4rem;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    flex: 0 0 auto;
+    background: var(--surface-overlay);
+}
+.cal-ep-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+.cal-ep-title {
+    font-size: var(--text-xs);
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cal-ep-meta {
+    font-size: 0.68rem;
+    color: var(--text-dim);
+}
+
+/* Mobile: a 7-wide grid can't fit chips, so collapse each episode to a
+   colour-coded tappable dot and shrink the cells. */
+@media (max-width: 640px) {
+    .cal-day { min-height: 3.4rem; }
+    .cal-ep-thumb,
+    .cal-ep-text { display: none; }
+    .cal-ep {
+        width: 0.55rem;
+        height: 0.55rem;
+        padding: 0;
+        border-left: none;
+        border-radius: 50%;
+        background: var(--accent);
+    }
+    .cal-ep-series { background: #a855f7; }
+    .cal-day-eps {
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 0.2rem;
+    }
+    .cal-month-label { min-width: 7rem; }
+}

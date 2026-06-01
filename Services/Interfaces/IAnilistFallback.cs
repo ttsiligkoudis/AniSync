@@ -113,6 +113,20 @@ namespace AnimeList.Services.Interfaces
         Task<List<UpcomingEpisode>> GetUpcomingEpisodesAsync(long startUnix, long endUnix);
 
         /// <summary>
+        /// Per-episode airing entries for a SET of AniList anime ids, filtered to
+        /// the [<paramref name="startUnix"/>, <paramref name="endUnix"/>] window
+        /// (Unix seconds, UTC). Unlike <see cref="GetUpcomingEpisodesAsync"/> — which
+        /// pulls the global airing feed and is bounded to ~48h — this queries each
+        /// media's own <c>airingSchedule</c> in id-batches, so the cost scales with
+        /// the user's list size rather than the whole airing world. Used by the
+        /// month-grid Calendar page, which needs both recently-aired and upcoming
+        /// episodes across an arbitrary month for just the shows a user tracks.
+        /// Stays in the anilist-prefixed id space; the caller maps back to the
+        /// user's primary service for deep-links.
+        /// </summary>
+        Task<List<UpcomingEpisode>> GetAiringForMediaAsync(IReadOnlyCollection<int> anilistIds, long startUnix, long endUnix);
+
+        /// <summary>
         /// Per-episode airing timestamps for an AniList anime id. AniList's
         /// <c>airingSchedule</c> is community-maintained and tracks the actual
         /// broadcast date faster than Cinemeta's <c>released</c> field, which

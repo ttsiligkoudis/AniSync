@@ -461,6 +461,85 @@ namespace AnimeList.Services
             }
         }
 
+        public async Task<List<UpcomingEpisode>> GetAiringForMediaAsync(
+            IReadOnlyCollection<int> anilistIds, long startUnix, long endUnix)
+        {
+            var result = new List<UpcomingEpisode>();
+            if (anilistIds == null || anilistIds.Count == 0) return result;
+
+            // Query each media's own airingSchedule (id_in batches of 50, AniList's
+            // page cap). The nested connection can't be range-filtered server-side,
+            // so we pull up to 50 schedule nodes per show and window-filter here —
+            // ample for seasonal shows (a long-runner past 50 aired episodes is the
+            // rare exception). Per-chunk try/catch so one bad page doesn't sink the
+            // whole month.
+            var distinct = anilistIds.Distinct().ToList();
+            const int chunkSize = 50;
+            for (var offset = 0; offset < distinct.Count; offset += chunkSize)
+            {
+                var chunk = distinct.Skip(offset).Take(chunkSize).ToArray();
+                try
+                {
+                    var requestBody = SerializeObject(new
+                    {
+                        query = @"
+                            query ($ids: [Int], $page: Int) {
+                                Page(page: $page, perPage: 50) {
+                                    media(id_in: $ids, type: ANIME) {
+                                        id
+                                        title { english romaji }
+                                        coverImage { large }
+                                        airingSchedule(perPage: 50) {
+                                            nodes { episode airingAt }
+                                        }
+                                    }
+                                }
+                            }",
+                        variables = new { ids = chunk, page = 1 }
+                    });
+
+                    var data = await PostJsonAsync(requestBody);
+                    var mediaList = data?.Page?.media;
+                    if (mediaList == null) continue;
+
+                    foreach (var media in mediaList)
+                    {
+                        var anilistId = (int?)media.id;
+                        if (!anilistId.HasValue) continue;
+
+                        var name = string.IsNullOrEmpty((string)media.title?.english)
+                            ? (string)media.title?.romaji
+                            : (string)media.title?.english;
+                        if (string.IsNullOrEmpty(name)) continue;
+
+                        var cover = (string)media.coverImage?.large;
+                        var nodes = media.airingSchedule?.nodes;
+                        if (nodes == null) continue;
+
+                        foreach (var node in nodes)
+                        {
+                            var episode = (int?)node.episode;
+                            var airingAt = (long?)node.airingAt;
+                            if (!episode.HasValue || !airingAt.HasValue) continue;
+                            if (airingAt.Value < startUnix || airingAt.Value > endUnix) continue;
+
+                            result.Add(new UpcomingEpisode(
+                                AnilistId: anilistId.Value,
+                                Title: name,
+                                Episode: episode.Value,
+                                AiringAt: airingAt.Value,
+                                CoverImage: cover));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[AnilistFallback] GetAiringForMediaAsync chunk failed: {ex.Message}");
+                }
+            }
+            return result;
+        }
+
         // 1h TTL is the same horizon the notification scheduler treats as
         // fresh enough to act on — beyond that, the daily refresh + per-
         // minute tick combo will have re-pulled the global schedule anyway.
