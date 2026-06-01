@@ -244,6 +244,9 @@ namespace AnimeList.Controllers
             foreach (var e in calendar)
             {
                 if (string.IsNullOrEmpty(e.ImdbId) || !eligible.Contains(e.ImdbId)) continue;
+                // Skip Trakt specials (season 0): the series watch loader folds/drops
+                // season 0, so a /watch/0/{ep} deep link 404s — don't surface them.
+                if (e.Season <= 0) continue;
                 if (e.FirstAired is not { } aired) continue;
                 if (aired < rangeStart || aired >= rangeEnd) continue;
 
