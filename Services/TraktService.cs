@@ -522,6 +522,21 @@ namespace AnimeList.Services
             return episodes;
         }
 
+        // Resolves a TMDB person id to a Trakt person slug (the /discover/actors
+        // directory is TMDB-sourced, but the filmography keys off Trakt). null
+        // when Trakt has no matching person. Public.
+        public async Task<string> ResolveSlugByTmdbAsync(int tmdbId)
+        {
+            if (!IsConfigured || tmdbId <= 0) return null;
+            if (await GetPublicAsync($"/search/tmdb/{tmdbId}?type=person") is not JArray arr) return null;
+            foreach (var hit in arr)
+            {
+                var slug = (string)hit["person"]?["ids"]?["slug"];
+                if (!string.IsNullOrEmpty(slug)) return slug;
+            }
+            return null;
+        }
+
         // Actor filmography for /discover/actor/{slug}: the person's name +
         // headshot plus their movie & show cast credits (deduped by imdb id,
         // newest first). Public — works for anonymous viewers.

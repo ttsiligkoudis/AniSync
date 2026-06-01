@@ -1,0 +1,22 @@
+@model List<AnimeList.Models.ActorSummary>
+@*
+    Shared tile chunk for the actor directory — used by Actors.cshtml (first
+    page, server-rendered) and DiscoverController.ActorsPage (subsequent pages
+    fetched by actor-pagination.js). Just the tile elements; the .actor-grid
+    container lives in Actors.cshtml so the JS appends children directly.
+    Each tile links to the Trakt-backed filmography via the tmdb-id bridge.
+*@
+@foreach (var a in Model)
+{
+    <a class="actor-tile" href="/discover/actor/tmdb/@a.TmdbId" data-actor-id="@a.TmdbId">
+        <span class="actor-tile-avatar">
+            <span class="actor-tile-initial" aria-hidden="true">@(string.IsNullOrEmpty(a.Name) ? "?" : a.Name[..1])</span>
+            @if (!string.IsNullOrEmpty(a.Image))
+            {
+                <img class="actor-tile-img" src="@a.Image" alt="" loading="lazy"
+                     decoding="async" onerror="this.remove()" />
+            }
+        </span>
+        <span class="actor-tile-name">@a.Name</span>
+    </a>
+}

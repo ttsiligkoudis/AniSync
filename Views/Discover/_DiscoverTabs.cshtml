@@ -56,4 +56,11 @@
        aria-selected="@(tagsActive ? "true" : "false")">
         Tags
     </a>
+    @{ var actorsActive = Model.ActiveBrowse == "actors"; }
+    <a class="library-tab @(actorsActive ? "library-tab-active" : "")"
+       href="/discover/actors"
+       role="tab"
+       aria-selected="@(actorsActive ? "true" : "false")">
+        Actors
+    </a>
 </nav>

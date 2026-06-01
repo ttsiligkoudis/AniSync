@@ -1,0 +1,41 @@
+@model List<AnimeList.Models.ActorSummary>
+@{
+    ViewData["Title"] = "Actors";
+    ViewData["BodyClass"] = "library-page";
+    ViewData["ActiveNav"] = "discover";
+    var hasNext = ViewData["ActorsHasNext"] as bool? ?? false;
+}
+
+@await Html.PartialAsync("_DiscoverTabs", new AnimeList.Controllers.DiscoverTabsViewModel
+{
+    ActiveBrowse = "actors",
+})
+
+<header class="page-header">
+    <h1 class="page-title">Popular Actors</h1>
+    <p class="page-subtitle">Tap an actor to see their movies &amp; series</p>
+</header>
+
+@if (Model == null || Model.Count == 0)
+{
+    <p class="hint-text">No actors available right now. Try again in a moment.</p>
+}
+else
+{
+    @* actor-pagination.js reads data-page (last server-rendered page) +
+       data-has-next, then fetches /discover/actors/page?page=N+1 as the
+       sentinel scrolls into view, appending tiles into .actor-grid. *@
+    <div class="actor-paginator" data-page="1" data-has-next="@(hasNext ? "true" : "false")">
+        <div class="actor-grid">
+            @await Html.PartialAsync("_ActorTiles", Model)
+        </div>
+        <div class="paginator-loader" hidden aria-hidden="true">
+            <div class="paginator-loader-spinner"></div>
+        </div>
+        <div class="actor-sentinel" aria-hidden="true"></div>
+    </div>
+}
+
+@section Scripts {
+    <script src="~/js/actor-pagination.js" asp-append-version="true" defer></script>
+}
