@@ -112,7 +112,7 @@
    scores; v0 sticks to what's already in the existing list-catalog response. *@
 @if (isLoggedIn && !anonymousUser && Model.HasStats && animeEnabled)
 {
-    <section class="dashboard-section stats-section" data-dash-section="anime-stats" data-stats-section data-stats-loading>
+    <section class="dashboard-section stats-section" data-dash-section="anime-stats" data-media-type="anime" data-stats-section data-stats-loading>
         @{
             // Stats come from AniList's User.statistics GraphQL regardless of
             // which provider the user picked as their primary — that's where
@@ -369,7 +369,7 @@
    Currently Watching list comes back empty. *@
 @if (isLoggedIn && !anonymousUser && animeEnabled)
 {
-    <section class="dashboard-section" data-dash-section="anime-continue" data-continue-watching-section>
+    <section class="dashboard-section" data-dash-section="anime-continue" data-media-type="anime" data-continue-watching-section>
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">Continue watching@(animeSuffix)</h2>
             <a class="dashboard-section-link" href="/library?list=current">
@@ -504,7 +504,7 @@
    counts, or hides the whole section if the upstream returned zeros
    (transient failure / sandbox blocks the upstream / etc.) so the
    dashboard never shows a placeholder row of zeros. *@
-<section class="dashboard-section stats-section" data-dash-section="anime-this-season" data-season-stats data-stats-loading>
+<section class="dashboard-section stats-section" data-dash-section="anime-this-season" data-media-type="anime" data-season-stats data-stats-loading>
     <div class="dashboard-section-header">
         <h2 class="dashboard-section-title">This Season@(animeSuffix)</h2>
         <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(CurrentSeasonLabel())">
@@ -589,7 +589,7 @@
    section when the upstream returns nothing (transient failure, or
    genuinely no entries — e.g. no episodes airing today, or next season
    not yet populated). *@
-<section class="dashboard-section" data-dash-section="anime-new-episodes" data-shelf data-shelf-src="/Home/NewEpisodesTodayData">
+<section class="dashboard-section" data-dash-section="anime-new-episodes" data-media-type="anime" data-shelf data-shelf-src="/Home/NewEpisodesTodayData">
     <div class="dashboard-section-header">
         <h2 class="dashboard-section-title">New Episodes Today@(animeSuffix)</h2>
         <span class="dashboard-section-link-muted">Refreshes daily</span>
@@ -599,7 +599,7 @@
     </div>
 </section>
 
-<section class="dashboard-section" data-dash-section="anime-popular" data-shelf data-shelf-src="/Home/PopularThisSeasonData">
+<section class="dashboard-section" data-dash-section="anime-popular" data-media-type="anime" data-shelf data-shelf-src="/Home/PopularThisSeasonData">
     <div class="dashboard-section-header">
         <h2 class="dashboard-section-title">Most Popular this Season@(animeSuffix)</h2>
         <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(CurrentSeasonLabel())">
@@ -615,7 +615,7 @@
     </div>
 </section>
 
-<section class="dashboard-section" data-dash-section="anime-anticipated" data-shelf data-shelf-src="/Home/MostAnticipatedData">
+<section class="dashboard-section" data-dash-section="anime-anticipated" data-media-type="anime" data-shelf data-shelf-src="/Home/MostAnticipatedData">
     <div class="dashboard-section-header">
         <h2 class="dashboard-section-title">Most Anticipated@(animeSuffix)</h2>
         <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(NextSeasonLabel())">
@@ -641,7 +641,7 @@
 {
     @if (isLoggedIn && !anonymousUser && Model.TraktConnected)
     {
-        <section class="dashboard-section stats-section" data-dash-section="video-stats" data-trakt-stats data-stats-loading>
+        <section class="dashboard-section stats-section" data-dash-section="video-stats" data-media-type="movie series" data-trakt-stats data-stats-loading>
             <div class="dashboard-section-header">
                 <h2 class="dashboard-section-title">Your stats</h2>
                 <span class="dashboard-section-link-muted">via Trakt</span>
@@ -729,7 +729,7 @@
         {
             var vtSlug = vt == MetaType.movie ? "movie" : "series";
             var vtSuffix = combined ? " · " + (vt == MetaType.movie ? "Movies" : "Series") : "";
-            <section class="dashboard-section" data-dash-section="video-continue" data-shelf data-shelf-src="/Home/VideoContinueWatchingData?type=@vtSlug">
+            <section class="dashboard-section" data-dash-section="video-continue" data-media-type="@vtSlug" data-shelf data-shelf-src="/Home/VideoContinueWatchingData?type=@vtSlug">
                 <div class="dashboard-section-header">
                     <h2 class="dashboard-section-title">Continue watching@(vtSuffix)</h2>
                     <a class="dashboard-section-link" href="/library?list=current">
@@ -751,7 +751,7 @@
     {
         var vtSlug = vt == MetaType.movie ? "movie" : "series";
         var vtSuffix = combined ? " · " + (vt == MetaType.movie ? "Movies" : "Series") : "";
-        <section class="dashboard-section" data-dash-section="video-trending" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=trending">
+        <section class="dashboard-section" data-dash-section="video-trending" data-media-type="@vtSlug" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=trending">
             <div class="dashboard-section-header">
                 <h2 class="dashboard-section-title">Trending@(vtSuffix)</h2>
                 <a class="dashboard-section-link" href="/discover?mode=trending">
@@ -772,7 +772,7 @@
     {
         var vtSlug = vt == MetaType.movie ? "movie" : "series";
         var vtSuffix = combined ? " · " + (vt == MetaType.movie ? "Movies" : "Series") : "";
-        <section class="dashboard-section" data-dash-section="video-popular" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=popular">
+        <section class="dashboard-section" data-dash-section="video-popular" data-media-type="@vtSlug" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=popular">
             <div class="dashboard-section-header">
                 <h2 class="dashboard-section-title">Most Popular@(vtSuffix)</h2>
                 <a class="dashboard-section-link" href="/discover">
@@ -793,7 +793,7 @@
     {
         var vtSlug = vt == MetaType.movie ? "movie" : "series";
         var vtSuffix = combined ? " · " + (vt == MetaType.movie ? "Movies" : "Series") : "";
-        <section class="dashboard-section" data-dash-section="video-anticipated" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=anticipated">
+        <section class="dashboard-section" data-dash-section="video-anticipated" data-media-type="@vtSlug" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=anticipated">
             <div class="dashboard-section-header">
                 <h2 class="dashboard-section-title">Most Anticipated@(vtSuffix)</h2>
                 <a class="dashboard-section-link" href="/discover?mode=anticipated">

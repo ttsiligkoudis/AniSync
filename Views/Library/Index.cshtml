@@ -29,7 +29,6 @@
     ViewData["MtReturnUrl"] = "/library";
 }
 @* Single-select switch between the modes enabled in the chooser modal. *@
-@await Html.PartialAsync("_MediaTypeToggle")
 @{
     ViewData["Title"] = hasSearch
         ? $"Search: {Model.Search} · Library"
