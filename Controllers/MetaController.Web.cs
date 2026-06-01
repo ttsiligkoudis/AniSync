@@ -1017,6 +1017,11 @@ namespace AnimeList.Controllers
                     source = s.Source,
                     hdr = s.Hdr,
                     audio = s.Audio,
+                    // Derived here (from the already-detected audio label) rather
+                    // than in the stream service, so the shared parse path / record
+                    // stay untouched. Dolby/DTS/TrueHD play as silent video in most
+                    // browsers — the watch page warns + offers an external player.
+                    audioUnsupported = IsBrowserUnsupportedAudio(s.Audio),
                 }).ToList();
 
                 return Json(new { debridStreams = labelled });
@@ -1132,7 +1137,7 @@ namespace AnimeList.Controllers
         /// than 500ing.
         /// </summary>
         [HttpGet("/meta/episode-subtitles")]
-        public async Task<IActionResult> EpisodeSubtitles(string id, int? season, int episode, string filename = null)
+        public async Task<IActionResult> EpisodeSubtitles(string id, int? season, int episode, string filename = null, string type = null)
         {
             if (string.IsNullOrWhiteSpace(id) || episode <= 0)
             {
@@ -1147,13 +1152,21 @@ namespace AnimeList.Controllers
                 return Json(new { subtitles = Array.Empty<object>() });
             }
 
+            // Movies are keyed by IMDb id alone (movie/tt), not season+episode.
+            // The watch page synthesises "episode 1" for the single movie video,
+            // so without this the lookup hits the series/tt:1:1 path and finds
+            // nothing — the "OpenSubtitles doesn't fetch subs for movies" report.
+            // season/episode 0 makes the search take the movie path.
+            var isMovie = string.Equals(type, "movie", StringComparison.OrdinalIgnoreCase);
+
             // ImdbSeason on the mapping is the franchise-side season
             // — same fix as Torrentio. URL season is the AniSync cour-
             // internal value (usually 1) and would query the wrong
             // season of the IMDb listing otherwise.
-            var effectiveSeason = sourceLinks.ImdbSeason ?? season;
+            var effectiveSeason = isMovie ? null : (sourceLinks.ImdbSeason ?? season);
+            var effectiveEpisode = isMovie ? 0 : episode;
 
-            var tracks = await SafeOpenSubtitlesSearch(sourceLinks.ImdbId, effectiveSeason, episode, filename, id);
+            var tracks = await SafeOpenSubtitlesSearch(sourceLinks.ImdbId, effectiveSeason, effectiveEpisode, filename, id);
 
             return Json(new
             {
@@ -1172,6 +1185,25 @@ namespace AnimeList.Controllers
                     opensubtitles = tracks.Count,
                 },
             });
+        }
+
+        // True when the detected audio codec is one no mainstream browser <video>
+        // can decode in-page — Dolby Digital / Plus / Atmos, the DTS family,
+        // TrueHD. Such a release plays as video with NO sound (movie releases are
+        // overwhelmingly these; anime is usually AAC), so the watch page surfaces a
+        // warning + external-player path. Plain string checks against the short,
+        // already-parsed audio label (e.g. "DDP5.1", "DTS-HD MA 5.1", "AAC") — no
+        // regex, deliberately kept off the shared stream-parse path. AAC / MP3 /
+        // Opus / FLAC / Vorbis / PCM are not flagged (they play fine).
+        private static bool IsBrowserUnsupportedAudio(string audioLabel)
+        {
+            if (string.IsNullOrEmpty(audioLabel)) return false;
+            var a = audioLabel.ToUpperInvariant();
+            return a.Contains("AC3") || a.Contains("AC-3")
+                || a.Contains("EAC3") || a.Contains("E-AC-3")
+                || a.Contains("DD+") || a.Contains("DDP") || a.Contains("DOLBY")
+                || a.Contains("ATMOS") || a.Contains("TRUEHD")
+                || a.Contains("DTS");
         }
 
         private async Task<IReadOnlyList<SubtitleTrack>> SafeOpenSubtitlesSearch(
