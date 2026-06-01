@@ -2392,7 +2392,8 @@
                 var subQs = 'id=' + encodeURIComponent(animeId)
                     + '&episode=' + encodeURIComponent(episode)
                     + (hasSeasons ? '&season=' + encodeURIComponent(season) : '')
-                    + (firstLine ? '&filename=' + encodeURIComponent(firstLine) : '');
+                    + (firstLine ? '&filename=' + encodeURIComponent(firstLine) : '')
+                    + (isMovie ? '&type=movie' : '');
 
                 // Resolve the stream URL through our server-side
                 // redirect-follow first. For MediaFusion-style addons
@@ -3490,7 +3491,8 @@
                     var qs = 'id=' + encodeURIComponent(animeId)
                         + '&episode=' + encodeURIComponent(episode)
                         + (hasSeasons ? '&season=' + encodeURIComponent(season) : '')
-                        + (filename ? '&filename=' + encodeURIComponent(filename) : '');
+                        + (filename ? '&filename=' + encodeURIComponent(filename) : '')
+                        + (isMovie ? '&type=movie' : '');
                     fetch('/meta/episode-subtitles?' + qs, {
                         credentials: 'same-origin',
                         headers: { 'Accept': 'application/json' },
