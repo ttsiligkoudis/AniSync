@@ -5582,13 +5582,24 @@ a.stats-cell-link:hover {
    is the priority order (Watching first, Repeating last). */
 .library-tabs {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 0.4rem;
     width: 100%;
     margin-bottom: 0.4rem;
+    /* Single scrollable row instead of wrapping to several lines on narrow
+       screens. Scrollbar hidden — the row is swipeable on touch. */
+    overflow-x: auto;
+    scrollbar-width: none;            /* Firefox */
+    -ms-overflow-style: none;         /* old Edge */
+    -webkit-overflow-scrolling: touch;
+}
+.library-tabs::-webkit-scrollbar {   /* Chrome / Safari */
+    display: none;
 }
 
 .library-tab {
+    flex: 0 0 auto;          /* keep pills full-size in the scroll row */
+    white-space: nowrap;     /* no mid-label wrapping (e.g. "Most Watched") */
     padding: 0.45rem 0.95rem;
     border-radius: 1.5rem;
     background: var(--overlay-06);
