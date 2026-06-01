@@ -254,10 +254,34 @@ namespace AnimeList.Controllers
                 var summaryTask = _traktService.GetSummaryAsync(cinemetaType, imdbId);
                 var castTask = _traktService.GetCastAsync(cinemetaType, imdbId, 20);
                 var relatedTask = _traktService.GetRelatedAsync(cinemetaType, imdbId, 12);
-                await Task.WhenAll(summaryTask, castTask, relatedTask);
+                // Episodes come from Trakt for series; Cinemeta only supplies the
+                // thumbnails (merged below). Movies have no episode list.
+                var episodesTask = cinemetaType == "series"
+                    ? _traktService.GetEpisodesAsync(imdbId)
+                    : Task.FromResult(new List<Video>());
+                await Task.WhenAll(summaryTask, castTask, relatedTask, episodesTask);
 
                 var summary = summaryTask.Result;
                 videoCast = castTask.Result;
+
+                // Trakt is the episode source of truth; carry over Cinemeta's
+                // per-episode thumbnails (and overview as a fallback) by matching
+                // season+episode. Keep Cinemeta's list when Trakt has no episodes.
+                var traktEpisodes = episodesTask.Result;
+                if (traktEpisodes.Count > 0)
+                {
+                    var cinemetaByKey = new Dictionary<(int, int), Video>();
+                    foreach (var cv in meta.videos ?? Enumerable.Empty<Video>())
+                        cinemetaByKey[(cv.season, cv.episode)] = cv;
+
+                    foreach (var ep in traktEpisodes)
+                    {
+                        if (!cinemetaByKey.TryGetValue((ep.season, ep.episode), out var cv)) continue;
+                        if (string.IsNullOrEmpty(ep.thumbnail)) ep.thumbnail = cv.thumbnail;
+                        if (string.IsNullOrEmpty(ep.overview)) ep.overview = cv.overview ?? cv.description;
+                    }
+                    meta.videos = traktEpisodes;
+                }
                 if (summary != null)
                 {
                     if (!string.IsNullOrWhiteSpace(summary.Overview)) meta.description = summary.Overview;
