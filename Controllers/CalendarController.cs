@@ -7,16 +7,19 @@ using Microsoft.AspNetCore.Mvc;
 namespace AnimeList.Controllers
 {
     /// <summary>
-    /// Month-grid Calendar page. Shows recent + upcoming episodes for the shows a
-    /// user tracks: anime from their Watching list (AniList airing schedule,
-    /// matched through the watching cache) and series from their Trakt Watching +
-    /// Planning lists (the same scope the series notifications use). Each cell links
-    /// straight to that episode's watch page. Server-rendered; month navigation is
-    /// plain ?y=&amp;m= links so there's no client-side state to keep in sync.
+    /// Weekly Calendar page. Shows recent + upcoming episodes for the shows a user
+    /// tracks, one week at a time, as a day-by-day agenda so every entry can carry
+    /// its title (a month grid only has room for dots on mobile). Anime come from
+    /// the user's Watching list (AniList airing schedule, matched through the
+    /// watching cache); series from their Trakt Watching + Planning lists (the same
+    /// scope the series notifications use). Each row links straight to that
+    /// episode's watch page. Server-rendered; week navigation is plain ?d= links so
+    /// there's no client-side state to keep in sync.
     /// <para>
     /// Episodes are bucketed by their UTC calendar day — a known simplification: an
     /// episode airing late in the day in a far-west timezone can land on the next
-    /// grid cell relative to the viewer's local day.
+    /// day relative to the viewer's local day. The displayed air time is localised
+    /// client-side from the Unix timestamp.
     /// </para>
     /// </summary>
     public class CalendarController : Controller
@@ -48,36 +51,35 @@ namespace AnimeList.Controllers
         }
 
         [HttpGet("/calendar")]
-        public async Task<IActionResult> Index(int? y, int? m)
+        public async Task<IActionResult> Index(string d)
         {
             var (_, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             if (uid == null) return RedirectToAction("Index", "Home");
 
-            var nowUtc = DateTime.UtcNow;
-            var year = y ?? nowUtc.Year;
-            var month = m ?? nowUtc.Month;
-            if (month is < 1 or > 12) month = nowUtc.Month;
-            if (year is < 1970 or > 9999) year = nowUtc.Year;
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-            // Sunday-first 6×7-or-5×7 grid covering the whole month plus the
-            // leading/trailing days that fill its first and last weeks.
-            var firstOfMonth = new DateOnly(year, month, 1);
-            var leading = (int)firstOfMonth.DayOfWeek; // Sunday == 0
-            var gridStart = firstOfMonth.AddDays(-leading);
-            var daysInMonth = DateTime.DaysInMonth(year, month);
-            var cellCount = (int)Math.Ceiling((leading + daysInMonth) / 7.0) * 7;
+            // ?d=yyyy-MM-dd anchors the week (any day within it); default = today.
+            var anchor = DateOnly.TryParseExact(d, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var parsed)
+                ? parsed
+                : today;
 
-            var rangeStart = new DateTimeOffset(gridStart.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-            var rangeEnd = rangeStart.AddDays(cellCount);
+            // Sunday-first week containing the anchor.
+            var weekStart = anchor.AddDays(-(int)anchor.DayOfWeek);
+            var weekEnd = weekStart.AddDays(6);
+            const int days = 7;
+
+            var rangeStart = new DateTimeOffset(weekStart.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var rangeEnd = rangeStart.AddDays(days);
 
             var byDate = new Dictionary<DateOnly, List<CalendarEpisode>>();
             void Bucket(CalendarEpisode ep)
             {
-                var d = DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeSeconds(ep.AiringAt).UtcDateTime);
-                if (!byDate.TryGetValue(d, out var list))
+                var date = DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeSeconds(ep.AiringAt).UtcDateTime);
+                if (!byDate.TryGetValue(date, out var list))
                 {
                     list = new List<CalendarEpisode>();
-                    byDate[d] = list;
+                    byDate[date] = list;
                 }
                 list.Add(ep);
             }
@@ -87,45 +89,51 @@ namespace AnimeList.Controllers
             try { await AddAnimeAsync(uid, rangeStart.ToUnixTimeSeconds(), rangeEnd.ToUnixTimeSeconds() - 1, Bucket); }
             catch (Exception ex) { _logger.LogWarning(ex, "calendar anime load failed for {Uid}", uid); }
 
-            try { await AddSeriesAsync(uid, gridStart, cellCount, rangeStart, rangeEnd, Bucket); }
+            try { await AddSeriesAsync(uid, weekStart, days, rangeStart, rangeEnd, Bucket); }
             catch (Exception ex) { _logger.LogWarning(ex, "calendar series load failed for {Uid}", uid); }
 
-            var today = DateOnly.FromDateTime(nowUtc);
-            var days = new List<CalendarDay>(cellCount);
+            var dayList = new List<CalendarDay>(days);
             var total = 0;
-            for (var i = 0; i < cellCount; i++)
+            for (var i = 0; i < days; i++)
             {
-                var date = gridStart.AddDays(i);
+                var date = weekStart.AddDays(i);
                 byDate.TryGetValue(date, out var eps);
                 eps ??= new List<CalendarEpisode>();
                 eps.Sort((a, b) => a.AiringAt.CompareTo(b.AiringAt));
                 total += eps.Count;
-                days.Add(new CalendarDay
+                dayList.Add(new CalendarDay
                 {
                     Date = date,
-                    InMonth = date.Year == year && date.Month == month,
                     IsToday = date == today,
                     Episodes = eps,
                 });
             }
 
-            var prev = firstOfMonth.AddMonths(-1);
-            var next = firstOfMonth.AddMonths(1);
+            var currentWeekStart = today.AddDays(-(int)today.DayOfWeek);
             ViewData["ActiveNav"] = "calendar";
             ViewData["Title"] = "Calendar";
             return View(new CalendarViewModel
             {
-                Year = year,
-                Month = month,
-                MonthLabel = firstOfMonth.ToString("MMMM yyyy", CultureInfo.InvariantCulture),
-                PrevYear = prev.Year,
-                PrevMonth = prev.Month,
-                NextYear = next.Year,
-                NextMonth = next.Month,
-                IsCurrentMonth = year == nowUtc.Year && month == nowUtc.Month,
-                Days = days,
+                WeekStart = weekStart,
+                WeekEnd = weekEnd,
+                RangeLabel = BuildRangeLabel(weekStart, weekEnd),
+                PrevDate = weekStart.AddDays(-7).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                NextDate = weekStart.AddDays(7).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                IsCurrentWeek = weekStart == currentWeekStart,
+                Days = dayList,
                 TotalEpisodes = total,
             });
+        }
+
+        // "Jun 1 – 7, 2026" within a month; "Jun 28 – Jul 4, 2026" across months.
+        private static string BuildRangeLabel(DateOnly start, DateOnly end)
+        {
+            var ci = CultureInfo.InvariantCulture;
+            var startLabel = start.ToString("MMM d", ci);
+            var endLabel = end.Month == start.Month && end.Year == start.Year
+                ? end.ToString("d", ci)
+                : end.ToString("MMM d", ci);
+            return $"{startLabel} – {endLabel}, {end.Year}";
         }
 
         // Anime: the user's Watching cache (prefixed ids in their primary service
@@ -179,7 +187,7 @@ namespace AnimeList.Controllers
         // (playback) + Planning (watchlist) shows — the same scope the series
         // episode notifications use, so the calendar and the bell agree.
         private async Task AddSeriesAsync(
-            string uid, DateOnly gridStart, int days,
+            string uid, DateOnly weekStart, int days,
             DateTimeOffset rangeStart, DateTimeOffset rangeEnd, Action<CalendarEpisode> bucket)
         {
             if (!_trakt.IsConfigured) return;
@@ -193,7 +201,7 @@ namespace AnimeList.Controllers
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (eligible.Count == 0) return;
 
-            var calendar = await _trakt.GetMyShowsCalendarAsync(uid, gridStart, days);
+            var calendar = await _trakt.GetMyShowsCalendarAsync(uid, weekStart, days);
             foreach (var e in calendar)
             {
                 if (string.IsNullOrEmpty(e.ImdbId) || !eligible.Contains(e.ImdbId)) continue;
