@@ -107,24 +107,29 @@
         } catch (_) { /* ignore */ }
 
         // Persist to the account too (logged-in) so the choice follows the user
-        // across devices; fire-and-forget, the cookie already drives this reload.
+        // across devices. SSR prefers the ACCOUNT setting over the cookie for
+        // logged-in users, so we must WAIT for the save before reloading —
+        // otherwise the reload races the POST and the server re-renders the
+        // stale set (the bug where a newly-added mode only showed after a
+        // second manual refresh). Anonymous users are cookie-only, so they
+        // reload immediately.
         if (window.AniSync && window.AniSync.loggedIn) {
-            try {
-                fetch('/Home/SetEnabledMediaTypes', {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    body: 'enabled=' + encodeURIComponent(set.join(',')),
-                    skipLoader: true,
-                    keepalive: true
-                });
-            } catch (_) { /* best-effort */ }
+            if (confirmBtn) confirmBtn.disabled = true;
+            fetch('/Home/SetEnabledMediaTypes', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: 'enabled=' + encodeURIComponent(set.join(',')),
+                skipLoader: true
+            })
+            .catch(function () { /* save failed — reload anyway, the cookie is set */ })
+            .then(function () { location.reload(); });
+        } else {
+            location.reload();
         }
-
-        location.reload();
     }
 
     options.forEach(function (btn) {
