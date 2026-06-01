@@ -18,6 +18,10 @@ namespace AnimeList.Models
         public double? Rating { get; set; }
         // Trailer URL (usually YouTube); null when none.
         public string Trailer { get; set; }
+        // Artwork from Trakt (extended=images; https-prefixed). null when Trakt
+        // has none — the detail page keeps the Cinemeta image as the fallback.
+        public string Poster { get; set; }
+        public string Background { get; set; }
         public List<string> Genres { get; set; } = new();
     }
 

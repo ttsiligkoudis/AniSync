@@ -14,6 +14,14 @@ namespace AnimeList.Models
         public string Title { get; set; }
         public int? Year { get; set; }
 
+        // Artwork from Trakt (extended=images; https-prefixed). null when Trakt
+        // has no image — callers fall back to metahub (Cinemeta's CDN) by IMDb id.
+        public string Poster { get; set; }
+        public string Background { get; set; }
+
+        // Community rating (0–10, from extended=full); drives the card score badge.
+        public double? Rating { get; set; }
+
         // Populated for in-progress episodes (continue-watching) only.
         public int? Season { get; set; }
         public int? Episode { get; set; }

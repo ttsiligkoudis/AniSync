@@ -20,20 +20,17 @@ namespace AnimeList.Controllers
         private readonly IConfigStore _configStore;
         private readonly IMergedListService _mergedListService;
         private readonly ITraktService _traktService;
-        private readonly ICinemetaService _cinemeta;
 
         public LibraryController(
             ITokenService tokenService,
             IConfigStore configStore,
             IMergedListService mergedListService,
-            ITraktService traktService,
-            ICinemetaService cinemeta)
+            ITraktService traktService)
         {
             _tokenService = tokenService;
             _configStore = configStore;
             _mergedListService = mergedListService;
             _traktService = traktService;
-            _cinemeta = cinemeta;
         }
 
         // The list tabs that make sense for movies / series (sourced from Trakt):
@@ -262,7 +259,7 @@ namespace AnimeList.Controllers
             var kind = mediaType == MetaType.movie ? "movies" : "series";
 
             var items = await _traktService.GetListAsync(uid, activeList, mediaType);
-            var metas = await HydrateVideoMetasAsync(items);
+            var metas = items.ToVideoMetas();
 
             if (hasSearch && metas.Count > 0)
             {
@@ -304,29 +301,6 @@ namespace AnimeList.Controllers
             });
         }
 
-        // Hydrates Trakt list items (imdb id + type) into poster-bearing Meta via Cinemeta,
-        // in parallel, preserving order and dropping any id Cinemeta can't resolve. Forces
-        // Meta.type from the Trakt item so _PosterGrid's VideoLinks routing picks the right
-        // /movie|series path.
-        private async Task<List<Meta>> HydrateVideoMetasAsync(List<TraktListItem> items)
-        {
-            var lookups = items.Select(async it =>
-            {
-                try
-                {
-                    var meta = await _cinemeta.GetVideoMetaAsync(it.Type, it.ImdbId);
-                    if (meta == null) return null;
-                    meta.type = it.Type == "movie" ? MetaType.movie.ToString() : MetaType.series.ToString();
-                    return meta;
-                }
-                catch
-                {
-                    return null;
-                }
-            });
-            var resolved = await Task.WhenAll(lookups);
-            return resolved.Where(m => m != null).ToList();
-        }
     }
 
     /// <summary>
