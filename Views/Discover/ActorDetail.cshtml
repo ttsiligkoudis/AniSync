@@ -4,6 +4,7 @@
     var title = string.IsNullOrEmpty(Model.Name) ? Model.Slug : Model.Name;
     ViewData["Title"] = $"{title} · AniSync";
     var initial = string.IsNullOrEmpty(title) ? "?" : title[..1];
+    var hasAny = Model.Movies.Count > 0 || Model.Series.Count > 0;
 }
 
 <header class="page-header actor-header">
@@ -21,10 +22,36 @@
     </span>
 </header>
 
-@await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+@if (!hasAny)
 {
-    Items = Model.Items,
-    ConfigUid = Model.ConfigUid,
-    VideoLinks = true,
-    EmptyMessage = $"No titles found for {title}.",
-})
+    <p class="hint-text">No titles found for @title.</p>
+}
+else
+{
+    @* Each group renders only when it has items, so an actor with only movies
+       (or only series) shows a single section without an empty header. *@
+    @if (Model.Movies.Count > 0)
+    {
+        <section class="discover-group">
+            <h2 class="discover-group-title">Movies</h2>
+            @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+            {
+                Items = Model.Movies,
+                ConfigUid = Model.ConfigUid,
+                VideoLinks = true,
+            })
+        </section>
+    }
+    @if (Model.Series.Count > 0)
+    {
+        <section class="discover-group">
+            <h2 class="discover-group-title">Series</h2>
+            @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+            {
+                Items = Model.Series,
+                ConfigUid = Model.ConfigUid,
+                VideoLinks = true,
+            })
+        </section>
+    }
+}

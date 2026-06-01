@@ -26,25 +26,24 @@
 @* Single-select switch between the modes enabled in the chooser modal. *@
 @await Html.PartialAsync("_MediaTypeToggle")
 
-@* Browse-mode tabs (Popular + Trakt feeds). Mirrors the anime discover tab
-   strip. Plain links to /discover?mode=… preserving the active genre/search;
-   only shown when more than Popular is available (Trakt configured). *@
-@if (Model.Modes.Count > 1)
-{
-    <nav class="library-tabs" role="tablist" aria-label="Discover modes">
-        @foreach (var (slug, lbl) in Model.Modes)
-        {
-            var isActive = Model.Mode == slug;
-            var parts = new List<string> { $"mode={slug}" };
-            if (hasGenre) parts.Add($"genre={Uri.EscapeDataString(Model.Genre)}");
-            if (hasSearch) parts.Add($"search={Uri.EscapeDataString(Model.Search)}");
-            <a class="library-tab @(isActive ? "library-tab-active" : "")"
-               href="/discover?@string.Join("&", parts)"
-               role="tab"
-               aria-selected="@(isActive ? "true" : "false")">@lbl</a>
-        }
-    </nav>
-}
+@* Browse-mode tabs (Popular + Trakt feeds) plus an Actors browse-by pill.
+   Mode pills are plain links to /discover?mode=… preserving the active
+   genre/search. The Actors pill links to the popular-actors directory and
+   shows regardless of Trakt (it's TMDB-backed), so the strip always renders. *@
+<nav class="library-tabs" role="tablist" aria-label="Discover modes">
+    @foreach (var (slug, lbl) in Model.Modes)
+    {
+        var isActive = Model.Mode == slug;
+        var parts = new List<string> { $"mode={slug}" };
+        if (hasGenre) parts.Add($"genre={Uri.EscapeDataString(Model.Genre)}");
+        if (hasSearch) parts.Add($"search={Uri.EscapeDataString(Model.Search)}");
+        <a class="library-tab @(isActive ? "library-tab-active" : "")"
+           href="/discover?@string.Join("&", parts)"
+           role="tab"
+           aria-selected="@(isActive ? "true" : "false")">@lbl</a>
+    }
+    <a class="library-tab" href="/discover/actors" role="tab" aria-selected="false">Actors</a>
+</nav>
 
 @* Trakt connection is now managed from the Account page (Trakt is a first-class
    provider — sign in with it or link it there). The user's Trakt lists live on

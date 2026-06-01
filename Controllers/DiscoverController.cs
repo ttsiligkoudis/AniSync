@@ -612,13 +612,15 @@ namespace AnimeList.Controllers
             }
 
             var (name, image, items) = await _trakt.GetPersonCreditsAsync(slug);
+            var metas = items.ToVideoMetas();
             return View("ActorDetail", new ActorDetailViewModel
             {
                 Slug = slug,
                 Name = name,
                 Image = image,
                 ConfigUid = uid,
-                Items = items.ToVideoMetas(),
+                Movies = metas.Where(m => m.type == MetaType.movie.ToString()).ToList(),
+                Series = metas.Where(m => m.type == MetaType.series.ToString()).ToList(),
             });
         }
 
@@ -870,7 +872,9 @@ namespace AnimeList.Controllers
         // Trakt headshot URL (https-prefixed); null when none.
         public string Image { get; set; }
         public string ConfigUid { get; set; }
-        public List<Meta> Items { get; set; } = [];
+        // Filmography split by type; the view renders a group only when non-empty.
+        public List<Meta> Movies { get; set; } = [];
+        public List<Meta> Series { get; set; } = [];
     }
 
     public class TagDetailViewModel

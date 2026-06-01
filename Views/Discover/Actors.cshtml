@@ -6,11 +6,6 @@
     var hasNext = ViewData["ActorsHasNext"] as bool? ?? false;
 }
 
-@await Html.PartialAsync("_DiscoverTabs", new AnimeList.Controllers.DiscoverTabsViewModel
-{
-    ActiveBrowse = "actors",
-})
-
 <header class="page-header">
     <h1 class="page-title">Popular Actors</h1>
     <p class="page-subtitle">Tap an actor to see their movies &amp; series</p>
