@@ -92,7 +92,6 @@ namespace AnimeList.Controllers
             catch (Exception ex) { _logger.LogWarning(ex, "calendar series load failed for {Uid}", uid); }
 
             var dayList = new List<CalendarDay>(days);
-            var selectedEpisodes = new List<CalendarEpisode>();
             var total = 0;
             for (var i = 0; i < days; i++)
             {
@@ -102,14 +101,13 @@ namespace AnimeList.Controllers
                 eps.Sort((a, b) => a.AiringAt.CompareTo(b.AiringAt));
                 total += eps.Count;
 
-                var isSelected = date == selectedDate;
-                if (isSelected) selectedEpisodes = eps;
-
                 dayList.Add(new CalendarDay
                 {
                     Date = date,
+                    DateIso = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    Label = BuildSectionLabel(date),
                     IsToday = date == today,
-                    IsSelected = isSelected,
+                    IsSelected = date == selectedDate,
                     HasAnime = eps.Any(e => e.Kind == "anime"),
                     HasSeries = eps.Any(e => e.Kind == "series"),
                     Episodes = eps,
@@ -121,9 +119,8 @@ namespace AnimeList.Controllers
             return View(new CalendarViewModel
             {
                 Days = dayList,
-                SelectedDate = selectedDate,
-                SelectedDateLabel = BuildDayLabel(selectedDate),
-                SelectedEpisodes = selectedEpisodes,
+                SelectedDateIso = selectedDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                ScrollToSelected = !string.IsNullOrEmpty(d),
                 PrevDate = selectedDate.AddDays(-7).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 NextDate = selectedDate.AddDays(7).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 SelectedIsToday = selectedDate == today,
@@ -131,15 +128,15 @@ namespace AnimeList.Controllers
             });
         }
 
-        // "June 3rd, 2026" — full month, ordinal day, year.
-        private static string BuildDayLabel(DateOnly date)
+        // "Friday, May 29th" — weekday, month, ordinal day (per-day section heading).
+        private static string BuildSectionLabel(DateOnly date)
         {
             var ci = CultureInfo.InvariantCulture;
             var d = date.Day;
             var suffix = (d % 100) is >= 11 and <= 13
                 ? "th"
                 : (d % 10) switch { 1 => "st", 2 => "nd", 3 => "rd", _ => "th" };
-            return $"{date.ToString("MMMM", ci)} {d}{suffix}, {date.Year}";
+            return $"{date.ToString("dddd", ci)}, {date.ToString("MMMM", ci)} {d}{suffix}";
         }
 
         // Anime: the user's Watching cache (prefixed ids in their primary service

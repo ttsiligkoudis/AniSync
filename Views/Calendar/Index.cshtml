@@ -54,56 +54,64 @@
         </div>
     </div>
 
-    <h2 class="cal-detail-date">@Model.SelectedDateLabel</h2>
-
-    @if (Model.SelectedEpisodes.Count == 0)
+    @if (Model.TotalEpisodes == 0)
     {
         <div class="cal-empty">
-            Nothing scheduled on this day for the shows you're tracking. Episodes show up here once
+            Nothing scheduled this week for the shows you're tracking. Episodes show up here once
             they're on your anime <strong>Watching</strong> list or your Trakt <strong>Watching</strong> / <strong>Planning</strong> lists.
         </div>
     }
     else
     {
-        <div class="cal-cards">
-            @foreach (var ep in Model.SelectedEpisodes)
+        <div class="cal-week-data">
+            @foreach (var day in Model.Days)
             {
-                var utcTime = DateTimeOffset.FromUnixTimeSeconds(ep.AiringAt).UtcDateTime
-                    .ToString("h:mm tt", System.Globalization.CultureInfo.InvariantCulture);
-                string meta;
-                if (ep.Season.HasValue)
-                {
-                    meta = $"S{ep.Season} • E{ep.Episode}";
-                    if (!string.IsNullOrEmpty(ep.EpisodeTitle)) { meta += $" - {ep.EpisodeTitle}"; }
-                }
-                else
-                {
-                    meta = $"Episode {ep.Episode}";
-                }
-                <a class="cal-card cal-card-@ep.Kind" href="@ep.LinkPath" title="@ep.Title">
-                    <div class="cal-card-thumb">
-                        @if (!string.IsNullOrEmpty(ep.CoverImage))
+                if (day.Episodes.Count == 0) { continue; }
+                <section class="cal-day-section@(day.IsSelected ? " is-selected" : "")" id="day-@day.DateIso">
+                    <h2 class="cal-day-section-title">@day.Label</h2>
+                    <div class="cal-hscroll">
+                        @foreach (var ep in day.Episodes)
                         {
-                            <img src="@ep.CoverImage" alt="" loading="lazy" decoding="async" />
+                            var utcTime = DateTimeOffset.FromUnixTimeSeconds(ep.AiringAt).UtcDateTime
+                                .ToString("h:mm tt", System.Globalization.CultureInfo.InvariantCulture);
+                            string meta;
+                            if (ep.Season.HasValue)
+                            {
+                                meta = $"S{ep.Season} • E{ep.Episode}";
+                                if (!string.IsNullOrEmpty(ep.EpisodeTitle)) { meta += $" - {ep.EpisodeTitle}"; }
+                            }
+                            else
+                            {
+                                meta = $"Episode {ep.Episode}";
+                            }
+                            <a class="cal-card cal-card-@ep.Kind" href="@ep.LinkPath" title="@ep.Title">
+                                <div class="cal-card-thumb">
+                                    @if (!string.IsNullOrEmpty(ep.CoverImage))
+                                    {
+                                        <img src="@ep.CoverImage" alt="" loading="lazy" decoding="async" />
+                                    }
+                                    else
+                                    {
+                                        <span class="cal-card-thumb-ph" aria-hidden="true"></span>
+                                    }
+                                    <span class="cal-card-time" data-ts="@ep.AiringAt">@utcTime</span>
+                                </div>
+                                <div class="cal-card-info">
+                                    <div class="cal-card-title">@ep.Title</div>
+                                    <div class="cal-card-meta">@meta</div>
+                                </div>
+                            </a>
                         }
-                        else
-                        {
-                            <span class="cal-card-thumb-ph" aria-hidden="true"></span>
-                        }
-                        <span class="cal-card-time" data-ts="@ep.AiringAt">@utcTime</span>
                     </div>
-                    <div class="cal-card-info">
-                        <div class="cal-card-title">@ep.Title</div>
-                        <div class="cal-card-meta">@meta</div>
-                    </div>
-                </a>
+                </section>
             }
         </div>
     }
 </div>
 
-@* Localise the air time from the Unix timestamp; falls back to the
-   server-rendered UTC time when JS is off. (Day grouping stays UTC.) *@
+@* Localise the air time from the Unix timestamp (UTC fallback when JS is
+   off; day grouping stays UTC), and — when a day was tapped in the strip —
+   scroll that day's section into view. *@
 <script>
     (function () {
         document.querySelectorAll('.cal-card-time[data-ts]').forEach(function (el) {
@@ -114,5 +122,10 @@
                     .toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
             } catch (_) { /* keep the UTC fallback */ }
         });
+
+        if (@(Model.ScrollToSelected ? "true" : "false")) {
+            var sel = document.getElementById('day-@Model.SelectedDateIso');
+            if (sel) { sel.scrollIntoView({ block: 'start' }); }
+        }
     })();
 </script>
