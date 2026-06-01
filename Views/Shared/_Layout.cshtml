@@ -484,6 +484,20 @@
         </div>
     </header>
 
+    @* Fixed media-type switch (anime / movies / series) below the header on the
+       dashboard, Discover and Library. Renders only when more than one mode is
+       enabled; the dashboard variant adds an "All" pill + client-side section
+       filtering, the others reload into the chosen mode. *@
+    @if (activeNav == "home" || activeNav == "library" || activeNav == "discover")
+    {
+        @await Html.PartialAsync("_MediaTypeSwitch", new ViewDataDictionary(ViewData)
+        {
+            ["MtsEnabled"] = layoutEnabled,
+            ["MtsActive"] = layoutMediaType,
+            ["MtsDashboard"] = activeNav == "home",
+        })
+    }
+
     @* Upstream-outage banner — lights up when AniList GraphQL has returned a
        transport-level / 5xx failure in the last 5 minutes. AniList is the
        backbone for both AniList-primary users (their library + metadata) and
@@ -842,6 +856,7 @@
     </script>
     <script src="~/js/toast.js" asp-append-version="true" defer></script>
     <script src="~/js/media-type.js" asp-append-version="true" defer></script>
+    <script src="~/js/media-type-switch.js" asp-append-version="true" defer></script>
     <script src="~/js/theme-toggle.js" asp-append-version="true" defer></script>
     <script src="~/js/pwa-install.js" asp-append-version="true" defer></script>
     <script src="~/js/scroll-top.js" asp-append-version="true" defer></script>

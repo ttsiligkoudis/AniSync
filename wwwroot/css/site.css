@@ -8499,3 +8499,73 @@ a.video-cast-card[href]:hover .video-cast-name {
     color: var(--text-strong);
     margin: 0 0 0.75rem;
 }
+
+/* Fixed media-type switch (anime / movies / series) below the header.
+   Trakt-style segmented pill: inactive modes are icon-only circles, the
+   active mode expands to icon + label. JS sets the sticky `top` to the
+   header height so it pins just beneath it. */
+.mt-switch-bar {
+    position: sticky;
+    top: 0; /* overridden by media-type-switch.js with the header height */
+    z-index: 55;
+    background: var(--bg);
+    padding: 0.4rem 0;
+    margin-bottom: 0.6rem;
+    border-bottom: 1px solid var(--overlay-10);
+}
+.mt-switch-inner {
+    display: flex;
+    justify-content: flex-start;
+}
+.mt-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem;
+    background: var(--overlay-04);
+    border-radius: 999px;
+}
+.mt-switch-btn {
+    display: inline-flex;
+    align-items: center;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    height: 40px;
+    border-radius: 999px;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.mt-switch-icon {
+    display: inline-flex;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+}
+.mt-switch-label {
+    display: none;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    white-space: nowrap;
+    padding: 0 0.9rem 0 0.1rem;
+}
+.mt-switch-btn:hover:not(.active) {
+    color: var(--text-strong);
+    background: var(--overlay-10);
+}
+.mt-switch-btn.active {
+    background: var(--accent);
+    color: var(--on-accent);
+}
+.mt-switch-btn.active .mt-switch-label {
+    display: inline;
+}
+
+/* Dashboard section hidden by the media-type filter. !important so it wins
+   over any inline display the customize-layout modal may have set. */
+.mt-filter-hidden {
+    display: none !important;
+}
