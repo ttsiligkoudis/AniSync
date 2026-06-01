@@ -89,6 +89,15 @@ namespace AnimeList.Models
         public List<string> genres { get; set; }
         public string background { get; set; }
         public string type { get; set; } = MetaType.series.ToString();
+
+        // Stremio-native video meta fields, surfaced when the addon's GetByID
+        // serves a (non-anime) movie / series: Cinemeta supplies the base, Trakt
+        // overrides where it has data. Null on anime (the per-service builders use
+        // score / year / avgDuration instead) so STJ's null-skip omits them.
+        public List<string> cast { get; set; }
+        public string releaseInfo { get; set; }
+        public string imdbRating { get; set; }
+        public string runtime { get; set; }
         public List<Trailer> trailers { get; set; } = [];
         public List<TrailerStream> trailerStreams { get; set; } = [];
         public List<Video> videos { get; set; } = [];

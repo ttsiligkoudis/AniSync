@@ -241,65 +241,10 @@ namespace AnimeList.Controllers
                 ? meta.id
                 : null;
 
-            // Hybrid enrichment: Trakt has the richer detail data (overview,
-            // runtime, certification, trailer, cast, related titles) while
-            // Cinemeta keeps the poster / background / episodes. Public Trakt
-            // calls, so this works for anonymous viewers too. Posters for the
-            // recommendation cards come from metahub (Cinemeta's image CDN) by
-            // IMDb id — no per-item Cinemeta round-trip.
-            var videoCast = new List<TraktCastMember>();
-            string certification = null;
-            if (!string.IsNullOrEmpty(imdbId))
-            {
-                var summaryTask = _traktService.GetSummaryAsync(cinemetaType, imdbId);
-                var castTask = _traktService.GetCastAsync(cinemetaType, imdbId, 20);
-                var relatedTask = _traktService.GetRelatedAsync(cinemetaType, imdbId, 12);
-                // Episodes come from Trakt for series; Cinemeta only supplies the
-                // thumbnails (merged below). Movies have no episode list.
-                var episodesTask = cinemetaType == "series"
-                    ? _traktService.GetEpisodesAsync(imdbId)
-                    : Task.FromResult(new List<Video>());
-                await Task.WhenAll(summaryTask, castTask, relatedTask, episodesTask);
-
-                var summary = summaryTask.Result;
-                videoCast = castTask.Result;
-
-                // Trakt is the episode source of truth; carry over Cinemeta's
-                // per-episode thumbnails (and overview as a fallback) by matching
-                // season+episode. Keep Cinemeta's list when Trakt has no episodes.
-                var traktEpisodes = episodesTask.Result;
-                if (traktEpisodes.Count > 0)
-                {
-                    var cinemetaByKey = new Dictionary<(int, int), Video>();
-                    foreach (var cv in meta.videos ?? Enumerable.Empty<Video>())
-                        cinemetaByKey[(cv.season, cv.episode)] = cv;
-
-                    foreach (var ep in traktEpisodes)
-                    {
-                        if (!cinemetaByKey.TryGetValue((ep.season, ep.episode), out var cv)) continue;
-                        if (string.IsNullOrEmpty(ep.thumbnail)) ep.thumbnail = cv.thumbnail;
-                        if (string.IsNullOrEmpty(ep.overview)) ep.overview = cv.overview ?? cv.description;
-                    }
-                    meta.videos = traktEpisodes;
-                }
-                if (summary != null)
-                {
-                    if (!string.IsNullOrWhiteSpace(summary.Overview)) meta.description = summary.Overview;
-                    if (summary.Runtime is int rt && rt > 0) meta.avgDuration = rt;
-                    certification = string.IsNullOrWhiteSpace(summary.Certification) ? null : summary.Certification;
-                    // Full-Trakt artwork; Cinemeta's poster/background stays as the
-                    // fallback (only overridden when Trakt actually has an image).
-                    if (!string.IsNullOrEmpty(summary.Poster)) meta.poster = summary.Poster;
-                    if (!string.IsNullOrEmpty(summary.Background)) meta.background = summary.Background;
-                    if (!string.IsNullOrWhiteSpace(summary.Trailer))
-                    {
-                        var ts = new TrailerStream(summary.Trailer, meta.name);
-                        if (!string.IsNullOrEmpty(ts.ytId))
-                            meta.trailerStreams = new List<TrailerStream> { ts };
-                    }
-                }
-                meta.recommendations = relatedTask.Result.Select(it => it.ToVideoMeta()).ToList();
-            }
+            // Hybrid enrichment shared with the Stremio addon meta (GetByID):
+            // Trakt supplies the richer data + artwork + episodes; Cinemeta is
+            // the fallback. Returns cast + certification the web hero surfaces.
+            var (videoCast, certification) = await EnrichVideoMetaAsync(meta, cinemetaType, imdbId);
 
             // Current Trakt state → the hero's Manage Entry pill (status +
             // progress + rating), mirroring how the anime path fills Model.Entry.
@@ -338,6 +283,80 @@ namespace AnimeList.Controllers
                 VideoCertification = certification,
                 SourceLinks = new AnimeSourceLinks { ImdbId = imdbId },
             });
+        }
+
+        // Trakt enrichment for a Cinemeta-backed video Meta, shared by the web
+        // detail page (VideoDetail) and the Stremio addon meta (GetByID). Trakt
+        // supplies the richer data: overview, runtime, certification, trailer,
+        // artwork (poster / background), the episode list (Cinemeta only fills
+        // the per-episode thumbnails by season+episode), cast, and related
+        // titles. Cinemeta stays the fallback for anything Trakt lacks. Mutates
+        // meta in place; returns cast + certification the callers surface
+        // differently (web view model vs Stremio meta.cast). No-op without an
+        // imdb id. Public Trakt calls — works for anonymous viewers too.
+        private async Task<(List<TraktCastMember> Cast, string Certification)> EnrichVideoMetaAsync(
+            Meta meta, string cinemetaType, string imdbId)
+        {
+            var cast = new List<TraktCastMember>();
+            if (meta == null || string.IsNullOrEmpty(imdbId)) return (cast, null);
+
+            var summaryTask = _traktService.GetSummaryAsync(cinemetaType, imdbId);
+            var castTask = _traktService.GetCastAsync(cinemetaType, imdbId, 20);
+            var relatedTask = _traktService.GetRelatedAsync(cinemetaType, imdbId, 12);
+            // Episodes come from Trakt for series; Cinemeta only supplies the
+            // thumbnails (merged below). Movies have no episode list.
+            var episodesTask = cinemetaType == "series"
+                ? _traktService.GetEpisodesAsync(imdbId)
+                : Task.FromResult(new List<Video>());
+            await Task.WhenAll(summaryTask, castTask, relatedTask, episodesTask);
+
+            var summary = summaryTask.Result;
+            cast = castTask.Result;
+            string certification = null;
+
+            // Trakt is the episode source of truth; carry over Cinemeta's
+            // per-episode thumbnails (and overview as a fallback) by matching
+            // season+episode. Keep Cinemeta's list when Trakt has no episodes.
+            var traktEpisodes = episodesTask.Result;
+            if (traktEpisodes.Count > 0)
+            {
+                var cinemetaByKey = new Dictionary<(int, int), Video>();
+                foreach (var cv in meta.videos ?? Enumerable.Empty<Video>())
+                    cinemetaByKey[(cv.season, cv.episode)] = cv;
+
+                foreach (var ep in traktEpisodes)
+                {
+                    if (!cinemetaByKey.TryGetValue((ep.season, ep.episode), out var cv)) continue;
+                    if (string.IsNullOrEmpty(ep.thumbnail)) ep.thumbnail = cv.thumbnail;
+                    if (string.IsNullOrEmpty(ep.overview)) ep.overview = cv.overview ?? cv.description;
+                }
+                meta.videos = traktEpisodes;
+            }
+            if (summary != null)
+            {
+                if (!string.IsNullOrWhiteSpace(summary.Overview)) meta.description = summary.Overview;
+                if (summary.Runtime is int rt && rt > 0)
+                {
+                    meta.avgDuration = rt;
+                    meta.runtime = $"{rt} min";   // Stremio-native runtime string
+                }
+                certification = string.IsNullOrWhiteSpace(summary.Certification) ? null : summary.Certification;
+                // Full-Trakt artwork; Cinemeta's poster/background stays as the
+                // fallback (only overridden when Trakt actually has an image).
+                if (!string.IsNullOrEmpty(summary.Poster)) meta.poster = summary.Poster;
+                if (!string.IsNullOrEmpty(summary.Background)) meta.background = summary.Background;
+                if (!string.IsNullOrWhiteSpace(summary.Trailer))
+                {
+                    var ts = new TrailerStream(summary.Trailer, meta.name);
+                    if (!string.IsNullOrEmpty(ts.ytId))
+                    {
+                        meta.trailerStreams = new List<TrailerStream> { ts };
+                        meta.trailers = new List<Trailer> { new(ts.ytId) };   // Stremio trailers
+                    }
+                }
+            }
+            meta.recommendations = relatedTask.Result.Select(it => it.ToVideoMeta()).ToList();
+            return (cast, certification);
         }
 
         // Projects a TraktVideoEntry onto the modal/pill's (status, progress)
