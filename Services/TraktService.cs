@@ -558,8 +558,11 @@ namespace AnimeList.Services
                     var statusKey = (status ?? string.Empty).ToLowerInvariant();
                     await ClearCustomStatusAsync(uid, type, imdbId, statusKey);
                     var listId = await EnsureListIdAsync(uid, CustomStatusListName(statusKey));
-                    if (listId != null) await AddToListAsync(uid, listId.Value, type, imdbId);
-                    break;
+                    // Surface a failure (couldn't create/find the personal list, or
+                    // the add failed) instead of a silent fake-success, so the modal
+                    // tells the user rather than appearing to save.
+                    if (listId == null) return false;
+                    return await AddToListAsync(uid, listId.Value, type, imdbId);
 
                 default: // "" → None: remove from every surface.
                     await ClearPlaybackAsync(uid, type, imdbId);
