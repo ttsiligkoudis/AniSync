@@ -8502,28 +8502,31 @@ a.video-cast-card[href]:hover .video-cast-name {
 
 /* Fixed media-type switch (anime / movies / series) below the header.
    Trakt-style segmented pill: inactive modes are icon-only circles, the
-   active mode expands to icon + label. JS sets the sticky `top` to the
-   header height so it pins just beneath it. */
+   active mode expands to icon + label. The bar itself is transparent so the
+   pill floats "in the air" detached from the header; JS sets the sticky `top`
+   to the header height so it pins just beneath it. */
 .mt-switch-bar {
     position: sticky;
     top: 0; /* overridden by media-type-switch.js with the header height */
     z-index: 55;
-    background: var(--bg);
-    padding: 0.4rem 0;
-    margin-bottom: 0.6rem;
-    border-bottom: 1px solid var(--overlay-10);
+    padding: 0.7rem 0;
+    /* Transparent strip — let clicks fall through to content beside the pill. */
+    pointer-events: none;
 }
 .mt-switch-inner {
     display: flex;
     justify-content: flex-start;
 }
 .mt-switch {
+    pointer-events: auto;
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
     padding: 0.25rem;
-    background: var(--overlay-04);
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
     border-radius: 999px;
+    box-shadow: var(--shadow);
 }
 .mt-switch-btn {
     display: inline-flex;
