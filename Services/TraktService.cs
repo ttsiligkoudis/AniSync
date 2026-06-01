@@ -447,7 +447,10 @@ namespace AnimeList.Services
                 {
                     Name = name,
                     Character = character,
-                    Image = TraktImage(c["person"], "headshots"),
+                    // Trakt's person image key is singular ("headshot", matching
+                    // poster / fanart); fall back to the plural just in case.
+                    Image = TraktImage(c["person"], "headshot")
+                            ?? TraktImage(c["person"], "headshots"),
                 });
                 if (list.Count >= limit) break;
             }
