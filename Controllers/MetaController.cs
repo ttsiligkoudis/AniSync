@@ -459,7 +459,15 @@ namespace AnimeList.Controllers
             try
             {
                 var anime = await GetByIDInternal(config, id);
-                return new JsonResult(new { meta = anime });
+                if (anime != null)
+                    return new JsonResult(new { meta = anime });
+
+                // Not anime → serve Trakt-enriched video meta for movie / series
+                // ids (Cinemeta base + Trakt data / artwork / episodes + cast),
+                // mirroring the web detail page. Cinemeta-unresolvable ids fall
+                // through to {meta:null} so Stremio uses its own meta provider.
+                var video = await BuildAddonVideoMetaAsync(metaType, id);
+                return new JsonResult(new { meta = video });
             }
             catch (Exception ex)
             {
@@ -469,6 +477,30 @@ namespace AnimeList.Controllers
                 // title and stops asking on the same id.
                 return new JsonResult(new { meta = (object)null });
             }
+        }
+
+        // Serves a (non-anime) movie / series meta for Stremio, mirroring the web
+        // detail page via the shared EnrichVideoMetaAsync: Cinemeta supplies the
+        // base (poster / background / episodes / genres / rating), Trakt overrides
+        // with its richer data + artwork + episode list (Cinemeta fills the
+        // per-episode thumbnails) + cast. Returns null when Cinemeta can't resolve
+        // the id, so Stremio falls back to its own meta provider (e.g. Cinemeta).
+        private async Task<Meta> BuildAddonVideoMetaAsync(MetaType metaType, string id)
+        {
+            if (metaType != MetaType.movie && metaType != MetaType.series) return null;
+            var cinemetaType = metaType == MetaType.movie ? "movie" : "series";
+            var meta = await _cinemeta.GetVideoMetaAsync(cinemetaType, id);
+            if (meta == null) return null;
+
+            var imdbId = meta.id != null && meta.id.StartsWith(imdbPrefix, StringComparison.Ordinal)
+                ? meta.id
+                : (id.StartsWith(imdbPrefix, StringComparison.Ordinal) ? id : null);
+
+            var (cast, _) = await EnrichVideoMetaAsync(meta, cinemetaType, imdbId);
+            // Stremio renders cast as a name list; Trakt names win over Cinemeta's
+            // when present (Cinemeta's stay as the fallback otherwise).
+            if (cast.Count > 0) meta.cast = cast.Select(c => c.Name).ToList();
+            return meta;
         }
 
         [HttpGet("{config}/[controller]/ManageEntry/{*id}")]

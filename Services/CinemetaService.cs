@@ -269,15 +269,19 @@ namespace AnimeList.Services
                 && rating > 0)
             {
                 meta.score = Math.Round(rating, 1);
+                // Stremio-native rating string (raw "8.4"), surfaced when the
+                // addon serves this meta for a movie / series.
+                meta.imdbRating = ratingRaw;
             }
 
             // releaseInfo shapes: "2020", "2020-", "2020-2024" — the four-digit
             // prefix is always the start year.
             var releaseInfo = (string)m["releaseInfo"];
-            if (!string.IsNullOrEmpty(releaseInfo) && releaseInfo.Length >= 4
-                && int.TryParse(releaseInfo[..4], out var year))
+            if (!string.IsNullOrEmpty(releaseInfo))
             {
-                meta.year = year;
+                meta.releaseInfo = releaseInfo;   // Stremio-native year string
+                if (releaseInfo.Length >= 4 && int.TryParse(releaseInfo[..4], out var year))
+                    meta.year = year;
             }
 
             // Runtime is "2h 28min" / "148 min" / null — take the leading int so
@@ -285,6 +289,7 @@ namespace AnimeList.Services
             var runtime = (string)m["runtime"];
             if (!string.IsNullOrEmpty(runtime))
             {
+                meta.runtime = runtime;           // Stremio-native runtime string
                 var digits = new string(runtime.TakeWhile(char.IsDigit).ToArray());
                 if (int.TryParse(digits, out var mins) && mins > 0) meta.avgDuration = mins;
             }
@@ -294,6 +299,15 @@ namespace AnimeList.Services
                 meta.genres = genres.Select(t => (string)t)
                     .Where(s => !string.IsNullOrEmpty(s))
                     .ToList();
+            }
+
+            // Cinemeta cast (names) as the fallback when Trakt has none.
+            if (m["cast"] is JArray cast)
+            {
+                var names = cast.Select(t => (string)t)
+                    .Where(s => !string.IsNullOrEmpty(s))
+                    .ToList();
+                if (names.Count > 0) meta.cast = names;
             }
 
             if (includeVideos && m["videos"] is JArray)
