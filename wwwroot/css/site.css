@@ -8311,3 +8311,29 @@ body.dash-modal-open { overflow: hidden; }
     flex-wrap: wrap;
     gap: 0.5rem;
 }
+
+/* Video detail — Trakt cast list (names + characters; Trakt ships no images). */
+.video-cast-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.video-cast-member {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.5rem 0.8rem;
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-10);
+    border-radius: var(--radius-md);
+    min-width: 0;
+}
+.video-cast-name {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-strong);
+}
+.video-cast-char {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}

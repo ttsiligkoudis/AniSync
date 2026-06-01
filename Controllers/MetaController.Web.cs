@@ -241,6 +241,45 @@ namespace AnimeList.Controllers
                 ? meta.id
                 : null;
 
+            // Hybrid enrichment: Trakt has the richer detail data (overview,
+            // runtime, certification, trailer, cast, related titles) while
+            // Cinemeta keeps the poster / background / episodes. Public Trakt
+            // calls, so this works for anonymous viewers too. Posters for the
+            // recommendation cards come from metahub (Cinemeta's image CDN) by
+            // IMDb id — no per-item Cinemeta round-trip.
+            var videoCast = new List<TraktCastMember>();
+            string certification = null;
+            if (!string.IsNullOrEmpty(imdbId))
+            {
+                var summaryTask = _traktService.GetSummaryAsync(cinemetaType, imdbId);
+                var castTask = _traktService.GetCastAsync(cinemetaType, imdbId, 20);
+                var relatedTask = _traktService.GetRelatedAsync(cinemetaType, imdbId, 12);
+                await Task.WhenAll(summaryTask, castTask, relatedTask);
+
+                var summary = summaryTask.Result;
+                videoCast = castTask.Result;
+                if (summary != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(summary.Overview)) meta.description = summary.Overview;
+                    if (summary.Runtime is int rt && rt > 0) meta.avgDuration = rt;
+                    certification = string.IsNullOrWhiteSpace(summary.Certification) ? null : summary.Certification;
+                    if (!string.IsNullOrWhiteSpace(summary.Trailer))
+                    {
+                        var ts = new TrailerStream(summary.Trailer, meta.name);
+                        if (!string.IsNullOrEmpty(ts.ytId))
+                            meta.trailerStreams = new List<TrailerStream> { ts };
+                    }
+                }
+                meta.recommendations = relatedTask.Result.Select(it => new Meta
+                {
+                    id = it.ImdbId,
+                    name = it.Title,
+                    year = it.Year,
+                    type = it.Type == "movie" ? MetaType.movie.ToString() : MetaType.series.ToString(),
+                    poster = $"https://images.metahub.space/poster/medium/{it.ImdbId}/img",
+                }).ToList();
+            }
+
             // Current Trakt state → the hero's Manage Entry pill (status +
             // progress + rating), mirroring how the anime path fills Model.Entry.
             // Only when connected and we have an IMDb id to key off.
@@ -274,6 +313,8 @@ namespace AnimeList.Controllers
                 AnimeService = AnimeService.Trakt,
                 TraktConnected = traktConnected,
                 Entry = entry,
+                VideoCast = videoCast,
+                VideoCertification = certification,
                 SourceLinks = new AnimeSourceLinks { ImdbId = imdbId },
             });
         }
@@ -1549,6 +1590,13 @@ namespace AnimeList.Controllers
         // connected, so the hero can show a Trakt watchlist toggle in place of
         // the anime-tracker Manage Entry pill. Ignored on the anime path.
         public bool TraktConnected { get; set; }
+
+        // Video (Trakt-enriched) detail extras: cast (names + characters; Trakt
+        // ships no images) and the content certification (PG-13 / TV-MA / …) for
+        // the hero info row. Recommendations ride Meta.recommendations. Empty/null
+        // for anime, which uses its own deferred-extras path.
+        public List<TraktCastMember> VideoCast { get; set; } = new();
+        public string VideoCertification { get; set; }
 
         // User's tracking state for this entry — null for anonymous visitors,
         // not-yet-tracked entries, or transient fetch failures (the hero

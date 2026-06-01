@@ -360,6 +360,7 @@ namespace AnimeList.Services
             var path = mode switch
             {
                 "trending"    => $"/{traktType}/trending",
+                "popular"     => $"/{traktType}/popular",
                 "anticipated" => $"/{traktType}/anticipated",
                 "watched"     => $"/{traktType}/watched/weekly",
                 "recommended" => $"/recommendations/{traktType}",
@@ -394,6 +395,65 @@ namespace AnimeList.Services
                 // recommendations return the bare object.
                 var node = it["movie"] ?? it["show"] ?? it;
                 var item = type == "movie" ? MovieItem(node) : ShowItem(node);
+                if (!string.IsNullOrEmpty(item.ImdbId)) items.Add(item);
+            }
+            return items;
+        }
+
+        // ── Rich detail-page data (public — api-key only) ───────────────────
+        // Trakt has the text/metadata the detail page wants; Cinemeta keeps the
+        // images + episodes (Trakt's API ships no images).
+
+        public async Task<TraktVideoSummary> GetSummaryAsync(string type, string imdbId)
+        {
+            if (!IsConfigured || string.IsNullOrEmpty(imdbId)) return null;
+            var t = type == "movie" ? "movies" : "shows";
+            if (await GetPublicAsync($"/{t}/{imdbId}?extended=full") is not JObject o) return null;
+            return new TraktVideoSummary
+            {
+                Title = (string)o["title"],
+                Year = (int?)o["year"],
+                Overview = (string)o["overview"],
+                Runtime = (int?)o["runtime"],
+                Certification = (string)o["certification"],
+                Rating = (double?)o["rating"],
+                Trailer = (string)o["trailer"],
+                Genres = (o["genres"] as JArray)?.Select(g => (string)g)
+                    .Where(s => !string.IsNullOrEmpty(s)).ToList() ?? new(),
+            };
+        }
+
+        public async Task<List<TraktCastMember>> GetCastAsync(string type, string imdbId, int limit)
+        {
+            if (!IsConfigured || string.IsNullOrEmpty(imdbId)) return new();
+            var t = type == "movie" ? "movies" : "shows";
+            if (await GetPublicAsync($"/{t}/{imdbId}/people") is not JObject o || o["cast"] is not JArray cast)
+                return new();
+            var list = new List<TraktCastMember>();
+            foreach (var c in cast)
+            {
+                var name = (string)c["person"]?["name"];
+                if (string.IsNullOrEmpty(name)) continue;
+                // Newer API: characters[]; older: character (string).
+                var character = c["characters"] is JArray chars && chars.Count > 0
+                    ? (string)chars[0]
+                    : (string)c["character"];
+                list.Add(new TraktCastMember { Name = name, Character = character });
+                if (list.Count >= limit) break;
+            }
+            return list;
+        }
+
+        public async Task<List<TraktListItem>> GetRelatedAsync(string type, string imdbId, int limit)
+        {
+            if (!IsConfigured || string.IsNullOrEmpty(imdbId)) return new();
+            var t = type == "movie" ? "movies" : "shows";
+            if (await GetPublicAsync($"/{t}/{imdbId}/related?extended=full&limit={Math.Max(1, limit)}") is not JArray arr)
+                return new();
+            var items = new List<TraktListItem>();
+            foreach (var it in arr)
+            {
+                var item = type == "movie" ? MovieItem(it) : ShowItem(it);
                 if (!string.IsNullOrEmpty(item.ImdbId)) items.Add(item);
             }
             return items;

@@ -119,6 +119,7 @@
                 if (a.episodes is int eps && eps > 0) infoBits.Add($"{eps} ep{(eps > 1 ? "s" : "")}");
                 if (a.avgDuration is int dur && dur > 0) infoBits.Add($"~{dur} min");
                 if (a.year is int yr && yr > 0) infoBits.Add(yr.ToString());
+                if (isVideo && !string.IsNullOrEmpty(Model.VideoCertification)) infoBits.Add(Model.VideoCertification);
                 if (!string.IsNullOrEmpty(a.source)) infoBits.Add(a.source);
             }
             @if (infoBits.Count > 0)
@@ -841,11 +842,51 @@ else if (a.type == MetaType.movie.ToString())
     </section>
 }
 
+@* Video (Trakt-enriched) extras — rendered server-side. Cast names come from
+   Trakt (no headshots in its API); Recommended is Trakt /related hydrated to
+   posters via metahub. The anime deferred carousels below are skipped for
+   video (their /extras source is AniList-only). *@
+@if (isVideo && Model.VideoCast?.Count > 0)
+{
+    <section class="anime-detail-section">
+        <h2 class="anime-detail-section-title">Cast</h2>
+        <div class="video-cast-list">
+            @foreach (var c in Model.VideoCast)
+            {
+                <div class="video-cast-member">
+                    <span class="video-cast-name">@c.Name</span>
+                    @if (!string.IsNullOrEmpty(c.Character))
+                    {
+                        <span class="video-cast-char">@c.Character</span>
+                    }
+                </div>
+            }
+        </div>
+    </section>
+}
+
+@if (isVideo && a.recommendations?.Count > 0)
+{
+    <section class="anime-detail-section">
+        <h2 class="anime-detail-section-title">Recommended</h2>
+        @await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+        {
+            Items = a.recommendations,
+            Variant = "scroll",
+            VideoLinks = true,
+            ConfigUid = Model.ConfigUid,
+        })
+    </section>
+}
+
 @* Related (prequel/sequel) + Recommended carousels are populated client-side
    after page load via /anime/{id}/extras so the hero + episodes render off
    GetAnimeByIdAsync alone. Each placeholder stays hidden until the fetch
    completes; the script reveals + fills it with the same _PosterGrid card
-   markup the server would have emitted inline. *@
+   markup the server would have emitted inline. Anime only — video fills its
+   own server-rendered carousels above. *@
+@if (!isVideo)
+{
 <section class="anime-detail-section anime-detail-section-deferred" data-anime-related hidden>
     <h2 class="anime-detail-section-title">Related</h2>
     <div class="poster-scroll-row" data-anime-related-grid></div>
@@ -855,6 +896,7 @@ else if (a.type == MetaType.movie.ToString())
     <h2 class="anime-detail-section-title">Recommended</h2>
     <div class="poster-scroll-row" data-anime-recommendations-grid></div>
 </section>
+}
 
 @functions {
     // Builds an in-app href for a Link based on its category, or returns

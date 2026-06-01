@@ -672,7 +672,17 @@ public class HomeController : Controller
         List<Meta> metas;
         if (mode == "popular")
         {
-            metas = (await _cinemeta.GetVideoCatalogAsync(type)).Take(VideoShelfSize).ToList();
+            // Trakt's popular list (hydrated via Cinemeta); fall back to Cinemeta's
+            // own catalog when Trakt isn't configured.
+            if (_trakt.IsConfigured)
+            {
+                var items = await _trakt.GetDiscoveryAsync(uid, type, "popular", genre: null, page: 1, limit: VideoShelfSize);
+                metas = await HydrateVideoMetasAsync(items);
+            }
+            else
+            {
+                metas = (await _cinemeta.GetVideoCatalogAsync(type)).Take(VideoShelfSize).ToList();
+            }
         }
         else if (mode is "trending" or "anticipated")
         {
