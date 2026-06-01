@@ -591,6 +591,34 @@ namespace AnimeList.Controllers
             });
         }
 
+        // ─── Actor drill-down (video) ───────────────────────────────────
+        // An actor's movie + series filmography, reached from a cast card on
+        // the video detail page. Trakt-sourced (name + headshot + credits);
+        // cards link back into the video detail (?type=) via VideoLinks.
+        [Route("/discover/actor/{slug}")]
+        public async Task<IActionResult> Actor(string slug)
+        {
+            var tokenData = await _tokenService.GetAccessTokenAsync()
+                ?? new TokenData { anime_service = AnimeService.Kitsu };
+
+            string uid = null;
+            if (!tokenData.anonymousUser)
+            {
+                var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                uid = resolved;
+            }
+
+            var (name, image, items) = await _trakt.GetPersonCreditsAsync(slug);
+            return View("ActorDetail", new ActorDetailViewModel
+            {
+                Slug = slug,
+                Name = name,
+                Image = image,
+                ConfigUid = uid,
+                Items = items.ToVideoMetas(),
+            });
+        }
+
         // ─── Browse-by-tag ──────────────────────────────────────────────
         // Listing: every AniList tag in one render (MediaTagCollection is
         // unpaginated upstream — ~300 entries). Detail: poster grid for a
@@ -786,6 +814,17 @@ namespace AnimeList.Controllers
         public int Id { get; set; }
         // Null when the staff id didn't resolve — view renders "Unknown".
         public string Name { get; set; }
+        public string ConfigUid { get; set; }
+        public List<Meta> Items { get; set; } = [];
+    }
+
+    public class ActorDetailViewModel
+    {
+        public string Slug { get; set; }
+        // Null when the slug didn't resolve — view falls back to the slug.
+        public string Name { get; set; }
+        // Trakt headshot URL (https-prefixed); null when none.
+        public string Image { get; set; }
         public string ConfigUid { get; set; }
         public List<Meta> Items { get; set; } = [];
     }

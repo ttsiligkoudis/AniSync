@@ -30,8 +30,11 @@ namespace AnimeList.Models
     {
         public string Name { get; set; }
         public string Character { get; set; }
-        // Trakt headshot URL (from images.headshots[0], https-prefixed); null when
+        // Trakt headshot URL (from images.headshot[0], https-prefixed); null when
         // the person has no image on Trakt.
         public string Image { get; set; }
+        // Trakt person slug (e.g. "karl-urban") — links the cast card to the
+        // actor's filmography at /discover/actor/{slug}. null when absent.
+        public string Slug { get; set; }
     }
 }

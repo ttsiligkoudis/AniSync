@@ -1,0 +1,30 @@
+@model AnimeList.Controllers.ActorDetailViewModel
+@{
+    ViewData["BodyClass"] = "library-page";
+    var title = string.IsNullOrEmpty(Model.Name) ? Model.Slug : Model.Name;
+    ViewData["Title"] = $"{title} · AniSync";
+    var initial = string.IsNullOrEmpty(title) ? "?" : title[..1];
+}
+
+<header class="page-header actor-header">
+    <span class="actor-header-avatar">
+        <span class="actor-header-avatar-initial" aria-hidden="true">@initial</span>
+        @if (!string.IsNullOrEmpty(Model.Image))
+        {
+            <img class="actor-header-avatar-img" src="@Model.Image" alt="" loading="lazy"
+                 decoding="async" onerror="this.remove()" />
+        }
+    </span>
+    <span class="actor-header-text">
+        <span class="page-subtitle">Movies &amp; Series</span>
+        <h1 class="page-title">@title</h1>
+    </span>
+</header>
+
+@await Html.PartialAsync("_PosterGrid", new AnimeList.Models.PosterGridViewModel
+{
+    Items = Model.Items,
+    ConfigUid = Model.ConfigUid,
+    VideoLinks = true,
+    EmptyMessage = $"No titles found for {title}.",
+})

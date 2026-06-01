@@ -451,6 +451,7 @@ namespace AnimeList.Services
                     // poster / fanart); fall back to the plural just in case.
                     Image = TraktImage(c["person"], "headshot")
                             ?? TraktImage(c["person"], "headshots"),
+                    Slug = (string)c["person"]?["ids"]?["slug"],
                 });
                 if (list.Count >= limit) break;
             }
@@ -519,6 +520,47 @@ namespace AnimeList.Services
                 }
             }
             return episodes;
+        }
+
+        // Actor filmography for /discover/actor/{slug}: the person's name +
+        // headshot plus their movie & show cast credits (deduped by imdb id,
+        // newest first). Public — works for anonymous viewers.
+        public async Task<(string Name, string Image, List<TraktListItem> Items)> GetPersonCreditsAsync(string slug)
+        {
+            if (!IsConfigured || string.IsNullOrEmpty(slug)) return (null, null, new());
+            var enc = Uri.EscapeDataString(slug);
+            var personTask = GetPublicAsync($"/people/{enc}?extended=images");
+            var moviesTask = GetPublicAsync($"/people/{enc}/movies?extended=full,images");
+            var showsTask = GetPublicAsync($"/people/{enc}/shows?extended=full,images");
+            await Task.WhenAll(personTask, moviesTask, showsTask);
+
+            string name = null, image = null;
+            if (personTask.Result is JObject p)
+            {
+                name = (string)p["name"];
+                image = TraktImage(p, "headshot") ?? TraktImage(p, "headshots");
+            }
+
+            var items = new List<TraktListItem>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void AddCast(JToken json, string mediaKey, string type)
+            {
+                if (json is not JObject o || o["cast"] is not JArray cast) return;
+                foreach (var c in cast)
+                {
+                    var item = type == "movie" ? MovieItem(c[mediaKey]) : ShowItem(c[mediaKey]);
+                    if (string.IsNullOrEmpty(item.ImdbId)) continue;
+                    if (!seen.Add($"{item.Type}:{item.ImdbId}")) continue;
+                    items.Add(item);
+                }
+            }
+
+            AddCast(moviesTask.Result, "movie", "movie");
+            AddCast(showsTask.Result, "show", "series");
+
+            items = items.OrderByDescending(i => i.Year ?? 0).ToList();
+            return (name, image, items);
         }
 
         // Maps a Cinemeta genre name to a Trakt genre slug so the existing video

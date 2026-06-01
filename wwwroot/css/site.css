@@ -8332,6 +8332,17 @@ body.dash-modal-open { overflow: hidden; }
     text-align: center;
     gap: 0.4rem;
     scroll-snap-align: start;
+    text-decoration: none;
+    color: inherit;
+}
+a.video-cast-card[href] {
+    cursor: pointer;
+}
+a.video-cast-card[href]:hover .video-cast-avatar {
+    box-shadow: 0 0 0 2px var(--accent);
+}
+a.video-cast-card[href]:hover .video-cast-name {
+    color: var(--accent);
 }
 .video-cast-avatar {
     position: relative;
@@ -8375,5 +8386,43 @@ body.dash-modal-open { overflow: hidden; }
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+
+/* Actor filmography page (/discover/actor/{slug}) — header with a circular
+   headshot beside the name. */
+.actor-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+.actor-header-avatar {
+    position: relative;
+    flex: 0 0 auto;
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--overlay-10);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.actor-header-avatar-initial {
+    font-size: var(--text-xl);
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+.actor-header-avatar-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.actor-header-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
 }
 
