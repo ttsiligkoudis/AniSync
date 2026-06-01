@@ -74,6 +74,9 @@ namespace AnimeList.Services
             {
                 if (ct.IsCancellationRequested) break;
                 if (string.IsNullOrEmpty(entry.ImdbId) || !eligible.Contains(entry.ImdbId)) continue;
+                // Skip Trakt specials (season 0): the watch loader drops season 0, so
+                // the notification's /watch/0/{ep} deep link would 404.
+                if (entry.Season <= 0) continue;
                 // "Just aired": air instant within the lookback window. Entries
                 // without a parseable air time can't be timed, so skip them.
                 if (entry.FirstAired is not { } aired) continue;
