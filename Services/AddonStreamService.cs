@@ -160,17 +160,6 @@ namespace AnimeList.Services
             @"\b(Atmos|TrueHD|DTS-?HD(?:[\s.]?MA)?|DTS-?X|DDP|E-?AC-?3|EAC3|AC-?3|DD\+|DTS|FLAC|AAC|Opus|MP3|PCM|Vorbis)(?:[\s.]?(\d\.\d)(?:ch)?)?\b",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-        // Audio codecs no mainstream browser <video> element can decode in-page —
-        // Dolby Digital / Digital Plus / Atmos, the DTS family, and TrueHD. A
-        // release whose only audio track is one of these plays as video with NO
-        // sound, which is the "movies have no audio" report (movie releases are
-        // overwhelmingly E-AC-3 / DTS, anime is usually AAC). Flagged so the watch
-        // page can warn + point at an external player. AAC / MP3 / Opus / FLAC /
-        // Vorbis play fine and are intentionally excluded.
-        private static readonly Regex BrowserUnsupportedAudioRegex = new(
-            @"\b(?:E-?AC-?3|EAC3|AC-?3|DD\+|DDP|Dolby[\s.]*Digital(?:[\s.]*Plus)?|Atmos|TrueHD|DTS(?:[-\s]?(?:HD|X|ES|MA))*)\b",
-            RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
         public AddonStreamService(
             IHttpClientFactory clientFactory,
             ILogger<AddonStreamService> logger)
@@ -681,9 +670,6 @@ namespace AnimeList.Services
                 var source = DetectSource(combined);
                 var hdr = DetectHdr(combined);
                 var audio = DetectAudio(combined);
-                // Dolby/DTS-only releases play silently in the browser — flag so
-                // the watch page warns + offers the external-player path.
-                var audioUnsupported = BrowserUnsupportedAudioRegex.IsMatch(combined);
 
                 string bingeGroup = null;
                 if (s["behaviorHints"] is JObject hints)
@@ -734,8 +720,7 @@ namespace AnimeList.Services
                     IsHevc: isHevc,
                     Source: source,
                     Hdr: hdr,
-                    Audio: audio,
-                    AudioUnsupported: audioUnsupported));
+                    Audio: audio));
             }
 
             // Return in the addon's emit order — no re-sort, no cap. Each
