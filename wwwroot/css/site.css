@@ -8795,10 +8795,16 @@ a.video-cast-card[href]:hover .video-cast-name {
 .cal-card-thumb {
     position: relative;
     aspect-ratio: 16 / 9;
+    overflow: hidden;
     background: var(--surface-overlay);
 }
+/* Absolutely positioned so the image can't push the box past its 16:9
+   aspect-ratio — a portrait poster (anime with no banner) is cropped to the
+   same height as a landscape one, keeping every tile uniform. */
 .cal-card-thumb img,
 .cal-card-thumb-ph {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
