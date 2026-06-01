@@ -850,28 +850,26 @@ else if (a.type == MetaType.movie.ToString())
 {
     <section class="anime-detail-section">
         <h2 class="anime-detail-section-title">Cast</h2>
-        <div class="video-cast-list">
+        <div class="video-cast-scroll">
             @foreach (var c in Model.VideoCast)
             {
-                <div class="video-cast-member">
-                    @if (!string.IsNullOrEmpty(c.Image))
-                    {
-                        @* onerror collapses to the initials fallback if the Trakt
-                           CDN image is missing / blocked. *@
-                        <img class="video-cast-avatar" src="@c.Image" alt="" loading="lazy" decoding="async"
-                             onerror="this.classList.add('is-broken')" />
-                    }
-                    else
-                    {
-                        <span class="video-cast-avatar video-cast-avatar-empty" aria-hidden="true">@(string.IsNullOrEmpty(c.Name) ? "?" : c.Name[..1])</span>
-                    }
-                    <span class="video-cast-text">
-                        <span class="video-cast-name">@c.Name</span>
-                        @if (!string.IsNullOrEmpty(c.Character))
+                <div class="video-cast-card">
+                    @* The initial sits behind the headshot so it shows through
+                       when Trakt has no image or the CDN url 404s (onerror
+                       strips the img). *@
+                    <span class="video-cast-avatar">
+                        <span class="video-cast-avatar-initial" aria-hidden="true">@(string.IsNullOrEmpty(c.Name) ? "?" : c.Name[..1])</span>
+                        @if (!string.IsNullOrEmpty(c.Image))
                         {
-                            <span class="video-cast-char">@c.Character</span>
+                            <img class="video-cast-avatar-img" src="@c.Image" alt="" loading="lazy"
+                                 decoding="async" onerror="this.remove()" />
                         }
                     </span>
+                    <span class="video-cast-name">@c.Name</span>
+                    @if (!string.IsNullOrEmpty(c.Character))
+                    {
+                        <span class="video-cast-char">@c.Character</span>
+                    }
                 </div>
             }
         </div>
