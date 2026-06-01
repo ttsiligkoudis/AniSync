@@ -90,6 +90,30 @@ namespace AnimeList.Services
             @"\b(?:hevc|x265|h\.?265|hi10p?|10[\s-]?bit)\b",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+        // Non-stream "notice" rows some addons inject into the stream list —
+        // Comet's "First search for this media - More results coming", and
+        // MediaFusion's "No streams found" / "Please configure ..." /
+        // rate-limit / API-key placeholders. They carry a clickable URL (so the
+        // empty-url skip doesn't catch them) but aren't playable media. Matched
+        // only in combination with the "no real stream signal" guard below so a
+        // genuine release whose filename happens to contain one of these words
+        // isn't dropped.
+        private static readonly Regex NonStreamNoticeRegex = new(
+            @"first search for this media" +
+            @"|more results (?:coming|available|will follow|on the way)" +
+            @"|no (?:streams?|results|matching streams?|sources?) (?:found|available|yet)" +
+            @"|no matching (?:streams?|results)" +
+            @"|please configure" +
+            @"|configure (?:the|your) addon" +
+            @"|(?:setup|configuration) (?:is )?required" +
+            @"|(?:api[\s-]?key|token) (?:is )?(?:invalid|expired|missing|required)" +
+            @"|invalid (?:api[\s-]?key|token)" +
+            @"|account (?:expired|required|invalid|not configured)" +
+            @"|rate[\s-]?limit" +
+            @"|(?:quota|limit) (?:reached|exceeded)" +
+            @"|results? (?:are )?(?:being )?(?:fetched|loading)|searching\.\.\.|indexing\.\.\.",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
         // Source / release-type tokens. Listed most-specific first so
         // "1080p BluRay REMUX" surfaces as REMUX (the better signal)
         // rather than BluRay. BDRip / BRRip collapse into BluRay
@@ -658,6 +682,16 @@ namespace AnimeList.Services
                 {
                     fileIdx = fi;
                 }
+
+                // Drop addon "notice" rows (Comet's "First search for this media",
+                // MediaFusion's "No streams found" / config / rate-limit messages):
+                // they read as one of the known notices AND carry none of the signals
+                // a real release has (torrent hash / size / seeders / quality). The
+                // guard keeps a real file whose name contains e.g. "No Limit" safe.
+                var hasStreamSignal = !string.IsNullOrEmpty(infoHash)
+                    || size != null || seeders > 0 || quality != null;
+                if (!hasStreamSignal && NonStreamNoticeRegex.IsMatch(combined))
+                    continue;
 
                 // Pick a single human-readable release-name line for
                 // display. Torrentio puts the filename straight in
