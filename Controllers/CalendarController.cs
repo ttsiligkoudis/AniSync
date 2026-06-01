@@ -83,9 +83,14 @@ namespace AnimeList.Controllers
                 list.Add(ep);
             }
 
+            // Honour the "Group anime seasons" preference for the anime deep-links,
+            // same as the notifications bell + catalog renders.
+            var cfg = await GetConfigByUidAsync(uid, _configStore);
+            var groupSeasons = cfg?.enableSeasonGrouping == true;
+
             // One source failing (AniList down, Trakt unreachable) must not blank
             // the whole calendar — degrade to the other source.
-            try { await AddAnimeAsync(uid, rangeStart.ToUnixTimeSeconds(), rangeEnd.ToUnixTimeSeconds() - 1, Bucket); }
+            try { await AddAnimeAsync(uid, rangeStart.ToUnixTimeSeconds(), rangeEnd.ToUnixTimeSeconds() - 1, groupSeasons, Bucket); }
             catch (Exception ex) { _logger.LogWarning(ex, "calendar anime load failed for {Uid}", uid); }
 
             try { await AddSeriesAsync(uid, weekStart, days, rangeStart, rangeEnd, Bucket); }
@@ -140,9 +145,11 @@ namespace AnimeList.Controllers
         }
 
         // Anime: the user's Watching cache (prefixed ids in their primary service
-        // space) → AniList ids → batched airing schedule. The user-space id is kept
-        // for the deep-link so it lands on the id-space the rest of the site uses.
-        private async Task AddAnimeAsync(string uid, long startUnix, long endUnix, Action<CalendarEpisode> bucket)
+        // space) → AniList ids → batched airing schedule. The deep-link respects the
+        // "Group anime seasons" preference: when on, it points at the IMDb franchise
+        // umbrella with the cour's season embedded (same shape the notification
+        // rewriter / catalog use); when off, the user-space per-service id is kept.
+        private async Task AddAnimeAsync(string uid, long startUnix, long endUnix, bool groupSeasons, Action<CalendarEpisode> bucket)
         {
             var cache = await _watchingCache.GetAsync(uid);
             if (cache == null || cache.MediaIds.Count == 0) return;
@@ -171,10 +178,39 @@ namespace AnimeList.Controllers
             }
             if (linkByAnilist.Count == 0) return;
 
+            // When grouping, resolve each AniList id to its IMDb umbrella + cour season
+            // once and reuse across that show's episodes. Null = no usable imdb mapping
+            // (fall back to the ungrouped per-service link).
+            var grouped = new Dictionary<int, (string Imdb, int? Season)?>();
+
             var airings = await _anilist.GetAiringForMediaAsync(linkByAnilist.Keys.ToList(), startUnix, endUnix);
             foreach (var a in airings)
             {
                 if (!linkByAnilist.TryGetValue(a.AnilistId, out var userId)) continue;
+
+                string link = null;
+                if (groupSeasons)
+                {
+                    if (!grouped.TryGetValue(a.AnilistId, out var g))
+                    {
+                        g = null;
+                        try
+                        {
+                            var m = await _mapping.GetAnilistMapping($"{anilistPrefix}{a.AnilistId}");
+                            if (m != null && !string.IsNullOrEmpty(m.ImdbId)
+                                && m.ImdbId.StartsWith("tt", StringComparison.Ordinal))
+                                g = (m.ImdbId, m.Season);
+                        }
+                        catch { g = null; }
+                        grouped[a.AnilistId] = g;
+                    }
+                    if (g is { } gv)
+                        link = gv.Season is int s && s > 0
+                            ? $"/meta/{gv.Imdb}/watch/{s}/{a.Episode}"
+                            : $"/meta/{gv.Imdb}/watch/{a.Episode}";
+                }
+                link ??= $"/meta/{userId}/watch/{a.Episode}";
+
                 bucket(new CalendarEpisode(
                     Kind: "anime",
                     Title: a.Title,
@@ -182,7 +218,7 @@ namespace AnimeList.Controllers
                     Episode: a.Episode,
                     AiringAt: a.AiringAt,
                     CoverImage: a.CoverImage,
-                    LinkPath: $"/meta/{userId}/watch/{a.Episode}"));
+                    LinkPath: link));
             }
         }
 
