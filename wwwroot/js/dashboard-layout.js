@@ -103,12 +103,37 @@
         return document.querySelector('[data-dash-section="' + key + '"]') != null;
     }
 
+    // Current dashboard media-type filter (set by the media-type switch). When
+    // it's a specific mode (not "all"), the customize modal should only offer
+    // that mode's sections.
+    function dashFilter() {
+        try { return localStorage.getItem('anisync-dashboard-media') || 'all'; }
+        catch (_) { return 'all'; }
+    }
+    // A section key is offered under the active filter when it has at least one
+    // element matching the filter — or an untyped element (general sections like
+    // "Browse By" always show). filter === "all" shows everything present.
+    function presentForFilter(key, filter) {
+        var els = document.querySelectorAll('[data-dash-section="' + key + '"]');
+        if (els.length === 0) return false;
+        if (filter === 'all') return true;
+        for (var i = 0; i < els.length; i++) {
+            var mt = els[i].getAttribute('data-media-type');
+            if (!mt) return true;
+            if (mt.split(/\s+/).indexOf(filter) !== -1) return true;
+        }
+        return false;
+    }
+
     // On the dashboard, only offer sections that actually rendered (gated by the
-    // enabled modes). On /account there are no dashboard sections present, so
-    // offer every section so the user can still configure the layout there.
+    // enabled modes) AND match the active media-type filter. On /account there
+    // are no dashboard sections present, so offer every section so the user can
+    // still configure the layout there.
     function pageHasSections() { return document.querySelector('[data-dash-section]') != null; }
     function displayedRows() {
-        return pageHasSections() ? layout.filter(function (e) { return present(e.key); }) : layout.slice();
+        if (!pageHasSections()) return layout.slice();
+        var filter = dashFilter();
+        return layout.filter(function (e) { return presentForFilter(e.key, filter); });
     }
 
     function renderRows() {
