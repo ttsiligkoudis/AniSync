@@ -865,8 +865,9 @@
         <span class="dashboard-section-link-muted">Find your next favourite</span>
     </div>
     <div class="browse-grid">
-        @if (isAnime)
+        @if (animeEnabled)
         {
+        <div data-media-type="anime" style="display:contents">
         <a class="browse-tile" href="/discover?list=seasonal">
             <span class="browse-tile-icon browse-tile-icon-blue">
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -925,9 +926,11 @@
                 <p class="browse-tile-text">Browse by tag</p>
             </div>
         </a>
+        </div>
         }
-        else
+        @if (videoTypes.Count > 0)
         {
+        <div data-media-type="movie series" style="display:contents">
         <a class="browse-tile" href="/discover?list=trending">
             <span class="browse-tile-icon browse-tile-icon-blue">
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -979,6 +982,7 @@
                 <p class="browse-tile-text">Coming soon</p>
             </div>
         </a>
+        </div>
         }
     </div>
 </section>
