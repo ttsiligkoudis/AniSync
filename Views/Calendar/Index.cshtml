@@ -9,95 +9,109 @@
             <h1 class="cal-title">Calendar</h1>
             <p class="cal-sub">Recent &amp; upcoming episodes from your anime Watching list and your Trakt series.</p>
         </div>
-        <div class="cal-nav">
-            <a class="cal-nav-btn" href="/calendar?d=@Model.PrevDate" aria-label="Previous week" rel="prev">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
-            </a>
-            <span class="cal-month-label">@Model.RangeLabel</span>
-            <a class="cal-nav-btn" href="/calendar?d=@Model.NextDate" aria-label="Next week" rel="next">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg>
-            </a>
-            @if (!Model.IsCurrentWeek)
-            {
-                <a class="cal-today-btn" href="/calendar">This week</a>
-            }
+        <div class="cal-legend" aria-hidden="true">
+            <span class="cal-legend-item"><span class="cal-dot cal-dot-anime"></span> Anime</span>
+            <span class="cal-legend-item"><span class="cal-dot cal-dot-series"></span> Series</span>
         </div>
     </header>
 
-    <div class="cal-legend" aria-hidden="true">
-        <span class="cal-legend-item"><span class="cal-dot cal-dot-anime"></span> Anime</span>
-        <span class="cal-legend-item"><span class="cal-dot cal-dot-series"></span> Series</span>
+    @* Week strip — pick a day. Prev/next shift the week by 7 days (same
+       weekday stays selected); "Today" jumps back to the current day. *@
+    <div class="cal-strip">
+        <div class="cal-strip-head">
+            <a class="cal-strip-nav" href="/calendar?d=@Model.PrevDate" aria-label="Previous week" rel="prev">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+            </a>
+            <a class="cal-strip-today@(Model.SelectedIsToday ? " is-today" : "")" href="/calendar">Today</a>
+            <a class="cal-strip-nav" href="/calendar?d=@Model.NextDate" aria-label="Next week" rel="next">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg>
+            </a>
+        </div>
+        <div class="cal-strip-days" role="tablist">
+            @foreach (var day in Model.Days)
+            {
+                var dayHref = day.Date.ToString("yyyy-MM-dd");
+                var monLabel = day.Date.ToString("MMM");
+                var dowLabel = day.Date.ToString("ddd");
+                <a class="cal-dcell@(day.IsSelected ? " selected" : "")@(day.IsToday ? " today" : "")"
+                   href="/calendar?d=@dayHref"
+                   role="tab" aria-selected="@(day.IsSelected ? "true" : "false")">
+                    <span class="cal-dcell-mon">@monLabel</span>
+                    <span class="cal-dcell-num">@day.Date.Day</span>
+                    <span class="cal-dcell-dow">@dowLabel</span>
+                    <span class="cal-dcell-dots" aria-hidden="true">
+                        @if (day.HasAnime)
+                        {
+                            <span class="cal-dot cal-dot-anime"></span>
+                        }
+                        @if (day.HasSeries)
+                        {
+                            <span class="cal-dot cal-dot-series"></span>
+                        }
+                    </span>
+                </a>
+            }
+        </div>
     </div>
 
-    @if (Model.TotalEpisodes == 0)
+    <h2 class="cal-detail-date">@Model.SelectedDateLabel</h2>
+
+    @if (Model.SelectedEpisodes.Count == 0)
     {
         <div class="cal-empty">
-            No episodes scheduled this week for the shows you're tracking. Episodes show up here once
+            Nothing scheduled on this day for the shows you're tracking. Episodes show up here once
             they're on your anime <strong>Watching</strong> list or your Trakt <strong>Watching</strong> / <strong>Planning</strong> lists.
         </div>
     }
-
-    <div class="cal-week">
-        @foreach (var day in Model.Days)
-        {
-            <section class="cal-wday@(day.IsToday ? " cal-wday-today" : "")">
-                <div class="cal-wday-head">
-                    <span class="cal-wday-dow">@day.Date.ToString("dddd")</span>
-                    <span class="cal-wday-date">@day.Date.ToString("MMM d")</span>
-                    @if (day.IsToday)
-                    {
-                        <span class="cal-wday-badge">Today</span>
-                    }
-                </div>
-                @if (day.Episodes.Count == 0)
+    else
+    {
+        <div class="cal-cards">
+            @foreach (var ep in Model.SelectedEpisodes)
+            {
+                var utcTime = DateTimeOffset.FromUnixTimeSeconds(ep.AiringAt).UtcDateTime
+                    .ToString("h:mm tt", System.Globalization.CultureInfo.InvariantCulture);
+                string meta;
+                if (ep.Season.HasValue)
                 {
-                    <div class="cal-wday-empty">No episodes</div>
+                    meta = $"S{ep.Season} • E{ep.Episode}";
+                    if (!string.IsNullOrEmpty(ep.EpisodeTitle)) { meta += $" - {ep.EpisodeTitle}"; }
                 }
                 else
                 {
-                    <div class="cal-wday-eps">
-                        @foreach (var ep in day.Episodes)
-                        {
-                            var label = ep.Season.HasValue ? $"S{ep.Season}E{ep.Episode}" : $"Ep {ep.Episode}";
-                            var utcTime = DateTimeOffset.FromUnixTimeSeconds(ep.AiringAt).UtcDateTime.ToString("HH:mm");
-                            <a class="cal-row cal-row-@ep.Kind" href="@ep.LinkPath" title="@ep.Title">
-                                @if (!string.IsNullOrEmpty(ep.CoverImage))
-                                {
-                                    <img class="cal-row-thumb" src="@ep.CoverImage" alt="" loading="lazy" decoding="async" />
-                                }
-                                else
-                                {
-                                    <span class="cal-row-thumb cal-row-thumb-ph" aria-hidden="true"></span>
-                                }
-                                <span class="cal-row-body">
-                                    <span class="cal-row-title">@ep.Title</span>
-                                    <span class="cal-row-meta">
-                                        <span class="cal-row-time" data-ts="@ep.AiringAt">@utcTime</span>
-                                        <span class="cal-row-sep">·</span>
-                                        <span class="cal-row-ep">@label</span>
-                                        <span class="cal-row-sep">·</span>
-                                        <span class="cal-row-kind">@(ep.Kind == "anime" ? "Anime" : "Series")</span>
-                                    </span>
-                                </span>
-                            </a>
-                        }
-                    </div>
+                    meta = $"Episode {ep.Episode}";
                 }
-            </section>
-        }
-    </div>
+                <a class="cal-card cal-card-@ep.Kind" href="@ep.LinkPath" title="@ep.Title">
+                    <div class="cal-card-thumb">
+                        @if (!string.IsNullOrEmpty(ep.CoverImage))
+                        {
+                            <img src="@ep.CoverImage" alt="" loading="lazy" decoding="async" />
+                        }
+                        else
+                        {
+                            <span class="cal-card-thumb-ph" aria-hidden="true"></span>
+                        }
+                        <span class="cal-card-time" data-ts="@ep.AiringAt">@utcTime</span>
+                    </div>
+                    <div class="cal-card-info">
+                        <div class="cal-card-title">@ep.Title</div>
+                        <div class="cal-card-meta">@meta</div>
+                    </div>
+                </a>
+            }
+        </div>
+    }
 </div>
 
 @* Localise the air time from the Unix timestamp; falls back to the
-   server-rendered UTC HH:mm when JS is off. (Day grouping stays UTC.) *@
+   server-rendered UTC time when JS is off. (Day grouping stays UTC.) *@
 <script>
     (function () {
-        document.querySelectorAll('.cal-row-time[data-ts]').forEach(function (el) {
+        document.querySelectorAll('.cal-card-time[data-ts]').forEach(function (el) {
             var ts = parseInt(el.getAttribute('data-ts'), 10);
             if (!ts) return;
             try {
                 el.textContent = new Date(ts * 1000)
-                    .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    .toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
             } catch (_) { /* keep the UTC fallback */ }
         });
     })();

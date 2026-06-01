@@ -58,15 +58,14 @@ namespace AnimeList.Controllers
 
             var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-            // ?d=yyyy-MM-dd anchors the week (any day within it); default = today.
-            var anchor = DateOnly.TryParseExact(d, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+            // ?d=yyyy-MM-dd is the selected day; default = today.
+            var selectedDate = DateOnly.TryParseExact(d, "yyyy-MM-dd", CultureInfo.InvariantCulture,
                 DateTimeStyles.None, out var parsed)
                 ? parsed
                 : today;
 
-            // Sunday-first week containing the anchor.
-            var weekStart = anchor.AddDays(-(int)anchor.DayOfWeek);
-            var weekEnd = weekStart.AddDays(6);
+            // Sunday-first week containing the selected day.
+            var weekStart = selectedDate.AddDays(-(int)selectedDate.DayOfWeek);
             const int days = 7;
 
             var rangeStart = new DateTimeOffset(weekStart.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
@@ -93,6 +92,7 @@ namespace AnimeList.Controllers
             catch (Exception ex) { _logger.LogWarning(ex, "calendar series load failed for {Uid}", uid); }
 
             var dayList = new List<CalendarDay>(days);
+            var selectedEpisodes = new List<CalendarEpisode>();
             var total = 0;
             for (var i = 0; i < days; i++)
             {
@@ -101,39 +101,45 @@ namespace AnimeList.Controllers
                 eps ??= new List<CalendarEpisode>();
                 eps.Sort((a, b) => a.AiringAt.CompareTo(b.AiringAt));
                 total += eps.Count;
+
+                var isSelected = date == selectedDate;
+                if (isSelected) selectedEpisodes = eps;
+
                 dayList.Add(new CalendarDay
                 {
                     Date = date,
                     IsToday = date == today,
+                    IsSelected = isSelected,
+                    HasAnime = eps.Any(e => e.Kind == "anime"),
+                    HasSeries = eps.Any(e => e.Kind == "series"),
                     Episodes = eps,
                 });
             }
 
-            var currentWeekStart = today.AddDays(-(int)today.DayOfWeek);
             ViewData["ActiveNav"] = "calendar";
             ViewData["Title"] = "Calendar";
             return View(new CalendarViewModel
             {
-                WeekStart = weekStart,
-                WeekEnd = weekEnd,
-                RangeLabel = BuildRangeLabel(weekStart, weekEnd),
-                PrevDate = weekStart.AddDays(-7).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                NextDate = weekStart.AddDays(7).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                IsCurrentWeek = weekStart == currentWeekStart,
                 Days = dayList,
+                SelectedDate = selectedDate,
+                SelectedDateLabel = BuildDayLabel(selectedDate),
+                SelectedEpisodes = selectedEpisodes,
+                PrevDate = selectedDate.AddDays(-7).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                NextDate = selectedDate.AddDays(7).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                SelectedIsToday = selectedDate == today,
                 TotalEpisodes = total,
             });
         }
 
-        // "Jun 1 – 7, 2026" within a month; "Jun 28 – Jul 4, 2026" across months.
-        private static string BuildRangeLabel(DateOnly start, DateOnly end)
+        // "June 3rd, 2026" — full month, ordinal day, year.
+        private static string BuildDayLabel(DateOnly date)
         {
             var ci = CultureInfo.InvariantCulture;
-            var startLabel = start.ToString("MMM d", ci);
-            var endLabel = end.Month == start.Month && end.Year == start.Year
-                ? end.ToString("d", ci)
-                : end.ToString("MMM d", ci);
-            return $"{startLabel} – {endLabel}, {end.Year}";
+            var d = date.Day;
+            var suffix = (d % 100) is >= 11 and <= 13
+                ? "th"
+                : (d % 10) switch { 1 => "st", 2 => "nd", 3 => "rd", _ => "th" };
+            return $"{date.ToString("MMMM", ci)} {d}{suffix}, {date.Year}";
         }
 
         // Anime: the user's Watching cache (prefixed ids in their primary service
@@ -215,7 +221,8 @@ namespace AnimeList.Controllers
                     Episode: e.Episode,
                     AiringAt: aired.ToUnixTimeSeconds(),
                     CoverImage: e.ThumbnailUrl,
-                    LinkPath: $"/meta/{e.ImdbId}/watch/{e.Season}/{e.Episode}?type=series"));
+                    LinkPath: $"/meta/{e.ImdbId}/watch/{e.Season}/{e.Episode}?type=series",
+                    EpisodeTitle: e.EpisodeTitle));
             }
         }
     }
