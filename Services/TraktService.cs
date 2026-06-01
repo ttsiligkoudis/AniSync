@@ -427,7 +427,10 @@ namespace AnimeList.Services
         {
             if (!IsConfigured || string.IsNullOrEmpty(imdbId)) return new();
             var t = type == "movie" ? "movies" : "shows";
-            if (await GetPublicAsync($"/{t}/{imdbId}/people") is not JObject o || o["cast"] is not JArray cast)
+            // extended=images surfaces person.images.headshots (Trakt re-added image
+            // URLs to the API in 2024); without it the people payload has no images.
+            if (await GetPublicAsync($"/{t}/{imdbId}/people?extended=images") is not JObject o
+                || o["cast"] is not JArray cast)
                 return new();
             var list = new List<TraktCastMember>();
             foreach (var c in cast)
@@ -438,10 +441,27 @@ namespace AnimeList.Services
                 var character = c["characters"] is JArray chars && chars.Count > 0
                     ? (string)chars[0]
                     : (string)c["character"];
-                list.Add(new TraktCastMember { Name = name, Character = character });
+                var headshot = (c["person"]?["images"]?["headshots"] as JArray)?.FirstOrDefault();
+                list.Add(new TraktCastMember
+                {
+                    Name = name,
+                    Character = character,
+                    Image = NormalizeTraktImage((string)headshot),
+                });
                 if (list.Count >= limit) break;
             }
             return list;
+        }
+
+        // Trakt image URLs come back scheme-less (e.g. "media.trakt.tv/images/...");
+        // prepend https:// so they're usable as-is in <img src>.
+        private static string NormalizeTraktImage(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return null;
+            if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                return url;
+            return "https://" + url.TrimStart('/');
         }
 
         public async Task<List<TraktListItem>> GetRelatedAsync(string type, string imdbId, int limit)

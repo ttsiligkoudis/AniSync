@@ -854,11 +854,24 @@ else if (a.type == MetaType.movie.ToString())
             @foreach (var c in Model.VideoCast)
             {
                 <div class="video-cast-member">
-                    <span class="video-cast-name">@c.Name</span>
-                    @if (!string.IsNullOrEmpty(c.Character))
+                    @if (!string.IsNullOrEmpty(c.Image))
                     {
-                        <span class="video-cast-char">@c.Character</span>
+                        @* onerror collapses to the initials fallback if the Trakt
+                           CDN image is missing / blocked. *@
+                        <img class="video-cast-avatar" src="@c.Image" alt="" loading="lazy" decoding="async"
+                             onerror="this.classList.add('is-broken')" />
                     }
+                    else
+                    {
+                        <span class="video-cast-avatar video-cast-avatar-empty" aria-hidden="true">@(string.IsNullOrEmpty(c.Name) ? "?" : c.Name[..1])</span>
+                    }
+                    <span class="video-cast-text">
+                        <span class="video-cast-name">@c.Name</span>
+                        @if (!string.IsNullOrEmpty(c.Character))
+                        {
+                            <span class="video-cast-char">@c.Character</span>
+                        }
+                    </span>
                 </div>
             }
         </div>
