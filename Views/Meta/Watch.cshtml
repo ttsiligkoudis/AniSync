@@ -2392,7 +2392,8 @@
                 var subQs = 'id=' + encodeURIComponent(animeId)
                     + '&episode=' + encodeURIComponent(episode)
                     + (hasSeasons ? '&season=' + encodeURIComponent(season) : '')
-                    + (firstLine ? '&filename=' + encodeURIComponent(firstLine) : '');
+                    + (firstLine ? '&filename=' + encodeURIComponent(firstLine) : '')
+                    + (isMovie ? '&type=movie' : '');
 
                 // Resolve the stream URL through our server-side
                 // redirect-follow first. For MediaFusion-style addons
@@ -3490,7 +3491,8 @@
                     var qs = 'id=' + encodeURIComponent(animeId)
                         + '&episode=' + encodeURIComponent(episode)
                         + (hasSeasons ? '&season=' + encodeURIComponent(season) : '')
-                        + (filename ? '&filename=' + encodeURIComponent(filename) : '');
+                        + (filename ? '&filename=' + encodeURIComponent(filename) : '')
+                        + (isMovie ? '&type=movie' : '');
                     fetch('/meta/episode-subtitles?' + qs, {
                         credentials: 'same-origin',
                         headers: { 'Accept': 'application/json' },
@@ -3836,7 +3838,17 @@
                         // source pill — handy for users picking
                         // between two same-quality releases but not
                         // primary signal for most viewers.
-                        if (s.audio) {
+                        // Dolby/DTS/TrueHD audio plays as silent video in most
+                        // browsers — surface it as a red warning pill (reusing the
+                        // HEVC badge style) so the user knows to use an external
+                        // player or pick an AAC release, instead of a normal pill.
+                        if (s.audioUnsupported) {
+                            sub.appendChild(el('span', {
+                                class: 'episode-stream-hevc',
+                                'data-supported': 'false',
+                                title: "This release's audio (" + (s.audio || 'Dolby/DTS') + ") can't be decoded by most browsers — you'll get picture with no sound. Open it in an external player (VLC / Infuse), or pick a stream with AAC audio.",
+                            }, (s.audio || 'Audio') + ' ⚠');
+                        } else if (s.audio) {
                             sub.appendChild(el('span', { class: 'episode-stream-audio' }, s.audio));
                         }
                         if (s.size) sub.appendChild(el('span', { class: 'episode-stream-size' }, s.size));
