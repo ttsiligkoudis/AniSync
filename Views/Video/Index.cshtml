@@ -25,14 +25,14 @@
 
 @* Single-select switch between the modes enabled in the chooser modal. *@
 @* Browse-mode tabs (Popular + Trakt feeds) plus an Actors browse-by pill.
-   Mode pills are plain links to /discover?mode=… preserving the active
+   Mode pills are plain links to /discover?list=… preserving the active
    genre/search. The Actors pill links to the popular-actors directory and
    shows regardless of Trakt (it's TMDB-backed), so the strip always renders. *@
 <nav class="library-tabs" role="tablist" aria-label="Discover modes">
     @foreach (var (slug, lbl) in Model.Modes)
     {
         var isActive = Model.Mode == slug;
-        var parts = new List<string> { $"mode={slug}" };
+        var parts = new List<string> { $"list={slug}" };
         if (hasGenre) parts.Add($"genre={Uri.EscapeDataString(Model.Genre)}");
         if (hasSearch) parts.Add($"search={Uri.EscapeDataString(Model.Search)}");
         <a class="library-tab @(isActive ? "library-tab-active" : "")"
@@ -59,7 +59,7 @@
            autocomplete="off" />
 
     @* Keep search / genre submits within the active browse mode. *@
-    <input type="hidden" name="mode" value="@Model.Mode" />
+    <input type="hidden" name="list" value="@Model.Mode" />
 
     <select name="genre" class="filter-bar-select" aria-label="Genre">
         <option value="">All genres</option>
