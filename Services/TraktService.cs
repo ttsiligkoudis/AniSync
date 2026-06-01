@@ -320,12 +320,9 @@ namespace AnimeList.Services
             {
                 items = await GetCustomStatusItemsAsync(uid, CustomStatusListName("dropped"));
             }
-            else if (list == ListType.Repeating)
-            {
-                items = await GetCustomStatusItemsAsync(uid, CustomStatusListName("rewatching"));
-            }
             else
             {
+                // Repeating has no Trakt surface for video (no Rewatching list).
                 items = new List<TraktListItem>();
             }
 
@@ -549,7 +546,6 @@ namespace AnimeList.Services
 
                 case "onhold":
                 case "dropped":
-                case "rewatching":
                     // No native Trakt surface — clear them all and park the title
                     // in the matching AniSync personal list (created on demand).
                     await RemoveFromWatchlistAsync(uid, type, imdbId);
@@ -844,11 +840,12 @@ namespace AnimeList.Services
         // (playback) and completed (history). The remaining AniSync statuses are
         // backed by per-user personal lists so they round-trip to the user's
         // Trakt account (and show up in Trakt apps too).
+        // Only two — a free Trakt account caps the number of custom lists, so we
+        // don't offer Rewatching for video (it'd need a third list).
         private static readonly (string Status, string Name)[] CustomStatusLists =
         {
-            ("onhold",     "AniSync On Hold"),
-            ("dropped",    "AniSync Dropped"),
-            ("rewatching", "AniSync Rewatching"),
+            ("onhold",  "AniSync On Hold"),
+            ("dropped", "AniSync Dropped"),
         };
 
         // status → list name (null when the status isn't custom-list backed).

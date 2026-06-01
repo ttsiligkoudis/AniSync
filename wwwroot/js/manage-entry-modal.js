@@ -89,9 +89,9 @@
         1: { 'CURRENT': 'current', 'PLANNING': 'planning', 'COMPLETED': 'completed', 'PAUSED': 'paused', 'DROPPED': 'dropped', 'REPEATING': 'repeating' },
         2: { 'watching': 'current', 'plan_to_watch': 'planning', 'completed': 'completed', 'on_hold': 'paused', 'dropped': 'dropped', 'rewatching': 'repeating' },
         // Trakt (movies / series): Watchlist→planning, Watching→Continue
-        // Watching (current), Watched→completed; On Hold / Dropped / Rewatching
-        // ride AniSync-managed Trakt personal lists.
-        3: { 'planning': 'planning', 'watching': 'current', 'completed': 'completed', 'onhold': 'paused', 'dropped': 'dropped', 'rewatching': 'repeating' },
+        // Watching (current), Watched→completed; On Hold / Dropped ride
+        // AniSync-managed Trakt personal lists.
+        3: { 'planning': 'planning', 'watching': 'current', 'completed': 'completed', 'onhold': 'paused', 'dropped': 'dropped' },
     };
 
     // The currently-active per-cour entry id (anilist:N / kitsu:N / mal:N).
@@ -313,6 +313,17 @@
                 finishedInput.value = data.finishedAt || '';
                 rewatchInput.value = data.rewatchCount || 0;
                 notesInput.value = data.notes || '';
+                // Trakt (movies / series) only stores status, episode progress
+                // and rating — it has no Started / Finished / Rewatches / Notes,
+                // so hide those fields for the Trakt case rather than showing
+                // inputs that silently don't persist.
+                var isTraktEntry = activeMediaType === 'movie' || activeMediaType === 'series';
+                var startedRow = startedInput.closest('.entry-modal-field-row');
+                if (startedRow) startedRow.hidden = isTraktEntry;
+                var rewatchField = rewatchInput.closest('.entry-modal-field');
+                if (rewatchField) rewatchField.hidden = isTraktEntry;
+                var notesFieldEl = notesInput.closest('.entry-modal-field');
+                if (notesFieldEl) notesFieldEl.hidden = isTraktEntry;
                 // Reveal the Delete button only when the entry actually
                 // exists on the user's list (data.status non-empty). For
                 // the create flow ("Add to List" pill on the detail page)
@@ -334,8 +345,9 @@
         var opts;
         if (service === 3) {
             // Trakt's native surfaces cover Watching (playback), Planning
-            // (watchlist) and Completed (history); On Hold / Dropped /
-            // Rewatching ride AniSync-managed Trakt personal lists. Movies get
+            // (watchlist) and Completed (history); On Hold / Dropped ride
+            // AniSync-managed Trakt personal lists. (No Rewatching — a free Trakt
+            // account caps custom lists, so we keep to two.) Movies get
             // "Watching" too (a movie left part-way via a paused playback).
             opts = [
                 ['', '— None (not in list) —'],
@@ -344,7 +356,6 @@
                 ['completed', 'Completed'],
                 ['onhold', 'On Hold'],
                 ['dropped', 'Dropped'],
-                ['rewatching', 'Rewatching'],
             ];
         } else {
             opts = STATUS_OPTIONS[service] || STATUS_OPTIONS[1];
