@@ -637,29 +637,6 @@ public class HomeController : Controller
             VideoLinks = true,
         });
 
-    private async Task<List<Meta>> HydrateVideoMetasAsync(List<TraktListItem> items)
-    {
-        if (items == null || items.Count == 0) return [];
-        var lookups = items.Select(async it =>
-        {
-            try
-            {
-                var meta = await _cinemeta.GetVideoMetaAsync(it.Type, it.ImdbId);
-                if (meta == null) return null;
-                // Force the card's type from the Trakt item so _PosterGrid's
-                // VideoLinks routing emits the right ?type=.
-                meta.type = it.Type == "movie" ? MetaType.movie.ToString() : MetaType.series.ToString();
-                return meta;
-            }
-            catch
-            {
-                return null;
-            }
-        });
-        var resolved = await Task.WhenAll(lookups);
-        return resolved.Where(m => m != null).ToList();
-    }
-
     // Trending / Most Popular / Most Anticipated for the video dashboard.
     // Public feeds (no user identity required); "popular" is Cinemeta's top
     // catalog, the others are Trakt's ranked discovery feeds.
@@ -677,7 +654,7 @@ public class HomeController : Controller
             if (_trakt.IsConfigured)
             {
                 var items = await _trakt.GetDiscoveryAsync(uid, type, "popular", genre: null, page: 1, limit: VideoShelfSize);
-                metas = await HydrateVideoMetasAsync(items);
+                metas = items.ToVideoMetas();
             }
             else
             {
@@ -688,7 +665,7 @@ public class HomeController : Controller
         {
             if (!_trakt.IsConfigured) return VideoShelfPartial([], uid);
             var items = await _trakt.GetDiscoveryAsync(uid, type, mode, genre: null, page: 1, limit: VideoShelfSize);
-            metas = await HydrateVideoMetasAsync(items);
+            metas = items.ToVideoMetas();
         }
         else
         {
@@ -710,7 +687,7 @@ public class HomeController : Controller
         // type when one is given.
         if (type is "movie" or "series")
             playback = playback.Where(i => i.Type == type);
-        var metas = await HydrateVideoMetasAsync(playback.Take(ContinueWatchingMaxItems).ToList());
+        var metas = playback.Take(ContinueWatchingMaxItems).ToList().ToVideoMetas();
         return VideoShelfPartial(metas, uid);
     }
 

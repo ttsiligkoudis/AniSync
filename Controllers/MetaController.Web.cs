@@ -287,6 +287,10 @@ namespace AnimeList.Controllers
                     if (!string.IsNullOrWhiteSpace(summary.Overview)) meta.description = summary.Overview;
                     if (summary.Runtime is int rt && rt > 0) meta.avgDuration = rt;
                     certification = string.IsNullOrWhiteSpace(summary.Certification) ? null : summary.Certification;
+                    // Full-Trakt artwork; Cinemeta's poster/background stays as the
+                    // fallback (only overridden when Trakt actually has an image).
+                    if (!string.IsNullOrEmpty(summary.Poster)) meta.poster = summary.Poster;
+                    if (!string.IsNullOrEmpty(summary.Background)) meta.background = summary.Background;
                     if (!string.IsNullOrWhiteSpace(summary.Trailer))
                     {
                         var ts = new TrailerStream(summary.Trailer, meta.name);
@@ -294,14 +298,7 @@ namespace AnimeList.Controllers
                             meta.trailerStreams = new List<TrailerStream> { ts };
                     }
                 }
-                meta.recommendations = relatedTask.Result.Select(it => new Meta
-                {
-                    id = it.ImdbId,
-                    name = it.Title,
-                    year = it.Year,
-                    type = it.Type == "movie" ? MetaType.movie.ToString() : MetaType.series.ToString(),
-                    poster = $"https://images.metahub.space/poster/medium/{it.ImdbId}/img",
-                }).ToList();
+                meta.recommendations = relatedTask.Result.Select(it => it.ToVideoMeta()).ToList();
             }
 
             // Current Trakt state → the hero's Manage Entry pill (status +

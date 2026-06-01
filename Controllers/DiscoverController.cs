@@ -1,5 +1,6 @@
 using AnimeList.Models;
 using AnimeList.Services;
+using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -699,7 +700,7 @@ namespace AnimeList.Controllers
                 else
                 {
                     var traktItems = await _trakt.GetDiscoveryAsync(uid, type, mode, genre, page, VideoModeSize);
-                    items = await BuildVideoMetasAsync(traktItems);
+                    items = traktItems.ToVideoMetas();
                 }
             }
             else if (_trakt.IsConfigured)
@@ -708,7 +709,7 @@ namespace AnimeList.Controllers
                 // Cinemeta. (Falls back to Cinemeta's own catalog below when Trakt
                 // isn't configured, so the video section still works.)
                 var traktItems = await _trakt.GetDiscoveryAsync(uid, type, "popular", genre, page, VideoModeSize);
-                items = await BuildVideoMetasAsync(traktItems);
+                items = traktItems.ToVideoMetas();
             }
             else
             {
@@ -728,26 +729,6 @@ namespace AnimeList.Controllers
         // Cinemeta, in parallel, preserving Trakt's ranked order and dropping any
         // id Cinemeta can't resolve. Forces Meta.type from the Trakt item so the
         // _PosterGrid VideoLinks routing picks the right ?type=.
-        private async Task<List<Meta>> BuildVideoMetasAsync(List<TraktListItem> items)
-        {
-            var lookups = items.Select(async it =>
-            {
-                try
-                {
-                    var meta = await _cinemeta.GetVideoMetaAsync(it.Type, it.ImdbId);
-                    if (meta == null) return null;
-                    meta.type = it.Type == "movie" ? MetaType.movie.ToString() : MetaType.series.ToString();
-                    return meta;
-                }
-                catch
-                {
-                    return null;
-                }
-            });
-
-            var resolved = await Task.WhenAll(lookups);
-            return resolved.Where(m => m != null).ToList();
-        }
 
         // UID resolution mirroring Index() — anonymous visitors get null.
         private async Task<string> ResolveVideoUidAsync()

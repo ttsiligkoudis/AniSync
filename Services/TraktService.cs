@@ -192,7 +192,7 @@ namespace AnimeList.Services
 
         public async Task<List<TraktListItem>> GetWatchlistAsync(string uid)
         {
-            var arr = await GetAuthedAsync(uid, "/sync/watchlist?extended=full") as JArray;
+            var arr = await GetAuthedAsync(uid, "/sync/watchlist?extended=full,images") as JArray;
             if (arr == null) return new();
 
             var items = new List<TraktListItem>();
@@ -207,7 +207,7 @@ namespace AnimeList.Services
 
         public async Task<List<TraktListItem>> GetPlaybackAsync(string uid)
         {
-            var arr = await GetAuthedAsync(uid, "/sync/playback?extended=full") as JArray;
+            var arr = await GetAuthedAsync(uid, "/sync/playback?extended=full,images") as JArray;
             if (arr == null) return new();
 
             var items = new List<TraktListItem>();
@@ -265,7 +265,7 @@ namespace AnimeList.Services
 
         public async Task<List<TraktListItem>> GetHistoryAsync(string uid)
         {
-            var arr = await GetAuthedAsync(uid, "/sync/history?extended=full&limit=100") as JArray;
+            var arr = await GetAuthedAsync(uid, "/sync/history?extended=full,images&limit=100") as JArray;
             if (arr == null) return new();
 
             var items = new List<TraktListItem>();
@@ -368,7 +368,7 @@ namespace AnimeList.Services
             };
             if (path == null) return new();
 
-            var qs = new List<string> { "extended=full", $"page={Math.Max(1, page)}", $"limit={limit}" };
+            var qs = new List<string> { "extended=full,images", $"page={Math.Max(1, page)}", $"limit={limit}" };
             var slug = TraktGenreSlug(genre);
             if (!string.IsNullOrEmpty(slug)) qs.Add($"genres={Uri.EscapeDataString(slug)}");
             if (mode == "recommended") qs.Add("ignore_collected=true");
@@ -408,7 +408,7 @@ namespace AnimeList.Services
         {
             if (!IsConfigured || string.IsNullOrEmpty(imdbId)) return null;
             var t = type == "movie" ? "movies" : "shows";
-            if (await GetPublicAsync($"/{t}/{imdbId}?extended=full") is not JObject o) return null;
+            if (await GetPublicAsync($"/{t}/{imdbId}?extended=full,images") is not JObject o) return null;
             return new TraktVideoSummary
             {
                 Title = (string)o["title"],
@@ -418,6 +418,8 @@ namespace AnimeList.Services
                 Certification = (string)o["certification"],
                 Rating = (double?)o["rating"],
                 Trailer = (string)o["trailer"],
+                Poster = TraktImage(o, "poster"),
+                Background = TraktImage(o, "fanart"),
                 Genres = (o["genres"] as JArray)?.Select(g => (string)g)
                     .Where(s => !string.IsNullOrEmpty(s)).ToList() ?? new(),
             };
@@ -441,12 +443,11 @@ namespace AnimeList.Services
                 var character = c["characters"] is JArray chars && chars.Count > 0
                     ? (string)chars[0]
                     : (string)c["character"];
-                var headshot = (c["person"]?["images"]?["headshots"] as JArray)?.FirstOrDefault();
                 list.Add(new TraktCastMember
                 {
                     Name = name,
                     Character = character,
-                    Image = NormalizeTraktImage((string)headshot),
+                    Image = TraktImage(c["person"], "headshots"),
                 });
                 if (list.Count >= limit) break;
             }
@@ -468,7 +469,7 @@ namespace AnimeList.Services
         {
             if (!IsConfigured || string.IsNullOrEmpty(imdbId)) return new();
             var t = type == "movie" ? "movies" : "shows";
-            if (await GetPublicAsync($"/{t}/{imdbId}/related?extended=full&limit={Math.Max(1, limit)}") is not JArray arr)
+            if (await GetPublicAsync($"/{t}/{imdbId}/related?extended=full,images&limit={Math.Max(1, limit)}") is not JArray arr)
                 return new();
             var items = new List<TraktListItem>();
             foreach (var it in arr)
@@ -488,7 +489,7 @@ namespace AnimeList.Services
         {
             var episodes = new List<Video>();
             if (!IsConfigured || string.IsNullOrEmpty(imdbId)) return episodes;
-            if (await GetPublicAsync($"/shows/{imdbId}/seasons?extended=episodes,full") is not JArray seasons)
+            if (await GetPublicAsync($"/shows/{imdbId}/seasons?extended=episodes,full,images") is not JArray seasons)
                 return episodes;
 
             foreach (var s in seasons)
@@ -510,6 +511,7 @@ namespace AnimeList.Services
                         overview = (string)e["overview"],
                         released = aired,
                         firstAired = aired,
+                        thumbnail = TraktImage(e, "screenshot"),
                     });
                 }
             }
@@ -907,7 +909,7 @@ namespace AnimeList.Services
         // deletion keys off the playback id, not the movie id.
         private async Task<long?> FindMoviePlaybackIdAsync(string uid, string imdbId)
         {
-            var arr = await GetAuthedAsync(uid, "/sync/playback?extended=full") as JArray;
+            var arr = await GetAuthedAsync(uid, "/sync/playback?extended=full,images") as JArray;
             if (arr == null) return null;
             foreach (var it in arr)
             {
@@ -930,7 +932,7 @@ namespace AnimeList.Services
         private async Task<List<long>> FindShowPlaybackIdsAsync(string uid, string imdbId)
         {
             var ids = new List<long>();
-            var arr = await GetAuthedAsync(uid, "/sync/playback?extended=full") as JArray;
+            var arr = await GetAuthedAsync(uid, "/sync/playback?extended=full,images") as JArray;
             if (arr == null) return ids;
             foreach (var it in arr)
             {
@@ -1025,7 +1027,7 @@ namespace AnimeList.Services
         {
             var id = await FindListIdAsync(uid, name);
             if (id == null) return new();
-            if (await GetAuthedAsync(uid, $"/users/me/lists/{id}/items?extended=full") is not JArray arr) return new();
+            if (await GetAuthedAsync(uid, $"/users/me/lists/{id}/items?extended=full,images") is not JArray arr) return new();
             var items = new List<TraktListItem>();
             foreach (var it in arr)
             {
@@ -1067,6 +1069,9 @@ namespace AnimeList.Services
             ImdbId = (string)m?["ids"]?["imdb"],
             Title = (string)m?["title"],
             Year = (int?)m?["year"],
+            Poster = TraktImage(m, "poster"),
+            Background = TraktImage(m, "fanart"),
+            Rating = (double?)m?["rating"],
         };
 
         private static TraktListItem ShowItem(JToken s) => new()
@@ -1075,7 +1080,17 @@ namespace AnimeList.Services
             ImdbId = (string)s?["ids"]?["imdb"],
             Title = (string)s?["title"],
             Year = (int?)s?["year"],
+            Poster = TraktImage(s, "poster"),
+            Background = TraktImage(s, "fanart"),
+            Rating = (double?)s?["rating"],
         };
+
+        // Pulls the first image of a given kind (poster / fanart / headshots /
+        // screenshot / logo) off a node's images object, https-prefixed. null
+        // when the node has no images (i.e. extended=images wasn't requested or
+        // Trakt has none).
+        private static string TraktImage(JToken node, string kind)
+            => NormalizeTraktImage((string)(node?["images"]?[kind] as JArray)?.FirstOrDefault());
 
         // Grouped body for /sync/* endpoints (watchlist, history). A movie
         // rides under "movies"; a show under "shows" — with seasons/episodes
