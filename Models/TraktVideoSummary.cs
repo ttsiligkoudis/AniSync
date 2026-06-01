@@ -21,10 +21,13 @@ namespace AnimeList.Models
         public List<string> Genres { get; set; } = new();
     }
 
-    /// <summary>A cast member from Trakt's /people endpoint (no images in the API).</summary>
+    /// <summary>A cast member from Trakt's /people endpoint. Headshot needs extended=images.</summary>
     public class TraktCastMember
     {
         public string Name { get; set; }
         public string Character { get; set; }
+        // Trakt headshot URL (from images.headshots[0], https-prefixed); null when
+        // the person has no image on Trakt.
+        public string Image { get; set; }
     }
 }

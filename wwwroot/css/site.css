@@ -8312,28 +8312,61 @@ body.dash-modal-open { overflow: hidden; }
     gap: 0.5rem;
 }
 
-/* Video detail — Trakt cast list (names + characters; Trakt ships no images). */
+/* Video detail — Trakt cast list (avatar + name + character; headshots from
+   Trakt's image CDN via extended=images, with an initials fallback). */
 .video-cast-list {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 0.5rem;
 }
 .video-cast-member {
     display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-    padding: 0.5rem 0.8rem;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.45rem 0.7rem;
     background: var(--overlay-04);
     border: 1px solid var(--overlay-10);
     border-radius: var(--radius-md);
+    min-width: 0;
+}
+.video-cast-avatar {
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: var(--overlay-10);
+}
+.video-cast-avatar.is-broken {
+    visibility: hidden;
+}
+.video-cast-avatar-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--text-sm);
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+.video-cast-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
     min-width: 0;
 }
 .video-cast-name {
     font-size: var(--text-sm);
     font-weight: 600;
     color: var(--text-strong);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .video-cast-char {
     font-size: var(--text-xs);
     color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
