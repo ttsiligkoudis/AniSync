@@ -735,6 +735,33 @@ namespace AnimeList.Services
             }
         }
 
+        // POST that returns the parsed response body (e.g. to read a freshly
+        // created list's id), rather than just success/failure.
+        private async Task<JToken> PostAuthedReturningAsync(string uid, string path, JObject body)
+        {
+            var token = await GetValidTokenAsync(uid);
+            if (token == null) return null;
+            try
+            {
+                var client = _clientFactory.CreateClient();
+                client.Timeout = TimeSpan.FromSeconds(10);
+                using var req = BuildApiRequest(HttpMethod.Post, path, token.access_token, body);
+                var resp = await client.SendAsync(req);
+                var b = await resp.Content.ReadAsStringAsync();
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Trakt POST {Path} returned {Status}: {Body}", path, (int)resp.StatusCode, Truncate(b, 300));
+                    return null;
+                }
+                return string.IsNullOrEmpty(b) ? null : JToken.Parse(b);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Trakt POST {Path} failed.", path);
+                return null;
+            }
+        }
+
         private async Task<bool> DeleteAuthedAsync(string uid, string path)
         {
             var token = await GetValidTokenAsync(uid);
@@ -851,13 +878,22 @@ namespace AnimeList.Services
         {
             var existing = await FindListIdAsync(uid, name);
             if (existing != null) return existing;
-            await PostAuthedAsync(uid, "/users/me/lists", new JObject
+
+            // Read the new list's id straight from the create response — a
+            // follow-up /users/me/lists fetch can race (the list may not show up
+            // immediately), which left the item un-added.
+            var created = await PostAuthedReturningAsync(uid, "/users/me/lists", new JObject
             {
                 ["name"] = name,
                 ["description"] = "Managed by AniSync.",
                 ["privacy"] = "private",
             });
-            // Re-resolve (and cache) the freshly-created list.
+            if ((long?)created?["ids"]?["trakt"] is long id)
+            {
+                _listIdCache[uid + "|" + name] = id;
+                return id;
+            }
+            // Fallback (no body returned) — re-resolve.
             return await FindListIdAsync(uid, name);
         }
 

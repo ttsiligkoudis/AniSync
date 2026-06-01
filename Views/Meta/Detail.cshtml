@@ -172,6 +172,9 @@
                     if (string.IsNullOrEmpty(vStatus)) { vLabel = "Add to List"; }
                     else if (vStatus == "planning") { vLabel = "Planning"; }
                     else if (vStatus == "completed") { vLabel = "Completed"; }
+                    else if (vStatus == "onhold") { vLabel = "On Hold"; }
+                    else if (vStatus == "dropped") { vLabel = "Dropped"; }
+                    else if (vStatus == "rewatching") { vLabel = "Rewatching"; }
                     else
                     {
                         // "watching" — show episode progress for series only;
