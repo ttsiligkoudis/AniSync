@@ -844,8 +844,8 @@ namespace AnimeList.Services
         // don't offer Rewatching for video (it'd need a third list).
         private static readonly (string Status, string Name)[] CustomStatusLists =
         {
-            ("onhold",  "AniSync On Hold"),
-            ("dropped", "AniSync Dropped"),
+            ("onhold",  "On Hold"),
+            ("dropped", "Dropped"),
         };
 
         // status → list name (null when the status isn't custom-list backed).
