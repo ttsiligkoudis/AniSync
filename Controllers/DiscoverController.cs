@@ -80,7 +80,7 @@ namespace AnimeList.Controllers
         ];
 
         [Route("/discover")]
-        public async Task<IActionResult> Index(string list = null, string search = null, string genre = null, string season = null, string tag = null, string mode = null)
+        public async Task<IActionResult> Index(string list = null, string search = null, string genre = null, string season = null, string tag = null)
         {
             // Anonymous fresh-visit: GetAccessTokenAsync returns null. Synthesise an
             // anonymous TokenData with the Kitsu default so the per-service dispatch
@@ -115,8 +115,11 @@ namespace AnimeList.Controllers
             var enabledModes = await MediaTypePreference.ResolveEnabledAsync(HttpContext, uid, _configStore);
             var preferredMediaType = MediaTypePreference.ResolveActive(HttpContext, enabledModes);
             ViewData["MtEnabled"] = enabledModes;   // drives the media-type toggle's chips
+            // Video browse takes its catalog selection from the same `list`
+            // query param the anime catalog uses (popular / trending / …),
+            // keeping the URL shape consistent across media types.
             if (preferredMediaType != MetaType.anime)
-                return await VideoBrowseAsync(preferredMediaType, uid, search, genre, mode);
+                return await VideoBrowseAsync(preferredMediaType, uid, search, genre, list);
 
             // Honor the "Hide unaired from Watching" pref. Only affects the
             // ListType.Current discover-only tab; harmless on every other list.
