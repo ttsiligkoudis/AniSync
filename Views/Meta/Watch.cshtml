@@ -3838,7 +3838,17 @@
                         // source pill — handy for users picking
                         // between two same-quality releases but not
                         // primary signal for most viewers.
-                        if (s.audio) {
+                        // Dolby/DTS/TrueHD audio plays as silent video in most
+                        // browsers — show a red warning pill (reusing the HEVC badge
+                        // style) instead of the neutral audio pill, so the silence is
+                        // explained and the user can use an external player / pick AAC.
+                        if (s.audioUnsupported) {
+                            sub.appendChild(el('span', {
+                                class: 'episode-stream-hevc',
+                                'data-supported': 'false',
+                                title: "This release's audio (" + (s.audio || 'Dolby/DTS') + ") can't be decoded by most browsers — you'll get picture with no sound. Open it in an external player (VLC / Infuse), or pick a stream with AAC audio.",
+                            }, (s.audio || 'Audio') + ' ⚠'));
+                        } else if (s.audio) {
                             sub.appendChild(el('span', { class: 'episode-stream-audio' }, s.audio));
                         }
                         if (s.size) sub.appendChild(el('span', { class: 'episode-stream-size' }, s.size));
