@@ -853,10 +853,12 @@ else if (a.type == MetaType.movie.ToString())
         <div class="video-cast-scroll">
             @foreach (var c in Model.VideoCast)
             {
-                <div class="video-cast-card">
-                    @* The initial sits behind the headshot so it shows through
-                       when Trakt has no image or the CDN url 404s (onerror
-                       strips the img). *@
+                @* Clicking an actor opens their filmography. href is omitted (so
+                   the card stays inert) when Trakt gave us no person slug. The
+                   initial sits behind the headshot so it shows through when Trakt
+                   has no image or the CDN url 404s (onerror strips the img). *@
+                <a class="video-cast-card"
+                   href="@(string.IsNullOrEmpty(c.Slug) ? null : $"/discover/actor/{c.Slug}")">
                     <span class="video-cast-avatar">
                         <span class="video-cast-avatar-initial" aria-hidden="true">@(string.IsNullOrEmpty(c.Name) ? "?" : c.Name[..1])</span>
                         @if (!string.IsNullOrEmpty(c.Image))
@@ -870,7 +872,7 @@ else if (a.type == MetaType.movie.ToString())
                     {
                         <span class="video-cast-char">@c.Character</span>
                     }
-                </div>
+                </a>
             }
         </div>
     </section>
