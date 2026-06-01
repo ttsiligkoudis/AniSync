@@ -489,6 +489,7 @@ namespace AnimeList.Services
                                         id
                                         title { english romaji }
                                         coverImage { large }
+                                        bannerImage
                                         airingSchedule(perPage: 50) {
                                             nodes { episode airingAt }
                                         }
@@ -512,7 +513,9 @@ namespace AnimeList.Services
                             : (string)media.title?.english;
                         if (string.IsNullOrEmpty(name)) continue;
 
-                        var cover = (string)media.coverImage?.large;
+                        // Prefer the landscape banner for the Calendar's wide cards;
+                        // fall back to the (portrait) cover when a show has no banner.
+                        var cover = (string)media.bannerImage ?? (string)media.coverImage?.large;
                         var nodes = media.airingSchedule?.nodes;
                         if (nodes == null) continue;
 
