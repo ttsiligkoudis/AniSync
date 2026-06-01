@@ -459,6 +459,43 @@ namespace AnimeList.Services
             return items;
         }
 
+        // Full episode list for a series, built from Trakt's seasons endpoint
+        // (extended=episodes,full → title / overview / first_aired per episode).
+        // Trakt ships no episode images, so the caller merges Cinemeta thumbnails
+        // by season+episode. Season 0 (specials) is skipped — the detail view
+        // folds season 0 into season 1, which would misgroup real specials.
+        public async Task<List<Video>> GetEpisodesAsync(string imdbId)
+        {
+            var episodes = new List<Video>();
+            if (!IsConfigured || string.IsNullOrEmpty(imdbId)) return episodes;
+            if (await GetPublicAsync($"/shows/{imdbId}/seasons?extended=episodes,full") is not JArray seasons)
+                return episodes;
+
+            foreach (var s in seasons)
+            {
+                var seasonNum = (int?)s["number"] ?? -1;
+                if (seasonNum < 1 || s["episodes"] is not JArray eps) continue;
+                foreach (var e in eps)
+                {
+                    if ((int?)e["number"] is not int epNum) continue;
+                    var aired = (string)e["first_aired"];
+                    var title = (string)e["title"];
+                    episodes.Add(new Video
+                    {
+                        id = $"{imdbId}:{seasonNum}:{epNum}",
+                        season = seasonNum,
+                        episode = epNum,
+                        title = title,
+                        name = title,
+                        overview = (string)e["overview"],
+                        released = aired,
+                        firstAired = aired,
+                    });
+                }
+            }
+            return episodes;
+        }
+
         // Maps a Cinemeta genre name to a Trakt genre slug so the existing video
         // genre dropdown can filter the Trakt feeds. Most are just lowercased;
         // Cinemeta's "Sci-Fi" is Trakt's "science-fiction".

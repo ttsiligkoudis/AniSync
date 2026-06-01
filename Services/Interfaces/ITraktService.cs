@@ -129,6 +129,9 @@ namespace AnimeList.Services.Interfaces
         /// <summary>Related titles for the "Recommended" row (hydrate to posters via Cinemeta). Public.</summary>
         Task<List<TraktListItem>> GetRelatedAsync(string type, string imdbId, int limit);
 
+        /// <summary>Full episode list for a series (Cinemeta supplies the thumbnails). Public.</summary>
+        Task<List<Video>> GetEpisodesAsync(string imdbId);
+
         Task<TraktVideoEntry> GetVideoEntryAsync(string uid, string type, string imdbId);
 
         /// <summary>
