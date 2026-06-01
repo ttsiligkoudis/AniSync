@@ -15,8 +15,10 @@
         </div>
     </header>
 
-    @* Week strip — pick a day. Prev/next shift the week by 7 days (same
-       weekday stays selected); "Today" jumps back to the current day. *@
+    @* Week strip — a read-only overview of the week (today highlighted, dots
+       mark days with episodes). Prev/next shift the week by 7 days; "Today"
+       jumps back to the current week. The days themselves aren't clickable —
+       every day's episodes are already shown below. *@
     <div class="cal-strip">
         <div class="cal-strip-head">
             <a class="cal-strip-nav" href="/calendar?d=@Model.PrevDate" aria-label="Previous week" rel="prev">
@@ -27,15 +29,12 @@
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg>
             </a>
         </div>
-        <div class="cal-strip-days" role="tablist">
+        <div class="cal-strip-days">
             @foreach (var day in Model.Days)
             {
-                var dayHref = day.Date.ToString("yyyy-MM-dd");
                 var monLabel = day.Date.ToString("MMM");
                 var dowLabel = day.Date.ToString("ddd");
-                <a class="cal-dcell@(day.IsSelected ? " selected" : "")@(day.IsToday ? " today" : "")"
-                   href="/calendar?d=@dayHref"
-                   role="tab" aria-selected="@(day.IsSelected ? "true" : "false")">
+                <div class="cal-dcell@(day.IsToday ? " today" : "")">
                     <span class="cal-dcell-mon">@monLabel</span>
                     <span class="cal-dcell-num">@day.Date.Day</span>
                     <span class="cal-dcell-dow">@dowLabel</span>
@@ -49,7 +48,7 @@
                             <span class="cal-dot cal-dot-series"></span>
                         }
                     </span>
-                </a>
+                </div>
             }
         </div>
     </div>
@@ -67,7 +66,7 @@
             @foreach (var day in Model.Days)
             {
                 if (day.Episodes.Count == 0) { continue; }
-                <section class="cal-day-section@(day.IsSelected ? " is-selected" : "")" id="day-@day.DateIso">
+                <section class="cal-day-section@(day.IsToday ? " is-today" : "")" id="day-@day.DateIso">
                     <h2 class="cal-day-section-title">@day.Label</h2>
                     <div class="cal-hscroll">
                         @foreach (var ep in day.Episodes)
@@ -110,8 +109,7 @@
 </div>
 
 @* Localise the air time from the Unix timestamp (UTC fallback when JS is
-   off; day grouping stays UTC), and — when a day was tapped in the strip —
-   scroll that day's section into view. *@
+   off; day grouping stays UTC). *@
 <script>
     (function () {
         document.querySelectorAll('.cal-card-time[data-ts]').forEach(function (el) {
@@ -122,10 +120,5 @@
                     .toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
             } catch (_) { /* keep the UTC fallback */ }
         });
-
-        if (@(Model.ScrollToSelected ? "true" : "false")) {
-            var sel = document.getElementById('day-@Model.SelectedDateIso');
-            if (sel) { sel.scrollIntoView({ block: 'start' }); }
-        }
     })();
 </script>
