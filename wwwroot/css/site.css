@@ -8488,3 +8488,14 @@ a.video-cast-card[href]:hover .video-cast-name {
     height: 1px;
     width: 100%;
 }
+
+/* Grouped sections on a discover detail page (e.g. an actor's Movies / Series). */
+.discover-group {
+    margin-bottom: 2rem;
+}
+.discover-group-title {
+    font-size: var(--text-lg);
+    font-weight: 700;
+    color: var(--text-strong);
+    margin: 0 0 0.75rem;
+}
