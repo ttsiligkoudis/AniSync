@@ -244,6 +244,21 @@
                 </svg>
                 <span class="nav-label">Discover</span>
             </a>
+            @* Calendar — recent + upcoming episodes for the user's tracked
+               anime (Watching) and Trakt series (Watching / Planning). Gated
+               like Library: the page needs a logged-in session. *@
+            @if (layoutLoggedIn)
+            {
+                <a href="/calendar" class="@(activeNav == "calendar" ? "active" : "")">
+                    <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+                        <line x1="16" y1="2" x2="16" y2="6"></line>
+                        <line x1="8" y1="2" x2="8" y2="6"></line>
+                        <line x1="3" y1="10" x2="21" y2="10"></line>
+                    </svg>
+                    <span class="nav-label">Calendar</span>
+                </a>
+            }
             @* Movies & series fold into Discover now — it's media-type aware (the
                Anime / Movies / Series switch lives on Discover & Library), so the
                standalone nav items are gone. *@
@@ -334,6 +349,19 @@
                         </svg>
                         <span class="nav-label">Discover</span>
                     </a>
+                    @* Calendar — logged-in only, mirrors the drawer link. *@
+                    @if (layoutLoggedIn)
+                    {
+                        <a href="/calendar" class="@(activeNav == "calendar" ? "active" : "")">
+                            <svg class="nav-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+                                <line x1="16" y1="2" x2="16" y2="6"></line>
+                                <line x1="8" y1="2" x2="8" y2="6"></line>
+                                <line x1="3" y1="10" x2="21" y2="10"></line>
+                            </svg>
+                            <span class="nav-label">Calendar</span>
+                        </a>
+                    }
                     @* Movies & series fold into Discover (media-type aware). *@
                     @* Settings consolidates Account + Stremio addon pages —
                        same activeNav double-match as the drawer / bottom-nav
@@ -625,6 +653,16 @@
                     <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
                 </svg>
                 <span class="bottom-nav-more-row-label">Notifications</span>
+            </a>
+            @* Calendar — recent + upcoming episodes for tracked anime + series. *@
+            <a href="/calendar" class="bottom-nav-more-row @(activeNav == "calendar" ? "active" : "")" role="menuitem">
+                <svg class="bottom-nav-more-row-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+                <span class="bottom-nav-more-row-label">Calendar</span>
             </a>
         }
         @* Install row — pwa-install.js toggles [data-pwa-install]'s `hidden`
