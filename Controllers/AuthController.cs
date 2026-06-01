@@ -173,6 +173,7 @@ namespace AnimeList.Controllers
                 return RedirectToReturnUrlOrHome(returnUrl);
 
             await _tokenService.GetAccessTokenByCredsAsync(username, password, true);
+            await EnsurePrimaryPersistedAsync();
 
             return RedirectToReturnUrlOrHome(returnUrl);
         }
@@ -307,6 +308,11 @@ namespace AnimeList.Controllers
             if (isLink && linkedTokenData != null && !string.IsNullOrEmpty(primarySession))
                 await PersistLinkedTokenAsync(primarySession, linkedTokenData);
 
+            // Persist the primary + drop the auto-sign-in cookie. For the login flow
+            // this is the freshly-exchanged primary; for the link flow it ensures the
+            // already-logged-in primary has its cookie too (idempotent).
+            await EnsurePrimaryPersistedAsync();
+
             // Both flows honour the stashed return URL when set. Link flow falls
             // back to /configure when nothing was stashed (the link partial always
             // sets it, but be defensive); login flow falls back to the home
@@ -338,6 +344,57 @@ namespace AnimeList.Controllers
                 TokenData = linkedTokenData,
                 NeedsReauth = false,
             });
+        }
+
+        /// <summary>
+        /// Persists the just-logged-in primary into the config store and drops the
+        /// long-lived <c>anisync_uid</c> cookie, so the session can be rehydrated
+        /// after the in-memory session store is dropped (Fly machine restart /
+        /// redeploy, or a PWA reopened after the 30-day session window). Without
+        /// this the cookie + row were only minted on the first /configure or
+        /// /account visit, so a user who just signed in and browsed the web app had
+        /// nothing to auto-sign-in from after a restart.
+        /// <para>
+        /// Mirrors <see cref="HomeController"/>'s configure-page resolution: dedupe
+        /// to a stable UID via the identity index (idempotent across re-logins), and
+        /// when the user signed in through a service that's a linked secondary on an
+        /// existing row, refresh that link and route the session to the row's primary
+        /// rather than forking a duplicate account. No-op for anonymous sessions.
+        /// </para>
+        /// </summary>
+        private async Task EnsurePrimaryPersistedAsync()
+        {
+            var primary = GetSessionPrimary();
+            if (primary == null) return; // null also covers anonymous sessions
+
+            string uid;
+            var (matchedUid, isPrimaryMatch) = await _configStore.FindUidByIdentityAsync(primary);
+            if (!string.IsNullOrEmpty(matchedUid))
+            {
+                uid = matchedUid;
+                if (isPrimaryMatch)
+                {
+                    await _configStore.UpdateByUserAsync(primary);
+                }
+                else
+                {
+                    await _configStore.SetLinkedTokenAsync(uid, new LinkedToken
+                    {
+                        Service = primary.anime_service,
+                        TokenData = primary,
+                        NeedsReauth = false,
+                    });
+                    var existingPrimary = await _configStore.GetAsync(uid);
+                    if (existingPrimary != null)
+                        HttpContext.Session.SetString("AccessToken", SerializeObject(existingPrimary));
+                }
+            }
+            else
+            {
+                uid = await _configStore.UpsertAsync(primary);
+            }
+
+            _tokenService.SetPrimaryUidCookie(uid);
         }
 
         /// <summary>
@@ -732,6 +789,7 @@ namespace AnimeList.Controllers
                 // (defaults to the home dashboard) — Stremio-initiated signups land on
                 // /configure, identity-page signups land on home.
                 await _tokenService.GetAccessTokenByCredsAsync(email, password, setContext: true);
+                await EnsurePrimaryPersistedAsync();
                 return RedirectToReturnUrlOrHome(returnUrl);
             }
             finally
