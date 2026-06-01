@@ -8017,7 +8017,21 @@ body.mt-modal-open {
 .mt-modal-option:active { transform: scale(0.99); }
 .mt-modal-option.is-selected {
     border-color: var(--accent);
-    background: var(--accent-light, var(--overlay-08));
+    /* Filled accent card. --accent-fill is the same blue in both themes and is
+       tuned to carry --on-accent (white) text, so the label/blurb/icon below
+       switch to white for contrast — fixes the dark-text-on-blue issue on the
+       light theme. */
+    background: var(--accent-fill);
+}
+.mt-modal-option.is-selected .mt-modal-option-title {
+    color: var(--on-accent);
+}
+.mt-modal-option.is-selected .mt-modal-option-blurb {
+    color: rgba(255, 255, 255, 0.82);
+}
+.mt-modal-option.is-selected .mt-modal-option-icon {
+    background: rgba(255, 255, 255, 0.2);
+    color: var(--on-accent);
 }
 /* Trailing check — only on selected options. */
 .mt-modal-option-check {
@@ -8038,6 +8052,9 @@ body.mt-modal-open {
 .mt-modal-option.is-selected .mt-modal-option-check {
     opacity: 1;
     transform: scale(1);
+    /* White circle + blue tick so it reads on the filled accent card. */
+    background: var(--on-accent);
+    color: var(--accent-fill);
 }
 .mt-modal-footer {
     display: flex;
