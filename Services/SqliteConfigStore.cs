@@ -580,6 +580,23 @@ namespace AnimeList.Services
             };
         }
 
+        public async Task<List<string>> ListTraktConnectedUidsAsync()
+        {
+            // trakt_user_key is set whenever Trakt is the row's primary OR a linked
+            // secondary (see the identity-column writes), with a unique partial index
+            // over the non-null values — so this filter is index-backed.
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT uid FROM configs WHERE trakt_user_key IS NOT NULL";
+            var uids = new List<string>();
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                if (!reader.IsDBNull(0)) uids.Add(reader.GetString(0));
+            }
+            return uids;
+        }
+
         public async Task<WebSettings> GetWebSettingsAsync(string uid)
         {
             if (string.IsNullOrEmpty(uid)) return new WebSettings();

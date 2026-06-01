@@ -132,6 +132,16 @@ namespace AnimeList.Services.Interfaces
         /// <summary>Full episode list for a series (Cinemeta supplies the thumbnails). Public.</summary>
         Task<List<Video>> GetEpisodesAsync(string imdbId);
 
+        /// <summary>
+        /// The user's Trakt "my shows" calendar over <c>[startDate, startDate+days)</c>:
+        /// episodes of the user's watched / collected / watchlisted shows airing in the
+        /// window, each carrying the parent show's IMDb id, season + episode, title,
+        /// air instant (UTC), and an image. Empty when Trakt isn't connected or the call
+        /// fails. Used by the series-episode notifier for just-aired detection (intersect
+        /// the results with the user's Watching / Planning lists to honor those scopes).
+        /// </summary>
+        Task<List<TraktCalendarEpisode>> GetMyShowsCalendarAsync(string uid, DateOnly startDate, int days);
+
         /// <summary>Resolves a TMDB person id to a Trakt person slug (directory → filmography bridge). Public.</summary>
         Task<string> ResolveSlugByTmdbAsync(int tmdbId);
 

@@ -160,13 +160,18 @@
             var thumb = item.thumbnailUrl
                 ? '<img class="notif-thumb" src="' + escape(item.thumbnailUrl) + '" alt="" loading="lazy" />'
                 : '<div class="notif-thumb notif-thumb-placeholder" aria-hidden="true"></div>';
+            // Series notifications carry a season (S1E5); single-cour anime don't
+            // (Episode 5). `season` is omitted from the JSON when null.
+            var epLabel = (item.season != null)
+                ? 'S' + escape(item.season) + 'E' + escape(item.episodeNumber)
+                : 'Episode ' + escape(item.episodeNumber);
             return '<a class="notif-item' + (unread ? ' notif-item-unread' : '') + '"'
                 + ' href="' + escape(item.linkPath) + '"'
                 + ' data-notif-id="' + escape(item.id) + '">'
                 + thumb
                 + '<div class="notif-body">'
                 + '<div class="notif-title">' + escape(item.animeTitle) + '</div>'
-                + '<div class="notif-meta">Episode ' + escape(item.episodeNumber) + ' &middot; ' + escape(relativeTime(item.createdAt)) + '</div>'
+                + '<div class="notif-meta">' + epLabel + ' &middot; ' + escape(relativeTime(item.createdAt)) + '</div>'
                 + '</div>'
                 + '</a>';
         }).join('');

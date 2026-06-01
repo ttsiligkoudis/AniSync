@@ -36,6 +36,14 @@ namespace AnimeList.Services.Extensions
             {
                 if (string.IsNullOrEmpty(r?.AnimeId)) continue;
 
+                // Trakt series notifications carry a bare IMDb id + a season-aware
+                // /meta/{tt}/watch/{season}/{episode}?type=series link. The rewrites
+                // below translate anime ids across AniList/MAL/Kitsu and rebuild the
+                // path from the single-cour template — which would strip the season
+                // and ?type=series. They don't apply to Trakt, so leave the link as
+                // stored.
+                if (r.Service == AnimeService.Trakt) continue;
+
                 // Legacy rows were minted with the /anime/ prefix (pre-MetaController
                 // consolidation); normalise to the unified /meta/ route so old + new
                 // notifications both resolve. The id-space rewrites below already emit
