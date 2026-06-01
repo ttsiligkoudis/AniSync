@@ -422,10 +422,25 @@
                    current mode (Anime / Movies / Series); the icon mirrors the
                    modal's option glyphs. Lives in the header so it's reachable on
                    every viewport, like the theme toggle beside it. *@
+                @* Icon + label reflect the ENABLED SET: more than one mode → the
+                   "All" grid icon; a single mode → that mode's own icon. *@
+                @{
+                    var mtMultiple = layoutEnabled.Count > 1;
+                    var mtBtnLabel = mtMultiple ? "All" : layoutMediaTypeLabel;
+                }
                 <button type="button" class="media-type-btn" data-media-type-open
-                        aria-label="Change mode (currently @layoutMediaTypeLabel)" title="Change mode">
+                        aria-label="Change mode (currently @mtBtnLabel)" title="Change mode">
                     <span class="media-type-btn-icon" aria-hidden="true">
-                        @if (layoutMediaType == MetaType.movie)
+                        @if (mtMultiple)
+                        {
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                                <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                                <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                                <rect x="14" y="14" width="7" height="7" rx="1.5" />
+                            </svg>
+                        }
+                        else if (layoutMediaType == MetaType.movie)
                         {
                             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <rect x="3" y="4" width="18" height="16" rx="2" />
@@ -447,7 +462,7 @@
                             </svg>
                         }
                     </span>
-                    <span class="media-type-btn-label">@layoutMediaTypeLabel</span>
+                    <span class="media-type-btn-label">@mtBtnLabel</span>
                 </button>
                 <button type="button" class="theme-toggle-btn" data-theme-toggle
                         aria-label="Switch theme" title="Switch theme">
