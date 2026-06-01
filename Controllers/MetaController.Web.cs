@@ -32,13 +32,45 @@ namespace AnimeList.Controllers
             if (string.IsNullOrEmpty(id)) return NotFound();
             // One detail route for every media type. Poster cards pass ?type=
             // explicitly (a movie card links ?type=movie); when it's omitted —
-            // e.g. a bare /meta/{id} deep link — fall back to the viewer's
-            // chosen media-type (the cookie media-type.js keeps in sync) so the
-            // page matches the mode they're browsing in rather than always anime.
-            var effectiveType = type ?? MediaTypePreference.FromCookie(HttpContext);
+            // e.g. a bare /meta/{id} deep link or an anime notification — the type
+            // is derived from the id (see ResolveMetaTypeAsync), NOT the browsing
+            // mode, so anime opened while the app is in Movies/Series mode still
+            // resolves instead of 404ing through the video loader.
+            var effectiveType = await ResolveMetaTypeAsync(id, type);
             return effectiveType == MetaType.anime
                 ? await AnimeDetail(id)
                 : await VideoDetail(effectiveType, id);
+        }
+
+        // Resolves which loader a /meta or /watch request should use, from the id +
+        // explicit ?type — deliberately independent of the browsing-mode cookie for
+        // anime. Anime tracker ids (anilist:/mal:/kitsu:) are always anime; a bare
+        // IMDb id is anime when the shared mapping knows it as one (grouped-franchise
+        // links carry no ?type), so an anime opened from a notification / calendar /
+        // deep link while the app is in Movies or Series mode resolves correctly
+        // rather than 404ing. Only a genuine movie/series with no ?type at all falls
+        // back to the browsing mode (to pick movie vs series).
+        private async Task<MetaType> ResolveMetaTypeAsync(string id, MetaType? explicitType)
+        {
+            if (explicitType.HasValue) return explicitType.Value;
+            if (string.IsNullOrEmpty(id)) return MediaTypePreference.FromCookie(HttpContext);
+
+            if (id.StartsWith(anilistPrefix, StringComparison.Ordinal)
+                || id.StartsWith(malPrefix, StringComparison.Ordinal)
+                || id.StartsWith(kitsuPrefix, StringComparison.Ordinal))
+                return MetaType.anime;
+
+            if (id.StartsWith(imdbPrefix, StringComparison.Ordinal))
+            {
+                try
+                {
+                    var animeMappings = await _mappingService.GetImdbMapping(id);
+                    if (animeMappings is { Count: > 0 }) return MetaType.anime;
+                }
+                catch { /* mapping miss / load hiccup → treat as a video id */ }
+            }
+
+            return MediaTypePreference.FromCookie(HttpContext);
         }
 
         private async Task<IActionResult> AnimeDetail(string id)
@@ -514,10 +546,12 @@ namespace AnimeList.Controllers
                 Response.StatusCode = 404;
                 return View("NotFound");
             }
-            // ?type= is carried through from the detail page's episode links;
-            // when absent, fall back to the viewer's chosen media-type cookie
-            // (see Detail) rather than defaulting to anime.
-            var effectiveType = type ?? MediaTypePreference.FromCookie(HttpContext);
+            // ?type= is carried through from the detail page's episode links; when
+            // absent, the type is derived from the id (see ResolveMetaTypeAsync) so a
+            // grouped-anime watch link (/meta/tt.../watch/{s}/{ep}, no ?type) opened
+            // while the app is in Movies/Series mode resolves as anime instead of
+            // 404ing through the video loader.
+            var effectiveType = await ResolveMetaTypeAsync(id, type);
             return effectiveType == MetaType.anime
                 ? await AnimeWatch(id, episode, season)
                 : await VideoWatch(effectiveType, id, episode, season);
