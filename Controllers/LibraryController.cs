@@ -40,9 +40,9 @@ namespace AnimeList.Controllers
         // Watchlist (Planning), Watched history (Completed), and in-progress playback
         // (Current). The anime-only Paused / Dropped / Rewatching tabs have no Trakt
         // analogue, so the video library shows a reduced tab strip.
-        // Video (Trakt) now supports every status too: Planning → watchlist,
-        // Watching → playback, Completed → history, and Paused / Dropped /
-        // Repeating → AniSync-managed Trakt personal lists.
+        // Video (Trakt): Planning → watchlist, Watching → playback, Completed →
+        // history, On Hold / Dropped → AniSync-managed Trakt personal lists.
+        // No Repeating — a free Trakt account caps custom lists, so we keep to two.
         private static readonly ListType[] VideoListTypes =
         [
             ListType.Current,
@@ -50,7 +50,6 @@ namespace AnimeList.Controllers
             ListType.Planning,
             ListType.Paused,
             ListType.Dropped,
-            ListType.Repeating,
         ];
 
         // The six list types the user-list catalogs map to. Trending/Seasonal/Airing
