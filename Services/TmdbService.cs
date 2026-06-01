@@ -98,6 +98,43 @@ namespace AnimeList.Services
             return meta;
         }
 
+        /// <summary>
+        /// Popular people for the /discover/actors directory (paginated). Maps
+        /// TMDB's /person/popular to ActorSummary tiles; HasNextPage drives the
+        /// infinite scroll. Empty when TMDB isn't configured.
+        /// </summary>
+        public async Task<(List<ActorSummary> People, bool HasNextPage)> GetPopularPeopleAsync(int page = 1)
+        {
+            if (string.IsNullOrEmpty(_tmdbReadToken)) return ([], false);
+            var p = Math.Max(1, page);
+            var result = await GetJsonAsync($"{_tmdbApi}/person/popular?page={p}");
+            if (result == null) return ([], false);
+
+            var people = new List<ActorSummary>();
+            if (result["results"] is JArray results)
+            {
+                foreach (var r in results.OfType<JObject>())
+                {
+                    // "Acting" department only — TMDB's popular list mixes in
+                    // directors / crew, but this is an actor directory.
+                    if (!string.Equals((string)r["known_for_department"], "Acting", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    var id = (int?)r["id"];
+                    var name = (string)r["name"];
+                    if (id is not int tmdbId || string.IsNullOrEmpty(name)) continue;
+                    people.Add(new ActorSummary
+                    {
+                        TmdbId = tmdbId,
+                        Name = name,
+                        Image = BuildImageUrl((string)r["profile_path"]),
+                    });
+                }
+            }
+
+            var totalPages = (int?)result["total_pages"] ?? p;
+            return (people, p < totalPages);
+        }
+
         private async Task<JObject> GetJsonAsync(string url)
         {
             var client = _clientFactory.CreateClient();

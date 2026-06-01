@@ -8426,3 +8426,65 @@ a.video-cast-card[href]:hover .video-cast-name {
     min-width: 0;
 }
 
+
+/* Actor directory (/discover/actors) — responsive grid of circular headshots
+   with the name beneath. Tiles link to the actor's filmography. */
+.actor-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 1rem;
+}
+.actor-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 0.5rem;
+    text-decoration: none;
+    color: inherit;
+}
+.actor-tile-avatar {
+    position: relative;
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--overlay-10);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: box-shadow 0.15s ease;
+}
+.actor-tile:hover .actor-tile-avatar {
+    box-shadow: 0 0 0 2px var(--accent);
+}
+.actor-tile-initial {
+    font-size: var(--text-xl);
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+.actor-tile-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.actor-tile-name {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-strong);
+    line-height: 1.25;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.actor-tile:hover .actor-tile-name {
+    color: var(--accent);
+}
+.actor-sentinel {
+    height: 1px;
+    width: 100%;
+}

@@ -132,6 +132,9 @@ namespace AnimeList.Services.Interfaces
         /// <summary>Full episode list for a series (Cinemeta supplies the thumbnails). Public.</summary>
         Task<List<Video>> GetEpisodesAsync(string imdbId);
 
+        /// <summary>Resolves a TMDB person id to a Trakt person slug (directory → filmography bridge). Public.</summary>
+        Task<string> ResolveSlugByTmdbAsync(int tmdbId);
+
         /// <summary>An actor's name + headshot + movie/show credits for /discover/actor/{slug}. Public.</summary>
         Task<(string Name, string Image, List<TraktListItem> Items)> GetPersonCreditsAsync(string slug);
 

@@ -23,6 +23,7 @@ namespace AnimeList.Controllers
         private readonly IAnilistFallback _anilistFallback;
         private readonly ICinemetaService _cinemeta;
         private readonly ITraktService _trakt;
+        private readonly ITmdbService _tmdb;
         private readonly IConfigStore _configStore;
 
         public DiscoverController(
@@ -33,6 +34,7 @@ namespace AnimeList.Controllers
             IAnilistFallback anilistFallback,
             ICinemetaService cinemeta,
             ITraktService trakt,
+            ITmdbService tmdb,
             IConfigStore configStore)
         {
             _tokenService = tokenService;
@@ -42,6 +44,7 @@ namespace AnimeList.Controllers
             _anilistFallback = anilistFallback;
             _cinemeta = cinemeta;
             _trakt = trakt;
+            _tmdb = tmdb;
             _configStore = configStore;
         }
 
@@ -617,6 +620,47 @@ namespace AnimeList.Controllers
                 ConfigUid = uid,
                 Items = items.ToVideoMetas(),
             });
+        }
+
+        // Filmography reached from the /discover/actors directory: the directory
+        // is TMDB-sourced (tmdb ids), so bridge to a Trakt slug first, then reuse
+        // the slug-keyed Actor() render above.
+        [Route("/discover/actor/tmdb/{tmdbId:int}")]
+        public async Task<IActionResult> ActorByTmdb(int tmdbId)
+        {
+            var slug = await _trakt.ResolveSlugByTmdbAsync(tmdbId);
+            if (string.IsNullOrEmpty(slug))
+            {
+                string fallbackUid = null;
+                var td = await _tokenService.GetAccessTokenAsync();
+                if (td != null && !td.anonymousUser)
+                {
+                    var (resolved, _) = await _configStore.FindUidByIdentityAsync(td);
+                    fallbackUid = resolved;
+                }
+                return View("ActorDetail", new ActorDetailViewModel { Slug = tmdbId.ToString(), ConfigUid = fallbackUid });
+            }
+            return await Actor(slug);
+        }
+
+        // ─── Actor directory ────────────────────────────────────────────
+        // Paginated list of popular actors (TMDB /person/popular). Each tile
+        // links to /discover/actor/tmdb/{id} → the Trakt-backed filmography.
+
+        [Route("/discover/actors")]
+        public async Task<IActionResult> Actors()
+        {
+            var (people, hasNext) = await _tmdb.GetPopularPeopleAsync(1);
+            ViewData["ActorsHasNext"] = hasNext;
+            return View("Actors", people);
+        }
+
+        [Route("/discover/actors/page")]
+        public async Task<IActionResult> ActorsPage(int page = 1)
+        {
+            var (people, hasNext) = await _tmdb.GetPopularPeopleAsync(page);
+            Response.Headers["X-Has-Next-Page"] = hasNext ? "true" : "false";
+            return PartialView("_ActorTiles", people);
         }
 
         // ─── Browse-by-tag ──────────────────────────────────────────────
