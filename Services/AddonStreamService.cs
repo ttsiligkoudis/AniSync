@@ -103,6 +103,7 @@ namespace AnimeList.Services
             @"|more results (?:coming|available|will follow|on the way)" +
             @"|no (?:streams?|results|matching streams?|sources?) (?:found|available|yet)" +
             @"|no matching (?:streams?|results)" +
+            @"|filtered (?:by your|out)" +
             @"|please configure" +
             @"|configure (?:the|your) addon" +
             @"|(?:setup|configuration) (?:is )?required" +
