@@ -120,6 +120,15 @@ namespace AnimeList.Services.Interfaces
         /// </summary>
         Task<List<TraktListItem>> GetDiscoveryAsync(string uid, string type, string mode, string genre, int page, int limit);
 
+        /// <summary>Rich summary (overview / runtime / certification / trailer / rating / genres) for the detail page. Public.</summary>
+        Task<TraktVideoSummary> GetSummaryAsync(string type, string imdbId);
+
+        /// <summary>Cast names + characters (no images in Trakt's API), capped at limit. Public.</summary>
+        Task<List<TraktCastMember>> GetCastAsync(string type, string imdbId, int limit);
+
+        /// <summary>Related titles for the "Recommended" row (hydrate to posters via Cinemeta). Public.</summary>
+        Task<List<TraktListItem>> GetRelatedAsync(string type, string imdbId, int limit);
+
         Task<TraktVideoEntry> GetVideoEntryAsync(string uid, string type, string imdbId);
 
         /// <summary>

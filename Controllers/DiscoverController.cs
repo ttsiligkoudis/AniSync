@@ -702,9 +702,16 @@ namespace AnimeList.Controllers
                     items = await BuildVideoMetasAsync(traktItems);
                 }
             }
+            else if (_trakt.IsConfigured)
+            {
+                // Popular (default) — Trakt's popular list, hydrated to posters via
+                // Cinemeta. (Falls back to Cinemeta's own catalog below when Trakt
+                // isn't configured, so the video section still works.)
+                var traktItems = await _trakt.GetDiscoveryAsync(uid, type, "popular", genre, page, VideoModeSize);
+                items = await BuildVideoMetasAsync(traktItems);
+            }
             else
             {
-                // Popular (default) — Cinemeta's "top" catalog, paged by skip.
                 var skip = (page - 1) * CatalogPageSize;
                 items = await _cinemeta.GetVideoCatalogAsync(type, genre, search: null, skip: skip);
             }
