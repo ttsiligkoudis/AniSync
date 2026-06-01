@@ -1017,6 +1017,7 @@ namespace AnimeList.Controllers
                     source = s.Source,
                     hdr = s.Hdr,
                     audio = s.Audio,
+                    audioUnsupported = s.AudioUnsupported,
                 }).ToList();
 
                 return Json(new { debridStreams = labelled });
@@ -1132,7 +1133,7 @@ namespace AnimeList.Controllers
         /// than 500ing.
         /// </summary>
         [HttpGet("/meta/episode-subtitles")]
-        public async Task<IActionResult> EpisodeSubtitles(string id, int? season, int episode, string filename = null)
+        public async Task<IActionResult> EpisodeSubtitles(string id, int? season, int episode, string filename = null, string type = null)
         {
             if (string.IsNullOrWhiteSpace(id) || episode <= 0)
             {
@@ -1147,13 +1148,21 @@ namespace AnimeList.Controllers
                 return Json(new { subtitles = Array.Empty<object>() });
             }
 
+            // Movies are keyed by IMDb id alone (movie/tt), not season+episode.
+            // The watch page synthesises episode 1 for the single movie "video", so
+            // without this the lookup would hit the series/tt:1:1 path and find
+            // nothing — which is the "OpenSubtitles doesn't fetch subs for movies"
+            // report. season/episode 0 makes SearchAsync take the movie path.
+            var isMovie = string.Equals(type, "movie", StringComparison.OrdinalIgnoreCase);
+
             // ImdbSeason on the mapping is the franchise-side season
             // — same fix as Torrentio. URL season is the AniSync cour-
             // internal value (usually 1) and would query the wrong
             // season of the IMDb listing otherwise.
-            var effectiveSeason = sourceLinks.ImdbSeason ?? season;
+            var effectiveSeason = isMovie ? null : (sourceLinks.ImdbSeason ?? season);
+            var effectiveEpisode = isMovie ? 0 : episode;
 
-            var tracks = await SafeOpenSubtitlesSearch(sourceLinks.ImdbId, effectiveSeason, episode, filename, id);
+            var tracks = await SafeOpenSubtitlesSearch(sourceLinks.ImdbId, effectiveSeason, effectiveEpisode, filename, id);
 
             return Json(new
             {

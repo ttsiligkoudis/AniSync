@@ -114,5 +114,9 @@ namespace AnimeList.Services.Interfaces
         bool IsHevc,
         string Source = null,
         string Hdr = null,
-        string Audio = null);
+        string Audio = null,
+        // True when the audio track is a codec browsers can't decode in-page
+        // (Dolby Digital / Plus / Atmos, DTS family, TrueHD) — plays as silent
+        // video, so the watch page warns + offers an external player.
+        bool AudioUnsupported = false);
 }
