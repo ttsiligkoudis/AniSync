@@ -381,6 +381,12 @@ builder.Services.AddSingleton<IEpisodeNotificationScheduler>(sp =>
 builder.Services.AddHostedService(sp =>
     sp.GetRequiredService<EpisodeNotificationScheduler>());
 
+// Series-episode notifications (Trakt). No external trigger surface — the
+// hourly BackgroundService is the only driver (per-user Trakt reads can't run
+// off the per-minute cron ping), so a plain hosted-service registration suffices.
+builder.Services.AddScoped<ISeriesEpisodeNotificationDispatcher, SeriesEpisodeNotificationDispatcher>();
+builder.Services.AddHostedService<SeriesEpisodeNotificationScheduler>();
+
 var app = builder.Build();
 
 // Must run before any middleware that reads Request.Scheme / Request.IsHttps (HSTS,

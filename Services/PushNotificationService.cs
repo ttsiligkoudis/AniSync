@@ -83,16 +83,27 @@ namespace AnimeList.Services
             // (wwwroot/sw.js). Stays under Web Push's 4 KiB encrypted
             // limit easily — title + body + URL + thumbnail URL is at
             // most a few hundred bytes.
+            // Series carry a season, so qualify both the body and the dedup tag
+            // with it (S1E5) — without it, S1E5 and S2E5 of the same show would
+            // collide on one tag. Anime (Season null) keep the original wording
+            // and tag shape, byte-for-byte.
+            var episodeLabel = notification.Season.HasValue
+                ? $"S{notification.Season.Value}E{notification.EpisodeNumber}"
+                : $"Episode {notification.EpisodeNumber}";
+            var tag = notification.Season.HasValue
+                ? $"anisync:{notification.AnimeId}:{notification.Season.Value}:{notification.EpisodeNumber}"
+                : $"anisync:{notification.AnimeId}:{notification.EpisodeNumber}";
+
             var payload = JsonConvert.SerializeObject(new
             {
                 title = notification.AnimeTitle,
-                body = $"Episode {notification.EpisodeNumber} just aired",
+                body = $"{episodeLabel} just aired",
                 icon = notification.ThumbnailUrl,
                 url = notification.LinkPath,
                 // tag dedups notifications client-side — re-pushing the
                 // same airing collapses to one OS notification instead
                 // of stacking.
-                tag = $"anisync:{notification.AnimeId}:{notification.EpisodeNumber}",
+                tag = tag,
             });
 
             foreach (var sub in subs)

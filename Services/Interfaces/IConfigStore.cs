@@ -154,6 +154,15 @@ namespace AnimeList.Services.Interfaces
         /// </summary>
         Task<TraktToken> GetTraktTokenAsync(string uid);
 
+        /// <summary>
+        /// Enumerates the UIDs of every config row that has Trakt connected — whether as the
+        /// row's primary provider or a linked secondary. Backed by the <c>trakt_user_key</c>
+        /// column (populated for both slots, with the unique partial index
+        /// <c>idx_configs_trakt</c>), so it's an index scan rather than a full table walk.
+        /// Used by the series-episode notifier to fan out per-user Trakt calendar reads.
+        /// </summary>
+        Task<List<string>> ListTraktConnectedUidsAsync();
+
         // ── Web-UI preferences (media-type modes + dashboard layout) ────────
         /// <summary>Reads the account's web-UI preferences (empty fields when unset/unknown UID).</summary>
         Task<WebSettings> GetWebSettingsAsync(string uid);

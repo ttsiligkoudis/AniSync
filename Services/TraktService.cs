@@ -522,6 +522,58 @@ namespace AnimeList.Services
             return episodes;
         }
 
+        // The user's "my shows" calendar — episodes of their watched / collected /
+        // watchlisted shows airing in [startDate, startDate+days). One authed call
+        // regardless of list size (vs. one /last_episode call per tracked show).
+        // The caller intersects the results with the user's Watching / Planning
+        // imdb ids, since the calendar also includes collected-only shows.
+        public async Task<List<TraktCalendarEpisode>> GetMyShowsCalendarAsync(string uid, DateOnly startDate, int days)
+        {
+            var result = new List<TraktCalendarEpisode>();
+            if (!IsConfigured || string.IsNullOrEmpty(uid)) return result;
+
+            var path = $"/calendars/my/shows/{startDate:yyyy-MM-dd}/{Math.Max(1, days)}?extended=full,images";
+            if (await GetAuthedAsync(uid, path) is not JArray arr) return result;
+
+            foreach (var it in arr)
+            {
+                var show = it["show"];
+                var ep = it["episode"];
+                var imdb = (string)show?["ids"]?["imdb"];
+                if (string.IsNullOrEmpty(imdb)) continue;
+                if ((int?)ep?["season"] is not int season || (int?)ep?["number"] is not int number) continue;
+
+                result.Add(new TraktCalendarEpisode
+                {
+                    ImdbId = imdb,
+                    ShowTitle = (string)show?["title"],
+                    Season = season,
+                    Episode = number,
+                    EpisodeTitle = (string)ep?["title"],
+                    // The calendar's top-level first_aired is the airing instant for
+                    // this entry; fall back to the episode node defensively.
+                    FirstAired = ParseUtc((string)it["first_aired"] ?? (string)ep?["first_aired"]),
+                    ThumbnailUrl = TraktImage(ep, "screenshot") ?? TraktImage(show, "poster"),
+                });
+            }
+            return result;
+        }
+
+        // Trakt timestamps are ISO-8601 UTC (e.g. 2026-06-01T01:00:00.000Z); some
+        // older entries are date-only (treated as midnight UTC). Returns null for
+        // missing/unparseable values so the caller can skip rather than misfire.
+        private static DateTimeOffset? ParseUtc(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            return DateTimeOffset.TryParse(
+                s,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                out var dto)
+                ? dto
+                : null;
+        }
+
         // Resolves a TMDB person id to a Trakt person slug (the /discover/actors
         // directory is TMDB-sourced, but the filmography keys off Trakt). null
         // when Trakt has no matching person. Public.

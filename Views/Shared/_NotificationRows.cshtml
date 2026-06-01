@@ -11,6 +11,10 @@
         if (diff < 86400) return $"{diff / 3600}h ago";
         return $"{diff / 86400}d ago";
     }
+
+    // Series notifications carry a season (S1E5); single-cour anime don't (Episode 5).
+    string EpLabel(AnimeList.Models.NotificationRecord n)
+        => n.Season.HasValue ? $"S{n.Season}E{n.EpisodeNumber}" : $"Episode {n.EpisodeNumber}";
 }
 @foreach (var n in Model)
 {
@@ -25,7 +29,7 @@
         <span class="notif-page-checkbox" data-notif-page-checkbox>
             <input type="checkbox"
                    class="notif-page-checkbox-input"
-                   aria-label="Select notification: @n.AnimeTitle Episode @n.EpisodeNumber" />
+                   aria-label="Select notification: @n.AnimeTitle @EpLabel(n)" />
         </span>
         @if (!string.IsNullOrEmpty(n.ThumbnailUrl))
         {
@@ -37,12 +41,12 @@
         }
         <div class="notif-page-body">
             <div class="notif-page-title">@n.AnimeTitle</div>
-            <div class="notif-page-meta">Episode @n.EpisodeNumber &middot; @Relative(n.CreatedAt)</div>
+            <div class="notif-page-meta">@EpLabel(n) &middot; @Relative(n.CreatedAt)</div>
         </div>
         <button type="button"
                 class="notif-page-delete"
                 data-notif-page-delete
-                aria-label="Delete notification: @n.AnimeTitle Episode @n.EpisodeNumber">
+                aria-label="Delete notification: @n.AnimeTitle @EpLabel(n)">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="3 6 5 6 21 6"></polyline>
