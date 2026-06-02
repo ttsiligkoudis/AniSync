@@ -164,7 +164,23 @@
     // cookies in step with localStorage (covers cleared cookies / older builds).
     var storedSet = readSet();
     if (storedSet.length === 0) {
-        open(true);
+        // Single-mode pages (the Stremio /configure page, which is anime-only)
+        // stamp data-autodefault so we silently commit that mode instead of
+        // forcing the chooser. Persist it like a normal pick (localStorage +
+        // cookie) so the rest of the site agrees and the modal never fires —
+        // no reload: the server already renders the unset state as the same
+        // default mode we're committing to.
+        var auto = modal.getAttribute('data-autodefault');
+        if (auto && valid(auto)) {
+            try {
+                localStorage.setItem(SET_KEY, auto);
+                localStorage.setItem(ACTIVE_KEY, auto);
+            } catch (_) { /* private mode */ }
+            setCookie(SET_COOKIE, auto);
+            setCookie(ACTIVE_COOKIE, auto);
+        } else {
+            open(true);
+        }
     } else {
         // The enabled set is only ever changed by the modal, so keep its cookie
         // in sync with localStorage (covers a cleared cookie + the comma fix).
