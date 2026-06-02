@@ -794,7 +794,11 @@ public class HomeController : Controller
             var tokenData = DeserializeObject<TokenData>(sessionStr);
             if (tokenData != null)
             {
-                primaryService = tokenData.anime_service;
+                // Trakt has no anime catalogs — the anime shelves source from
+                // AniList in the IMDb id-space (grouping forced below) for a
+                // Trakt primary, matching the rest of the app.
+                var traktPrimary = tokenData.anime_service == AnimeService.Trakt;
+                primaryService = traktPrimary ? AnimeService.Anilist : tokenData.anime_service;
                 if (!tokenData.anonymousUser)
                 {
                     var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
@@ -802,7 +806,7 @@ public class HomeController : Controller
                     if (!string.IsNullOrEmpty(uid))
                     {
                         var config = await GetConfigByUidAsync(uid, _configStore);
-                        groupSeasons = config?.enableSeasonGrouping == true;
+                        groupSeasons = config?.enableSeasonGrouping == true || traktPrimary;
                     }
                 }
             }
