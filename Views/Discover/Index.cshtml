@@ -6,16 +6,18 @@
 
     var labels = new Dictionary<ListType, string>
     {
-        [ListType.Trending_Desc] = "Trending",
-        [ListType.Seasonal]      = "Seasonal",
-        [ListType.Airing]        = "Airing",
+        [ListType.Trending_Desc]   = "Trending",
+        [ListType.Popularity_Desc] = "Popular",
+        [ListType.Seasonal]        = "Seasonal",
+        [ListType.Airing]          = "Airing",
     };
 
     var slugs = new Dictionary<ListType, string>
     {
-        [ListType.Trending_Desc] = "trending",
-        [ListType.Seasonal]      = "seasonal",
-        [ListType.Airing]        = "airing",
+        [ListType.Trending_Desc]   = "trending",
+        [ListType.Popularity_Desc] = "popular",
+        [ListType.Seasonal]        = "seasonal",
+        [ListType.Airing]          = "airing",
     };
 
     var hasSearch = !string.IsNullOrEmpty(Model.Search);
