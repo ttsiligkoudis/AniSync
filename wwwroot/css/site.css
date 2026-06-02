@@ -6418,13 +6418,27 @@ a.stats-cell-link:hover {
     text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
 }
 
-/* Badges row: score + airing status, side by side. Wraps to the next line
-   on narrow viewports rather than squishing. */
+/* Badges row: airing status + Add-to-List pill + heart + Hide, forced onto a
+   single row. nowrap keeps them on one line; the children don't shrink (so the
+   pill text stays intact) and the row scrolls horizontally on the rare narrow
+   case rather than wrapping to a second line. Scrollbar hidden — on mobile the
+   Hide label collapses to icon-only (below) so it almost always just fits. */
 .anime-detail-badges {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 0.4rem;
     align-items: center;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none; /* Firefox */
+}
+
+.anime-detail-badges::-webkit-scrollbar {
+    display: none; /* WebKit/Blink */
+}
+
+.anime-detail-badges > * {
+    flex-shrink: 0;
 }
 
 /* Airing status + Add-to-List pill + heart + Hide share one row; give the
@@ -6440,11 +6454,23 @@ a.stats-cell-link:hover {
     width: 2rem;
 }
 
-/* Centre the single status+actions row on mobile (the meta column is centred
-   there), and keep it on one line — flex-wrap still rescues very narrow /
-   long-label cases. */
+/* Mobile: keep the row centred + tighten the gap, and collapse the Hide button
+   to icon-only (matching the icon-only heart) so airing + Add-to-List + heart +
+   Hide all fit on one line without scrolling. */
 @media (max-width: 599px) {
     .anime-detail-badges {
+        justify-content: center;
+        gap: 0.3rem;
+    }
+
+    .anime-detail-hide .anime-detail-hide-label {
+        display: none;
+    }
+
+    .anime-detail-hide {
+        width: 2rem;
+        padding-left: 0;
+        padding-right: 0;
         justify-content: center;
     }
 }
