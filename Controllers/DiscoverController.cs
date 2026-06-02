@@ -166,6 +166,11 @@ namespace AnimeList.Controllers
             if (preferredMediaType != MetaType.anime)
                 return await VideoBrowseAsync(preferredMediaType, uid, search, genre, list);
 
+            // Anime path. A Trakt primary has no anime id-space, so run anime on
+            // the linked AniList (then MAL/Kitsu, else anonymous AniList) token —
+            // catalogs, ids, and methods all behave as if AniList were primary.
+            tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
+
             // Honor the "Hide unaired from Watching" pref. Only affects the
             // ListType.Current discover-only tab; harmless on every other list.
             var configuration = await GetConfigByUidAsync(uid, _configStore);
@@ -416,6 +421,11 @@ namespace AnimeList.Controllers
                     VideoLinks = true,
                 });
             }
+
+            // /discover/page is the anime catalog pager (video uses /video/page),
+            // so a Trakt primary runs anime through the linked AniList token —
+            // see the matching swap + rationale in Index().
+            tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
 
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
