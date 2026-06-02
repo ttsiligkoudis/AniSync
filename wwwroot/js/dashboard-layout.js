@@ -11,13 +11,11 @@
     // map to more than one section (the per-type video shelves share a key);
     // they move + hide together and keep their on-page order.
     var UNITS = [
-        { key: 'anime-stats',        label: 'Your stats · Anime' },
+        { key: 'stats',              label: 'Your stats' },
         { key: 'anime-continue',     label: 'Continue watching · Anime' },
-        { key: 'anime-this-season',  label: 'This Season' },
         { key: 'anime-new-episodes', label: 'New Episodes Today' },
         { key: 'anime-popular',      label: 'Most Popular this Season' },
         { key: 'anime-anticipated',  label: 'Most Anticipated · Anime' },
-        { key: 'video-stats',        label: 'Your stats · Trakt' },
         { key: 'video-continue',     label: 'Continue watching · Movies/Series' },
         { key: 'video-trending',     label: 'Trending · Movies/Series' },
         { key: 'video-popular',      label: 'Most Popular · Movies/Series' },
@@ -41,12 +39,20 @@
         try { saved = JSON.parse(raw) || []; } catch (_) { saved = []; }
         if (boot) { try { localStorage.setItem(KEY, boot); } catch (_) { /* mirror locally */ } }
         if (!Array.isArray(saved)) saved = [];
+        // Migrate retired keys so an existing saved layout keeps the stats panel
+        // in place: the separate 'anime-stats' / 'video-stats' rows are now one
+        // unified 'stats' section, and 'anime-this-season' was removed entirely.
+        // The first old stats key wins the 'stats' slot; the rest collapse onto
+        // it (deduped by `seen` below). 'anime-this-season' maps to null = drop.
+        var RENAME = { 'anime-stats': 'stats', 'video-stats': 'stats', 'anime-this-season': null };
         var seen = {};
         var out = [];
         saved.forEach(function (e) {
-            if (e && DEFAULT_ORDER.indexOf(e.key) !== -1 && !seen[e.key]) {
-                seen[e.key] = true;
-                out.push({ key: e.key, visible: e.visible !== false });
+            if (!e) return;
+            var key = (e.key in RENAME) ? RENAME[e.key] : e.key;
+            if (key && DEFAULT_ORDER.indexOf(key) !== -1 && !seen[key]) {
+                seen[key] = true;
+                out.push({ key: key, visible: e.visible !== false });
             }
         });
         DEFAULT_ORDER.forEach(function (k) {

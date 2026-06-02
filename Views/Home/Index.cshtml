@@ -31,6 +31,19 @@
     var modeNoun = Model.MediaType == MetaType.movie ? "movies"
         : Model.MediaType == MetaType.series ? "series"
         : "anime";
+
+    // One unified "Your stats" panel holds a row per tracker: the AniList anime
+    // row (gated by HasStats) and/or the Trakt movies-&-series row (gated by a
+    // connected Trakt account). The panel renders when either row applies; each
+    // row carries its own data-media-type so the dashboard media-type switch can
+    // hide one row while the panel stays. The section's own data-media-type is
+    // the union of the rows present, so the switch hides the whole panel only
+    // when neither row matches the active filter.
+    var showAnimeStats = isLoggedIn && !anonymousUser && Model.HasStats && animeEnabled;
+    var showVideoStats = isLoggedIn && !anonymousUser && Model.TraktConnected && videoTypes.Count > 0;
+    var statsTypes = string.Join(" ",
+        (showAnimeStats ? new[] { "anime" } : Array.Empty<string>())
+        .Concat(showVideoStats ? new[] { "movie", "series" } : Array.Empty<string>()));
 }
 
 @* Streaming nudge — only for logged-in non-anonymous users who haven't
@@ -64,29 +77,41 @@
    the strip would feel like a placeholder. v1 will add Hours Watched + Mean
    Score once the per-service queries surface episode counts and per-entry
    scores; v0 sticks to what's already in the existing list-catalog response. *@
-@if (isLoggedIn && !anonymousUser && Model.HasStats && animeEnabled)
+@if (showAnimeStats || showVideoStats)
 {
-    <section class="dashboard-section stats-section" data-dash-section="anime-stats" data-media-type="anime" data-stats-section data-stats-loading>
-        @{
-            // Stats come from AniList's User.statistics GraphQL regardless of
-            // which provider the user picked as their primary — that's where
-            // the dashboard sources count + mean + minutesWatched from.
-            // ContributingServices[0] is the actual source service (always
-            // "Anilist" today; the list shape leaves room for a future
-            // multi-source aggregation), so use it instead of the primary's
-            // service label to keep the attribution honest.
-            var statsSourceLabel = Model.ContributingServices.Count > 0
-                ? Model.ContributingServices[0]
-                : "Anilist";
-            // "Anilist" → "AniList" for display, matching the service's own
-            // branding. Other service names already display naturally.
-            if (string.Equals(statsSourceLabel, "Anilist", StringComparison.OrdinalIgnoreCase))
-                statsSourceLabel = "AniList";
-            var statsAttribution = $"via {statsSourceLabel}";
-        }
+    <section class="dashboard-section stats-section" data-dash-section="stats" data-media-type="@statsTypes">
         <div class="dashboard-section-header">
-            <h2 class="dashboard-section-title">Your stats@(animeSuffix)</h2>
-            <span class="dashboard-section-actions">
+            <h2 class="dashboard-section-title">Your stats</h2>
+        </div>
+        @if (showAnimeStats)
+        {
+            @{
+                // Stats come from AniList's User.statistics GraphQL regardless of
+                // which provider the user picked as their primary — that's where
+                // the dashboard sources count + mean + minutesWatched from.
+                // ContributingServices[0] is the actual source service (always
+                // "Anilist" today; the list shape leaves room for a future
+                // multi-source aggregation), so use it instead of the primary's
+                // service label to keep the attribution honest.
+                var statsSourceLabel = Model.ContributingServices.Count > 0
+                    ? Model.ContributingServices[0]
+                    : "Anilist";
+                // "Anilist" → "AniList" for display, matching the service's own
+                // branding. Other service names already display naturally.
+                if (string.Equals(statsSourceLabel, "Anilist", StringComparison.OrdinalIgnoreCase))
+                    statsSourceLabel = "AniList";
+                var statsAttribution = $"via {statsSourceLabel}";
+            }
+            <div class="stats-group" data-media-type="anime" data-stats-section data-stats-loading>
+                <div class="stats-group-head">
+                    @* Row sub-label only when more than one tracker shows, so a
+                       single-tracker dashboard reads "Your stats" without a
+                       redundant "Anime" caption. *@
+                    @if (combined)
+                    {
+                        <span class="stats-group-label">Anime</span>
+                    }
+                    <span class="dashboard-section-actions stats-group-actions">
                 <span class="dashboard-section-link-muted">@statsAttribution</span>
                 @* Info popover. AniList re-aggregates User.statistics on
                    its own schedule (typically 24-48 h) and exposes no
@@ -169,7 +194,66 @@
                 <div class="stats-number">—</div>
                 <div class="stats-label">Mean</div>
             </div>
-        </div>
+                </div>
+            </div>
+        }
+        @if (showVideoStats)
+        {
+            <div class="stats-group" data-media-type="movie series" data-trakt-stats data-stats-loading>
+                <div class="stats-group-head">
+                    @if (combined)
+                    {
+                        <span class="stats-group-label">Movies &amp; Series</span>
+                    }
+                    <span class="dashboard-section-actions stats-group-actions">
+                        <span class="dashboard-section-link-muted">via Trakt</span>
+                    </span>
+                </div>
+                <div class="stats-strip">
+                    <div class="stats-cell" data-trakt-stat="movies">
+                        <span class="stats-icon stats-icon-blue">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+                                <line x1="7" y1="4" x2="7" y2="20"></line><line x1="17" y1="4" x2="17" y2="20"></line>
+                                <line x1="3" y1="12" x2="21" y2="12"></line>
+                            </svg>
+                        </span>
+                        <div class="stats-number">—</div>
+                        <div class="stats-label">Movies</div>
+                    </div>
+                    <div class="stats-cell" data-trakt-stat="shows">
+                        <span class="stats-icon stats-icon-green">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="7" width="20" height="13" rx="2"></rect>
+                                <polyline points="8 3 12 7 16 3"></polyline>
+                            </svg>
+                        </span>
+                        <div class="stats-number">—</div>
+                        <div class="stats-label">Shows</div>
+                    </div>
+                    <div class="stats-cell" data-trakt-stat="episodes">
+                        <span class="stats-icon stats-icon-purple">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="3" width="20" height="14" rx="2"></rect>
+                                <line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line>
+                            </svg>
+                        </span>
+                        <div class="stats-number">—</div>
+                        <div class="stats-label">Episodes</div>
+                    </div>
+                    <div class="stats-cell" data-trakt-stat="hours" hidden>
+                        <span class="stats-icon stats-icon-amber">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                        </span>
+                        <div class="stats-number">—</div>
+                        <div class="stats-label">Hours</div>
+                    </div>
+                </div>
+            </div>
+        }
     </section>
     @* Click-to-toggle behaviour for the stats info popover plus the
        localStorage-cached stats fetch. Both kept tiny + inline since the
@@ -310,6 +394,41 @@
             if (window.AniSyncRevalidate) {
                 window.AniSyncRevalidate.on(function () { if (!readCache()) fetchAndRender(); });
             }
+        })();
+    </script>
+    <script>
+        (function () {
+            // Trakt row of the unified "Your stats" panel. Guarded on the row's
+            // presence, so it no-ops when only the anime row rendered.
+            var group = document.querySelector('[data-trakt-stats]');
+            if (!group) return;
+            // Hide just this row on an empty/failed fetch; if that leaves the
+            // panel with no live row (Trakt-only dashboard, upstream blip), hide
+            // the whole "Your stats" section rather than show a bare header.
+            function hideRow() {
+                group.hidden = true;
+                var sec = group.closest('.stats-section');
+                if (sec && !sec.querySelector('.stats-group:not([hidden])')) sec.hidden = true;
+            }
+            function set(stat, val) {
+                var cell = group.querySelector('[data-trakt-stat="' + stat + '"]');
+                if (!cell) return;
+                var n = cell.querySelector('.stats-number');
+                var has = val != null && val !== 0;
+                if (stat === 'hours') cell.hidden = !has;
+                if (n) n.textContent = has ? Number(val).toLocaleString() : '—';
+            }
+            fetch('/Home/TraktStatsData', { credentials: 'same-origin', skipLoader: true })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (data) {
+                    if (!data || !data.success || !data.stats) { hideRow(); return; }
+                    set('movies', data.stats.moviesWatched);
+                    set('shows', data.stats.showsWatched);
+                    set('episodes', data.stats.episodesWatched);
+                    set('hours', data.stats.totalHoursWatched);
+                    group.removeAttribute('data-stats-loading');
+                })
+                .catch(function () { hideRow(); });
         })();
     </script>
 }
@@ -509,91 +628,15 @@
 }
 
 @* ── Video-mode dashboard (movies / series) ──────────────────────────────
-   Mirrors the anime dashboard with Trakt/Cinemeta sources. The Trakt "Your
-   stats" strip + Continue Watching need a connected account (like the anime
-   stats need AniList); the Trending / Popular / Anticipated shelves are
-   public. All shelves reuse the same [data-shelf] loader below. *@
+   Mirrors the anime dashboard with Trakt/Cinemeta sources. Continue Watching
+   needs a connected Trakt account (the Trakt "Your stats" row moved up into
+   the unified "Your stats" panel); the Trending / Popular / Anticipated
+   shelves are public. All shelves reuse the same [data-shelf] loader below. *@
 @if (videoTypes.Count > 0)
 {
-    @if (isLoggedIn && !anonymousUser && Model.TraktConnected)
-    {
-        <section class="dashboard-section stats-section" data-dash-section="video-stats" data-media-type="movie series" data-trakt-stats data-stats-loading>
-            <div class="dashboard-section-header">
-                <h2 class="dashboard-section-title">Your stats</h2>
-                <span class="dashboard-section-link-muted">via Trakt</span>
-            </div>
-            <div class="stats-strip">
-                <div class="stats-cell" data-trakt-stat="movies">
-                    <span class="stats-icon stats-icon-blue">
-                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="3" y="4" width="18" height="16" rx="2"></rect>
-                            <line x1="7" y1="4" x2="7" y2="20"></line><line x1="17" y1="4" x2="17" y2="20"></line>
-                            <line x1="3" y1="12" x2="21" y2="12"></line>
-                        </svg>
-                    </span>
-                    <div class="stats-number">—</div>
-                    <div class="stats-label">Movies</div>
-                </div>
-                <div class="stats-cell" data-trakt-stat="shows">
-                    <span class="stats-icon stats-icon-green">
-                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="2" y="7" width="20" height="13" rx="2"></rect>
-                            <polyline points="8 3 12 7 16 3"></polyline>
-                        </svg>
-                    </span>
-                    <div class="stats-number">—</div>
-                    <div class="stats-label">Shows</div>
-                </div>
-                <div class="stats-cell" data-trakt-stat="episodes">
-                    <span class="stats-icon stats-icon-purple">
-                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="2" y="3" width="20" height="14" rx="2"></rect>
-                            <line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line>
-                        </svg>
-                    </span>
-                    <div class="stats-number">—</div>
-                    <div class="stats-label">Episodes</div>
-                </div>
-                <div class="stats-cell" data-trakt-stat="hours" hidden>
-                    <span class="stats-icon stats-icon-amber">
-                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <polyline points="12 6 12 12 16 14"></polyline>
-                        </svg>
-                    </span>
-                    <div class="stats-number">—</div>
-                    <div class="stats-label">Hours</div>
-                </div>
-            </div>
-        </section>
-        <script>
-            (function () {
-                var section = document.querySelector('[data-trakt-stats]');
-                if (!section) return;
-                function set(stat, val) {
-                    var cell = section.querySelector('[data-trakt-stat="' + stat + '"]');
-                    if (!cell) return;
-                    var n = cell.querySelector('.stats-number');
-                    var has = val != null && val !== 0;
-                    if (stat === 'hours') cell.hidden = !has;
-                    if (n) n.textContent = has ? Number(val).toLocaleString() : '—';
-                }
-                fetch('/Home/TraktStatsData', { credentials: 'same-origin', skipLoader: true })
-                    .then(function (r) { return r.ok ? r.json() : null; })
-                    .then(function (data) {
-                        if (!data || !data.success || !data.stats) { section.hidden = true; return; }
-                        set('movies', data.stats.moviesWatched);
-                        set('shows', data.stats.showsWatched);
-                        set('episodes', data.stats.episodesWatched);
-                        set('hours', data.stats.totalHoursWatched);
-                        section.removeAttribute('data-stats-loading');
-                    })
-                    .catch(function () { section.hidden = true; });
-            })();
-        </script>
-
-    }
-
+    @* The Trakt "Your stats" row now lives in the unified "Your stats" panel
+       near the top of the dashboard (rendered above with the AniList row), so
+       it's no longer emitted here. *@
     @* Video shelves grouped by LIST TYPE, not media type: each list type renders
        one tile per enabled video type (Watching · Movies, Watching · Series, then
        Trending · Movies, Trending · Series, …) so the page reads down the list
