@@ -135,6 +135,41 @@ namespace AnimeList.Services
             return (people, p < totalPages);
         }
 
+        /// <summary>
+        /// TMDB /search/person → ActorSummary tiles, same shape + Acting-only
+        /// filter as <see cref="GetPopularPeopleAsync"/>. Empty when TMDB isn't
+        /// configured or the query is blank.
+        /// </summary>
+        public async Task<(List<ActorSummary> People, bool HasNextPage)> SearchPeopleAsync(string query, int page = 1)
+        {
+            if (string.IsNullOrEmpty(_tmdbReadToken) || string.IsNullOrWhiteSpace(query)) return ([], false);
+            var p = Math.Max(1, page);
+            var result = await GetJsonAsync($"{_tmdbApi}/search/person?query={Uri.EscapeDataString(query.Trim())}&page={p}");
+            if (result == null) return ([], false);
+
+            var people = new List<ActorSummary>();
+            if (result["results"] is JArray results)
+            {
+                foreach (var r in results.OfType<JObject>())
+                {
+                    if (!string.Equals((string)r["known_for_department"], "Acting", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    var id = (int?)r["id"];
+                    var name = (string)r["name"];
+                    if (id is not int tmdbId || string.IsNullOrEmpty(name)) continue;
+                    people.Add(new ActorSummary
+                    {
+                        TmdbId = tmdbId,
+                        Name = name,
+                        Image = BuildImageUrl((string)r["profile_path"]),
+                    });
+                }
+            }
+
+            var totalPages = (int?)result["total_pages"] ?? p;
+            return (people, p < totalPages);
+        }
+
         private async Task<JObject> GetJsonAsync(string url)
         {
             var client = _clientFactory.CreateClient();

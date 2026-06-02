@@ -667,7 +667,7 @@ namespace AnimeList.Controllers
         // links to /discover/actor/tmdb/{id} → the Trakt-backed filmography.
 
         [Route("/discover/actors")]
-        public async Task<IActionResult> Actors(string type = null)
+        public async Task<IActionResult> Actors(string type = null, string search = null)
         {
             // Movies / series surface; honour a ?type= so the mode stays in sync
             // after arriving from the dashboard's "Browse By · Actors" tile.
@@ -675,15 +675,52 @@ namespace AnimeList.Controllers
             // Anime has no actor directory — if the user flipped the switch to
             // anime while here, bounce to /discover (anime browse).
             if (MediaTypePreference.FromCookie(HttpContext) == MetaType.anime) return Redirect("/discover");
-            var (people, hasNext) = await _tmdb.GetPopularPeopleAsync(1);
+
+            var hasSearch = !string.IsNullOrWhiteSpace(search);
+            var (people, hasNext) = hasSearch
+                ? await _tmdb.SearchPeopleAsync(search.Trim(), 1)
+                : await _tmdb.GetPopularPeopleAsync(1);
+
+            // Mode pills so Actors shares /discover's video nav chrome (mirrors
+            // VideoBrowseAsync's mode list). Links carry the active video type so
+            // tapping a pill stays in movies/series.
+            await PopulateActorChromeAsync(hasSearch ? search.Trim() : null);
             ViewData["ActorsHasNext"] = hasNext;
             return View("Actors", people);
         }
 
-        [Route("/discover/actors/page")]
-        public async Task<IActionResult> ActorsPage(int page = 1)
+        // Builds the Actors page's nav pills + search/type ViewData. Trakt feeds
+        // appear when configured; "For You" only when the user has Trakt connected
+        // — same gating as VideoBrowseAsync.
+        private async Task PopulateActorChromeAsync(string search)
         {
-            var (people, hasNext) = await _tmdb.GetPopularPeopleAsync(page);
+            string uid = null;
+            var td = await _tokenService.GetAccessTokenAsync();
+            if (td != null && !td.anonymousUser)
+            {
+                var (resolved, _) = await _configStore.FindUidByIdentityAsync(td);
+                uid = resolved;
+            }
+            var traktToken = string.IsNullOrEmpty(uid) ? null : await _configStore.GetTraktTokenAsync(uid);
+            var modes = new List<(string Slug, string Label)> { ("popular", "Popular") };
+            if (_trakt.IsConfigured)
+            {
+                modes.Add(("trending", "Trending"));
+                modes.Add(("anticipated", "Anticipated"));
+                modes.Add(("watched", "Most Watched"));
+                if (traktToken?.Connected == true) modes.Add(("recommended", "For You"));
+            }
+            ViewData["ActorModes"] = modes;
+            ViewData["ActorType"] = MediaTypePreference.FromCookie(HttpContext) == MetaType.series ? "series" : "movie";
+            ViewData["ActorSearch"] = search;
+        }
+
+        [Route("/discover/actors/page")]
+        public async Task<IActionResult> ActorsPage(int page = 1, string search = null)
+        {
+            var (people, hasNext) = !string.IsNullOrWhiteSpace(search)
+                ? await _tmdb.SearchPeopleAsync(search.Trim(), page)
+                : await _tmdb.GetPopularPeopleAsync(page);
             Response.Headers["X-Has-Next-Page"] = hasNext ? "true" : "false";
             return PartialView("_ActorTiles", people);
         }

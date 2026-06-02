@@ -14,6 +14,9 @@
     if (!grid || !sentinel) return;
 
     var page = parseInt(paginator.getAttribute('data-page') || '1', 10);
+    // Forwarded on each page fetch so search results paginate too (TMDB
+    // /search/person), mirroring the studios paginator.
+    var searchTerm = paginator.getAttribute('data-search') || '';
     var loading = false;
     var done = paginator.getAttribute('data-has-next') !== 'true';
     var observer = null;
@@ -54,7 +57,9 @@
         loading = true;
         if (loader) loader.hidden = false;
 
-        fetch('/discover/actors/page?page=' + (page + 1), {
+        var url = '/discover/actors/page?page=' + (page + 1)
+            + (searchTerm ? '&search=' + encodeURIComponent(searchTerm) : '');
+        fetch(url, {
             credentials: 'same-origin',
             headers: { 'Accept': 'text/html' },
             skipLoader: true

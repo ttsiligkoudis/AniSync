@@ -3,24 +3,63 @@
     ViewData["Title"] = "Actors";
     ViewData["BodyClass"] = "library-page";
     ViewData["ActiveNav"] = "discover";
+    ViewData["MtActive"] = (ViewData["ActorType"] as string) == "series" ? MetaType.series : MetaType.movie;
+    ViewData["MtReturnUrl"] = "/discover";
+
     var hasNext = ViewData["ActorsHasNext"] as bool? ?? false;
+    var actorModes = ViewData["ActorModes"] as List<(string Slug, string Label)> ?? new();
+    var actorType = ViewData["ActorType"] as string ?? "movie";
+    var actorSearch = ViewData["ActorSearch"] as string;
+    var hasActorSearch = !string.IsNullOrEmpty(actorSearch);
 }
 
-<header class="page-header">
-    <h1 class="page-title">Popular Actors</h1>
-    <p class="page-subtitle">Tap an actor to see their movies &amp; series</p>
-</header>
+@* Same Discover video nav as /discover (Popular + Trakt feeds) with the Actors
+   pill active, so this stays inside the Discover surface. Pills carry the active
+   video type so tapping one keeps the mode in movies/series. *@
+<nav class="library-tabs" role="tablist" aria-label="Discover modes">
+    @foreach (var (slug, lbl) in actorModes)
+    {
+        <a class="library-tab" href="/discover?list=@slug&amp;type=@actorType" role="tab" aria-selected="false">@lbl</a>
+    }
+    <a class="library-tab library-tab-active" href="/discover/actors?type=@actorType" role="tab" aria-selected="true">Actors</a>
+</nav>
+
+@* Server-side search form — TMDB person search. Same shape as the Studios
+   browse-by search: a full GET round-trip (the directory is paginated, so a
+   client-side filter would only catch already-loaded tiles). The paginator
+   forwards the term on subsequent page fetches via data-search. *@
+<form method="get" action="/discover/actors" class="filter-bar" role="search">
+    <input type="hidden" name="type" value="@actorType" />
+    <input type="search"
+           name="search"
+           value="@actorSearch"
+           placeholder="Search actors…"
+           class="filter-bar-search"
+           autocomplete="off" />
+    <button type="submit" class="filter-bar-submit">Search</button>
+    @if (hasActorSearch)
+    {
+        <a class="filter-bar-clear" href="/discover/actors?type=@actorType">Clear</a>
+    }
+</form>
 
 @if (Model == null || Model.Count == 0)
 {
-    <p class="hint-text">No actors available right now. Try again in a moment.</p>
+    @if (hasActorSearch)
+    {
+        <p class="hint-text">No actors match "@actorSearch".</p>
+    }
+    else
+    {
+        <p class="hint-text">No actors available right now. Try again in a moment.</p>
+    }
 }
 else
 {
     @* actor-pagination.js reads data-page (last server-rendered page) +
-       data-has-next, then fetches /discover/actors/page?page=N+1 as the
-       sentinel scrolls into view, appending tiles into .actor-grid. *@
-    <div class="actor-paginator" data-page="1" data-has-next="@(hasNext ? "true" : "false")">
+       data-has-next + data-search, then fetches /discover/actors/page?page=N+1
+       (forwarding the search term) as the sentinel scrolls into view. *@
+    <div class="actor-paginator" data-page="1" data-has-next="@(hasNext ? "true" : "false")" data-search="@actorSearch">
         <div class="actor-grid">
             @await Html.PartialAsync("_ActorTiles", Model)
         </div>
