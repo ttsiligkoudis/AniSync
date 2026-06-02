@@ -8235,6 +8235,25 @@ body.mt-modal-open {
     justify-content: flex-end;
     margin: 0 0 0.4rem;
 }
+
+/* Dashboard "Customize" button. Pinned to the top-right of the content, but
+   absolutely positioned (not sticky) so it scrolls away with the page — unlike
+   the sticky media-type pills. Anchored to main (body.dash-page main is
+   position: relative). z-index keeps it clickable above the section below it. */
+.dash-customize-float {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 1;
+}
+/* When the media-type switch bar is present (more than one mode enabled) it
+   sits, sticky, just above the content; lift the button onto that row so it
+   lines up with the pills. The dashboard's switch-bar bottom padding (0.3rem)
+   + main's top padding are small, so a fixed lift lands it on the pills row. */
+.dash-customize-float.is-on-switch-row {
+    top: -1rem;
+    transform: translateY(-100%);
+}
 .dash-customize-btn {
     display: inline-flex;
     align-items: center;
@@ -8725,6 +8744,8 @@ a.video-cast-card[href]:hover .video-cast-name {
    shared 2rem main top-padding reads as dead space above "Your stats". */
 body.dash-page main {
     padding-top: 0.4rem;
+    /* Containing block for the absolutely-positioned .dash-customize-float. */
+    position: relative;
 }
 @media (min-width: 768px) {
     body.dash-page main {
