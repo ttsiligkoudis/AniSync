@@ -6399,6 +6399,37 @@ a.stats-cell-link:hover {
     align-items: center;
 }
 
+/* Action cluster (Add to List / status pill + quick-add heart + Hide) grouped
+   so they wrap together as one unit rather than scattering across lines. On
+   desktop it sits inline after the score/status badges; on mobile it drops to
+   its own centered row so the controls read as a tidy action bar under the
+   info badges. The heart + hide + pill share a common control height so the
+   row lines up cleanly. */
+.anime-detail-actions {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.anime-detail-actions .anime-detail-user-state,
+.anime-detail-actions .anime-detail-heart,
+.anime-detail-actions .anime-detail-hide {
+    height: 2rem;
+}
+
+.anime-detail-heart {
+    width: 2rem;
+}
+
+@media (max-width: 599px) {
+    .anime-detail-actions {
+        width: 100%;
+        justify-content: center;
+        margin-top: 0.15rem;
+    }
+}
+
 .anime-detail-score {
     display: inline-flex;
     align-items: center;
