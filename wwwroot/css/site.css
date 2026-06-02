@@ -6326,6 +6326,34 @@ a.stats-cell-link:hover {
     background: var(--overlay-04);
 }
 
+/* Wraps the poster so the score badge can overlay it. Sizes to the poster
+   (line-height:0 strips the inline-image gap) and stays a fixed flex item in
+   the hero body, same as the bare poster used to be. */
+.anime-detail-poster-wrap {
+    position: relative;
+    flex-shrink: 0;
+    line-height: 0;
+    align-self: center;
+}
+
+@media (min-width: 600px) {
+    .anime-detail-poster-wrap {
+        align-self: flex-start;
+    }
+}
+
+/* Score overlaid on the poster's bottom-left, mirroring the .library-card-score
+   badge on the dashboard / Library / Discover poster cards. */
+.anime-detail-poster-score {
+    position: absolute;
+    left: 0.5rem;
+    bottom: 0.5rem;
+    line-height: 1.2;
+    font-size: 0.8rem;
+    padding: 0.2rem 0.55rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
 .anime-detail-meta {
     flex: 1;
     width: 100%;
@@ -6397,11 +6425,6 @@ a.stats-cell-link:hover {
     flex-wrap: wrap;
     gap: 0.4rem;
     align-items: center;
-}
-
-/* Score now sits on its own line above the format/duration info row. */
-.anime-detail-score-row {
-    margin: 0.1rem 0;
 }
 
 /* Airing status + Add-to-List pill + heart + Hide share one row; give the
