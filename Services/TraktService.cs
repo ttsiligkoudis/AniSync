@@ -232,9 +232,18 @@ namespace AnimeList.Services
                     items.Add(s);
                 }
             }
+            // Collapse to one entry per title. Trakt's /sync/playback returns a
+            // separate in-progress row per episode, so a series with several
+            // part-watched episodes would otherwise show as that many duplicate
+            // tiles in Continue Watching / the library "Watching" tab — and grow
+            // by one every time another episode is started. Keep the most-recently-
+            // paused row per IMDb id (the list is already sorted newest-first, and
+            // GroupBy preserves source order within each group).
             return items
                 .Where(i => !string.IsNullOrEmpty(i.ImdbId))
                 .OrderByDescending(i => i.PausedAt)
+                .GroupBy(i => i.ImdbId, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
                 .ToList();
         }
 
