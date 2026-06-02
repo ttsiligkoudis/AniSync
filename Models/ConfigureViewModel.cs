@@ -30,6 +30,14 @@ namespace AnimeList.Models
         /// <summary>True for "Continue without account" installs (v3 inline token).</summary>
         public bool AnonymousUser { get; init; }
 
+        /// <summary>
+        /// The user's selected media-type set (anime / movies / series), resolved
+        /// from the account setting or cookie. Drives which settings render —
+        /// e.g. the Preferences card's anime-only toggles only show when anime
+        /// is selected, and the card hides entirely when none apply.
+        /// </summary>
+        public List<MetaType> EnabledMediaTypes { get; init; } = new();
+
         /// <summary>Linked secondary providers (multi-provider sync targets).</summary>
         public List<LinkedToken> LinkedTokens { get; init; } = new();
 

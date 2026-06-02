@@ -7,37 +7,48 @@
     _ConfigurePageScript reads every toggle's checkbox via bitFor() so
     one Save click on either page persists the full pref set.
 
-    Per-toggle visibility:
-      - hideUnreleasedWatching is hidden for anonymous users (they have
-        no library to filter against, so the toggle would be inert);
-      - groupSeasons and showAdultContent are available to everyone so
-        the addon catalogs anonymous users install respect them too.
+    Visibility:
+      - Every toggle here is anime-only, so the whole card only renders when
+        anime is one of the user's selected media types (Model.EnabledMediaTypes);
+        with anime off there are no settings to show and the card is hidden.
+      - hideUnreleasedWatching is additionally hidden for anonymous users (they
+        have no library to filter against, so the toggle would be inert).
 
     DOM ids must match the selectors readFlags() in _ConfigurePageScript
-    already drives.
+    already drives. When a toggle isn't rendered (anime off), bitFor() falls
+    back to its stored value, so Save never clobbers a hidden setting.
 *@
 @model ConfigureViewModel
 
 @{
+    // Every preference here only affects anime (Currently-Watching filtering,
+    // multi-cour grouping, R18 catalog hiding), so they only render when anime
+    // is one of the user's selected media types. With anime off, `prefs` stays
+    // empty and the whole card is hidden by the @if below. A future non-anime
+    // pref would just be added outside this gate.
+    var animeEnabled = Model.EnabledMediaTypes.Contains(MetaType.anime);
     var prefs = new List<(string Id, string Label, string Description, bool Checked)>();
-    if (!Model.AnonymousUser)
+    if (animeEnabled)
     {
+        if (!Model.AnonymousUser)
+        {
+            prefs.Add((
+                "hideUnreleasedWatching",
+                "Hide unaired from Watching",
+                "When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.",
+                Model.HideUnreleasedWatching));
+        }
         prefs.Add((
-            "hideUnreleasedWatching",
-            "Hide unaired from Watching",
-            "When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.",
-            Model.HideUnreleasedWatching));
+            "groupSeasons",
+            "Group anime seasons",
+            "Collapse multi-cour franchises into a single card across the site and the Stremio addon. Off shows every cour separately.",
+            Model.GroupSeasons));
+        prefs.Add((
+            "showAdultContent",
+            "Show 18+ content",
+            "Off (default) hides hentai / R18 entries from Discover, Library, and the Stremio addon catalogs. Direct anime URLs still work either way — this only affects what shows up in the grid.",
+            Model.ShowAdultContent));
     }
-    prefs.Add((
-        "groupSeasons",
-        "Group anime seasons",
-        "Collapse multi-cour franchises into a single card across the site and the Stremio addon. Off shows every cour separately.",
-        Model.GroupSeasons));
-    prefs.Add((
-        "showAdultContent",
-        "Show 18+ content",
-        "Off (default) hides hentai / R18 entries from Discover, Library, and the Stremio addon catalogs. Direct anime URLs still work either way — this only affects what shows up in the grid.",
-        Model.ShowAdultContent));
 }
 
 @if (prefs.Count > 0)
