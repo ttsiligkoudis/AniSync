@@ -62,12 +62,11 @@ namespace AnimeList.Models
         // Popular / Anticipated) render regardless.
         public bool TraktConnected { get; set; }
 
-        // The "This Season" stat strip and the discovery shelves (New
-        // Episodes Today, Most Popular this Season, Most Anticipated) are no
-        // longer rendered server-side — they're fetched client-side after
-        // first paint from /Home/SeasonStatsData and the *Data shelf
+        // The discovery shelves (New Episodes Today, Most Popular this
+        // Season, Most Anticipated) are not rendered server-side — they're
+        // fetched client-side after first paint from the *Data shelf
         // endpoints, so the dashboard never blocks on AniList. The view
-        // emits shimmer placeholders and the inline loader swaps them for
+        // emits shimmer placeholders and the shelf loader swaps them for
         // the real content (or hides the section when the upstream returns
         // nothing).
     }
