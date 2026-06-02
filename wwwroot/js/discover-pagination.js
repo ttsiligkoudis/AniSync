@@ -171,6 +171,19 @@
                     teardown();
                 } else {
                     page = nextPage;
+                    // A short page (e.g. Kitsu caps catalogs at 20/page) may not
+                    // push the sentinel past the load margin, and an
+                    // IntersectionObserver only fires on *transitions* — so it
+                    // would never call us again and the grid would stall after
+                    // page 1. Re-observing forces a fresh intersection check on
+                    // the next frame (by which point `loading` has cleared): if
+                    // the sentinel is still in view we pull the next page,
+                    // repeating until the grid overflows the viewport or the
+                    // catalog ends; if it has already scrolled past, it's a no-op.
+                    if (observer && sentinel.parentNode) {
+                        observer.unobserve(sentinel);
+                        observer.observe(sentinel);
+                    }
                 }
             })
             .catch(function () {

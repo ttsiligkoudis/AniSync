@@ -319,9 +319,14 @@ namespace AnimeList.Services
                 var genreVarDecl = !string.IsNullOrEmpty(genre) ? ", $genre: String" : string.Empty;
                 var genreArg = !string.IsNullOrEmpty(genre) ? ", genre: $genre" : string.Empty;
 
-                // If the user picked a sort, honour it; otherwise fall back to the catalog's
-                // default sort encoded in the ListType (e.g. TRENDING_DESC).
-                var sortValue = string.IsNullOrEmpty(sort) ? GetListTypeString(list.Value, tokenData) : SortToAnilist(sort);
+                // This branch always builds an AniList catalog (Page.media) query,
+                // so the default sort must be AniList's own MediaSort enum
+                // (TRENDING_DESC / POPULARITY_DESC). When Trending is routed here
+                // for a MAL/Kitsu/Trakt primary the token is null — and
+                // GetListTypeString would then default to Kitsu and emit the
+                // lowercase "trending_desc", which AniList rejects (→ empty
+                // results). Take the AniList spelling straight off the ListType.
+                var sortValue = string.IsNullOrEmpty(sort) ? list.Value.ToString().ToUpperInvariant() : SortToAnilist(sort);
 
                 requestBody = SerializeObject(new
                 {
