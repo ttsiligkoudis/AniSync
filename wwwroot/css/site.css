@@ -8601,6 +8601,12 @@ a.video-cast-card[href]:hover .video-cast-name {
     /* Transparent strip — let clicks fall through to content beside the pill. */
     pointer-events: none;
 }
+/* Dashboard variant sits right under the header and leads straight into the
+   "Your stats" panel, so drop the standalone breathing room above the pills
+   that the navigate-mode switch (Library / Discover) keeps. */
+.mt-switch-bar[data-mt-switch="dashboard"] {
+    padding-top: 0.1rem;
+}
 .mt-switch-inner {
     display: flex;
     justify-content: flex-start;
