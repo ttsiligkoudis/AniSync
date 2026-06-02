@@ -8255,6 +8255,60 @@ body.mt-modal-open {
     backdrop-filter: blur(4px);
     z-index: 250;
 }
+
+/* Streams settings modal (/account). Mirrors the dash-modal shell but wider —
+   addon manifest URLs are long — and scrolls its body. The shared
+   _StreamsSection renders as a plain .section-card; inside the modal we drop
+   that card chrome so the modal surface isn't doubled. */
+.streams-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 250;
+}
+.streams-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(94vw, 720px);
+    max-height: 90vh;
+    max-height: 90dvh;
+    z-index: 251;
+}
+body.streams-modal-open { overflow: hidden; }
+/* Float the page's Save bar ABOVE the modal so toggle changes made inside it
+   can be committed without closing first (the addon list saves on its own). */
+body.streams-modal-open .floating-save-bar { z-index: 260; }
+.streams-modal-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    max-height: 90vh;
+    max-height: 90dvh;
+    background: var(--surface);
+    border: 1px solid var(--overlay-10);
+    border-radius: 1rem;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+}
+.streams-modal-body {
+    flex: 1 1 auto;
+    min-height: 0;            /* let it shrink below content height so it scrolls */
+    overflow-y: auto;
+    padding: 0.4rem;
+}
+/* The inner _StreamsSection is a .section-card; the modal card already
+   provides the surface, so strip its chrome to avoid a card-in-a-card. */
+.streams-modal-body .section-card {
+    border: none;
+    background: transparent;
+    margin: 0;
+    padding: 1.1rem 1.2rem 1.3rem;
+    box-shadow: none;
+}
+
 .dash-modal {
     position: fixed;
     top: 50%;

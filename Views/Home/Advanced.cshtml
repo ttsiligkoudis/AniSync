@@ -11,27 +11,19 @@
    on this page (catalogs, streams, prefs) silently no-op. *@
 <header class="page-header">
     <h1 class="page-title">Advanced</h1>
-    <p class="page-subtitle">Streams · sync · home server sync · backups · destructive actions</p>
+    <p class="page-subtitle">Sync · home server sync · backups · destructive actions</p>
 </header>
 
 @if (Model.IsLoggedIn)
 {
-    @* Sections are ordered Streams → Sync → Home Server Sync → Backups →
-       Danger Zone. The non-anonymous-only block is split around Backups
-       because Backups (Import) stays visible to anonymous sessions as the
-       "restore on a fresh browser" path, while everything else needs a
-       real config row. *@
+    @* Sections are ordered Sync → Home Server Sync → Backups → Danger Zone.
+       Streams config moved to /account (a button there opens the streams
+       modal). The non-anonymous-only block is split around Backups because
+       Backups (Import) stays visible to anonymous sessions as the "restore
+       on a fresh browser" path, while everything else needs a real config
+       row. *@
     @if (!Model.AnonymousUser)
     {
-        <!-- ─── STREAMS ─────────────────────────────────────────────────── -->
-        @* Shared partial with /stremio — isStremio=false hides the
-           Manage Entry toggle (which only affects the Stremio addon's
-           Stream list) but keeps the rest of the affordances visible
-           since RD + external services still surface on the web app's
-           per-episode picker. *@
-        @await Html.PartialAsync("_StreamsSection", Model,
-            new ViewDataDictionary(ViewData) { ["isStremio"] = false })
-
         <!-- ─── BACKFILL LINKED ACCOUNTS ────────────────────────────────── -->
         @* Moved out of /configure's Linked Accounts card so the primary
            configure surface stays focused on identity. Lives here in
