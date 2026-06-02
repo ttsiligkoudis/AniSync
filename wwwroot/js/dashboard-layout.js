@@ -131,37 +131,21 @@
         return document.querySelector('[data-dash-section="' + key + '"]') != null;
     }
 
-    // Current dashboard media-type filter (set by the media-type switch). When
-    // it's a specific mode (not "all"), the customize modal should only offer
-    // that mode's sections.
-    function dashFilter() {
-        try { return localStorage.getItem('anisync-dashboard-media') || 'all'; }
-        catch (_) { return 'all'; }
-    }
-    // A section key is offered under the active filter when it has at least one
-    // element matching the filter — or an untyped element (general sections like
-    // "Browse By" always show). filter === "all" shows everything present.
-    function presentForFilter(key, filter) {
-        var els = document.querySelectorAll('[data-dash-section="' + key + '"]');
-        if (els.length === 0) return false;
-        if (filter === 'all') return true;
-        for (var i = 0; i < els.length; i++) {
-            var mt = els[i].getAttribute('data-media-type');
-            if (!mt) return true;
-            if (mt.split(/\s+/).indexOf(filter) !== -1) return true;
-        }
-        return false;
-    }
+    // Working copy the modal edits while it's open; null when closed. Toggles +
+    // drags stage here and only apply to the live dashboard (and persist) when
+    // the user hits Save — closing / cancelling discards them.
+    var draft = null;
 
-    // On the dashboard, only offer sections that actually rendered (gated by the
-    // enabled modes) AND match the active media-type filter. On /account there
-    // are no dashboard sections present, so offer every section so the user can
-    // still configure the layout there.
+    // Offer every section that actually rendered — gated by the user's selected
+    // media types (the "All" set), NOT the active toggler pill (the pill only
+    // hides sections client-side via a class; they're still present, so they're
+    // still offered here). On /account there are no dashboard sections present,
+    // so offer the whole layout so it can still be configured there.
     function pageHasSections() { return document.querySelector('[data-dash-section]') != null; }
     function displayedRows() {
-        if (!pageHasSections()) return layout.slice();
-        var filter = dashFilter();
-        return layout.filter(function (e) { return presentForFilter(e.key, filter); });
+        var src = draft || layout;
+        if (!pageHasSections()) return src.slice();
+        return src.filter(function (e) { return present(e.key); });
     }
 
     function renderRows() {
@@ -200,25 +184,30 @@
         });
     }
 
-    // Reorder the layout to match a new on-screen key order from a drag. Only
-    // the displayed keys move; non-displayed entries (hidden by mode) keep their
-    // slots, and every entry keeps its visible flag.
+    // Reorder the staged draft to match a new on-screen key order from a drag.
+    // Only the displayed keys move; non-displayed entries keep their slots, and
+    // every entry keeps its visible flag. No apply/render — the DOM rows are
+    // already in the dragged order, and nothing touches the live dashboard until
+    // Save.
     function applyDraggedOrder(newKeys) {
+        var src = draft || layout;
         var byKey = {};
-        layout.forEach(function (e) { byKey[e.key] = e; });
+        src.forEach(function (e) { byKey[e.key] = e; });
         var inDrag = {};
         newKeys.forEach(function (k) { inDrag[k] = true; });
         var queue = newKeys.slice();
-        layout = layout.map(function (e) {
+        var reordered = src.map(function (e) {
             return inDrag[e.key] ? byKey[queue.shift()] : e;
         });
-        commit();
+        if (draft) draft = reordered; else layout = reordered;
     }
     function toggleVisible(key) {
-        var e = layout.find(function (x) { return x.key === key; });
+        var src = draft || layout;
+        var e = src.find(function (x) { return x.key === key; });
         if (e) e.visible = !e.visible;
-        commit();
+        renderRows();   // reflect the staged change in the modal only
     }
+    // Persist + apply the (saved) layout to the live dashboard. Called from Save.
     function commit() {
         save(layout);
         apply(layout);
@@ -249,6 +238,9 @@
 
     function openModal() {
         if (!modal) return;
+        // Start a fresh editing draft (deep copy so edits don't touch the live
+        // layout until Save).
+        draft = layout.map(function (e) { return { key: e.key, visible: e.visible }; });
         renderRows();
         modal.hidden = false;
         if (backdrop) backdrop.hidden = false;
@@ -256,9 +248,14 @@
     }
     function closeModal() {
         if (!modal) return;
+        draft = null;   // discard any unsaved edits
         modal.hidden = true;
         if (backdrop) backdrop.hidden = true;
         document.body.classList.remove('dash-modal-open');
+    }
+    function saveAndClose() {
+        if (draft) { layout = draft; commit(); }
+        closeModal();
     }
 
     document.querySelectorAll('[data-dash-customize-open]').forEach(function (el) {
@@ -269,10 +266,11 @@
         var doneBtn = modal.querySelector('[data-dash-modal-done]');
         var resetBtn = modal.querySelector('[data-dash-reset]');
         if (closeBtn) closeBtn.addEventListener('click', closeModal);
-        if (doneBtn) doneBtn.addEventListener('click', closeModal);
+        if (doneBtn) doneBtn.addEventListener('click', saveAndClose);
         if (resetBtn) resetBtn.addEventListener('click', function () {
-            layout = DEFAULT_ORDER.map(function (k) { return { key: k, visible: defaultVisible(k) }; });
-            commit();
+            // Stage the default order in the draft; applies on Save.
+            draft = DEFAULT_ORDER.map(function (k) { return { key: k, visible: defaultVisible(k) }; });
+            renderRows();
         });
     }
     if (backdrop) backdrop.addEventListener('click', closeModal);
