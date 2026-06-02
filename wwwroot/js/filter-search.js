@@ -106,14 +106,10 @@
                 pane.removeAttribute('data-needs-initial-load');
                 reloadPaginationScript();
 
-                if (!opts.initial) {
-                    // Push the corresponding visible URL so deep-linking + back
-                    // navigation works. Strip the fullPane=1 we appended for the
-                    // partial endpoint — it has no meaning on the Index route.
-                    params.delete('fullPane');
-                    var visibleUrl = config.indexPath + (params.toString() ? ('?' + params.toString()) : '');
-                    window.history.pushState({ filterSearch: true }, '', visibleUrl);
-                }
+                // Search / filter is deliberately EPHEMERAL: we fetch + swap the
+                // grid in place but do NOT push the query into the URL, so a
+                // refresh clears the search rather than persisting it. (If we want
+                // to remember it later, that'll be a localStorage thing.)
                 // Scroll position is left alone on both paths. Earlier we
                 // smooth-scrolled the pane into view after a manual submit
                 // so users who had scrolled far down would still see the
