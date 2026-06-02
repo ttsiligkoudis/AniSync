@@ -6168,6 +6168,55 @@ a.stats-cell-link:hover {
     pointer-events: none;
 }
 
+/* Quick-add heart on the poster card — top-right corner, clear of the
+   top-left progress badge and bottom-left score. One tap toggles Watching
+   without leaving the grid. Always visible (touch-friendly); fills rose when
+   the entry is in the Watching list. Unlike the score/progress badges this is
+   interactive, so it keeps pointer-events. */
+.library-card-heart {
+    position: absolute;
+    right: 6px;
+    top: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(4px);
+    color: #fff;
+    cursor: pointer;
+    line-height: 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    transition: background 0.15s, color 0.15s, transform 0.1s, opacity 0.15s;
+}
+
+.library-card-heart:hover {
+    background: rgba(244, 63, 94, 0.85);
+    color: #fff;
+}
+
+.library-card-heart:active {
+    transform: scale(0.9);
+}
+
+.library-card-heart:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.library-card-heart-filled {
+    background: rgba(244, 63, 94, 0.92);
+    color: #fff;
+}
+
+.library-card-heart-filled svg {
+    fill: currentColor;
+}
+
 /* Info line under the title — "format · X eps · year". Same muted grey as
    the section subtitles so it reads as secondary context, not a label. */
 .library-card-meta {
