@@ -3,6 +3,7 @@
     ViewData["Title"] = "Actors";
     ViewData["BodyClass"] = "library-page";
     ViewData["ActiveNav"] = "discover";
+    ViewData["ShowMediaTypeSwitch"] = true;
     ViewData["MtActive"] = (ViewData["ActorType"] as string) == "series" ? MetaType.series : MetaType.movie;
     ViewData["MtReturnUrl"] = "/discover";
 

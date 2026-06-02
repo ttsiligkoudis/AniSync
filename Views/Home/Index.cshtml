@@ -1,6 +1,7 @@
 @model AnimeList.Models.DashboardViewModel
 @{
     ViewData["ActiveNav"] = "home";
+    ViewData["ShowMediaTypeSwitch"] = true;
     ViewData["Title"] = "Dashboard";
     var tokenData = Model.TokenData;
     var isLoggedIn = tokenData != null;

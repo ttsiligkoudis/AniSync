@@ -2,6 +2,7 @@
 @{
     ViewData["BodyClass"] = "library-page";
     ViewData["ActiveNav"] = "library";
+    ViewData["ShowMediaTypeSwitch"] = true;
 
     var isVideo = Model.MediaType != MetaType.anime;
     // Same vocabulary for both anime and video now — video's Paused / Dropped /

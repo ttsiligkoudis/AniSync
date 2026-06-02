@@ -6,6 +6,7 @@
     // IS the Discover surface for video, so the nav highlights Discover and the
     // filter form posts back to /discover (the old /movies · /series routes are gone).
     ViewData["ActiveNav"] = "discover";
+    ViewData["ShowMediaTypeSwitch"] = true;
 
     var label = isMovies ? "Movies" : "Series";
     var hasSearch = !string.IsNullOrEmpty(Model.Search);
