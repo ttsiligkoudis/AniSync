@@ -64,6 +64,7 @@ namespace AnimeList.Controllers
         private static readonly ListType[] DiscoverListTypes =
         [
             ListType.Trending_Desc,
+            ListType.Popularity_Desc,
             ListType.Seasonal,
             ListType.Airing,
         ];
@@ -281,13 +282,14 @@ namespace AnimeList.Controllers
             var traktToken = await _configStore.GetTraktTokenAsync(uid);
             var traktConnected = traktToken?.Connected == true;
 
-            // Available browse modes: Popular (Cinemeta) is always present; the
-            // Trakt feeds appear when Trakt is configured, and "For You" only
-            // when the user has Trakt connected.
-            var modes = new List<(string Slug, string Label)> { ("popular", "Popular") };
+            // Available browse modes. Trending leads (the default), then Popular
+            // (Cinemeta, always present); the rest of the Trakt feeds follow, and
+            // "For You" only when the user has Trakt connected.
+            var modes = new List<(string Slug, string Label)>();
+            if (_trakt.IsConfigured) modes.Add(("trending", "Trending"));
+            modes.Add(("popular", "Popular"));
             if (_trakt.IsConfigured)
             {
-                modes.Add(("trending", "Trending"));
                 modes.Add(("anticipated", "Anticipated"));
                 modes.Add(("watched", "Most Watched"));
                 if (traktConnected) modes.Add(("recommended", "For You"));
@@ -486,6 +488,9 @@ namespace AnimeList.Controllers
             // to know about.
             if (string.Equals(raw, "trending", StringComparison.OrdinalIgnoreCase))
                 return ListType.Trending_Desc;
+            // "popular" → Popularity_Desc, same friendly-synonym treatment.
+            if (string.Equals(raw, "popular", StringComparison.OrdinalIgnoreCase))
+                return ListType.Popularity_Desc;
             return ListType.Trending_Desc;
         }
 
@@ -708,10 +713,11 @@ namespace AnimeList.Controllers
                 uid = resolved;
             }
             var traktToken = string.IsNullOrEmpty(uid) ? null : await _configStore.GetTraktTokenAsync(uid);
-            var modes = new List<(string Slug, string Label)> { ("popular", "Popular") };
+            var modes = new List<(string Slug, string Label)>();
+            if (_trakt.IsConfigured) modes.Add(("trending", "Trending"));
+            modes.Add(("popular", "Popular"));
             if (_trakt.IsConfigured)
             {
-                modes.Add(("trending", "Trending"));
                 modes.Add(("anticipated", "Anticipated"));
                 modes.Add(("watched", "Most Watched"));
                 if (traktToken?.Connected == true) modes.Add(("recommended", "For You"));
