@@ -193,6 +193,10 @@ namespace AnimeList.Services
             // Web-UI preference columns (see CREATE TABLE comment).
             EnsureColumn(conn, "configs", "enabled_media_types", "TEXT");
             EnsureColumn(conn, "configs", "dashboard_layout", "TEXT");
+            // "Hide completed from Discover" preference. Its own column rather than
+            // a flag bit because the 3-byte flag field that rides the Stremio
+            // install URL is full, and this is a web-only display pref anyway.
+            EnsureColumn(conn, "configs", "hide_completed_discover", "INTEGER NOT NULL DEFAULT 0");
 
             // Created after EnsureColumn so it works on databases that predate the
             // trakt_user_key column (the CREATE TABLE block above won't add a column to
@@ -426,6 +430,33 @@ namespace AnimeList.Services
             cmd.Parameters.AddWithValue("$uid", uid);
             var raw = await cmd.ExecuteScalarAsync();
             return raw is long l ? l : 0L;
+        }
+
+        public async Task<bool> GetHideCompletedFromDiscoverAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return false;
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT hide_completed_discover FROM configs WHERE uid = $uid LIMIT 1";
+            cmd.Parameters.AddWithValue("$uid", uid);
+            var raw = await cmd.ExecuteScalarAsync();
+            return raw is long l && l != 0;
+        }
+
+        public async Task SetHideCompletedFromDiscoverAsync(string uid, bool value)
+        {
+            if (string.IsNullOrEmpty(uid)) return;
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
+            using var cmd = conn.CreateCommand();
+            // Web-only display pref — no revision bump (it doesn't change the
+            // Stremio manifest the install URL serves).
+            cmd.CommandText = """
+                UPDATE configs SET hide_completed_discover = $v, updated_at = $u WHERE uid = $uid
+                """;
+            cmd.Parameters.AddWithValue("$v", value ? 1 : 0);
+            cmd.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$uid", uid);
+            await cmd.ExecuteNonQueryAsync();
         }
 
         public async Task<bool> ClearShowExternalStreamsAsync(string uid)

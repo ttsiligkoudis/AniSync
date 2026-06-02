@@ -37,6 +37,11 @@
                 "Hide unaired anime from Watching",
                 "When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.",
                 Model.HideUnreleasedWatching));
+            prefs.Add((
+                "hideCompletedDiscover",
+                "Hide completed from Discover",
+                "When on, anime you've already Completed are filtered out of every Discover catalog (Trending / Popular / Seasonal / Airing). Off shows them like everyone else. Doesn't affect the Stremio addon.",
+                Model.HideCompletedFromDiscover));
         }
         prefs.Add((
             "groupSeasons",
