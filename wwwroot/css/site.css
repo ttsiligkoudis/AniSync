@@ -5292,19 +5292,20 @@ body.modal-open {
     transform: translateY(-1px);
 }
 
-/* Stats strip — flex-wrap row of 2-4 cells (Watching / Completed always; Hours
-   / Mean Score conditional on data availability). On the dashboard's 520px-wide
-   main column, two cells fit per row at min-width 130px, so 4 cells wrap to
-   2x2 on mobile and stay 4-across only on wider viewports. */
+/* Stats strip — a single row of 2-4 cells (Watching / Completed always; Hours
+   / Mean Score conditional on data availability). Cells share the width evenly
+   and shrink to stay on one line at every viewport (no 2x2 wrap on mobile); the
+   mobile rules further down tighten padding / type so 4 cells still fit a phone. */
 .stats-strip {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 0.65rem;
     width: 100%;
 }
 
 .stats-cell {
-    flex: 1 1 130px;
+    flex: 1 1 0;
+    min-width: 0;
     padding: 0.75rem 0.85rem;
     background: var(--overlay-04);
     border: 1px solid var(--overlay-08);
@@ -5315,6 +5316,36 @@ body.modal-open {
     gap: 0.05rem;
     color: inherit;
     text-decoration: none;
+}
+
+/* Unified "Your stats" panel: one section holds a row per tracker (the AniList
+   anime row and/or the Trakt movies-&-series row). Each .stats-group is one
+   such row — a small head (sub-label + "via <service>" attribution) above its
+   stats-strip. Rows stack with a little breathing room under the shared title. */
+.stats-group + .stats-group {
+    margin-top: 0.85rem;
+}
+
+.stats-group-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin-bottom: 0.5rem;
+}
+
+/* When there's no sub-label (single-tracker dashboard) the attribution still
+   needs to sit on the trailing edge, so push it right on its own. */
+.stats-group-head > .stats-group-actions:only-child {
+    margin-left: auto;
+}
+
+.stats-group-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-dim);
 }
 
 /* Linkable stat-cell variant — used by the "This Season" strip where each
@@ -5522,6 +5553,34 @@ a.stats-cell-link:hover {
     color: var(--text-dim);
     text-transform: uppercase;
     letter-spacing: 0.05em;
+}
+
+/* Phone: keep all 2-4 cells on a single row (no 2x2 wrap) by tightening the
+   gap, padding and type so four still fit a narrow viewport. The label can
+   wrap to a second line if it must — better than truncating "Completed". */
+@media (max-width: 600px) {
+    .stats-strip {
+        gap: 0.4rem;
+    }
+    .stats-cell {
+        padding: 0.6rem 0.5rem;
+    }
+    .stats-icon {
+        width: 26px;
+        height: 26px;
+        margin-bottom: 0.3rem;
+    }
+    .stats-number {
+        font-size: 1.15rem;
+    }
+    .stats-label {
+        font-size: 0.62rem;
+        letter-spacing: 0.02em;
+    }
+    [data-stats-loading] .stats-number {
+        min-width: 3.2rem;
+        height: 1.15rem;
+    }
 }
 
 /* Genre chip strip below the numbers. Same wrap-on-narrow behaviour as the
