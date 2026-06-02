@@ -29,29 +29,6 @@
 @if (Model.IsLoggedIn)
 {
 
-    @* Display preferences — the media-type modes (anime / movies / series) and
-       the dashboard layout. Both also reachable from the header / dashboard, but
-       surfaced here as account settings; they save to the account + this device. *@
-    <section class="section-card">
-        <span class="section-title">Display</span>
-        <p class="section-description">
-            Choose which modes you track (anime / movies / series) and reorder or hide
-            the sections on your dashboard. Saved to your account.
-        </p>
-        <div class="display-settings-actions">
-            <button type="button" class="dash-customize-btn" data-media-type-open>
-                <span>Choose modes</span>
-            </button>
-            <button type="button" class="dash-customize-btn" data-dash-customize-open>
-                <span>Customize dashboard</span>
-            </button>
-        </div>
-    </section>
-
-    @* Layout chooser modal + its script, so "Customize dashboard" works here too
-       (no dashboard sections on this page — the modal then lists every section). *@
-    @await Html.PartialAsync("_DashCustomize")
-
     @* Streams — moved here from /advanced. The card carries just a button;
        it opens a modal holding the full shared _StreamsSection (toggles +
        debrid / addon manager). The same partial renders inline (no modal)
