@@ -78,11 +78,15 @@
                     typeBadge = '<span class="site-search-result-type site-search-result-type-tv">TV</span>';
                 }
 
-                // Movie/series ids are bare imdb ids — append ?type so the meta
-                // route loads them through the video path (anime ids are
-                // service-prefixed and self-describing, so they need no ?type).
+                // Only video results carry ?type — they're bare imdb (tt…) ids that
+                // the meta route needs the type to load through the video path. Anime
+                // results are service-prefixed (anilist:/mal:/kitsu:) and
+                // self-describing; their `type` can still be "movie"/"series" (an
+                // anime film/TV), but adding ?type would wrongly send them to the
+                // video loader and 404. Gate on the id shape, not the type.
+                var isImdbId = id.indexOf('tt') === 0;
                 var href = '/meta/' + encodeURIComponent(id)
-                    + ((type === 'movie' || type === 'series') ? ('?type=' + type) : '');
+                    + (isImdbId && (type === 'movie' || type === 'series') ? ('?type=' + type) : '');
 
                 return '<a class="site-search-result" role="option" href="' + escapeAttr(href) + '">'
                     + posterHtml
