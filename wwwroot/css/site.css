@@ -600,6 +600,16 @@ body.anime-detail-page .anime-detail-hero {
     margin: 0;
 }
 
+/* Optional descriptive line under a page title (e.g. the Discover Hidden
+   section's "Titles you've hidden…" blurb). Muted + capped width so it
+   reads as supporting copy rather than competing with the title. */
+.page-header-desc {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin: 0.3rem 0 0;
+    max-width: 32rem;
+}
+
 /* ── Inline desktop nav (lives in .site-header) ── */
 /* Hidden on mobile / tablet — the hamburger + drawer below take over.
    At ≥992px we flip: nav links inline, hamburger gone, drawer becomes
@@ -4886,23 +4896,46 @@ body.config-page main {
 
 .browse-tile {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: var(--space-3);
-    padding: 1rem;
+    padding: 0.95rem 1.05rem;
     background: var(--overlay-04);
     border: 1px solid var(--overlay-08);
-    border-radius: 1rem;
+    border-radius: 0.9rem;
     color: inherit;
     text-decoration: none;
-    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    transition: background 0.15s, border-color 0.15s, transform 0.12s, box-shadow 0.15s;
 }
 
 .browse-tile:hover {
     background: var(--overlay-07);
-    border-color: var(--overlay-15);
+    border-color: var(--overlay-18);
     color: inherit;
     text-decoration: none;
-    transform: translateY(-1px);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+
+/* Trailing chevron — a quiet navigational affordance so the tiles read as
+   "tap to go somewhere" rather than static cards. Generated, so no markup
+   change; nudges right + brightens on hover. */
+.browse-tile::after {
+    content: "";
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    margin-left: auto;
+    border-right: 2px solid var(--text-dim);
+    border-top: 2px solid var(--text-dim);
+    transform: rotate(45deg);
+    opacity: 0.55;
+    transition: transform 0.15s, opacity 0.15s, border-color 0.15s;
+}
+
+.browse-tile:hover::after {
+    opacity: 1;
+    border-color: #60a5fa;
+    transform: rotate(45deg) translate(2px, -2px);
 }
 
 .browse-tile-disabled {
@@ -4914,16 +4947,26 @@ body.config-page main {
     background: var(--overlay-04);
     border-color: var(--overlay-08);
     transform: none;
+    box-shadow: none;
 }
 
+.browse-tile-disabled::after,
+.browse-tile-disabled:hover::after {
+    opacity: 0.25;
+    border-color: var(--text-dim);
+    transform: rotate(45deg);
+}
+
+/* Rounded-square "app icon" treatment — shared with .stats-icon so the
+   dashboard's icon language stays consistent across Stats + Browse By. */
 .browse-tile-icon {
     flex-shrink: 0;
-    width: 36px;
-    height: 36px;
+    width: 40px;
+    height: 40px;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 50%;
+    border-radius: 0.7rem;
 }
 
 /* Soft icon-tile colours — matches StreamD's per-category accent treatment.
@@ -5383,13 +5426,15 @@ a.stats-cell-link:hover {
 
 .stats-icon {
     grid-area: icon;
-    width: 30px;
-    height: 30px;
+    width: 32px;
+    height: 32px;
     flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 50%;
+    /* Rounded-square "app icon" treatment — matches .browse-tile-icon so the
+       dashboard's Stats + Browse By share one consistent icon language. */
+    border-radius: 0.6rem;
 }
 
 .stats-icon-blue   { background: rgba(59, 130, 246, 0.15);  color: #60a5fa; }
@@ -6674,6 +6719,112 @@ button.anime-detail-user-state:hover {
     /* On the dark hero in both themes — keep the dark-theme light-blue so the
        pencil/edit glyph stays legible (matches the user-state pill text). */
     color: #93c5fd;
+}
+
+/* Quick-add "heart" toggle — sits right after the Add to List / status
+   pill in the hero badge row. A circular icon button: outline heart when
+   the entry isn't on a list (click adds to Watching), filled rose heart
+   when it's already Watching (click removes). Matches the pill's pill-
+   radius + cobalt-on-dark hero treatment so the two read as one control
+   cluster. */
+.anime-detail-heart {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.1rem;
+    height: 2.1rem;
+    padding: 0;
+    flex-shrink: 0;
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 999px;
+    color: #c4daff;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
+}
+
+.anime-detail-heart:hover {
+    background: rgba(244, 63, 94, 0.16);
+    border-color: rgba(244, 63, 94, 0.4);
+    color: #fda4af;
+}
+
+.anime-detail-heart:active {
+    transform: scale(0.92);
+}
+
+.anime-detail-heart:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+/* Filled state — the heart is "on" (entry is Watching). Rose fill so it
+   pops against the cobalt pill cluster and reads as an active toggle. */
+.anime-detail-heart-filled {
+    background: rgba(244, 63, 94, 0.18);
+    border-color: rgba(244, 63, 94, 0.5);
+    color: #fb7185;
+}
+
+.anime-detail-heart-filled svg {
+    fill: currentColor;
+}
+
+.anime-detail-heart-filled:hover {
+    background: rgba(244, 63, 94, 0.26);
+    border-color: rgba(244, 63, 94, 0.6);
+    color: #fda4af;
+}
+
+/* Hide / Unhide from Discover pill. Muted slate so it reads as a secondary
+   utility action next to the cobalt status pill + rose heart, not a primary
+   CTA. Turns amber-tinted when the entry is currently hidden so the "Unhide"
+   state is visually distinct. */
+.anime-detail-hide {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.7rem;
+    flex-shrink: 0;
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-08);
+    border-radius: 999px;
+    color: rgba(var(--ink-rgb), 0.7);
+    font-size: 0.82rem;
+    font-weight: 500;
+    line-height: 1.2;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.anime-detail-hide:hover {
+    background: var(--overlay-08);
+    color: rgba(var(--ink-rgb), 0.9);
+}
+
+.anime-detail-hide:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+.anime-detail-hide svg {
+    flex-shrink: 0;
+}
+
+/* Hidden state — amber so "this is currently hidden, click to restore" reads
+   at a glance. */
+.anime-detail-hide-on {
+    background: rgba(245, 158, 11, 0.16);
+    border-color: rgba(245, 158, 11, 0.4);
+    color: #fcd34d;
+}
+
+.anime-detail-hide-on:hover {
+    background: rgba(245, 158, 11, 0.24);
+    border-color: rgba(245, 158, 11, 0.55);
+    color: #fde68a;
 }
 
 /* "Not on your list" variant — fired when the requested anime has no

@@ -58,4 +58,16 @@
        aria-selected="@(tagsActive ? "true" : "false")">
         Tags
     </a>
+    @* Per-user Hidden section — only for logged-in users, who are the only
+       ones with a hidden list. Lets them review and restore tucked-away
+       titles. *@
+    @if (Model.ShowHidden)
+    {
+        <a class="library-tab @(Model.HiddenActive ? "library-tab-active" : "")"
+           href="/discover?list=hidden"
+           role="tab"
+           aria-selected="@(Model.HiddenActive ? "true" : "false")">
+            Hidden
+        </a>
+    }
 </nav>

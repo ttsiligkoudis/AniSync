@@ -307,6 +307,62 @@
                         </svg>
                     </button>
                 }
+                @* Quick-add heart — one-click toggle for the Currently Watching
+                   list, sitting right after the Add to List / status pill. Shown
+                   only when the entry is either NOT on any list (outline heart →
+                   adds to Watching) or already Watching (filled heart → removes).
+                   Hidden when the entry is in any other list (Completed / Planning
+                   / Paused / Dropped / Rewatching) — those are managed via the
+                   modal — and for anonymous viewers, multi-cour grouped renders,
+                   the unavailable case, and video (movie / series) pages. The
+                   server re-checks membership on toggle and returns hidden:true if
+                   this ever races a status change made elsewhere. *@
+                @{
+                    var heartStatusNorm = NormalizeListStatus(Model.Entry?.Status);
+                    var showHeart = !isVideo && canEdit && !Model.EntryUnavailable && !Model.IsMultiSeasonGroup
+                        && (heartStatusNorm == null || heartStatusNorm == "watching");
+                    var heartFilled = heartStatusNorm == "watching";
+                    var heartLabel = heartFilled ? "Remove from Currently Watching" : "Add to Currently Watching";
+                }
+                @if (showHeart)
+                {
+                    <button type="button"
+                            class="anime-detail-heart @(heartFilled ? "anime-detail-heart-filled" : "")"
+                            data-watching-toggle data-meta-id="@a.id"
+                            data-meta-service-override="@overrideAttr"
+                            aria-pressed="@(heartFilled ? "true" : "false")"
+                            aria-label="@heartLabel" title="@heartLabel">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+                        </svg>
+                    </button>
+                }
+                @* Hide / Unhide from Discover. Logged-in only. The label +
+                   pressed state reflect the entry's current hidden status;
+                   hiding caches the title / poster / media type so the Discover
+                   "Hidden" section renders without a re-fetch, and strips the
+                   entry from every other Discover catalog. Works for anime and
+                   movie / series alike. *@
+                @if (canEdit)
+                {
+                    var hideMediaType = isVideo ? (Model.MediaType == MetaType.movie ? "movie" : "series") : "anime";
+                    var hideLabel = Model.IsHidden ? "Unhide from Discover" : "Hide from Discover";
+                    <button type="button"
+                            class="anime-detail-hide @(Model.IsHidden ? "anime-detail-hide-on" : "")"
+                            data-hidden-toggle data-meta-id="@a.id"
+                            data-meta-title="@a.name" data-meta-image="@a.poster"
+                            data-meta-hide-type="@hideMediaType"
+                            aria-pressed="@(Model.IsHidden ? "true" : "false")"
+                            aria-label="@hideLabel" title="@hideLabel">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none"
+                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                            <line x1="1" y1="1" x2="23" y2="23"></line>
+                        </svg>
+                        <span class="anime-detail-hide-label">@(Model.IsHidden ? "Unhide" : "Hide")</span>
+                    </button>
+                }
             </div>
 
             @* Continue-watching CTA. Lives on its own centered row beneath the

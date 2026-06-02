@@ -23,13 +23,17 @@
     var hasSearch = !string.IsNullOrEmpty(Model.Search);
     var hasGenre = !string.IsNullOrEmpty(Model.Genre);
     var hasTag = !string.IsNullOrEmpty(Model.Tag);
+    var isHidden = Model.HiddenMode;
     var activeLabel = labels[Model.ActiveList];
-    var activeSlug = slugs[Model.ActiveList];
+    // Hidden is its own DB-backed surface — the paginator points at
+    // /discover/page?list=hidden rather than a catalog slug.
+    var activeSlug = isHidden ? "hidden" : slugs[Model.ActiveList];
     var isSeasonal = Model.ActiveList == ListType.Seasonal;
 
     // Distinguish browser-history rows: "Search: foo · Discover" vs "Action ·
     // Discover" vs "Trending · Discover".
-    ViewData["Title"] = hasSearch ? $"Search: {Model.Search} · Discover"
+    ViewData["Title"] = isHidden ? "Hidden · Discover"
+        : hasSearch ? $"Search: {Model.Search} · Discover"
         : hasTag ? $"#{Model.Tag} · Discover"
         : hasGenre ? $"{Model.Genre} · Discover"
         : isSeasonal ? $"{Model.Season} · Discover"
@@ -53,6 +57,17 @@
         <p><a class="filter-bar-clear" href="@Url.Action("Index", "Discover")">Clear tag</a></p>
     </header>
 }
+else if (isHidden)
+{
+    @* Hidden section — the user's tucked-away titles. No filter form (the
+       list is a flat most-recently-hidden feed); each card's detail page
+       carries the Unhide button that restores it. *@
+    <header class="page-header">
+        <p class="page-subtitle">Discover</p>
+        <h1 class="page-title">Hidden</h1>
+        <p class="page-header-desc">Titles you've hidden from Discover. Open any and use Unhide to bring it back.</p>
+    </header>
+}
 
 @if (hasTag) { <!-- list tabs / filter form hidden in tag-browse mode --> }
 else
@@ -61,15 +76,21 @@ else
    five-pill nav reads as one continuous Discover surface across all
    three routes. The partial preserves the catalog-side filters
    (genre / search / season) as query params on the Trending /
-   Seasonal / Airing pills. *@
+   Seasonal / Airing pills. The Hidden pill renders for logged-in users. *@
 @await Html.PartialAsync("_DiscoverTabs", new AnimeList.Controllers.DiscoverTabsViewModel
 {
-    ActiveList = Model.ActiveList,
+    // In hidden mode ActiveList is a placeholder (Trending) — pass null so no
+    // catalog pill lights up alongside the active Hidden pill.
+    ActiveList = isHidden ? (ListType?)null : Model.ActiveList,
     Genre = Model.Genre,
     Search = Model.Search,
     Season = Model.Season,
+    ShowHidden = !string.IsNullOrEmpty(Model.ConfigUid),
+    HiddenActive = isHidden,
 })
 
+@if (!isHidden)
+{
 @* Combined filter form. Search input + genre dropdown + (when Seasonal)
    season dropdown + an explicit Search button. Nothing auto-submits — the
    user picks their filters, then clicks Search to apply them all at once.
@@ -117,13 +138,20 @@ else
     }
 </form>
 }
+}
 
 @{
     var posterGridModel = new AnimeList.Models.PosterGridViewModel
     {
         Items = Model.Items,
         ConfigUid = Model.ConfigUid,
-        EmptyMessage = hasSearch
+        // The Hidden section can hold anime + movies/series, so let the grid tag
+        // video ids with ?type= per item (anime stay bare). Off for the anime
+        // catalog views, which are anime-only.
+        VideoLinks = isHidden,
+        EmptyMessage = isHidden
+            ? "You haven't hidden anything yet. Open a title and use Hide to tuck it away here."
+            : hasSearch
             ? $"No matches for \"{Model.Search}\"."
             : hasTag
                 ? $"No anime found with the tag \"{Model.Tag}\"."

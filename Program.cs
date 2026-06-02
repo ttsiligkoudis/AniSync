@@ -364,6 +364,7 @@ builder.Services.AddSingleton<IUserListCache, UserListCache>();
 //   - EpisodeNotificationScheduler is the hosted service that owns the
 //     daily refresh + per-episode Task.Delay timers.
 builder.Services.AddSingleton<INotificationStore, NotificationStore>();
+builder.Services.AddSingleton<IHiddenEntryStore, HiddenEntryStore>();
 builder.Services.AddSingleton<IWatchingCacheStore, WatchingCacheStore>();
 builder.Services.AddSingleton<IPushSubscriptionStore, PushSubscriptionStore>();
 builder.Services.AddSingleton<IPushNotificationService, PushNotificationService>();

@@ -29,7 +29,12 @@
             // with a resolved UID. Video-section grids (Model.VideoLinks) append
             // ?type=movie|series per the item's Cinemeta type; anime cards omit
             // the query (anime is the route default).
-            var detailHref = Model.VideoLinks
+            // Video links carry ?type= so Cinemeta ids resolve to the right
+            // movie/series loader. Anime entries (type "anime", or a service-
+            // prefixed id) never need it — they resolve from the id prefix — so
+            // a mixed grid (e.g. the Discover Hidden section, which can hold
+            // anime AND movies/series) keeps anime bare and only tags video ids.
+            var detailHref = (Model.VideoLinks && meta.type != MetaType.anime.ToString())
                 ? $"/meta/{meta.id}?type={(meta.type == MetaType.movie.ToString() ? "movie" : "series")}"
                 : $"/meta/{meta.id}";
 

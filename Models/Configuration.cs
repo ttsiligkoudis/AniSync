@@ -74,5 +74,16 @@
         // URL). Drives which providers the account page offers and, in later phases, what
         // Discover / Library surface. Defaults to anime.
         public MetaType preferredMediaType { get; set; } = MetaType.anime;
+
+        // Hide entries the user has Completed from every Discover catalog. A
+        // web-app display preference (it doesn't affect the Stremio addon
+        // catalogs), so — unlike the toggles above — it isn't packed into the
+        // 3-byte flag field that rides the install URL (that field is full).
+        // It lives in its own `hide_completed_discover` store column and is
+        // hydrated alongside the flags in ResolveConfigAsync / GetConfigByUidAsync.
+        // Default off. Filtering reads the user's Completed list ids from the
+        // existing IUserListCache (10-min TTL, invalidated on every save) and
+        // strips matching ids from the fetched Discover results.
+        public bool hideCompletedFromDiscover { get; set; }
     }
 }

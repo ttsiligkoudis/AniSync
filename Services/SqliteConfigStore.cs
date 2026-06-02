@@ -148,6 +148,25 @@ namespace AnimeList.Services
                 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_uid
                     ON push_subscriptions(uid);
 
+                -- Per-user entries hidden from Discover. Keyed by (uid, id) so a
+                -- user only ever has one hide-row per entry. Display fields are
+                -- cached at hide time (HiddenEntryStore.AddAsync) so the Hidden
+                -- section renders posters without re-fetching the providers, and
+                -- the catalog filter strips these ids from every other Discover
+                -- list. created_at backs the most-recently-hidden-first ordering
+                -- the infinite-scroll section pages through.
+                CREATE TABLE IF NOT EXISTS hidden_entries (
+                    uid         TEXT NOT NULL,
+                    id          TEXT NOT NULL,           -- provider-prefixed id, e.g. anilist:21
+                    title       TEXT,
+                    image_url   TEXT,
+                    media_type  TEXT,                    -- anime / movie / series
+                    created_at  INTEGER NOT NULL,
+                    PRIMARY KEY (uid, id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_hidden_entries_uid_created
+                    ON hidden_entries(uid, created_at DESC);
+
                 -- Per-(uid, episode) stream-addon fan-out cache used to
                 -- live here; it's been moved into the browser's
                 -- localStorage so the entries stay close to the user
@@ -174,6 +193,10 @@ namespace AnimeList.Services
             // Web-UI preference columns (see CREATE TABLE comment).
             EnsureColumn(conn, "configs", "enabled_media_types", "TEXT");
             EnsureColumn(conn, "configs", "dashboard_layout", "TEXT");
+            // "Hide completed from Discover" preference. Its own column rather than
+            // a flag bit because the 3-byte flag field that rides the Stremio
+            // install URL is full, and this is a web-only display pref anyway.
+            EnsureColumn(conn, "configs", "hide_completed_discover", "INTEGER NOT NULL DEFAULT 0");
 
             // Created after EnsureColumn so it works on databases that predate the
             // trakt_user_key column (the CREATE TABLE block above won't add a column to
@@ -407,6 +430,33 @@ namespace AnimeList.Services
             cmd.Parameters.AddWithValue("$uid", uid);
             var raw = await cmd.ExecuteScalarAsync();
             return raw is long l ? l : 0L;
+        }
+
+        public async Task<bool> GetHideCompletedFromDiscoverAsync(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return false;
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT hide_completed_discover FROM configs WHERE uid = $uid LIMIT 1";
+            cmd.Parameters.AddWithValue("$uid", uid);
+            var raw = await cmd.ExecuteScalarAsync();
+            return raw is long l && l != 0;
+        }
+
+        public async Task SetHideCompletedFromDiscoverAsync(string uid, bool value)
+        {
+            if (string.IsNullOrEmpty(uid)) return;
+            using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
+            using var cmd = conn.CreateCommand();
+            // Web-only display pref — no revision bump (it doesn't change the
+            // Stremio manifest the install URL serves).
+            cmd.CommandText = """
+                UPDATE configs SET hide_completed_discover = $v, updated_at = $u WHERE uid = $uid
+                """;
+            cmd.Parameters.AddWithValue("$v", value ? 1 : 0);
+            cmd.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$uid", uid);
+            await cmd.ExecuteNonQueryAsync();
         }
 
         public async Task<bool> ClearShowExternalStreamsAsync(string uid)
