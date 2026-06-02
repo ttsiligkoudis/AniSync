@@ -103,26 +103,25 @@
         <div class="anime-detail-backdrop-shade"></div>
     }
     <div class="anime-detail-hero-body">
-        @if (!string.IsNullOrEmpty(a.poster))
-        {
-            <img class="anime-detail-poster" src="@a.poster" alt="@a.name" decoding="async" />
-        }
-        else
-        {
-            <div class="anime-detail-poster anime-detail-poster-placeholder"></div>
-        }
-        <div class="anime-detail-meta">
-            <h1 class="anime-detail-title">@a.name</h1>
-            @* Community score on its own line above the format/duration info
-               row. Pulled out of the badges row below so that row only carries
-               the airing status + action controls (Add to List / heart / Hide),
-               which then fit on a single line even on mobile. *@
+        @* Poster wrap so the community score can overlay the bottom-left corner
+           of the artwork — same placement as the poster cards on the dashboard /
+           Library / Discover grids. *@
+        <div class="anime-detail-poster-wrap">
+            @if (!string.IsNullOrEmpty(a.poster))
+            {
+                <img class="anime-detail-poster" src="@a.poster" alt="@a.name" decoding="async" />
+            }
+            else
+            {
+                <div class="anime-detail-poster anime-detail-poster-placeholder"></div>
+            }
             @if (a.score is double scTop && scTop > 0)
             {
-                <div class="anime-detail-score-row">
-                    <span class="anime-detail-score">★ @scTop.ToString("0.0")</span>
-                </div>
+                <span class="anime-detail-score anime-detail-poster-score">★ @scTop.ToString("0.0")</span>
             }
+        </div>
+        <div class="anime-detail-meta">
+            <h1 class="anime-detail-title">@a.name</h1>
             @{
                 var infoBits = new List<string>();
                 if (!string.IsNullOrEmpty(a.format)) infoBits.Add(a.format);
