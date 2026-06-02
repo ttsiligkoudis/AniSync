@@ -40,7 +40,7 @@
            role="tab"
            aria-selected="@(isActive ? "true" : "false")">@lbl</a>
     }
-    <a class="library-tab" href="/discover/actors" role="tab" aria-selected="false">Actors</a>
+    <a class="library-tab" href="/discover/actors?type=@(isMovies ? "movie" : "series")" role="tab" aria-selected="false">Actors</a>
 </nav>
 
 @* Trakt connection is now managed from the Account page (Trakt is a first-class

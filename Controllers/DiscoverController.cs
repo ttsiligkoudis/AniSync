@@ -496,6 +496,10 @@ namespace AnimeList.Controllers
             // Anime-only surface; honour a ?type= so the mode stays in sync after
             // arriving from the dashboard's "Browse By · Studios" tile.
             MediaTypePreference.ApplyTypeQuery(HttpContext, type);
+            // If the active mode is a video type (the user flipped the media-type
+            // switch while on this page), bounce to /discover so it renders the
+            // movie/series browse instead of stranding them on anime studios.
+            if (MediaTypePreference.FromCookie(HttpContext) != MetaType.anime) return Redirect("/discover");
             ViewData["StudioSearch"] = search;
             // Skip the upstream studios fetch on the initial browse
             // render — studio-pagination.js kicks an immediate page-1
@@ -668,6 +672,9 @@ namespace AnimeList.Controllers
             // Movies / series surface; honour a ?type= so the mode stays in sync
             // after arriving from the dashboard's "Browse By · Actors" tile.
             MediaTypePreference.ApplyTypeQuery(HttpContext, type);
+            // Anime has no actor directory — if the user flipped the switch to
+            // anime while here, bounce to /discover (anime browse).
+            if (MediaTypePreference.FromCookie(HttpContext) == MetaType.anime) return Redirect("/discover");
             var (people, hasNext) = await _tmdb.GetPopularPeopleAsync(1);
             ViewData["ActorsHasNext"] = hasNext;
             return View("Actors", people);
@@ -695,6 +702,7 @@ namespace AnimeList.Controllers
             // Anime-only surface; honour a ?type= so the mode stays in sync after
             // arriving from the dashboard's "Browse By · Tags" tile.
             MediaTypePreference.ApplyTypeQuery(HttpContext, type);
+            if (MediaTypePreference.FromCookie(HttpContext) != MetaType.anime) return Redirect("/discover");
             var tags = await _anilistFallback.GetTagsListAsync();
             return View("Tags", tags ?? new List<TagSummary>());
         }
