@@ -52,18 +52,19 @@
        (no dashboard sections on this page — the modal then lists every section). *@
     @await Html.PartialAsync("_DashCustomize")
 
-    @* Preferences — shared card hosted on both /configure and /stremio.
+    @* Streams — moved here from /advanced. The card carries just a button;
+       it opens a modal holding the full shared _StreamsSection (toggles +
+       debrid / addon manager). The same partial renders inline (no modal)
+       on /stremio, which only exposes a couple of toggles. Kept above
+       Preferences so stream sources lead the settings list. *@
+    @await Html.PartialAsync("_StreamsModal", Model)
+
+    @* Preferences — shared card hosted on both /account and /stremio.
        The partial owns the canonical toggle set + visibility rules so a
        new pref only needs to be added in one place; this page just
        renders it. Save click on either page persists the full set via
        _ConfigurePageScript's bitFor() reads. *@
     @await Html.PartialAsync("_PreferencesSection", Model)
-
-    @* Streams — moved here from /advanced. The card carries just a button;
-       it opens a modal holding the full shared _StreamsSection (toggles +
-       debrid / addon manager). The same partial renders inline (no modal)
-       on /stremio, which only exposes a couple of toggles. *@
-    @await Html.PartialAsync("_StreamsModal", Model)
 
     @* Stremio-addon-specific config (catalogs, streams, install URL) lives
        on its own page at /stremio so /configure stays focused on the
