@@ -86,7 +86,10 @@
                 if (b.classList.contains('active') || VALID.indexOf(v) === -1) return;
                 write(ACTIVE_KEY, v);
                 setCookie(ACTIVE_COOKIE, v);
-                write(DASH_KEY, v);   // keep the dashboard filter in step
+                // Deliberately NOT touching DASH_KEY: switching the type on
+                // Discover/Library must not move the dashboard's filter (e.g.
+                // leave it on "All"). The reverse still holds — the dashboard
+                // switch writes ACTIVE_KEY/cookie so it drives these surfaces.
                 location.reload();
             });
         });
