@@ -818,6 +818,22 @@
         <span class="dashboard-section-link-muted">Find your next favourite</span>
     </div>
     <div class="browse-grid">
+        @* Trending is shown for every mode (no ?type so it respects the selected
+           type — anime trending when anime is active, video trending otherwise). *@
+        <div data-media-type="anime movie series" style="display:contents">
+        <a class="browse-tile" href="/discover?list=trending">
+            <span class="browse-tile-icon browse-tile-icon-blue">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                    <polyline points="17 6 23 6 23 12"></polyline>
+                </svg>
+            </span>
+            <div class="browse-tile-body">
+                <h3 class="browse-tile-title">Trending</h3>
+                <p class="browse-tile-text">What's hot right now</p>
+            </div>
+        </a>
+        </div>
         @if (animeEnabled)
         {
         <div data-media-type="anime" style="display:contents">
@@ -833,19 +849,6 @@
             <div class="browse-tile-body">
                 <h3 class="browse-tile-title">Seasons</h3>
                 <p class="browse-tile-text">Browse by release season</p>
-            </div>
-        </a>
-
-        <a class="browse-tile" href="/discover?list=trending&amp;type=anime">
-            <span class="browse-tile-icon browse-tile-icon-green">
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
-                    <polyline points="17 6 23 6 23 12"></polyline>
-                </svg>
-            </span>
-            <div class="browse-tile-body">
-                <h3 class="browse-tile-title">Trending</h3>
-                <p class="browse-tile-text">What's hot right now</p>
             </div>
         </a>
 
@@ -884,19 +887,6 @@
         @if (videoTypes.Count > 0)
         {
         <div data-media-type="movie series" style="display:contents">
-        <a class="browse-tile" href="/discover?list=trending">
-            <span class="browse-tile-icon browse-tile-icon-blue">
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
-                    <polyline points="17 6 23 6 23 12"></polyline>
-                </svg>
-            </span>
-            <div class="browse-tile-body">
-                <h3 class="browse-tile-title">Trending</h3>
-                <p class="browse-tile-text">What's hot right now</p>
-            </div>
-        </a>
-
         <a class="browse-tile" href="/discover">
             <span class="browse-tile-icon browse-tile-icon-green">
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

@@ -24,6 +24,11 @@ namespace AnimeList.Services
         public const string CookieName = "anisync_media_type";        // active single
         public const string EnabledCookieName = "anisync_media_types"; // enabled set (csv)
 
+        // Per-request override key. SetActiveCookie stamps the chosen mode here so
+        // FromCookie reflects it immediately — the response cookie it writes isn't
+        // visible on Request.Cookies until the next request.
+        private const string ActiveOverrideKey = "AniSync.ActiveMediaType";
+
         private static readonly MetaType[] DisplayOrder =
             { MetaType.anime, MetaType.movie, MetaType.series };
 
@@ -52,9 +57,20 @@ namespace AnimeList.Services
         private static string DecodeCookie(string raw) =>
             string.IsNullOrEmpty(raw) ? raw : Uri.UnescapeDataString(raw);
 
-        /// <summary>Active media-type cookie; anime when absent/unrecognised.</summary>
-        public static MetaType FromCookie(HttpContext ctx) =>
-            Parse(DecodeCookie(ctx?.Request?.Cookies[CookieName])) ?? MetaType.anime;
+        /// <summary>
+        /// Active media-type. An in-request override stamped by
+        /// <see cref="SetActiveCookie"/> (a ?type= deep-link) wins so the switch UI
+        /// matches the rendered content on first load; otherwise the active cookie,
+        /// anime when absent/unrecognised.
+        /// </summary>
+        public static MetaType FromCookie(HttpContext ctx)
+        {
+            if (ctx?.Items != null
+                && ctx.Items.TryGetValue(ActiveOverrideKey, out var ov)
+                && ov is MetaType mt)
+                return mt;
+            return Parse(DecodeCookie(ctx?.Request?.Cookies[CookieName])) ?? MetaType.anime;
+        }
 
         /// <summary>Enabled set from its cookie, de-duped + display-ordered. Empty when absent.</summary>
         public static List<MetaType> EnabledFromCookie(HttpContext ctx) =>
@@ -109,13 +125,17 @@ namespace AnimeList.Services
         /// </summary>
         public static void SetActiveCookie(HttpContext ctx, MetaType type)
         {
-            ctx?.Response.Cookies.Append(CookieName, type.ToString(), new CookieOptions
+            if (ctx == null) return;
+            ctx.Response.Cookies.Append(CookieName, type.ToString(), new CookieOptions
             {
                 Path = "/",
                 MaxAge = TimeSpan.FromDays(365),
                 SameSite = SameSiteMode.Lax,
                 IsEssential = true,
             });
+            // Make the choice visible to FromCookie within this same request
+            // (Request.Cookies still holds the old value until the next request).
+            if (ctx.Items != null) ctx.Items[ActiveOverrideKey] = type;
         }
 
         /// <summary>
