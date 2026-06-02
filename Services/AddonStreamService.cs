@@ -720,7 +720,8 @@ namespace AnimeList.Services
                     IsHevc: isHevc,
                     Source: source,
                     Hdr: hdr,
-                    Audio: audio));
+                    Audio: audio,
+                    Description: rawDescription));
             }
 
             // Return in the addon's emit order — no re-sort, no cap. Each

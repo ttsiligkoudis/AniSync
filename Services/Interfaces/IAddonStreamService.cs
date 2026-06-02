@@ -114,5 +114,10 @@ namespace AnimeList.Services.Interfaces
         bool IsHevc,
         string Source = null,
         string Hdr = null,
-        string Audio = null);
+        string Audio = null,
+        // Raw addon description (Stremio's right-column detail) — the multi-line
+        // release block (📄 title / codec / group / size·seeders / flags). Passed
+        // through so the watch page can show the release title from it rather than
+        // the addon's short name label. Null when the addon emitted none.
+        string Description = null);
 }

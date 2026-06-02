@@ -1022,6 +1022,9 @@ namespace AnimeList.Controllers
                     // stay untouched. Dolby/DTS/TrueHD play as silent video in most
                     // browsers — the watch page warns + offers an external player.
                     audioUnsupported = IsBrowserUnsupportedAudio(s.Audio),
+                    // Raw addon description — the client renders the release title
+                    // from it (Stremio's right column) instead of the short name.
+                    description = s.Description,
                 }).ToList();
 
                 return Json(new { debridStreams = labelled });

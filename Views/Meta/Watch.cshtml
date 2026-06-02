@@ -845,6 +845,33 @@
                 return n;
             }
 
+            // Picks the release-title line out of an addon's raw description —
+            // the same text Stremio shows in its right-hand detail column. Addons
+            // like Comet / MediaFusion put the title on the first line (often
+            // behind a 📄 icon), then codec / group / size·seeders / flag lines.
+            // We strip a leading icon, skip lines that are pure
+            // seeders/size/flag/group metadata, and skip codec-only lines, so the
+            // row shows "Project Hail Mary (2026) 2160p" rather than the addon's
+            // short "[RD⚡] Comet 2160p" name label. Returns '' when nothing usable.
+            function firstReleaseLine(desc) {
+                if (!desc) return '';
+                var lines = String(desc).split('\n');
+                var META_PREFIX = /^[\s💾👤🌐🔗⭐🏷📅🎬🔍]/;
+                var CODEC_WORD = /^(?:hevc|x26[45]|h\.?26[45]|av1|avc|aac|ac-?3|e-?ac-?3|ddp?|dd\+|dts(?:-?(?:hd|x|es|ma))?|truehd|atmos|flac|opus|mp3|pcm|web-?dl|web-?rip|bluray|bdrip|brrip|remux|hdtv|hdr10?\+?|dv|dolby|digital|plus|\d{3,4}p|4k|2k|10-?bit|hi10p?|multi|dual|sub(?:bed)?|dub(?:bed)?|ma|es|hd)$/i;
+                for (var i = 0; i < lines.length; i++) {
+                    var t = (lines[i] || '').trim();
+                    if (!t) continue;
+                    if (META_PREFIX.test(t)) continue;            // seeders / size / flags / group line
+                    var cleaned = t.replace(/^[^\p{L}\p{N}(]+/u, '').trim(); // drop leading icon(s)
+                    if (!cleaned) continue;
+                    var words = cleaned.split(/[\s•·|]+/).filter(Boolean);
+                    var allMeta = words.length > 0 && words.every(function (w) { return CODEC_WORD.test(w); });
+                    if (allMeta) continue;                         // codec-only line, not a title
+                    return cleaned;
+                }
+                return '';
+            }
+
             // Shimmer placeholder rows shaped like the real stream list, shown
             // in the Sources panel while the addon fan-out runs — perceived
             // performance over a bare "Looking for streams…" line. Reuses the
@@ -3787,7 +3814,12 @@
                         btn.appendChild(el('span', { class: 'episode-stream-quality' }, s.quality || '—'));
 
                         var meta = el('span', { class: 'episode-stream-meta' });
-                        var firstLine = (s.title || s.name || '').split('\n')[0];
+                        // Prefer the release title from the addon's description
+                        // (Stremio's right column); fall back to the server-picked
+                        // title, then the addon's short name label.
+                        var firstLine = firstReleaseLine(s.description)
+                            || (s.title || s.name || '').split('\n')[0]
+                            || '';
                         meta.appendChild(el('span', { class: 'episode-stream-title' }, firstLine));
                         var sub = el('span', { class: 'episode-stream-sub' });
                         // Provider badge so the user can tell which addon
