@@ -493,6 +493,26 @@ namespace AnimeList.Controllers
                     : null,
             };
 
+            // A full-pane swap from filter-search.js on a non-search filter submit
+            // (genre/season/list change, or an empty Search to reload) replaces the
+            // whole results pane — so it needs the paginator wrapper, not the bare
+            // grid, or infinite scroll dies after the swap. Search stays bare (it's
+            // single-shot, no pagination). Mirrors the Index view's two branches.
+            if (fullPane && !hasSearch)
+            {
+                ViewData["PaginatorList"] = activeList switch
+                {
+                    ListType.Popularity_Desc => "popular",
+                    ListType.Seasonal => "seasonal",
+                    ListType.Airing => "airing",
+                    _ => "trending",
+                };
+                ViewData["PaginatorGenre"] = genre;
+                ViewData["PaginatorSeason"] = season;
+                ViewData["PaginatorTag"] = tag;
+                return PartialView("_DiscoverPaginator", gridModel);
+            }
+
             return PartialView("_PosterGrid", gridModel);
         }
 

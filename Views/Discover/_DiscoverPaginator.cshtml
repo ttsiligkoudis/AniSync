@@ -1,0 +1,19 @@
+@model AnimeList.Models.PosterGridViewModel
+@* Re-bindable infinite-scroll wrapper returned for filter-search.js's full-pane
+   swap on a non-search filter submit. Mirrors the .discover-paginator the Index
+   view server-renders, so after the swap discover-pagination.js (re-injected by
+   filter-search.js) binds to it and continues from page 2 — otherwise the swap
+   would drop the bare grid in with no paginator and infinite scroll would die.
+   data-page="1" because this response IS page 1; data-* come via ViewData. *@
+<div class="discover-paginator"
+     data-list="@(ViewData["PaginatorList"] as string)"
+     data-genre="@(ViewData["PaginatorGenre"] as string)"
+     data-season="@(ViewData["PaginatorSeason"] as string)"
+     data-tag="@(ViewData["PaginatorTag"] as string)"
+     data-page="1">
+    @await Html.PartialAsync("_PosterGrid", Model)
+    <div class="paginator-loader" hidden aria-hidden="true">
+        <div class="paginator-loader-spinner"></div>
+    </div>
+    <div class="discover-sentinel" aria-hidden="true"></div>
+</div>
