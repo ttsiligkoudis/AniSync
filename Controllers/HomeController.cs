@@ -1080,10 +1080,6 @@ public class HomeController : Controller
             return new JsonResult(new { success = false, error = "missing body" });
 
         var revision = await _configStore.SetFlagsAsync(uid, request.flags1, request.flags2, request.flags3);
-        // Non-flag web preference (its own column) — persist when the client sent
-        // a value; a null leaves the stored setting untouched.
-        if (request.hideCompletedDiscover.HasValue)
-            await _configStore.SetHideCompletedFromDiscoverAsync(uid, request.hideCompletedDiscover.Value);
         return new JsonResult(new { success = true, revision });
     }
 
@@ -1184,7 +1180,6 @@ public class HomeController : Controller
             service = tokenData.anime_service.ToString(),
             tokenData = tokenData,
             flags = new BackupFlags { flags1 = f1, flags2 = f2, flags3 = f3 },
-            hideCompletedDiscover = await _configStore.GetHideCompletedFromDiscoverAsync(uid),
         };
 
         var json = SerializeObject(backup, Formatting.Indented, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
@@ -1212,8 +1207,6 @@ public class HomeController : Controller
         _tokenService.SetPrimaryUidCookie(uid);
         if (backup.flags != null)
             await _configStore.SetFlagsAsync(uid, backup.flags.flags1, backup.flags.flags2, backup.flags.flags3);
-        if (backup.hideCompletedDiscover.HasValue)
-            await _configStore.SetHideCompletedFromDiscoverAsync(uid, backup.hideCompletedDiscover.Value);
 
         return new JsonResult(new { success = true });
     }
@@ -1331,10 +1324,6 @@ public class SaveConfigRequest
     public byte flags1 { get; set; }
     public byte flags2 { get; set; }
     public byte flags3 { get; set; }
-    // Non-flag web preference persisted to its own store column. Nullable so a
-    // client that doesn't render the Preferences card (or omits the field)
-    // leaves the stored value untouched rather than forcing it off.
-    public bool? hideCompletedDiscover { get; set; }
 }
 
 public class PlexUsernameRequest
@@ -1382,9 +1371,6 @@ public class ConfigBackup
     public string service { get; set; }
     public TokenData tokenData { get; set; }
     public BackupFlags flags { get; set; }
-    // Non-flag web preference. Nullable so older backups (without the field)
-    // restore cleanly, leaving the default (off).
-    public bool? hideCompletedDiscover { get; set; }
 }
 
 public class BackupFlags

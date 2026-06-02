@@ -470,8 +470,6 @@ namespace AnimeList
             {
                 var (f1, f2, f3, _) = await store.GetFlagsAsync(cfg.tokenUid);
                 ApplyBinaryFlags(cfg, f1, f2, f3);
-                // Non-flag web preference (its own store column) — hydrate it too.
-                cfg.hideCompletedFromDiscover = await store.GetHideCompletedFromDiscoverAsync(cfg.tokenUid);
             }
             return cfg;
         }
@@ -491,8 +489,6 @@ namespace AnimeList
             var (f1, f2, f3, _) = await store.GetFlagsAsync(uid);
             var cfg = new Configuration();
             ApplyBinaryFlags(cfg, f1, f2, f3);
-            // Non-flag web preference (its own store column) — hydrate it too.
-            cfg.hideCompletedFromDiscover = await store.GetHideCompletedFromDiscoverAsync(uid);
             return cfg;
         }
 

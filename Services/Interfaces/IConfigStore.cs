@@ -62,19 +62,6 @@ namespace AnimeList.Services.Interfaces
         Task<long> SetFlagsAsync(string uid, byte flags1, byte flags2, byte flags3);
 
         /// <summary>
-        /// Reads the "Hide completed from Discover" web preference. Stored in its
-        /// own column (not the packed flags, which are full and ride the install
-        /// URL). False for unknown UIDs.
-        /// </summary>
-        Task<bool> GetHideCompletedFromDiscoverAsync(string uid);
-
-        /// <summary>
-        /// Writes the "Hide completed from Discover" web preference. No revision
-        /// bump — it doesn't change the Stremio manifest.
-        /// </summary>
-        Task SetHideCompletedFromDiscoverAsync(string uid, bool value);
-
-        /// <summary>
         /// Clears just the "External services" toggle (flags3 0x02) for a UID, leaving every other
         /// flag untouched and bumping the revision like any flag write. Used when the user sets up
         /// their first stream addon: once AniSync can serve real streams, the external streaming-

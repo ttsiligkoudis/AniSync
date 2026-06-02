@@ -49,17 +49,6 @@
             "Off (default) hides hentai / R18 entries from Discover, Library, and the Stremio addon catalogs. Direct anime URLs still work either way — this only affects what shows up in the grid.",
             Model.ShowAdultContent));
     }
-    // Applies to anime AND movies/series Discover, so it isn't gated on the
-    // anime-only block above — any logged-in user gets it. (Video completed
-    // filtering reads the user's Trakt watched history.)
-    if (!Model.AnonymousUser)
-    {
-        prefs.Add((
-            "hideCompletedDiscover",
-            "Hide completed from Discover",
-            "When on, titles you've already Completed are filtered out of every Discover catalog — anime (Trending / Popular / Seasonal / Airing) and movies/series alike. Off shows them like everyone else. Doesn't affect the Stremio addon.",
-            Model.HideCompletedFromDiscover));
-    }
 }
 
 @if (prefs.Count > 0)

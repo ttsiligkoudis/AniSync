@@ -171,10 +171,7 @@
     // refreshUrls change handler (keeps the install URL preview in sync),
     // the floating-save-bar dirty marker (reveals the Save bar when any
     // toggle flips), and the post-save re-init that hides the bar.
-    // #hideCompletedDiscover isn't a flag bit (it persists to its own store
-    // column via the SaveConfig body below), but it shares the same Save bar —
-    // include it so flipping it marks the form dirty and reveals Save.
-    var FLAG_TOGGLE_SELECTOR = '.catalogCheck, .discoverCheck, #showExternalStreams, #showManageEntry, #autoTrackProgress, #groupSeasons, #hideUnreleasedWatching, #showAdultContent, #hideCompletedDiscover';
+    var FLAG_TOGGLE_SELECTOR = '.catalogCheck, .discoverCheck, #showExternalStreams, #showManageEntry, #autoTrackProgress, #groupSeasons, #hideUnreleasedWatching, #showAdultContent';
 
     // Catalog + stream toggles — recompute the manifest URL whenever flags change. (For
     // v5 the path bytes don't actually change since flags live in DB, but we still call
@@ -566,19 +563,10 @@
         var hideUnreleasedChanged = (f.flags3 & 0x40) !== (initialFlags3 & 0x40);
         var showAdultChanged      = (f.flags3 & 0x80) !== (initialFlags3 & 0x80);
         var continueWatchingAffected = groupSeasonsChanged || hideUnreleasedChanged || showAdultChanged;
-        // #hideCompletedDiscover is a non-flag pref persisted to its own store
-        // column — fold it into the same SaveConfig call so one Save commits
-        // everything. Element is absent on pages that don't render the
-        // Preferences card (or for anonymous users), so default to undefined and
-        // let the server treat a missing value as "leave unchanged".
-        var hideCompletedEl = document.querySelector('#hideCompletedDiscover');
         var resp = await fetch('/Home/SaveConfig', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                uid: configUid, flags1: f.flags1, flags2: f.flags2, flags3: f.flags3,
-                hideCompletedDiscover: hideCompletedEl ? hideCompletedEl.checked : null,
-            }),
+            body: JSON.stringify({ uid: configUid, flags1: f.flags1, flags2: f.flags2, flags3: f.flags3 }),
         });
         if (!resp.ok) throw new Error('Save failed: ' + resp.status);
         var data = await resp.json();
