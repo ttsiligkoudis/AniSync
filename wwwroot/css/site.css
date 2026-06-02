@@ -8390,6 +8390,11 @@ body.dash-modal-open { overflow: hidden; }
     cursor: pointer;
 }
 .dash-modal-close:hover { color: var(--text-strong); background: var(--overlay-08); }
+/* SVG × renders as a block so flex-centering lands it dead-centre (the ×
+   character's glyph box sat slightly off). Shared by the dash + media-type
+   modal close buttons. */
+.dash-modal-close svg,
+.mt-modal-close svg { display: block; }
 .dash-modal-title {
     flex: 0 0 auto;
     margin: 0 0 0.3rem;
