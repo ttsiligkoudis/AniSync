@@ -92,6 +92,22 @@
             }).join('');
 
             results.innerHTML = html;
+
+            // Swap any poster that fails to load for the grey placeholder box, so a
+            // dead/missing image URL shows a clean tile instead of the browser's
+            // broken-image icon. The error listener is attached synchronously right
+            // after innerHTML (error events fire on the next tick, so it's never
+            // missed); the complete/naturalWidth check covers an already-failed
+            // cached image. CSP-safe — no inline onerror handler.
+            results.querySelectorAll('img.site-search-result-poster').forEach(function (img) {
+                var swap = function () {
+                    img.removeAttribute('src');
+                    img.classList.add('site-search-result-poster-placeholder');
+                };
+                img.addEventListener('error', swap, { once: true });
+                if (img.complete && img.naturalWidth === 0) swap();
+            });
+
             showResults();
         }
 
