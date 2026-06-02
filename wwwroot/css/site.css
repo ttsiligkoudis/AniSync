@@ -4899,16 +4899,17 @@ body.config-page main {
     align-items: center;
     gap: var(--space-3);
     padding: 0.95rem 1.05rem;
-    background: var(--overlay-04);
+    /* Solid raised surface (lighter than the page bg on dark, white on light)
+       so the tiles read with clear contrast against the canvas. */
+    background: var(--surface-raised);
     border: 1px solid var(--overlay-08);
     border-radius: 0.9rem;
     color: inherit;
     text-decoration: none;
-    transition: background 0.15s, border-color 0.15s, transform 0.12s, box-shadow 0.15s;
+    transition: border-color 0.15s, transform 0.12s, box-shadow 0.15s;
 }
 
 .browse-tile:hover {
-    background: var(--overlay-07);
     border-color: var(--overlay-18);
     color: inherit;
     text-decoration: none;
@@ -4944,7 +4945,7 @@ body.config-page main {
 }
 
 .browse-tile-disabled:hover {
-    background: var(--overlay-04);
+    background: var(--surface-raised);
     border-color: var(--overlay-08);
     transform: none;
     box-shadow: none;
@@ -5376,7 +5377,9 @@ body.config-page main {
     flex: 1 1 0;
     min-width: 0;
     padding: 0.75rem 0.85rem;
-    background: var(--overlay-04);
+    /* Solid raised surface for clear contrast against the page bg (lighter
+       than the canvas on dark, white on light). */
+    background: var(--surface-raised);
     border: 1px solid var(--overlay-08);
     border-radius: 1rem;
     display: grid;
@@ -5427,11 +5430,10 @@ body.config-page main {
    lift / border tint so the click affordance reads. Non-link cells (the
    user stats panel) stay static. */
 a.stats-cell-link {
-    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    transition: border-color 0.15s, transform 0.1s;
 }
 
 a.stats-cell-link:hover {
-    background: var(--overlay-07);
     border-color: var(--overlay-18);
     text-decoration: none;
     color: inherit;
