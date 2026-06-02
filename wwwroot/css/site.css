@@ -600,6 +600,16 @@ body.anime-detail-page .anime-detail-hero {
     margin: 0;
 }
 
+/* Optional descriptive line under a page title (e.g. the Discover Hidden
+   section's "Titles you've hidden…" blurb). Muted + capped width so it
+   reads as supporting copy rather than competing with the title. */
+.page-header-desc {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin: 0.3rem 0 0;
+    max-width: 32rem;
+}
+
 /* ── Inline desktop nav (lives in .site-header) ── */
 /* Hidden on mobile / tablet — the hamburger + drawer below take over.
    At ≥992px we flip: nav links inline, hamburger gone, drawer becomes
@@ -6730,6 +6740,56 @@ button.anime-detail-user-state:hover {
     background: rgba(244, 63, 94, 0.26);
     border-color: rgba(244, 63, 94, 0.6);
     color: #fda4af;
+}
+
+/* Hide / Unhide from Discover pill. Muted slate so it reads as a secondary
+   utility action next to the cobalt status pill + rose heart, not a primary
+   CTA. Turns amber-tinted when the entry is currently hidden so the "Unhide"
+   state is visually distinct. */
+.anime-detail-hide {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.7rem;
+    flex-shrink: 0;
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-08);
+    border-radius: 999px;
+    color: rgba(var(--ink-rgb), 0.7);
+    font-size: 0.82rem;
+    font-weight: 500;
+    line-height: 1.2;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.anime-detail-hide:hover {
+    background: var(--overlay-08);
+    color: rgba(var(--ink-rgb), 0.9);
+}
+
+.anime-detail-hide:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+.anime-detail-hide svg {
+    flex-shrink: 0;
+}
+
+/* Hidden state — amber so "this is currently hidden, click to restore" reads
+   at a glance. */
+.anime-detail-hide-on {
+    background: rgba(245, 158, 11, 0.16);
+    border-color: rgba(245, 158, 11, 0.4);
+    color: #fcd34d;
+}
+
+.anime-detail-hide-on:hover {
+    background: rgba(245, 158, 11, 0.24);
+    border-color: rgba(245, 158, 11, 0.55);
+    color: #fde68a;
 }
 
 /* "Not on your list" variant — fired when the requested anime has no

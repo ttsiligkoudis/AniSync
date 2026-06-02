@@ -25,6 +25,7 @@ namespace AnimeList.Controllers
         private readonly ITraktService _trakt;
         private readonly ITmdbService _tmdb;
         private readonly IConfigStore _configStore;
+        private readonly IHiddenEntryStore _hiddenStore;
 
         public DiscoverController(
             ITokenService tokenService,
@@ -35,7 +36,8 @@ namespace AnimeList.Controllers
             ICinemetaService cinemeta,
             ITraktService trakt,
             ITmdbService tmdb,
-            IConfigStore configStore)
+            IConfigStore configStore,
+            IHiddenEntryStore hiddenStore)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
@@ -46,6 +48,7 @@ namespace AnimeList.Controllers
             _trakt = trakt;
             _tmdb = tmdb;
             _configStore = configStore;
+            _hiddenStore = hiddenStore;
         }
 
         // Hand-curated video genre picker (intersection of Cinemeta's movie / series
@@ -96,6 +99,7 @@ namespace AnimeList.Controllers
             var hasSearch = !string.IsNullOrWhiteSpace(search);
             var hasGenre = !string.IsNullOrWhiteSpace(genre);
             var hasTag = !string.IsNullOrWhiteSpace(tag);
+            var isHiddenList = string.Equals(list, "hidden", StringComparison.OrdinalIgnoreCase);
             var activeList = ParseListType(list);
 
             // Resolve the row's UID for logged-in users so per-card Manage Entry links
@@ -106,6 +110,39 @@ namespace AnimeList.Controllers
             {
                 var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
                 uid = resolved;
+            }
+
+            // Per-user Hidden section. Its own surface (no catalog fetch, no
+            // filter form) that pages through the DB-backed hidden list via
+            // /discover/page?list=hidden. Anonymous visitors have no hidden list
+            // — bounce them to the default Discover view. Handled before the
+            // media-type branch so it renders the same anime-mode chrome the
+            // Hidden pill lives in regardless of the viewer's mode preference.
+            if (isHiddenList)
+            {
+                if (string.IsNullOrEmpty(uid)) return Redirect("/discover");
+                ViewData["MtActive"] = MetaType.anime;
+                ViewData["MtReturnUrl"] = "/discover";
+                ViewData["MtEnabled"] = MediaTypePreference.ForToggle(
+                    await MediaTypePreference.ResolveEnabledAsync(HttpContext, uid, _configStore), MetaType.anime);
+
+                // Render the first page server-side so the empty-state copy shows
+                // for users with nothing hidden (the JS paginator only appends
+                // into an existing grid). Infinite scroll picks up from page 2.
+                var firstPage = await _hiddenStore.GetPageAsync(uid, HiddenPageSize, 0);
+                return View(new DiscoverViewModel
+                {
+                    ConfigUid = uid,
+                    AnimeService = tokenData.anime_service,
+                    AnonymousUser = false,
+                    ActiveList = ListType.Trending_Desc, // unused in hidden mode; kept non-null for the view
+                    Tabs = DiscoverListTypes,
+                    AvailableGenres = PopularGenres,
+                    AvailableSeasons = BuildSeasonalDropdownOptions(),
+                    Items = firstPage.Select(ToHiddenMeta).ToList(),
+                    NeedsClientLoad = false,
+                    HiddenMode = true,
+                });
             }
 
             // Media-type preference: Discover IS the browse surface for movies / series too
@@ -241,6 +278,10 @@ namespace AnimeList.Controllers
                 }
             }
 
+            // Strip the user's hidden entries so a hidden show never resurfaces
+            // in Discover. No-op for anonymous viewers / empty result sets.
+            metas = await StripHiddenAsync(uid, metas);
+
             // Season dropdown drives only the Seasonal list type. Default is
             // the current season label so the picker reads "Spring 2026"
             // out of the box rather than blank. The picker options span the
@@ -348,6 +389,25 @@ namespace AnimeList.Controllers
             {
                 var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
                 uid = resolved;
+            }
+
+            // Hidden section pagination — served from the DB, not a provider.
+            // Each page is a fixed-size slice of the user's hidden entries,
+            // most-recently-hidden first, rendered through the shared poster
+            // grid. Anonymous users have no hidden list, so an empty grid.
+            if (string.Equals(list, "hidden", StringComparison.OrdinalIgnoreCase))
+            {
+                if (page < 1) page = 1;
+                if (string.IsNullOrEmpty(uid))
+                    return PartialView("_PosterGrid", new PosterGridViewModel { Items = [], ConfigUid = uid });
+
+                var offset = (page - 1) * HiddenPageSize;
+                var hidden = await _hiddenStore.GetPageAsync(uid, HiddenPageSize, offset);
+                return PartialView("_PosterGrid", new PosterGridViewModel
+                {
+                    Items = hidden.Select(ToHiddenMeta).ToList(),
+                    ConfigUid = uid,
+                });
             }
 
             var configuration = await GetConfigByUidAsync(uid, _configStore);
@@ -466,6 +526,10 @@ namespace AnimeList.Controllers
                 }
             }
 
+            // Strip the user's hidden entries from the paginated chunk too, so a
+            // hidden show stays gone across infinite-scroll appends.
+            metas = await StripHiddenAsync(uid, metas);
+
             var labels = new Dictionary<ListType, string>
             {
                 [ListType.Trending_Desc] = "Trending",
@@ -514,6 +578,33 @@ namespace AnimeList.Controllers
             }
 
             return PartialView("_PosterGrid", gridModel);
+        }
+
+        // Page size for the Discover Hidden section's infinite scroll.
+        private const int HiddenPageSize = 24;
+
+        // Projects a stored hidden entry into the Meta shape the _PosterGrid
+        // partial renders. Only id / name / poster / type are populated — the
+        // section is a flat restore-list, not a stat surface.
+        private static Meta ToHiddenMeta(HiddenEntry h) => new()
+        {
+            id = h.Id,
+            name = h.Title,
+            poster = h.ImageUrl,
+            type = string.IsNullOrEmpty(h.MediaType) ? MetaType.anime.ToString() : h.MediaType,
+        };
+
+        /// <summary>
+        /// Removes the user's hidden entries from a catalog result set so a
+        /// hidden title never resurfaces in Discover. No-op for anonymous
+        /// viewers (no hidden list) and empty result sets.
+        /// </summary>
+        private async Task<List<Meta>> StripHiddenAsync(string uid, List<Meta> metas)
+        {
+            if (string.IsNullOrEmpty(uid) || metas == null || metas.Count == 0) return metas;
+            var hidden = await _hiddenStore.GetHiddenIdsAsync(uid);
+            if (hidden.Count == 0) return metas;
+            return metas.Where(m => m == null || string.IsNullOrEmpty(m.id) || !hidden.Contains(m.id)).ToList();
         }
 
         private static ListType ParseListType(string raw)
@@ -1039,6 +1130,13 @@ namespace AnimeList.Controllers
         /// in the same round-trip the data fetch does.
         /// </summary>
         public bool NeedsClientLoad { get; set; }
+
+        /// <summary>
+        /// True when the view is rendering the per-user "Hidden" section
+        /// (?list=hidden) instead of a catalog. The view then drops the filter
+        /// form and points the paginator at the DB-backed hidden endpoint.
+        /// </summary>
+        public bool HiddenMode { get; set; }
     }
 
     /// <summary>
@@ -1059,5 +1157,10 @@ namespace AnimeList.Controllers
         public string Genre { get; set; }
         public string Search { get; set; }
         public string Season { get; set; }
+        // Whether to render the per-user "Hidden" pill — logged-in users only,
+        // since anonymous visitors have no hidden list.
+        public bool ShowHidden { get; set; }
+        // True when the Hidden section is the active surface (lights its pill).
+        public bool HiddenActive { get; set; }
     }
 }

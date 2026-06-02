@@ -232,6 +232,17 @@ namespace AnimeList.Controllers
                 && !string.IsNullOrEmpty(anime.id)
                 && !anime.id.StartsWith(anilistPrefix);
 
+            // Hidden-from-Discover state for the Hide / Unhide button. Only
+            // meaningful for logged-in users (anonymous viewers have no
+            // per-user hidden list); best-effort so a store hiccup doesn't
+            // break the detail render.
+            var isHidden = false;
+            if (!string.IsNullOrEmpty(uid) && !string.IsNullOrEmpty(anime.id))
+            {
+                try { isHidden = await _hiddenStore.IsHiddenAsync(uid, anime.id); }
+                catch (Exception ex) { _logger.LogWarning(ex, "AnimeDetail: hidden-state lookup failed for {Id}.", anime.id); }
+            }
+
             return View(new AnimeDetailViewModel
             {
                 Anime = anime,
@@ -244,6 +255,7 @@ namespace AnimeList.Controllers
                 SourceLinks = sourceLinks,
                 DeferredSupplementaryLinks = deferredSupplementaryLinks,
                 IsMultiSeasonGroup = isMultiSeasonGroup,
+                IsHidden = isHidden,
             });
         }
 
@@ -299,6 +311,13 @@ namespace AnimeList.Controllers
                 }
             }
 
+            var videoHidden = false;
+            if (!string.IsNullOrEmpty(uid) && !string.IsNullOrEmpty(meta.id))
+            {
+                try { videoHidden = await _hiddenStore.IsHiddenAsync(uid, meta.id); }
+                catch (Exception ex) { _logger.LogWarning(ex, "VideoDetail: hidden-state lookup failed for {Id}.", meta.id); }
+            }
+
             return View("Detail", new AnimeDetailViewModel
             {
                 Anime = meta,
@@ -306,6 +325,7 @@ namespace AnimeList.Controllers
                 BasePath = "/meta",
                 AnonymousUser = string.IsNullOrEmpty(uid),
                 ConfigUid = uid,
+                IsHidden = videoHidden,
                 // Trakt is the tracker for general video — surfaces the right
                 // status vocabulary on the shared detail view.
                 AnimeService = AnimeService.Trakt,
@@ -1746,6 +1766,11 @@ namespace AnimeList.Controllers
         // per-cour status text. Single-cour grouped renders (one
         // mapping) stay on the specific-message path.
         public bool IsMultiSeasonGroup { get; set; }
+
+        // True when the user has hidden this entry from their Discover
+        // catalogs. Drives the Hide / Unhide button's label + pressed state.
+        // Always false for anonymous viewers (no per-user hidden list).
+        public bool IsHidden { get; set; }
     }
 
     /// <summary>

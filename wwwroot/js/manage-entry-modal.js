@@ -741,6 +741,57 @@
             });
     }
 
+    // Hide / Unhide from Discover toggle on the /meta/{id} detail page. Caches
+    // the title / poster / media type server-side so the Discover Hidden
+    // section renders without a re-fetch. Logged-in only (matches the button's
+    // render condition in Detail.cshtml).
+    function setHideState(btn, hidden) {
+        btn.classList.toggle('anime-detail-hide-on', hidden);
+        btn.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+        var label = hidden ? 'Unhide from Discover' : 'Hide from Discover';
+        btn.setAttribute('aria-label', label);
+        btn.setAttribute('title', label);
+        var labelEl = btn.querySelector('.anime-detail-hide-label');
+        if (labelEl) labelEl.textContent = hidden ? 'Unhide' : 'Hide';
+    }
+
+    function toggleHidden(btn) {
+        var id = btn.getAttribute('data-meta-id');
+        if (!id) return;
+        var wasHidden = btn.classList.contains('anime-detail-hide-on');
+        setHideState(btn, !wasHidden);
+        btn.disabled = true;
+
+        fetch('/api/library/hidden/toggle', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({
+                id: id,
+                title: btn.getAttribute('data-meta-title') || null,
+                imageUrl: btn.getAttribute('data-meta-image') || null,
+                mediaType: btn.getAttribute('data-meta-hide-type') || null,
+            }),
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data && data.success) {
+                    setHideState(btn, !!data.hidden);
+                    showToast(data.hidden ? 'Hidden from Discover' : 'Unhidden');
+                } else {
+                    setHideState(btn, wasHidden);
+                    showToast('Save failed');
+                }
+            })
+            .catch(function () {
+                setHideState(btn, wasHidden);
+                showToast('Network error');
+            })
+            .finally(function () {
+                btn.disabled = false;
+            });
+    }
+
     document.addEventListener('click', function (e) {
         var heart = e.target.closest && e.target.closest('button[data-watching-toggle]');
         if (heart) {
@@ -748,6 +799,14 @@
             if (heart.disabled) return;
             if (window.AniSyncHaptics) window.AniSyncHaptics.tick();
             toggleWatching(heart);
+            return;
+        }
+        var hideBtn = e.target.closest && e.target.closest('button[data-hidden-toggle]');
+        if (hideBtn) {
+            e.preventDefault();
+            if (hideBtn.disabled) return;
+            if (window.AniSyncHaptics) window.AniSyncHaptics.tick();
+            toggleHidden(hideBtn);
             return;
         }
         var plusBtn = e.target.closest && e.target.closest('button.library-card-plus');

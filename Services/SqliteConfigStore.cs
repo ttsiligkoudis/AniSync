@@ -148,6 +148,25 @@ namespace AnimeList.Services
                 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_uid
                     ON push_subscriptions(uid);
 
+                -- Per-user entries hidden from Discover. Keyed by (uid, id) so a
+                -- user only ever has one hide-row per entry. Display fields are
+                -- cached at hide time (HiddenEntryStore.AddAsync) so the Hidden
+                -- section renders posters without re-fetching the providers, and
+                -- the catalog filter strips these ids from every other Discover
+                -- list. created_at backs the most-recently-hidden-first ordering
+                -- the infinite-scroll section pages through.
+                CREATE TABLE IF NOT EXISTS hidden_entries (
+                    uid         TEXT NOT NULL,
+                    id          TEXT NOT NULL,           -- provider-prefixed id, e.g. anilist:21
+                    title       TEXT,
+                    image_url   TEXT,
+                    media_type  TEXT,                    -- anime / movie / series
+                    created_at  INTEGER NOT NULL,
+                    PRIMARY KEY (uid, id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_hidden_entries_uid_created
+                    ON hidden_entries(uid, created_at DESC);
+
                 -- Per-(uid, episode) stream-addon fan-out cache used to
                 -- live here; it's been moved into the browser's
                 -- localStorage so the entries stay close to the user
