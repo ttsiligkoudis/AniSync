@@ -33,6 +33,10 @@ public class HomeController : Controller
     // AnilistFallback. Kept private here because only the dashboard's
     // popular-by-season helper needs it.
     private static readonly TimeSpan PopularBySeasonCacheDuration = TimeSpan.FromHours(24);
+    // Trending / Popular shelves: shorter than the seasonal cache because
+    // Trending shifts through the day; Popular barely moves but a 6h refresh
+    // is cheap and keeps both reasonably fresh.
+    private static readonly TimeSpan CatalogShelfCacheDuration = TimeSpan.FromHours(6);
 
     public HomeController(
         ITokenService tokenService,
@@ -179,7 +183,7 @@ public class HomeController : Controller
         }
 
         // The "This Season" stat strip and the discovery shelves (New
-        // Episodes Today, Most Popular this Season, Most Anticipated) used to
+        // Episodes Today, Trending, Popular, Most Anticipated) used to
         // be fetched here and awaited via Task.WhenAll, which held the whole
         // dashboard render behind AniList. They're now fetched client-side
         // after first paint — each from its own /Home/*Data endpoint — so the
@@ -240,6 +244,55 @@ public class HomeController : Controller
     // (season, year) tuple so the entry naturally rotates when AniList moves
     // to the next quarterly season; non-empty results only so a transient
     // upstream blip doesn't lock in an empty shelf for 24h.
+    // Trending / Popular dashboard shelves — the same AniList catalog lists
+    // the Discover Trending / Popular tabs use (TRENDING_DESC / POPULARITY_DESC),
+    // fetched anonymously, top-15, cached globally on the anilist:N ids and
+    // translated per-viewer into their primary's id space. Mirrors
+    // GetPopularBySeasonAsync but keyed on the list type rather than a season.
+    private async Task<List<Meta>> GetCatalogShelfAsync(ListType list, AnimeService translateTo, bool groupSeasons)
+    {
+        var cacheKey = $"dashboard:catalog:{list}";
+
+        List<Meta> top;
+        if (_dashboardCache.TryGetValue<List<Meta>>(cacheKey, out var cached) && cached != null)
+        {
+            top = cached;
+        }
+        else
+        {
+            try
+            {
+                var listResult = await _anilistService.GetAnimeListAsync(
+                    tokenData: null,
+                    list: list,
+                    groupSeasons: false,
+                    // Global cache → can't honor a per-user 18+ toggle, so keep the
+                    // safer shape (same as GetPopularBySeasonAsync).
+                    hideAdult: true);
+
+                top = listResult?.Take(15).ToList() ?? [];
+
+                if (top.Count > 0)
+                {
+                    _dashboardCache.Set(cacheKey, top, new MemoryCacheEntryOptions
+                    {
+                        AbsoluteExpirationRelativeToNow = CatalogShelfCacheDuration,
+                    });
+                }
+            }
+            catch
+            {
+                top = [];
+            }
+        }
+
+        return await _anilistFallback.TranslateMetaIdsAsync(top.Select(m => new Meta
+        {
+            id = m.id, name = m.name, poster = m.poster, type = m.type,
+            score = m.score, episodes = m.episodes, year = m.year, format = m.format,
+        }).ToList(), translateTo, groupSeasons);
+    }
+
     private async Task<List<Meta>> GetPopularBySeasonAsync(string seasonOption, AnimeService translateTo = AnimeService.Anilist, bool groupSeasons = false)
     {
         var (season, year) = GetSeasonAndYear(seasonOption);
@@ -579,11 +632,19 @@ public class HomeController : Controller
         return ShelfPartial(metas, uid);
     }
 
-    [HttpGet("Home/PopularThisSeasonData")]
-    public async Task<IActionResult> PopularThisSeasonData()
+    [HttpGet("Home/TrendingAnimeData")]
+    public async Task<IActionResult> TrendingAnimeData()
     {
         var (primaryService, uid, groupSeasons) = await ResolveDashboardShelfContextAsync();
-        var metas = await GetPopularBySeasonAsync(SeasonCurrent, primaryService, groupSeasons);
+        var metas = await GetCatalogShelfAsync(ListType.Trending_Desc, primaryService, groupSeasons);
+        return ShelfPartial(metas, uid);
+    }
+
+    [HttpGet("Home/PopularAnimeData")]
+    public async Task<IActionResult> PopularAnimeData()
+    {
+        var (primaryService, uid, groupSeasons) = await ResolveDashboardShelfContextAsync();
+        var metas = await GetCatalogShelfAsync(ListType.Popularity_Desc, primaryService, groupSeasons);
         return ShelfPartial(metas, uid);
     }
 
