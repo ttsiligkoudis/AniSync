@@ -436,6 +436,11 @@ public class HomeController : Controller
         // hop. The Account() and Advanced() actions below reuse this same
         // core, passing the account-focused / advanced view names (and the
         // External services default that goes with their entry point).
+        // Enabled media-type set drives which settings render on the page — the
+        // Preferences card's toggles are anime-only, so they (and the card) only
+        // show when anime is among the user's selected modes.
+        var enabledMediaTypes = await MediaTypePreference.ResolveEnabledAsync(HttpContext, configUid, _configStore);
+
         return View(viewName, new ConfigureViewModel
         {
             TokenData = encodedTokenData,
@@ -443,6 +448,7 @@ public class HomeController : Controller
             ConfigRevision = configRevision,
             AnimeService = tokenData?.anime_service ?? AnimeService.Kitsu,
             AnonymousUser = anonymousUser,
+            EnabledMediaTypes = enabledMediaTypes,
             LinkedTokens = linkedTokens,
             ScrobbleToken = scrobbleToken,
             PlexUsername = plexUsername,
