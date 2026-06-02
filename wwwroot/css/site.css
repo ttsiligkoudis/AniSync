@@ -5303,6 +5303,10 @@ body.modal-open {
     width: 100%;
 }
 
+/* Cell layout: a 2-column grid so the number sits right after the icon on the
+   first row and the label spans the full width below — icon + number never
+   wrap apart (the label always drops to its own row). The number column is
+   minmax(0,1fr) so it can shrink rather than push the cell wider. */
 .stats-cell {
     flex: 1 1 0;
     min-width: 0;
@@ -5310,10 +5314,14 @@ body.modal-open {
     background: var(--overlay-04);
     border: 1px solid var(--overlay-08);
     border-radius: 1rem;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.05rem;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+        "icon number"
+        "label label";
+    align-items: center;
+    column-gap: 0.55rem;
+    row-gap: 0.1rem;
     color: inherit;
     text-decoration: none;
 }
@@ -5366,13 +5374,14 @@ a.stats-cell-link:hover {
 }
 
 .stats-icon {
+    grid-area: icon;
     width: 30px;
     height: 30px;
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     border-radius: 50%;
-    margin-bottom: 0.35rem;
 }
 
 .stats-icon-blue   { background: rgba(59, 130, 246, 0.15);  color: #60a5fa; }
@@ -5381,10 +5390,12 @@ a.stats-cell-link:hover {
 .stats-icon-purple { background: rgba(139, 92, 246, 0.15);  color: #a78bfa; }
 
 .stats-number {
+    grid-area: number;
     font-size: 1.4rem;
     font-weight: 700;
     color: var(--text-strong);
     line-height: 1.1;
+    white-space: nowrap;
 }
 
 /* ── Skeleton placeholders for client-fetched dashboard sections ──
@@ -5550,37 +5561,43 @@ a.stats-cell-link:hover {
 }
 
 .stats-label {
+    grid-area: label;
     font-size: 0.72rem;
     color: var(--text-dim);
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
 
-/* Phone: keep all 2-4 cells on a single row (no 2x2 wrap) by tightening the
-   gap, padding and type so four still fit a narrow viewport. The label can
-   wrap to a second line if it must — better than truncating "Completed". */
+/* Phone: keep all 2-4 cells on a single row (no 2x2 wrap) and the icon +
+   number on the same line inside each cell. Tighten the gaps and shrink the
+   icon + number (and the icon's glyph) so four cells fit a narrow viewport
+   without the number wrapping under the icon or spilling the container. */
 @media (max-width: 600px) {
     .stats-strip {
         gap: 0.4rem;
     }
     .stats-cell {
-        padding: 0.6rem 0.5rem;
+        padding: 0.55rem 0.45rem;
+        column-gap: 0.4rem;
     }
     .stats-icon {
-        width: 26px;
-        height: 26px;
-        margin-bottom: 0.3rem;
+        width: 24px;
+        height: 24px;
+    }
+    .stats-icon svg {
+        width: 14px;
+        height: 14px;
     }
     .stats-number {
-        font-size: 1.15rem;
+        font-size: 0.95rem;
     }
     .stats-label {
-        font-size: 0.62rem;
-        letter-spacing: 0.02em;
+        font-size: 0.58rem;
+        letter-spacing: 0.01em;
     }
     [data-stats-loading] .stats-number {
-        min-width: 3.2rem;
-        height: 1.15rem;
+        min-width: 2.2rem;
+        height: 0.95rem;
     }
 }
 
@@ -8606,6 +8623,17 @@ a.video-cast-card[href]:hover .video-cast-name {
    that the navigate-mode switch (Library / Discover) keeps. */
 .mt-switch-bar[data-mt-switch="dashboard"] {
     padding-top: 0.1rem;
+    padding-bottom: 0.3rem;
+}
+/* …and pull the dashboard's main content up tight under those pills — the
+   shared 2rem main top-padding reads as dead space above "Your stats". */
+body.dash-page main {
+    padding-top: 0.4rem;
+}
+@media (min-width: 768px) {
+    body.dash-page main {
+        padding-top: 0.5rem;
+    }
 }
 .mt-switch-inner {
     display: flex;
