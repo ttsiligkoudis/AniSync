@@ -1,12 +1,11 @@
 @model AnimeList.Models.ConfigureViewModel
 @using AnimeList.Services
 @{
-    // isStremio = true when this partial renders on /stremio (toggles
-    // affect the Stremio addon stream surface). false on /advanced
-    // (where the same external-services toggle still applies but the
-    // Manage Entry stream — a Stremio-only affordance — is hidden so
-    // /advanced doesn't show a setting it can't change anywhere else
-    // for the user reading that page).
+    // isStremio = true when this partial renders inline on /stremio (toggles
+    // affect the Stremio addon stream surface). false when it renders inside
+    // the /account Streams modal (where the same external-services toggle
+    // still applies but the Manage Entry stream — a Stremio-only affordance —
+    // is hidden, and the full debrid / stream-addon manager is shown).
     var isStremio = ViewData["isStremio"] as bool? ?? false;
     var cfg = Model.Configuration ?? new AnimeList.Models.Configuration();
 }
@@ -79,8 +78,8 @@
        business. Hidden for anonymous installs entirely (no uid to
        persist against), and hidden on /stremio (isStremio=true) so the
        Stremio settings page stays focused on what the addon manifest
-       exposes — stream-addon plumbing is a server-side concern that
-       lives on /advanced. *@
+       exposes — stream-addon plumbing lives in the /account Streams
+       modal instead. *@
     @if (!isStremio && !Model.AnonymousUser && !string.IsNullOrEmpty(Model.ConfigUid))
     {
         <p class="manifest-url-label" style="margin-top: 1.5rem;">Stream addons</p>

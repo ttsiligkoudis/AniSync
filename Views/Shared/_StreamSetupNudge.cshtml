@@ -16,7 +16,7 @@
     //       logged-in users upstream.
     var nudgeDismissible = ViewData["dismissible"] as bool? ?? false;
     var nudgeAnonymous = ViewData["anonymous"] as bool? ?? false;
-    var nudgeCtaHref = nudgeAnonymous ? "/account" : "/advanced#streams";
+    var nudgeCtaHref = nudgeAnonymous ? "/account" : "/account#streams";
     var nudgeCtaLabel = nudgeAnonymous ? "Sign in →" : "Set up streaming →";
     // Unique id so aria-controls stays valid even if two banners ever share a
     // page (dashboard + an embedded panel, say).
@@ -66,7 +66,7 @@
                 AllDebrid, Premiumize, …): paste your debrid API key and the
                 addon unlocks instantly-streamable, cached copies — no
                 downloads, no seeding. The quick setup on
-                <a href="/advanced#streams">Advanced → Streams</a> wires both up
+                <a href="/account#streams">Account → Streams</a> wires both up
                 in one step.
             </p>
         </div>

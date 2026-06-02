@@ -1,0 +1,70 @@
+@model AnimeList.Models.ConfigureViewModel
+@*
+    /account Streams entry point. A compact card whose button opens a modal
+    holding the full shared _StreamsSection config (Auto-track / External
+    services toggles + the debrid / stream-addon manager). The SAME
+    _StreamsSection renders INLINE on /stremio (only a couple of toggles
+    matter there, so no modal). Keeping the modal wrapper here — rather than
+    inside the shared partial — lets /stremio reuse _StreamsSection unwrapped.
+
+    Gated on a uid-backed install: the toggles + addon list persist by uid,
+    and _StreamsSection hides the addon manager for anonymous anyway, so
+    there's nothing to surface without a config row.
+*@
+@if (!Model.AnonymousUser && !string.IsNullOrEmpty(Model.ConfigUid))
+{
+    <section class="section-card">
+        <span class="section-title">Streams</span>
+        <p class="section-description">
+            Sources surfaced on the in-app episode picker — debrid keys, stream
+            addons and external services.
+        </p>
+        <div class="btn-action-row">
+            <button type="button" class="dash-customize-btn" data-streams-modal-open>
+                <span>Manage stream sources</span>
+            </button>
+        </div>
+    </section>
+
+    <div class="streams-modal-backdrop" data-streams-modal-backdrop hidden></div>
+    <div class="streams-modal" data-streams-modal role="dialog" aria-modal="true" aria-label="Streams" hidden>
+        <div class="streams-modal-card">
+            <button type="button" class="dash-modal-close" aria-label="Close" data-streams-modal-close>&times;</button>
+            <div class="streams-modal-body">
+                @await Html.PartialAsync("_StreamsSection", Model,
+                    new ViewDataDictionary(ViewData) { ["isStremio"] = false })
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            var modal = document.querySelector('[data-streams-modal]');
+            if (!modal) return;
+            var backdrop = document.querySelector('[data-streams-modal-backdrop]');
+            function open() {
+                modal.hidden = false;
+                if (backdrop) backdrop.hidden = false;
+                document.body.classList.add('streams-modal-open');
+            }
+            function close() {
+                modal.hidden = true;
+                if (backdrop) backdrop.hidden = true;
+                document.body.classList.remove('streams-modal-open');
+            }
+            document.querySelectorAll('[data-streams-modal-open]').forEach(function (b) {
+                b.addEventListener('click', open);
+            });
+            modal.querySelectorAll('[data-streams-modal-close]').forEach(function (b) {
+                b.addEventListener('click', close);
+            });
+            if (backdrop) backdrop.addEventListener('click', close);
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && !modal.hidden) close();
+            });
+            // Deep link: the "Set up streaming" nudge points at /account#streams,
+            // so open the modal straight away when we land on that hash.
+            if (location.hash === '#streams') open();
+        })();
+    </script>
+}
