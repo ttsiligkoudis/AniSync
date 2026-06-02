@@ -27,6 +27,7 @@ public class HomeController : Controller
     // video browse already works.
     private readonly ICinemetaService _cinemeta;
     private readonly ITraktService _trakt;
+    private readonly IHiddenEntryStore _hiddenStore;
 
     // Day-stale rankings are indistinguishable from live ones for the
     // popularity shelves — same TTL the seasonal-stats cache uses inside
@@ -48,7 +49,8 @@ public class HomeController : Controller
         IMemoryCache dashboardCache,
         IMergedListService mergedListService,
         ICinemetaService cinemeta,
-        ITraktService trakt)
+        ITraktService trakt,
+        IHiddenEntryStore hiddenStore)
     {
         _tokenService = tokenService;
         _configStore = configStore;
@@ -60,6 +62,21 @@ public class HomeController : Controller
         _mergedListService = mergedListService;
         _cinemeta = cinemeta;
         _trakt = trakt;
+        _hiddenStore = hiddenStore;
+    }
+
+    /// <summary>
+    /// Removes the user's hidden entries from a dashboard shelf so a hidden
+    /// title doesn't keep surfacing in Trending / Popular / Continue Watching
+    /// etc. No-op for anonymous viewers and empty shelves. Keyed on the same
+    /// prefixed id the cards carry.
+    /// </summary>
+    private async Task<List<Meta>> StripHiddenAsync(string uid, List<Meta> metas)
+    {
+        if (string.IsNullOrEmpty(uid) || metas == null || metas.Count == 0) return metas;
+        var hidden = await _hiddenStore.GetHiddenIdsAsync(uid);
+        if (hidden.Count == 0) return metas;
+        return metas.Where(m => m == null || string.IsNullOrEmpty(m.id) || !hidden.Contains(m.id)).ToList();
     }
 
     /// <summary>
@@ -608,7 +625,7 @@ public class HomeController : Controller
         // duplicating Views/Shared/_PosterGrid.cshtml's markup.
         return PartialView("_PosterGrid", new PosterGridViewModel
         {
-            Items = metas,
+            Items = await StripHiddenAsync(uid, metas),
             ConfigUid = uid,
             Variant = "scroll",
         });
@@ -629,7 +646,7 @@ public class HomeController : Controller
     {
         var (primaryService, uid, groupSeasons) = await ResolveDashboardShelfContextAsync();
         var metas = await _anilistFallback.GetNewEpisodesTodayAsync(primaryService, ReadTimezoneOffsetMinutes(), groupSeasons);
-        return ShelfPartial(metas, uid);
+        return await ShelfPartial(metas, uid);
     }
 
     [HttpGet("Home/TrendingAnimeData")]
@@ -637,7 +654,7 @@ public class HomeController : Controller
     {
         var (primaryService, uid, groupSeasons) = await ResolveDashboardShelfContextAsync();
         var metas = await GetCatalogShelfAsync(ListType.Trending_Desc, primaryService, groupSeasons);
-        return ShelfPartial(metas, uid);
+        return await ShelfPartial(metas, uid);
     }
 
     [HttpGet("Home/PopularAnimeData")]
@@ -645,7 +662,7 @@ public class HomeController : Controller
     {
         var (primaryService, uid, groupSeasons) = await ResolveDashboardShelfContextAsync();
         var metas = await GetCatalogShelfAsync(ListType.Popularity_Desc, primaryService, groupSeasons);
-        return ShelfPartial(metas, uid);
+        return await ShelfPartial(metas, uid);
     }
 
     [HttpGet("Home/MostAnticipatedData")]
@@ -653,16 +670,16 @@ public class HomeController : Controller
     {
         var (primaryService, uid, groupSeasons) = await ResolveDashboardShelfContextAsync();
         var metas = await GetPopularBySeasonAsync(SeasonNext, primaryService, groupSeasons);
-        return ShelfPartial(metas, uid);
+        return await ShelfPartial(metas, uid);
     }
 
     // Shared _PosterGrid scroll-row partial for every client-loaded shelf.
     // Empty Items + no EmptyMessage renders an empty body, which the shelf
     // loader reads as "hide this section".
-    private PartialViewResult ShelfPartial(List<Meta> metas, string uid) =>
+    private async Task<PartialViewResult> ShelfPartial(List<Meta> metas, string uid) =>
         PartialView("_PosterGrid", new PosterGridViewModel
         {
-            Items = metas ?? [],
+            Items = await StripHiddenAsync(uid, metas ?? []),
             ConfigUid = uid,
             Variant = "scroll",
         });
@@ -679,10 +696,10 @@ public class HomeController : Controller
     // top-15 slice).
     private const int VideoShelfSize = 15;
 
-    private PartialViewResult VideoShelfPartial(List<Meta> metas, string uid) =>
+    private async Task<PartialViewResult> VideoShelfPartial(List<Meta> metas, string uid) =>
         PartialView("_PosterGrid", new PosterGridViewModel
         {
-            Items = metas ?? [],
+            Items = await StripHiddenAsync(uid, metas ?? []),
             ConfigUid = uid,
             Variant = "scroll",
             VideoLinks = true,
@@ -714,7 +731,7 @@ public class HomeController : Controller
         }
         else if (mode is "trending" or "anticipated")
         {
-            if (!_trakt.IsConfigured) return VideoShelfPartial([], uid);
+            if (!_trakt.IsConfigured) return await VideoShelfPartial([], uid);
             var items = await _trakt.GetDiscoveryAsync(uid, type, mode, genre: null, page: 1, limit: VideoShelfSize);
             metas = items.ToVideoMetas();
         }
@@ -722,7 +739,7 @@ public class HomeController : Controller
         {
             metas = [];
         }
-        return VideoShelfPartial(metas, uid);
+        return await VideoShelfPartial(metas, uid);
     }
 
     // Video "Continue watching" — Trakt's in-progress playback (paused movies +
@@ -739,7 +756,7 @@ public class HomeController : Controller
         if (type is "movie" or "series")
             playback = playback.Where(i => i.Type == type);
         var metas = playback.Take(ContinueWatchingMaxItems).ToList().ToVideoMetas();
-        return VideoShelfPartial(metas, uid);
+        return await VideoShelfPartial(metas, uid);
     }
 
     // Aggregate Trakt stats for the video dashboard's "Your stats" strip.

@@ -351,6 +351,10 @@ namespace AnimeList.Controllers
             var items = hasSearch
                 ? await _cinemeta.GetVideoCatalogAsync(type, genre, search.Trim())
                 : new List<Meta>();
+            // Strip hidden + (pref-gated) completed entries from the video browse,
+            // same as the anime catalog. Mostly affects search here — the popular
+            // browse hands page 1 to the paginator (VideoPage), which filters too.
+            items = await StripHiddenAndCompletedVideoAsync(uid, items);
 
             return View("/Views/Video/Index.cshtml", new VideoBrowseViewModel
             {
@@ -654,6 +658,33 @@ namespace AnimeList.Controllers
             AnimeService.MyAnimeList => _malService.GetAnimeListAsync(token, ListType.Completed, groupSeasons: groupSeasons, hideAdult: false),
             _ => _kitsuService.GetAnimeListAsync(token, ListType.Completed, groupSeasons: groupSeasons, hideAdult: false),
         };
+
+        /// <summary>
+        /// Video (movie / series) counterpart to the anime Hidden + Completed
+        /// strips, applied to the Cinemeta/Trakt-backed Discover browse. Removes
+        /// the user's hidden entries, and — when "Hide completed from Discover"
+        /// is on and Trakt is connected — entries already in their Trakt watched
+        /// history. Both keyed on the IMDb id the video cards carry. Best-effort:
+        /// a Trakt hiccup leaves the list unfiltered rather than failing the page.
+        /// </summary>
+        private async Task<List<Meta>> StripHiddenAndCompletedVideoAsync(string uid, List<Meta> items)
+        {
+            items = await StripHiddenAsync(uid, items);
+            if (string.IsNullOrEmpty(uid) || items == null || items.Count == 0) return items;
+
+            var cfg = await GetConfigByUidAsync(uid, _configStore);
+            if (cfg?.hideCompletedFromDiscover != true || !_trakt.IsConfigured) return items;
+
+            List<TraktListItem> history;
+            try { history = await _trakt.GetHistoryAsync(uid); }
+            catch { return items; }
+            if (history == null || history.Count == 0) return items;
+
+            var watched = new HashSet<string>(
+                history.Where(h => !string.IsNullOrEmpty(h.ImdbId)).Select(h => h.ImdbId),
+                StringComparer.OrdinalIgnoreCase);
+            return items.Where(m => m == null || string.IsNullOrEmpty(m.id) || !watched.Contains(m.id)).ToList();
+        }
 
         private static ListType ParseListType(string raw)
         {
@@ -1044,6 +1075,10 @@ namespace AnimeList.Controllers
                 var skip = (page - 1) * CatalogPageSize;
                 items = await _cinemeta.GetVideoCatalogAsync(type, genre, search: null, skip: skip);
             }
+
+            // Drop hidden + (pref-gated) completed entries so a hidden movie/series
+            // stays gone across the video browse + its infinite-scroll appends.
+            items = await StripHiddenAndCompletedVideoAsync(uid, items);
 
             return PartialView("_PosterGrid", new PosterGridViewModel
             {

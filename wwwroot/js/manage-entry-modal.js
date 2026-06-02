@@ -702,14 +702,20 @@
         if (!id) return;
         var serviceAttr = heart.getAttribute('data-meta-service-override');
         var serviceOverride = serviceAttr ? parseInt(serviceAttr, 10) : null;
+        // "movie"/"series" routes the toggle through Trakt; absent for anime.
+        var mediaType = heart.getAttribute('data-meta-media-type');
 
-        // Optimistic flip; reconciled against the server response below.
         var wasFilled = heart.classList.contains('anime-detail-heart-filled');
+        // Optimistic flip so the heart reacts instantly, then reload so the rest
+        // of the hero (Add-to-List pill, episode ticks, Continue CTA) reflects
+        // the new entry state — same full-refresh the modal save does, no
+        // confirmation toast.
         setHeartState(heart, !wasFilled);
         heart.disabled = true;
 
         var payload = { id: id };
         if (serviceOverride !== null && !isNaN(serviceOverride)) payload.service = serviceOverride;
+        if (mediaType === 'movie' || mediaType === 'series') payload.type = mediaType;
 
         fetch('/api/library/watching/toggle', {
             method: 'POST',
@@ -720,24 +726,26 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data && data.success) {
-                    setHeartState(heart, !!data.watching);
                     invalidateContinueWatchingCache();
-                    showToast(data.watching ? 'Added to Watching' : 'Removed from Watching');
+                    // Queue the toast through the navigation so it shows once after
+                    // the reload (same channel the modal save uses).
+                    try { sessionStorage.setItem('anisync-toast', data.watching ? 'Added to Watching' : 'Removed from Watching'); }
+                    catch (e) { /* private mode — toast is best-effort */ }
+                    window.location.reload();
                 } else if (data && data.hidden) {
                     // Server says the entry moved into another list (raced a save
                     // elsewhere) — the heart isn't the right control anymore.
                     heart.hidden = true;
                 } else {
                     setHeartState(heart, wasFilled);
+                    heart.disabled = false;
                     showToast('Save failed');
                 }
             })
             .catch(function () {
                 setHeartState(heart, wasFilled);
-                showToast('Network error');
-            })
-            .finally(function () {
                 heart.disabled = false;
+                showToast('Network error');
             });
     }
 

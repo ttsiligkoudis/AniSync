@@ -1147,6 +1147,13 @@ namespace AnimeList.Controllers
                 if (string.IsNullOrEmpty(request?.Id))
                     return new JsonResult(new { success = false, error = "missing-id" });
 
+                // Movie / series → the tracker is Trakt, not the anime providers.
+                // Route to the Trakt watching toggle, which mirrors this method's
+                // membership logic (in another list → hide; watching → remove;
+                // not tracked → add) on top of Trakt's vocabulary.
+                if (request.Type == "movie" || request.Type == "series")
+                    return await ToggleTraktWatchingAsync(tokenData, request);
+
                 // Same linked-secondary override path the modal uses: an anime with
                 // no mapping to the user's primary but present on a linked provider
                 // is read / written through that token instead.
@@ -1235,6 +1242,42 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
+        /// Trakt-backed half of the Currently Watching heart toggle, for movie /
+        /// series detail pages. Mirrors <see cref="ToggleWatchingByApi"/>'s
+        /// membership logic against Trakt's status vocabulary: an entry already in
+        /// some other list (Planning / Completed / On Hold / Dropped) returns
+        /// <c>hidden:true</c> so the client drops the heart; "watching" removes the
+        /// entry; not-tracked adds it as Watching. Reuses the same Trakt write the
+        /// Manage Entry modal runs (<see cref="ApplyTraktVideoSaveAsync"/>).
+        /// </summary>
+        private async Task<JsonResult> ToggleTraktWatchingAsync(TokenData tokenData, SaveEntryRequest request)
+        {
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+            if (string.IsNullOrEmpty(uid))
+                return new JsonResult(new { success = false, error = "no-uid" });
+
+            var entry = await _traktService.GetVideoEntryAsync(uid, request.Type, request.Id);
+            var (status, _) = DeriveTraktVideoStatus(request.Type, entry, null);
+            var norm = NormalizeListStatus(status);
+
+            // In some other list — the heart isn't the control for that.
+            if (norm != null && norm != "watching")
+                return new JsonResult(new { success = false, hidden = true });
+
+            // Watching → remove (status ""); not tracked → add as Watching.
+            var saveReq = new SaveEntryRequest
+            {
+                Id = request.Id,
+                Type = request.Type,
+                Status = norm == "watching" ? string.Empty : "watching",
+                Progress = 0,
+            };
+            var ok = await ApplyTraktVideoSaveAsync(uid, saveReq);
+            if (!ok) return new JsonResult(new { success = false, error = "trakt-not-connected" });
+            return new JsonResult(new { success = true, watching = norm != "watching" });
+        }
+
+        /// <summary>
         /// Hide / unhide an entry from the user's Discover catalogs, backing the
         /// Hide / Unhide button on the /meta/{id} detail page. Toggles a row in
         /// the per-user <c>hidden_entries</c> table; the display fields
@@ -1294,6 +1337,17 @@ namespace AnimeList.Controllers
             if (string.IsNullOrEmpty(uid))
                 return new JsonResult(new { success = false, error = "no-uid" });
 
+            var ok = await ApplyTraktVideoSaveAsync(uid, request);
+            return new JsonResult(new { success = ok, error = ok ? null : "trakt-not-connected" });
+        }
+
+        /// <summary>
+        /// Core Trakt movie/series write shared by the Manage Entry modal save and
+        /// the quick-add heart. Maps the request's status onto watchlist / history
+        /// / rating actions and returns whether the upstream write succeeded.
+        /// </summary>
+        private async Task<bool> ApplyTraktVideoSaveAsync(string uid, SaveEntryRequest request)
+        {
             var status = (request.Status ?? string.Empty).ToLowerInvariant();
 
             // Resolve the episode coords to mark watched (series only). Cinemeta's
@@ -1323,8 +1377,7 @@ namespace AnimeList.Controllers
                 ? (int)Math.Round(request.Score.Value)
                 : null;
 
-            var ok = await _traktService.SaveVideoEntryAsync(uid, request.Type, request.Id, status, episodes, rating, inProgress);
-            return new JsonResult(new { success = ok, error = ok ? null : "trakt-not-connected" });
+            return await _traktService.SaveVideoEntryAsync(uid, request.Type, request.Id, status, episodes, rating, inProgress);
         }
 
         /// <summary>

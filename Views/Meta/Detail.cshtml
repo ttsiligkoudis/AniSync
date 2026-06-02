@@ -148,6 +148,11 @@
                         @a.airStatus
                     </span>
                 }
+                @* Action controls (Add to List / status pill + quick-add heart +
+                   Hide) grouped so they wrap together as one unit beneath the
+                   score/status info badges — keeps the row tidy on mobile instead
+                   of the buttons scattering across lines. *@
+                <span class="anime-detail-actions">
                 @* User-state pill — three render shapes:
                      1. Logged-in user with a list entry → cobalt pill
                         ("Watching · Ep 2/24") with a trailing pencil icon;
@@ -319,10 +324,17 @@
                    this ever races a status change made elsewhere. *@
                 @{
                     var heartStatusNorm = NormalizeListStatus(Model.Entry?.Status);
-                    var showHeart = !isVideo && canEdit && !Model.EntryUnavailable && !Model.IsMultiSeasonGroup
-                        && (heartStatusNorm == null || heartStatusNorm == "watching");
+                    // Heart shows for anime (canEdit) and for movies/series only when
+                    // Trakt is connected — that's the tracker behind the video
+                    // Watching state. Same membership rule either way: visible only
+                    // when the entry is not on any list (add) or already Watching
+                    // (remove); hidden when it's in some other list.
+                    var heartEligible = canEdit && !Model.EntryUnavailable && !Model.IsMultiSeasonGroup
+                        && (!isVideo || Model.TraktConnected);
+                    var showHeart = heartEligible && (heartStatusNorm == null || heartStatusNorm == "watching");
                     var heartFilled = heartStatusNorm == "watching";
                     var heartLabel = heartFilled ? "Remove from Currently Watching" : "Add to Currently Watching";
+                    var heartMediaType = isVideo ? (Model.MediaType == MetaType.movie ? "movie" : "series") : null;
                 }
                 @if (showHeart)
                 {
@@ -330,6 +342,7 @@
                             class="anime-detail-heart @(heartFilled ? "anime-detail-heart-filled" : "")"
                             data-watching-toggle data-meta-id="@a.id"
                             data-meta-service-override="@overrideAttr"
+                            data-meta-media-type="@heartMediaType"
                             aria-pressed="@(heartFilled ? "true" : "false")"
                             aria-label="@heartLabel" title="@heartLabel">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
@@ -363,6 +376,7 @@
                         <span class="anime-detail-hide-label">@(Model.IsHidden ? "Unhide" : "Hide")</span>
                     </button>
                 }
+                </span>
             </div>
 
             @* Continue-watching CTA. Lives on its own centered row beneath the
