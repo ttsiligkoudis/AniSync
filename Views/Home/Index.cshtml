@@ -729,7 +729,7 @@
         <section class="dashboard-section" data-dash-section="video-popular" data-media-type="@vtSlug" data-shelf data-shelf-src="/Home/VideoShelfData?type=@vtSlug&amp;mode=popular">
             <div class="dashboard-section-header">
                 <h2 class="dashboard-section-title">Most Popular@(vtSuffix)</h2>
-                <a class="dashboard-section-link" href="/discover?type=@vtSlug">
+                <a class="dashboard-section-link" href="/discover?list=popular&amp;type=@vtSlug">
                     <span>View all</span>
                     <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -888,7 +888,7 @@
         @if (videoTypes.Count > 0)
         {
         <div data-media-type="movie series" style="display:contents">
-        <a class="browse-tile" href="/discover">
+        <a class="browse-tile" href="/discover?list=popular">
             <span class="browse-tile-icon browse-tile-icon-green">
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="10"></circle>

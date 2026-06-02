@@ -292,9 +292,12 @@ namespace AnimeList.Controllers
                 modes.Add(("watched", "Most Watched"));
                 if (traktConnected) modes.Add(("recommended", "For You"));
             }
-            // Resolve the active mode; fall back to Popular for anything unknown
-            // or not currently available to this user.
-            var activeMode = modes.Any(m => m.Slug == mode) ? mode : "popular";
+            // Default to Trending so video matches the anime catalog's default
+            // (anime opens on TRENDING_DESC). Trending is a Trakt feed, so it only
+            // exists when Trakt is configured — fall back to Popular (Cinemeta,
+            // always available) otherwise. An explicit, available ?list= still wins.
+            var defaultMode = modes.Any(m => m.Slug == "trending") ? "trending" : "popular";
+            var activeMode = modes.Any(m => m.Slug == mode) ? mode : defaultMode;
 
             var items = hasSearch
                 ? await _cinemeta.GetVideoCatalogAsync(type, genre, search.Trim())
