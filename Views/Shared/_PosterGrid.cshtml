@@ -101,12 +101,6 @@
                     {
                         <span class="library-card-score">★ @meta.score.Value.ToString("0.0")</span>
                     }
-                    @if (!string.IsNullOrEmpty(meta.entryStatus))
-                    {
-                        <button type="button" class="library-card-plus"
-                                aria-label="Mark next episode watched"
-                                title="+1 episode">+1</button>
-                    }
                 </div>
                 <span class="library-card-title">@meta.name</span>
                 @if (infoBits.Count > 0)

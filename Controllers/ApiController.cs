@@ -629,6 +629,7 @@ namespace AnimeList.Controllers
         /// the same day collapse to a single entry). Same data the
         /// dashboard's "New Episodes Today" shelf renders.
         /// </summary>
+        /// <param name="service">The anime service to query.</param>
         /// <param name="tz">Caller's UTC offset in minutes, JS
         /// <c>Date.getTimezoneOffset()</c> convention — positive = west
         /// of UTC. Defaults to 0 (UTC day) when omitted.</param>

@@ -17,7 +17,6 @@
         : $"{label} · AniSync";
 
     var browseAction = "/discover";
-    var here = "/discover";
     var traktFeedback = Context.Request.Query["trakt"].ToString();
 
     ViewData["MtActive"] = isMovies ? MetaType.movie : MetaType.series;

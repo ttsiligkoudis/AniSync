@@ -240,7 +240,6 @@ namespace AnimeList.Services
         /// Stremio-shape relation Links — Sequel / Prequel labels with
         /// web.stremio.com deep-link URLs. Mirrors the inline relation
         /// builder in <see cref="AnilistService"/> so the imdb-grouped
-        /// enrichment in <see cref="MetaController"/> can inject the same
         /// chip strip the per-service paths emit natively. The Meta-
         /// returning <see cref="ParseRelated"/> collapses Sequel and
         /// Prequel into a single "Related" carousel for the web app's

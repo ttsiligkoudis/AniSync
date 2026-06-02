@@ -12,7 +12,6 @@ namespace AnimeList.Controllers
     /// <summary>
     /// Browser-session API for the bell dropdown in the site header.
     /// Authenticated via the same cookie-rehydrated session
-    /// <see cref="AnimeController"/> uses (not the X-AniSync-Config header
     /// that <see cref="UserApiController"/> requires) — these endpoints are
     /// only ever called from the layout JS running on a page the user is
     /// already signed into.

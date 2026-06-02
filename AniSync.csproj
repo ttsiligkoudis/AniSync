@@ -14,12 +14,12 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
-    <NoWarn>1701;1702;CS8618;CS8602;CS8603;CS8600;CS8625;CS8604;CS8601;1591;CS8619;CS8621</NoWarn>
+    <NoWarn>1701;1702;CS8618;CS8602;CS8603;CS8600;CS8625;CS8604;CS8601;1591;CS8619;CS8621;CS8629</NoWarn>
     <TreatWarningsAsErrors>False</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-    <NoWarn>1701;1702;CS8618;CS8602;CS8603;CS8600;CS8625;CS8604;CS8601;1591;CS8619;CS8621</NoWarn>
+    <NoWarn>1701;1702;CS8618;CS8602;CS8603;CS8600;CS8625;CS8604;CS8601;1591;CS8619;CS8621;CS8629</NoWarn>
     <TreatWarningsAsErrors>False</TreatWarningsAsErrors>
   </PropertyGroup>
 
