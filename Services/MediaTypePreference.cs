@@ -93,6 +93,44 @@ namespace AnimeList.Services
             return enabled.Contains(active) ? active : enabled[0];
         }
 
+        /// <summary>
+        /// Parses a <c>?type=</c> query value ("anime" / "movie" / "series") into a
+        /// <see cref="MetaType"/>; null when absent or unrecognised. Used by the
+        /// Discover / Library / browse routes to honour a type-carrying deep-link
+        /// (e.g. a dashboard "View all · Series" → <c>?type=series</c>).
+        /// </summary>
+        public static MetaType? ParseType(string raw) => Parse(raw);
+
+        /// <summary>
+        /// Persists <paramref name="type"/> as the active mode in the same cookie
+        /// media-type.js writes (root path, 1y, Lax) so a type-carrying deep-link
+        /// sticks across subsequent navigation on the surface — the active mode is
+        /// a cookie-only view preference, so this is all SetMediaType does for it.
+        /// </summary>
+        public static void SetActiveCookie(HttpContext ctx, MetaType type)
+        {
+            ctx?.Response.Cookies.Append(CookieName, type.ToString(), new CookieOptions
+            {
+                Path = "/",
+                MaxAge = TimeSpan.FromDays(365),
+                SameSite = SameSiteMode.Lax,
+                IsEssential = true,
+            });
+        }
+
+        /// <summary>
+        /// If <paramref name="type"/> is a valid mode, persists it as the active
+        /// cookie and returns it; otherwise returns null (caller keeps the
+        /// cookie-resolved active mode). One call covers the "honour ?type=, else
+        /// respect the selected type" rule for Discover / Library / browse routes.
+        /// </summary>
+        public static MetaType? ApplyTypeQuery(HttpContext ctx, string type)
+        {
+            var parsed = Parse(type);
+            if (parsed.HasValue) SetActiveCookie(ctx, parsed.Value);
+            return parsed;
+        }
+
         /// <summary>Enabled set for a render — reads the account setting for logged-in users.</summary>
         public static async Task<List<MetaType>> ResolveEnabledAsync(HttpContext ctx, string uid, IConfigStore store) =>
             ResolveEnabled(ctx, string.IsNullOrEmpty(uid) ? null : await store.GetWebSettingsAsync(uid));

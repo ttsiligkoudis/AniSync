@@ -74,7 +74,7 @@ namespace AnimeList.Controllers
         ];
 
         [Route("/library")]
-        public async Task<IActionResult> Index(string list = null, string search = null, string genre = null)
+        public async Task<IActionResult> Index(string list = null, string search = null, string genre = null, string type = null)
         {
             // Session-based identity. /library has no path-config — it's pure web app.
             // Anonymous visitors and not-logged-in sessions get bounced to the dashboard
@@ -90,7 +90,12 @@ namespace AnimeList.Controllers
             // narrows for video since the anime-only statuses don't map onto Trakt.
             var enabledModes = await MediaTypePreference.ResolveEnabledAsync(HttpContext, uid, _configStore);
             var mediaType = MediaTypePreference.ResolveActive(HttpContext, enabledModes);
-            ViewData["MtEnabled"] = enabledModes;   // drives the media-type toggle's chips
+            // A ?type= deep-link (e.g. a dashboard "View all · Series") overrides the
+            // cookie-resolved active mode and persists it; absent → keep the selected
+            // type. The user can still switch via the media-type toggle.
+            var typeOverride = MediaTypePreference.ApplyTypeQuery(HttpContext, type);
+            if (typeOverride.HasValue) mediaType = typeOverride.Value;
+            ViewData["MtEnabled"] = MediaTypePreference.ForToggle(enabledModes, mediaType);   // drives the media-type toggle's chips
             var isVideo = mediaType != MetaType.anime;
             var tabs = isVideo ? VideoListTypes : UserListTypes;
 

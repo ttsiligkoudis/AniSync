@@ -80,7 +80,7 @@ namespace AnimeList.Controllers
         ];
 
         [Route("/discover")]
-        public async Task<IActionResult> Index(string list = null, string search = null, string genre = null, string season = null, string tag = null)
+        public async Task<IActionResult> Index(string list = null, string search = null, string genre = null, string season = null, string tag = null, string type = null)
         {
             // Anonymous fresh-visit: GetAccessTokenAsync returns null. Synthesise an
             // anonymous TokenData with the Kitsu default so the per-service dispatch
@@ -114,7 +114,14 @@ namespace AnimeList.Controllers
             // first-visit chooser stamps — so anonymous movie/series mode works too.
             var enabledModes = await MediaTypePreference.ResolveEnabledAsync(HttpContext, uid, _configStore);
             var preferredMediaType = MediaTypePreference.ResolveActive(HttpContext, enabledModes);
-            ViewData["MtEnabled"] = enabledModes;   // drives the media-type toggle's chips
+            // A ?type= deep-link (e.g. a dashboard "View all · Series") overrides the
+            // cookie-resolved active mode and persists it; absent → keep the selected
+            // type. The user can still switch via the media-type toggle.
+            var typeOverride = MediaTypePreference.ApplyTypeQuery(HttpContext, type);
+            if (typeOverride.HasValue) preferredMediaType = typeOverride.Value;
+            // ForToggle so the active mode always has a chip even if it isn't in the
+            // stored enabled set (a type-deep-link can land on a not-multi-selected mode).
+            ViewData["MtEnabled"] = MediaTypePreference.ForToggle(enabledModes, preferredMediaType);   // drives the media-type toggle's chips
             // Video browse takes its catalog selection from the same `list`
             // query param the anime catalog uses (popular / trending / …),
             // keeping the URL shape consistent across media types.
@@ -484,8 +491,11 @@ namespace AnimeList.Controllers
         // URL surface tracks the Browse By card on the home page.
 
         [Route("/discover/studio")]
-        public async Task<IActionResult> Studios(string search = null)
+        public async Task<IActionResult> Studios(string search = null, string type = null)
         {
+            // Anime-only surface; honour a ?type= so the mode stays in sync after
+            // arriving from the dashboard's "Browse By · Studios" tile.
+            MediaTypePreference.ApplyTypeQuery(HttpContext, type);
             ViewData["StudioSearch"] = search;
             // Skip the upstream studios fetch on the initial browse
             // render — studio-pagination.js kicks an immediate page-1
@@ -653,8 +663,11 @@ namespace AnimeList.Controllers
         // links to /discover/actor/tmdb/{id} → the Trakt-backed filmography.
 
         [Route("/discover/actors")]
-        public async Task<IActionResult> Actors()
+        public async Task<IActionResult> Actors(string type = null)
         {
+            // Movies / series surface; honour a ?type= so the mode stays in sync
+            // after arriving from the dashboard's "Browse By · Actors" tile.
+            MediaTypePreference.ApplyTypeQuery(HttpContext, type);
             var (people, hasNext) = await _tmdb.GetPopularPeopleAsync(1);
             ViewData["ActorsHasNext"] = hasNext;
             return View("Actors", people);
@@ -677,8 +690,11 @@ namespace AnimeList.Controllers
         // page.
 
         [Route("/discover/tag")]
-        public async Task<IActionResult> Tags()
+        public async Task<IActionResult> Tags(string type = null)
         {
+            // Anime-only surface; honour a ?type= so the mode stays in sync after
+            // arriving from the dashboard's "Browse By · Tags" tile.
+            MediaTypePreference.ApplyTypeQuery(HttpContext, type);
             var tags = await _anilistFallback.GetTagsListAsync();
             return View("Tags", tags ?? new List<TagSummary>());
         }
