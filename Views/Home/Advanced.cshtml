@@ -2,6 +2,9 @@
 @{
     ViewData["ActiveNav"] = "configure";
     ViewData["Title"] = "Advanced";
+    // Clears the fixed floating Save bar so the last section's buttons aren't
+    // hidden behind it when scrolled to the bottom (see body.config-page CSS).
+    ViewData["BodyClass"] = "config-page";
 }
 
 @* Advanced sub-page of /configure. The Configure action renders this view

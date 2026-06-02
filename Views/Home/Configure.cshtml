@@ -2,6 +2,9 @@
 @{
     ViewData["ActiveNav"] = "configure";
     ViewData["Title"] = "Account";
+    // Clears the fixed floating Save bar so the last section's buttons aren't
+    // hidden behind it when scrolled to the bottom (see body.config-page CSS).
+    ViewData["BodyClass"] = "config-page";
 }
 
 @* Page-level header. The site-header (logo + hamburger) above is layout chrome
