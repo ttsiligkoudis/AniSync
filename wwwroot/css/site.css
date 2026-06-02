@@ -4976,6 +4976,20 @@ body.config-page main {
 .browse-tile-icon-amber  { background: rgba(245, 158, 11, 0.15);  color: #fbbf24; }
 .browse-tile-icon-purple { background: rgba(139, 92, 246, 0.15);  color: #a78bfa; }
 
+/* On phones the two-up tiles are too tight to carry an icon + chevron next to
+   the title + subtext, so drop both and let the text use the full tile width.
+   Placed after the base rules above so these overrides win the cascade. */
+@media (max-width: 599px) {
+    .browse-tile-icon,
+    .browse-tile::after {
+        display: none;
+    }
+    .browse-tile {
+        padding: 0.75rem 0.85rem;
+        gap: 0;
+    }
+}
+
 .browse-tile-body {
     flex: 1;
     min-width: 0;
@@ -5629,28 +5643,31 @@ a.stats-cell-link:hover {
     .stats-strip {
         gap: 0.4rem;
     }
-    .stats-cell {
-        padding: 0.55rem 0.45rem;
-        column-gap: 0.4rem;
-    }
+    /* Drop the icon on phones and stack the number over the label, centred —
+       four cells across a phone are too tight to also carry an icon column. */
     .stats-icon {
-        width: 24px;
-        height: 24px;
+        display: none;
     }
-    .stats-icon svg {
-        width: 14px;
-        height: 14px;
+    .stats-cell {
+        padding: 0.6rem 0.3rem;
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "number"
+            "label";
+        justify-items: center;
+        text-align: center;
+        row-gap: 0.15rem;
     }
     .stats-number {
-        font-size: 0.95rem;
+        font-size: 1.05rem;
     }
     .stats-label {
-        font-size: 0.58rem;
+        font-size: 0.62rem;
         letter-spacing: 0.01em;
     }
     [data-stats-loading] .stats-number {
         min-width: 2.2rem;
-        height: 0.95rem;
+        height: 1.05rem;
     }
 }
 
