@@ -69,22 +69,6 @@
             string progressAttr = meta.progress.HasValue ? meta.progress.Value.ToString() : null;
             string totalAttr = (meta.episodes is int totalE && totalE > 0) ? totalE.ToString() : null;
 
-            // Quick-add heart on the card itself — toggle Watching without opening
-            // the detail page. Shown for logged-in users when the entry is on no
-            // list (empty heart → add) or already Watching (filled → remove);
-            // hidden when it's in another list (managed via the modal). entryStatus
-            // is the provider-native list status, null on Discover catalogs (no
-            // user state) → an empty heart that adds to Watching. Movie/series
-            // grids carry the media type so the toggle routes through Trakt.
-            string cardStatusNorm = NormalizeListStatus(meta.entryStatus);
-            bool showCardHeart = !string.IsNullOrEmpty(Model.ConfigUid)
-                && (cardStatusNorm == null || cardStatusNorm == "watching");
-            bool cardHeartFilled = cardStatusNorm == "watching";
-            string cardHeartType = Model.VideoLinks
-                ? (meta.type == MetaType.movie.ToString() ? "movie" : "series")
-                : null;
-            string cardHeartLabel = cardHeartFilled ? "Remove from Watching" : "Add to Watching";
-
             <a class="library-card" href="@detailHref" title="@meta.name"
                data-meta-id="@meta.id" data-meta-name="@meta.name"
                data-meta-status="@entryStatusAttr"
@@ -121,20 +105,6 @@
                     @if (hasScore)
                     {
                         <span class="library-card-score">★ @meta.score.Value.ToString("0.0")</span>
-                    }
-                    @if (showCardHeart)
-                    {
-                        <button type="button"
-                                class="library-card-heart @(cardHeartFilled ? "library-card-heart-filled" : "")"
-                                data-watching-toggle data-meta-id="@meta.id"
-                                data-meta-media-type="@cardHeartType"
-                                aria-pressed="@(cardHeartFilled ? "true" : "false")"
-                                aria-label="@cardHeartLabel" title="@cardHeartLabel">
-                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none"
-                                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
-                            </svg>
-                        </button>
                     }
                 </div>
                 <span class="library-card-title">@meta.name</span>

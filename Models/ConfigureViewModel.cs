@@ -99,7 +99,6 @@ namespace AnimeList.Models
         public bool GroupSeasons => Configuration.enableSeasonGrouping;
         public bool HideUnreleasedWatching => Configuration.hideUnreleasedFromWatching;
         public bool ShowAdultContent => Configuration.showAdultContent;
-        public bool HideCompletedFromDiscover => Configuration.hideCompletedFromDiscover;
 
         public Dictionary<AnimeService, LinkedToken> LinkedByService =>
             LinkedTokens.ToDictionary(t => t.Service, t => t);
