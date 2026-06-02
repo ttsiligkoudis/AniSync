@@ -1,4 +1,5 @@
 using AnimeList.Models;
+using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 
 namespace AnimeList.Services
@@ -14,6 +15,7 @@ namespace AnimeList.Services
         private readonly IAnilistService _anilistService;
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
+        private readonly ITraktService _traktService;
         private readonly IConfigStore _configStore;
         private readonly IAnimeMappingService _mappingService;
         private readonly ILogger<MergedListService> _logger;
@@ -22,6 +24,7 @@ namespace AnimeList.Services
             IAnilistService anilistService,
             IKitsuService kitsuService,
             IMalService malService,
+            ITraktService traktService,
             IConfigStore configStore,
             IAnimeMappingService mappingService,
             ILogger<MergedListService> logger)
@@ -29,6 +32,7 @@ namespace AnimeList.Services
             _anilistService = anilistService;
             _kitsuService = kitsuService;
             _malService = malService;
+            _traktService = traktService;
             _configStore = configStore;
             _mappingService = mappingService;
             _logger = logger;
@@ -54,6 +58,14 @@ namespace AnimeList.Services
             bool hideUnreleased = false, bool hideAdult = false)
         {
             if (primary == null) return [];
+
+            // Trakt is a movies/series tracker with no anime id-space: its anime
+            // are tracked as imdb-keyed video entries. So when the primary is
+            // Trakt the whole merge runs in the IMDb id-space — exactly like the
+            // group-anime-seasons setting — which lets the Trakt anime list
+            // (imdb ids) and every linked AniList/MAL/Kitsu list (grouped onto
+            // their imdb ids) dedup against each other on a shared key.
+            if (primary.anime_service == AnimeService.Trakt) groupSeasons = true;
 
             // Active linked tokens — same gate SyncService uses (skip
             // NeedsReauth + missing access_token entries so we don't fan out
@@ -84,6 +96,7 @@ namespace AnimeList.Services
                     {
                         AnimeService.Anilist     => await _anilistService.GetAnimeListAsync(token, listType, genre: genre, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
                         AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(token, listType, genre: genre, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                        AnimeService.Trakt       => await FetchTraktAnimeListAsync(uid, listType),
                         _                        => await _kitsuService.GetAnimeListAsync(token, listType, genre: genre, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
                     } ?? new List<Meta>();
                 }
@@ -145,7 +158,12 @@ namespace AnimeList.Services
                     }
                     else
                     {
-                        var primaryId = await _mappingService.GetIdWithPrefixAsync(m.id, primaryService);
+                        // Trakt has no anime id-space (GetIdWithPrefix would throw),
+                        // so don't try to rewrite into it — an ungrouped entry under
+                        // a Trakt primary keys on its canonical AniList id instead.
+                        var primaryId = primaryService == AnimeService.Trakt
+                            ? null
+                            : await _mappingService.GetIdWithPrefixAsync(m.id, primaryService);
                         if (!string.IsNullOrEmpty(primaryId))
                         {
                             dedupKey = primaryId;
@@ -193,6 +211,43 @@ namespace AnimeList.Services
                 }
             }
             return merged;
+        }
+
+        /// <summary>
+        /// Builds the anime slice of a Trakt user's list for the given status.
+        /// Trakt has no anime concept — it tracks everything as movies / series
+        /// (imdb-keyed) — so we pull both kinds for the status and keep only the
+        /// entries whose imdb id resolves to a known anime in the cross-service
+        /// mapping. The kept entries stay imdb-keyed (the franchise-group id
+        /// space), so they dedup cleanly against the grouped AniList/MAL/Kitsu
+        /// entries in the merge. Empty when Trakt isn't configured / connected.
+        /// </summary>
+        private async Task<List<Meta>> FetchTraktAnimeListAsync(string uid, ListType listType)
+        {
+            if (string.IsNullOrEmpty(uid) || !_traktService.IsConfigured) return [];
+
+            var moviesTask = _traktService.GetListAsync(uid, listType, MetaType.movie);
+            var seriesTask = _traktService.GetListAsync(uid, listType, MetaType.series);
+            await Task.WhenAll(moviesTask, seriesTask);
+
+            var metas = new List<Meta>();
+            foreach (var item in moviesTask.Result.Concat(seriesTask.Result))
+            {
+                if (string.IsNullOrEmpty(item?.ImdbId)) continue;
+                // Non-empty mapping ⇒ this imdb id is a known anime. The lookup
+                // hits the in-memory mapping table (no network), so per-item is
+                // cheap even across a long history.
+                var mapping = await _mappingService.GetImdbMapping(item.ImdbId);
+                if (mapping == null || mapping.Count == 0) continue;
+
+                var meta = item.ToVideoMeta();
+                // It's anime, not a general video — tag it so the card links to
+                // the anime detail route (no ?type=) and the rest of the app
+                // treats it as anime.
+                meta.type = MetaType.anime.ToString();
+                metas.Add(meta);
+            }
+            return metas;
         }
 
         /// <summary>

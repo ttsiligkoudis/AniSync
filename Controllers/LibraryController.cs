@@ -129,14 +129,6 @@ namespace AnimeList.Controllers
             // collapse to a single IMDb-id card across every list surface.
             var groupSeasonsForCall = configuration?.enableSeasonGrouping == true;
 
-            // For anime mode under a Trakt primary, surface the effective anime
-            // provider (AniList) so the empty-state copy + the modal's status set
-            // match the provider the list actually comes from. No store call for
-            // anime primaries (ResolveAnimeTokenAsync short-circuits on non-Trakt).
-            var animeServiceForView = isVideo
-                ? tokenData.anime_service
-                : (await _configStore.ResolveAnimeTokenAsync(tokenData)).anime_service;
-
             // Skip the upstream fetch on the initial /library render —
             // filter-search.js auto-fires a submit on script load (the same
             // pipeline a real Search-button click takes) which hits
@@ -147,7 +139,7 @@ namespace AnimeList.Controllers
             return View(new LibraryViewModel
             {
                 ConfigUid = uid,
-                AnimeService = animeServiceForView,
+                AnimeService = tokenData.anime_service,
                 MediaType = mediaType,
                 ActiveList = activeList,
                 Tabs = tabs,
@@ -191,10 +183,6 @@ namespace AnimeList.Controllers
             var mediaType = await MediaTypePreference.ResolveActiveAsync(HttpContext, uid, _configStore);
             if (mediaType != MetaType.anime)
                 return await VideoPaneAsync(uid, activeList, mediaType, search, hasSearch);
-
-            // Anime: a Trakt primary reads its merged anime list through the linked
-            // AniList (then MAL/Kitsu) token — Trakt isn't an anime list source.
-            tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
 
             var labels = new Dictionary<ListType, string>
             {

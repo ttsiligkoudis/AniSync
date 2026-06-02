@@ -166,10 +166,12 @@ namespace AnimeList.Controllers
             if (preferredMediaType != MetaType.anime)
                 return await VideoBrowseAsync(preferredMediaType, uid, search, genre, list);
 
-            // Anime path. A Trakt primary has no anime id-space, so run anime on
-            // the linked AniList (then MAL/Kitsu, else anonymous AniList) token —
-            // catalogs, ids, and methods all behave as if AniList were primary.
-            tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
+            // Trakt has no anime catalogs, so a Trakt primary sources the public
+            // anime catalogs (trending / seasonal / …) from AniList anonymously,
+            // in the IMDb id-space (grouping forced on below) — same id-space the
+            // Trakt anime library uses, so cards line up across the app.
+            var traktPrimary = tokenData.anime_service == AnimeService.Trakt;
+            if (traktPrimary) tokenData = new TokenData { anime_service = AnimeService.Anilist };
 
             // Honor the "Hide unaired from Watching" pref. Only affects the
             // ListType.Current discover-only tab; harmless on every other list.
@@ -187,7 +189,9 @@ namespace AnimeList.Controllers
             // honors the user's toggle so a grouped install collapses
             // franchises consistently across web + addon.
             var listForCall = hasSearch ? ListType.Search : activeList;
-            var groupSeasons = configuration?.enableSeasonGrouping == true;
+            // Force IMDb grouping for a Trakt primary so catalog ids match the
+            // Trakt anime library's id-space.
+            var groupSeasons = configuration?.enableSeasonGrouping == true || traktPrimary;
             var groupSeasonsForCall = listForCall == ListType.Search ? false : groupSeasons;
             // Tag is an AniList-native filter — MAL/Kitsu don't expose an
             // equivalent — so when a tag is requested we route through
@@ -422,10 +426,10 @@ namespace AnimeList.Controllers
                 });
             }
 
-            // /discover/page is the anime catalog pager (video uses /video/page),
-            // so a Trakt primary runs anime through the linked AniList token —
-            // see the matching swap + rationale in Index().
-            tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
+            // A Trakt primary sources anime catalogs from AniList anonymously in
+            // the IMDb id-space — see the matching swap + rationale in Index().
+            var traktPrimary = tokenData.anime_service == AnimeService.Trakt;
+            if (traktPrimary) tokenData = new TokenData { anime_service = AnimeService.Anilist };
 
             var configuration = await GetConfigByUidAsync(uid, _configStore);
             var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
@@ -439,7 +443,8 @@ namespace AnimeList.Controllers
             // pinned to ungrouped to avoid dedup name-flattening; every other
             // list reflects the user's toggle.
             var listForCall = hasSearch ? ListType.Search : activeList;
-            var groupSeasons = configuration?.enableSeasonGrouping == true;
+            // Force IMDb grouping for a Trakt primary (see Index()).
+            var groupSeasons = configuration?.enableSeasonGrouping == true || traktPrimary;
             var groupSeasonsForCall = listForCall == ListType.Search ? false : groupSeasons;
             var hasTag = !string.IsNullOrWhiteSpace(tag);
 

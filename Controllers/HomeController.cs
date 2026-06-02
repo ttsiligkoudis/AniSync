@@ -595,10 +595,6 @@ public class HomeController : Controller
             return Unauthorized();
         }
 
-        // A Trakt primary reads its Currently Watching anime from the linked
-        // AniList (then MAL/Kitsu) list — Trakt isn't an anime list source here.
-        token = await _configStore.ResolveAnimeTokenAsync(token);
-
         // Honor the user's general grouping pref the same way Library and
         // Discover do — when on, multi-cour franchises collapse into a single
         // IMDb-id card on the Continue Watching shelf, matching what the
@@ -798,11 +794,11 @@ public class HomeController : Controller
             var tokenData = DeserializeObject<TokenData>(sessionStr);
             if (tokenData != null)
             {
-                // Trakt has no anime id-space — the anime shelves run on AniList
-                // (anilist: ids) for a Trakt primary, matching the rest of the app.
-                primaryService = tokenData.anime_service == AnimeService.Trakt
-                    ? AnimeService.Anilist
-                    : tokenData.anime_service;
+                // Trakt has no anime catalogs — the anime shelves source from
+                // AniList in the IMDb id-space (grouping forced below) for a
+                // Trakt primary, matching the rest of the app.
+                var traktPrimary = tokenData.anime_service == AnimeService.Trakt;
+                primaryService = traktPrimary ? AnimeService.Anilist : tokenData.anime_service;
                 if (!tokenData.anonymousUser)
                 {
                     var (resolved, _) = await _configStore.FindUidByIdentityAsync(tokenData);
@@ -810,7 +806,7 @@ public class HomeController : Controller
                     if (!string.IsNullOrEmpty(uid))
                     {
                         var config = await GetConfigByUidAsync(uid, _configStore);
-                        groupSeasons = config?.enableSeasonGrouping == true;
+                        groupSeasons = config?.enableSeasonGrouping == true || traktPrimary;
                     }
                 }
             }
