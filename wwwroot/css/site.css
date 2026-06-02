@@ -6399,22 +6399,17 @@ a.stats-cell-link:hover {
     align-items: center;
 }
 
-/* Action cluster (Add to List / status pill + quick-add heart + Hide) grouped
-   so they wrap together as one unit rather than scattering across lines. On
-   desktop it sits inline after the score/status badges; on mobile it drops to
-   its own centered row so the controls read as a tidy action bar under the
-   info badges. The heart + hide + pill share a common control height so the
-   row lines up cleanly. */
-.anime-detail-actions {
-    display: inline-flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.4rem;
+/* Score now sits on its own line above the format/duration info row. */
+.anime-detail-score-row {
+    margin: 0.1rem 0;
 }
 
-.anime-detail-actions .anime-detail-user-state,
-.anime-detail-actions .anime-detail-heart,
-.anime-detail-actions .anime-detail-hide {
+/* Airing status + Add-to-List pill + heart + Hide share one row; give the
+   tappable controls a common height so they line up cleanly. align-items on
+   the badges row centres them, so the status pill's natural height is fine. */
+.anime-detail-badges .anime-detail-user-state,
+.anime-detail-badges .anime-detail-heart,
+.anime-detail-badges .anime-detail-hide {
     height: 2rem;
 }
 
@@ -6422,11 +6417,12 @@ a.stats-cell-link:hover {
     width: 2rem;
 }
 
+/* Centre the single status+actions row on mobile (the meta column is centred
+   there), and keep it on one line — flex-wrap still rescues very narrow /
+   long-label cases. */
 @media (max-width: 599px) {
-    .anime-detail-actions {
-        width: 100%;
+    .anime-detail-badges {
         justify-content: center;
-        margin-top: 0.15rem;
     }
 }
 
