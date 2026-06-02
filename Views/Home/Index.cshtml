@@ -248,6 +248,9 @@
        widget only mounts under the HasStats branch. *@
     <script>
         (function () {
+            // First-run: the media-type modal is forced — don't fetch anything
+            // behind it; the reload after the user chooses will load what's needed.
+            if (document.body.classList.contains('mt-unset')) return;
             var section = document.querySelector('[data-stats-section]');
             if (!section) return;
 
@@ -386,6 +389,8 @@
     </script>
     <script>
         (function () {
+            // First-run: skip while the forced media-type modal is up.
+            if (document.body.classList.contains('mt-unset')) return;
             // Trakt row of the unified "Your stats" panel. Guarded on the row's
             // presence, so it no-ops when only the anime row rendered.
             var group = document.querySelector('[data-trakt-stats]');
@@ -464,6 +469,8 @@
     </section>
     <script>
         (function () {
+            // First-run: skip while the forced media-type modal is up.
+            if (document.body.classList.contains('mt-unset')) return;
             var section = document.querySelector('[data-continue-watching-section]');
             if (!section) return;
             var container = section.querySelector('[data-continue-watching-container]');
@@ -734,6 +741,9 @@
         }
 
         function loadShelves() {
+            // First-run: the forced media-type modal is up — don't fetch shelves
+            // behind it; the reload after the user chooses will load what's needed.
+            if (document.body.classList.contains('mt-unset')) return;
             var shelves = document.querySelectorAll('[data-shelf]');
             if (!shelves.length) return;
 
