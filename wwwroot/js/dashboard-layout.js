@@ -14,18 +14,27 @@
     // Anticipated) rather than all-anime-then-all-video, so equivalent shelves
     // sit together. apply() reorders the DOM to match this (the view renders
     // the anime block then the video block; this is the on-screen order).
+    // Interleaved by list type (Continue watching → Trending → Popular →
+    // Anticipated), and within each, anime then movies then series. Video
+    // tiles are split per-type so movies and series can be shown/hidden and
+    // reordered independently. New Episodes Today leads (opt-in, hidden by
+    // default). apply() reorders the DOM to match this.
     var UNITS = [
-        { key: 'stats',              label: 'Your stats' },
-        { key: 'anime-continue',     label: 'Continue watching · Anime' },
-        { key: 'video-continue',     label: 'Continue watching · Movies/Series' },
-        { key: 'anime-new-episodes', label: 'New Episodes Today' },
-        { key: 'anime-trending',     label: 'Trending · Anime' },
-        { key: 'video-trending',     label: 'Trending · Movies/Series' },
-        { key: 'anime-popular',      label: 'Popular · Anime' },
-        { key: 'video-popular',      label: 'Most Popular · Movies/Series' },
-        { key: 'anime-anticipated',  label: 'Most Anticipated · Anime' },
-        { key: 'video-anticipated',  label: 'Most Anticipated · Movies/Series' },
-        { key: 'browse',             label: 'Browse By' },
+        { key: 'stats',                  label: 'Your stats' },
+        { key: 'anime-new-episodes',     label: 'New Episodes Today' },
+        { key: 'anime-continue',         label: 'Continue watching · Anime' },
+        { key: 'video-continue-movie',   label: 'Continue watching · Movies' },
+        { key: 'video-continue-series',  label: 'Continue watching · Series' },
+        { key: 'anime-trending',         label: 'Trending · Anime' },
+        { key: 'video-trending-movie',   label: 'Trending · Movies' },
+        { key: 'video-trending-series',  label: 'Trending · Series' },
+        { key: 'anime-popular',          label: 'Most Popular · Anime' },
+        { key: 'video-popular-movie',    label: 'Most Popular · Movies' },
+        { key: 'video-popular-series',   label: 'Most Popular · Series' },
+        { key: 'anime-anticipated',      label: 'Most Anticipated · Anime' },
+        { key: 'video-anticipated-movie',  label: 'Most Anticipated · Movies' },
+        { key: 'video-anticipated-series', label: 'Most Anticipated · Series' },
+        { key: 'browse',                 label: 'Browse By' },
     ];
     var DEFAULT_ORDER = UNITS.map(function (u) { return u.key; });
     var LABELS = {}; UNITS.forEach(function (u) { LABELS[u.key] = u.label; });
@@ -214,6 +223,11 @@
         save(layout);
         apply(layout);
         renderRows();
+        // A tile the user just un-hid was skipped by the dashboard loaders on
+        // first paint (they bail on [hidden]), so it'd sit on skeletons until a
+        // refresh. Now that apply() has un-hidden it, ask the loaders to fetch
+        // any newly-visible tile (idempotent — already-loaded tiles are skipped).
+        if (window.AniSyncDashboardTiles) window.AniSyncDashboardTiles.reload();
         // Persist to the account too (logged-in) so the layout follows the user
         // across devices. Fire-and-forget; localStorage already has it.
         if (window.AniSync && window.AniSync.loggedIn) {
