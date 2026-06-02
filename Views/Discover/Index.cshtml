@@ -79,7 +79,9 @@ else
    Seasonal / Airing pills. The Hidden pill renders for logged-in users. *@
 @await Html.PartialAsync("_DiscoverTabs", new AnimeList.Controllers.DiscoverTabsViewModel
 {
-    ActiveList = Model.ActiveList,
+    // In hidden mode ActiveList is a placeholder (Trending) — pass null so no
+    // catalog pill lights up alongside the active Hidden pill.
+    ActiveList = isHidden ? (ListType?)null : Model.ActiveList,
     Genre = Model.Genre,
     Search = Model.Search,
     Season = Model.Season,
@@ -143,6 +145,10 @@ else
     {
         Items = Model.Items,
         ConfigUid = Model.ConfigUid,
+        // The Hidden section can hold anime + movies/series, so let the grid tag
+        // video ids with ?type= per item (anime stay bare). Off for the anime
+        // catalog views, which are anime-only.
+        VideoLinks = isHidden,
         EmptyMessage = isHidden
             ? "You haven't hidden anything yet. Open a title and use Hide to tuck it away here."
             : hasSearch

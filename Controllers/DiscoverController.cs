@@ -413,6 +413,9 @@ namespace AnimeList.Controllers
                 {
                     Items = hidden.Select(ToHiddenMeta).ToList(),
                     ConfigUid = uid,
+                    // Mixed anime + movie/series list — _PosterGrid tags video ids
+                    // with ?type= per item so they route to the right loader.
+                    VideoLinks = true,
                 });
             }
 
