@@ -84,10 +84,6 @@ namespace AnimeList.Controllers
             // existing "anonymousUser → no uid" branching for us.
             var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
-            // Trakt has no anime id-space — run anime on the linked AniList
-            // (then MAL/Kitsu, else anonymous AniList) token. No-op for anime
-            // primaries / the anonymous fallback above.
-            tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
             var animeService = tokenData.anime_service;
 
             // 18+ gate gets its toggle from the user's config; null for
@@ -503,10 +499,6 @@ namespace AnimeList.Controllers
 
             var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
-            // Trakt has no anime id-space — run anime on the linked AniList
-            // (then MAL/Kitsu, else anonymous AniList) token. No-op for anime
-            // primaries / the anonymous fallback above.
-            tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
             var animeService = tokenData.anime_service;
 
             // Per-user grouping pref — recommendations + related lists hand
@@ -589,10 +581,6 @@ namespace AnimeList.Controllers
         {
             var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
-            // Trakt has no anime id-space — run anime on the linked AniList
-            // (then MAL/Kitsu, else anonymous AniList) token. No-op for anime
-            // primaries / the anonymous fallback above.
-            tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
             var animeService = tokenData.anime_service;
 
             // IMDb-id deep-link path mirrors Detail() — multi-cour franchise
@@ -741,10 +729,6 @@ namespace AnimeList.Controllers
         {
             var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
-            // Trakt has no anime id-space — run anime on the linked AniList
-            // (then MAL/Kitsu, else anonymous AniList) token. No-op for anime
-            // primaries / the anonymous fallback above.
-            tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
 
             var cinemetaType = type == MetaType.movie ? "movie" : "series";
             var meta = await _cinemeta.GetVideoMetaAsync(cinemetaType, id);
@@ -995,10 +979,6 @@ namespace AnimeList.Controllers
 
             var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
-            // Trakt has no anime id-space — run anime on the linked AniList
-            // (then MAL/Kitsu, else anonymous AniList) token. No-op for anime
-            // primaries / the anonymous fallback above.
-            tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
 
             // Stream addons — one fan-out per configured manifest URL.
             // Anonymous installs and users with no addons see no debrid

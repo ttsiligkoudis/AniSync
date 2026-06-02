@@ -29,43 +29,5 @@ namespace AnimeList.Services.Extensions
             var (uid, _) = await configStore.FindUidByIdentityAsync(token);
             return (token, uid);
         }
-
-        /// <summary>
-        /// Resolves the token to use for ANIME operations. Trakt is a
-        /// movies/series tracker with no anime id-space — the per-service anime
-        /// dispatch (AniList / MAL / Kitsu) has no Trakt branch and
-        /// <see cref="Utils.GetServicePrefix"/> throws for it. So when the
-        /// primary is Trakt, anime runs on a linked anime provider instead:
-        /// AniList first (anilist: ids + methods), then MAL, then Kitsu. With no
-        /// anime provider linked, falls back to an anonymous AniList token so
-        /// public anime catalogs / detail still resolve in the anilist: id-space.
-        ///
-        /// For an anime primary (or anonymous / null) the token is returned
-        /// unchanged — this only re-points the Trakt-primary case. Movie/series
-        /// flows must NOT call this (they keep the Trakt token).
-        /// </summary>
-        public static async Task<TokenData> ResolveAnimeTokenAsync(
-            this IConfigStore configStore,
-            TokenData primary)
-        {
-            if (primary == null || primary.anime_service != AnimeService.Trakt) return primary;
-
-            var (uid, _) = await configStore.FindUidByIdentityAsync(primary);
-            if (!string.IsNullOrEmpty(uid))
-            {
-                var linked = await configStore.GetLinkedTokensAsync(uid);
-                var pick = PickLinkedAnime(linked, AnimeService.Anilist)
-                        ?? PickLinkedAnime(linked, AnimeService.MyAnimeList)
-                        ?? PickLinkedAnime(linked, AnimeService.Kitsu);
-                if (pick != null) return pick;
-            }
-
-            // Nothing linked to read a real list from — anonymous AniList keeps
-            // anime catalogs / detail working in the anilist: id-space.
-            return new TokenData { anime_service = AnimeService.Anilist };
-        }
-
-        private static TokenData PickLinkedAnime(IEnumerable<LinkedToken> linked, AnimeService service) =>
-            linked.FirstOrDefault(l => l.Service == service && !l.NeedsReauth && l.TokenData != null)?.TokenData;
     }
 }

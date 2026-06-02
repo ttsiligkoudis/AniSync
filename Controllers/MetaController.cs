@@ -1,5 +1,4 @@
 using AnimeList.Models;
-using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
@@ -908,10 +907,6 @@ namespace AnimeList.Controllers
                 if (type == "movie" || type == "series")
                     return await GetTraktVideoEntryAsync(tokenData, type, id);
 
-                // Anime path: a Trakt primary runs anime on the linked AniList
-                // (then MAL/Kitsu) token so reads use the anilist: id-space.
-                tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
-
                 // service: <int> override — the detail page stamps it on the
                 // Manage Entry button when the requested anime has no mapping
                 // to the user's primary but lives on a linked secondary
@@ -1039,12 +1034,6 @@ namespace AnimeList.Controllers
                 if (request.Type == "movie" || request.Type == "series")
                     return await SaveTraktVideoEntryAsync(tokenData, request);
 
-                // Anime path: a Trakt primary writes anime through the linked
-                // AniList (then MAL/Kitsu) token; the fan-out below then mirrors
-                // it to the other linked providers (incl. Trakt via its anime→
-                // imdb mapping). No-op for anime primaries.
-                tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
-
                 // service: <int> override — the modal sends it when the entry
                 // was loaded through a linked-secondary token (anime had no
                 // mapping to the user's primary, e.g. anilist:N for an
@@ -1164,10 +1153,6 @@ namespace AnimeList.Controllers
                 // not tracked → add) on top of Trakt's vocabulary.
                 if (request.Type == "movie" || request.Type == "series")
                     return await ToggleTraktWatchingAsync(tokenData, request);
-
-                // Anime path: a Trakt primary toggles Watching through the linked
-                // AniList (then MAL/Kitsu) token; fan-out mirrors to the rest.
-                tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
 
                 // Same linked-secondary override path the modal uses: an anime with
                 // no mapping to the user's primary but present on a linked provider
