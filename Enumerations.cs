@@ -29,6 +29,7 @@
             Current,
             Completed,
             Trending_Desc,
+            Popularity_Desc,
             Seasonal,
             Planning,
             Paused,
