@@ -10,20 +10,30 @@
     // Keys match the [data-dash-section] attributes the view stamps. A key may
     // map to more than one section (the per-type video shelves share a key);
     // they move + hide together and keep their on-page order.
+    // Interleaved by list type (Continue watching → Popular/Trending →
+    // Anticipated) rather than all-anime-then-all-video, so equivalent shelves
+    // sit together. apply() reorders the DOM to match this (the view renders
+    // the anime block then the video block; this is the on-screen order).
     var UNITS = [
         { key: 'stats',              label: 'Your stats' },
         { key: 'anime-continue',     label: 'Continue watching · Anime' },
-        { key: 'anime-new-episodes', label: 'New Episodes Today' },
-        { key: 'anime-popular',      label: 'Most Popular this Season' },
-        { key: 'anime-anticipated',  label: 'Most Anticipated · Anime' },
         { key: 'video-continue',     label: 'Continue watching · Movies/Series' },
+        { key: 'anime-new-episodes', label: 'New Episodes Today' },
+        { key: 'anime-popular',      label: 'Most Popular this Season · Anime' },
         { key: 'video-trending',     label: 'Trending · Movies/Series' },
         { key: 'video-popular',      label: 'Most Popular · Movies/Series' },
+        { key: 'anime-anticipated',  label: 'Most Anticipated · Anime' },
         { key: 'video-anticipated',  label: 'Most Anticipated · Movies/Series' },
         { key: 'browse',             label: 'Browse By' },
     ];
     var DEFAULT_ORDER = UNITS.map(function (u) { return u.key; });
     var LABELS = {}; UNITS.forEach(function (u) { LABELS[u.key] = u.label; });
+
+    // Sections that start hidden until the user explicitly enables them in the
+    // layout chooser. "New Episodes Today" is opt-in: when it's off it's not
+    // rendered visible AND the dashboard shelf loader skips its fetch entirely.
+    var HIDDEN_BY_DEFAULT = { 'anime-new-episodes': true };
+    function defaultVisible(key) { return !HIDDEN_BY_DEFAULT[key]; }
 
     // ── persistence ──
     // Stored as [{ key, visible }]. Merge with the defaults so a key added in a
@@ -55,8 +65,10 @@
                 out.push({ key: key, visible: e.visible !== false });
             }
         });
+        // Keys the saved layout never mentioned fall back to their default
+        // visibility (most are on; opt-in shelves like New Episodes are off).
         DEFAULT_ORDER.forEach(function (k) {
-            if (!seen[k]) { seen[k] = true; out.push({ key: k, visible: true }); }
+            if (!seen[k]) { seen[k] = true; out.push({ key: k, visible: defaultVisible(k) }); }
         });
         return out;
     }
@@ -244,7 +256,7 @@
         if (closeBtn) closeBtn.addEventListener('click', closeModal);
         if (doneBtn) doneBtn.addEventListener('click', closeModal);
         if (resetBtn) resetBtn.addEventListener('click', function () {
-            layout = DEFAULT_ORDER.map(function (k) { return { key: k, visible: true }; });
+            layout = DEFAULT_ORDER.map(function (k) { return { key: k, visible: defaultVisible(k) }; });
             commit();
         });
     }

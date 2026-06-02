@@ -720,9 +720,6 @@
 
 <script>
     (function () {
-        var shelves = document.querySelectorAll('[data-shelf]');
-        if (!shelves.length) return;
-
         // Server-rendered _PosterGrid partials carry an inline <script> (the
         // airing-time localisation + clock-order reorder used by New Episodes
         // Today). innerHTML-inserted scripts don't execute, so re-create each
@@ -736,28 +733,47 @@
             });
         }
 
-        shelves.forEach(function (section) {
-            var src = section.getAttribute('data-shelf-src');
-            var container = section.querySelector('[data-shelf-container]');
-            if (!src || !container) return;
+        function loadShelves() {
+            var shelves = document.querySelectorAll('[data-shelf]');
+            if (!shelves.length) return;
 
-            // No await between iterations → every shelf fetch fires together
-            // and resolves independently.
-            fetch(src, { credentials: 'same-origin', skipLoader: true })
-                .then(function (resp) { return resp.ok ? resp.text() : null; })
-                .then(function (html) {
-                    if (html == null || !html.trim()) {
-                        // Upstream error or empty result — drop the skeleton
-                        // shelf rather than leaving it loading forever.
-                        section.hidden = true;
-                        return;
-                    }
-                    container.innerHTML = html;
-                    runScripts(container);
-                    section.hidden = false;
-                })
-                .catch(function () { section.hidden = true; });
-        });
+            shelves.forEach(function (section) {
+                // Skip shelves the saved layout has disabled (e.g. New Episodes
+                // Today is opt-in): dashboard-layout.js has already run by now
+                // and set [hidden] on them, so we never fire their fetch.
+                if (section.hidden) return;
+
+                var src = section.getAttribute('data-shelf-src');
+                var container = section.querySelector('[data-shelf-container]');
+                if (!src || !container) return;
+
+                // No await between iterations → every shelf fetch fires together
+                // and resolves independently.
+                fetch(src, { credentials: 'same-origin', skipLoader: true })
+                    .then(function (resp) { return resp.ok ? resp.text() : null; })
+                    .then(function (html) {
+                        if (html == null || !html.trim()) {
+                            // Upstream error or empty result — drop the skeleton
+                            // shelf rather than leaving it loading forever.
+                            section.hidden = true;
+                            return;
+                        }
+                        container.innerHTML = html;
+                        runScripts(container);
+                        section.hidden = false;
+                    })
+                    .catch(function () { section.hidden = true; });
+            });
+        }
+
+        // Wait for DOMContentLoaded so the deferred dashboard-layout.js has
+        // applied the saved layout (reorder + hide) first — that way a shelf
+        // the user disabled is already [hidden] and we skip its fetch above.
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', loadShelves);
+        } else {
+            loadShelves();
+        }
     })();
 </script>
 
@@ -895,3 +911,10 @@
         }
     </div>
 </section>
+
+@* Applies the saved dashboard layout (section order + which shelves are
+   shown/hidden). The Customize UI itself lives on the Configure page; here we
+   only need the layout applied — so we load the script without the chooser
+   modal. It runs deferred (before DOMContentLoaded), so the shelf loader above
+   sees disabled shelves as [hidden] and skips their fetch. *@
+<script src="~/js/dashboard-layout.js" asp-append-version="true" defer></script>
