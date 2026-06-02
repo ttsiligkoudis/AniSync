@@ -85,7 +85,6 @@
         </div>
         @if (showAnimeStats)
         {
-            @{
                 // Stats come from AniList's User.statistics GraphQL regardless of
                 // which provider the user picked as their primary — that's where
                 // the dashboard sources count + mean + minutesWatched from.
@@ -101,7 +100,6 @@
                 if (string.Equals(statsSourceLabel, "Anilist", StringComparison.OrdinalIgnoreCase))
                     statsSourceLabel = "AniList";
                 var statsAttribution = $"via {statsSourceLabel}";
-            }
             <div class="stats-group" data-media-type="anime" data-stats-section data-stats-loading>
                 <div class="stats-group-head">
                     @* Row sub-label only when more than one tracker shows, so a
