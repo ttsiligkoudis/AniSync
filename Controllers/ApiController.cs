@@ -389,6 +389,100 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
+        /// Header typeahead search spanning the user's enabled media types: anime
+        /// (their primary tracker, like <see cref="Match"/>) plus Trakt/Cinemeta
+        /// movies and series. Results are merged by relevance. Trakt carries anime
+        /// too, so a video result whose IMDb id matches one of the anime hits is
+        /// dropped to avoid a duplicate row. Each match returns an id ready for the
+        /// /meta route (service-native for anime, tt for movies/series) plus its
+        /// type so the client can append ?type= for video.
+        /// </summary>
+        [HttpGet("suggest")]
+        public async Task<IActionResult> Suggest(string title, int limit = 8)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+                return new JsonResult(new { query = title, matches = Array.Empty<object>() });
+
+            limit = Math.Clamp(limit, 1, 20);
+            var normalised = NormalizeTitle(title);
+            var hideAdult = await ResolveHideAdultAsync();
+
+            string uid = null;
+            var primary = AnimeService.Anilist;
+            try
+            {
+                var (token, resolvedUid) = await _tokenService.ResolveCurrentAsync(_configStore);
+                if (token != null) primary = token.anime_service;
+                uid = resolvedUid;
+            }
+            catch { /* no or corrupt session — fall through to defaults */ }
+
+            var enabled = await AnimeList.Services.MediaTypePreference.ResolveEnabledAsync(HttpContext, uid, _configStore);
+
+            // (id, name, poster, type, score). Built per source, merged at the end.
+            var scored = new List<(string Id, string Name, string Poster, string Type, double Score)>();
+            // IMDb ids already represented by an anime hit — used to drop duplicate
+            // video rows for the same title (Trakt indexes anime as well).
+            var animeImdbIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                if (enabled.Contains(MetaType.anime))
+                {
+                    var svc = primary;
+                    if (svc == AnimeService.Anilist && AnimeList.Services.AnilistHealthMonitor.IsDown)
+                        svc = AnimeService.Kitsu;
+                    var raw = svc switch
+                    {
+                        AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, ListType.Search, search: title, groupSeasons: false, hideAdult: hideAdult),
+                        AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, ListType.Search, search: title, groupSeasons: false, hideAdult: hideAdult),
+                        _ => await _anilistService.GetAnimeListAsync(null, ListType.Search, search: title, groupSeasons: false, hideAdult: hideAdult),
+                    };
+                    foreach (var m in raw.OrderByDescending(m => ScoreMatch(normalised, m.name)).Take(limit))
+                    {
+                        if (string.IsNullOrEmpty(m.id)) continue;
+                        try
+                        {
+                            AnimeIdMapping map = null;
+                            if (m.id.StartsWith(anilistPrefix)) map = await _mappingService.GetAnilistMapping(m.id);
+                            else if (m.id.StartsWith(kitsuPrefix)) map = await _mappingService.GetKitsuMapping(m.id);
+                            else if (m.id.StartsWith(malPrefix)) map = await _mappingService.GetMalMapping(m.id);
+                            if (!string.IsNullOrEmpty(map?.ImdbId)) animeImdbIds.Add(map.ImdbId);
+                        }
+                        catch { /* mapping miss — still show the anime result */ }
+                        scored.Add((m.id, m.name, m.poster, m.type ?? "anime", ScoreMatch(normalised, m.name)));
+                    }
+                }
+
+                foreach (var vt in new[] { MetaType.movie, MetaType.series })
+                {
+                    if (!enabled.Contains(vt)) continue;
+                    var t = vt == MetaType.movie ? "movie" : "series";
+                    var vids = await _cinemetaService.GetVideoCatalogAsync(t, search: title);
+                    foreach (var m in vids.OrderByDescending(m => ScoreMatch(normalised, m.name)).Take(limit))
+                    {
+                        if (string.IsNullOrEmpty(m.id)) continue;
+                        // Same title already covered by an anime hit → skip the dup.
+                        if (animeImdbIds.Contains(m.id)) continue;
+                        scored.Add((m.id, m.name, m.poster, t, ScoreMatch(normalised, m.name)));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "API Suggest failed (title={Title}).", title);
+            }
+
+            var matches = scored
+                .OrderByDescending(x => x.Score)
+                .Take(limit)
+                .Select(x => (object)new { id = x.Id, name = x.Name, poster = x.Poster, type = x.Type })
+                .ToList();
+
+            return new JsonResult(new { query = title, matches });
+        }
+
+        /// <summary>
         /// Discovery catalogs: <c>trending</c>, <c>seasonal</c>, <c>airing</c>. The
         /// <paramref name="genre"/> param doubles as the season selector ("This Season",
         /// "Next Season", "Previous Season") for the seasonal endpoint, mirroring the

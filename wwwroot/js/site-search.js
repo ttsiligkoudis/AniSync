@@ -78,7 +78,13 @@
                     typeBadge = '<span class="site-search-result-type site-search-result-type-tv">TV</span>';
                 }
 
-                return '<a class="site-search-result" role="option" href="/meta/' + encodeURIComponent(id) + '">'
+                // Movie/series ids are bare imdb ids — append ?type so the meta
+                // route loads them through the video path (anime ids are
+                // service-prefixed and self-describing, so they need no ?type).
+                var href = '/meta/' + encodeURIComponent(id)
+                    + ((type === 'movie' || type === 'series') ? ('?type=' + type) : '');
+
+                return '<a class="site-search-result" role="option" href="' + escapeAttr(href) + '">'
                     + posterHtml
                     + '<span class="site-search-result-name">' + escapeHtml(name) + '</span>'
                     + typeBadge
@@ -100,7 +106,7 @@
 
             renderStatus('Searching…');
 
-            fetch('/api/v1/match?title=' + encodeURIComponent(query) + '&limit=' + RESULT_LIMIT, {
+            fetch('/api/v1/suggest?title=' + encodeURIComponent(query) + '&limit=' + RESULT_LIMIT, {
                 signal: signal,
                 credentials: 'same-origin',
                 headers: { 'Accept': 'application/json' },
