@@ -7,6 +7,10 @@
     // + cookie + the account setting when logged in) and the reload.
     var mtEnabled = ViewData["MediaTypeEnabled"] as List<MetaType> ?? new();
     var mtLoggedIn = ViewData["MediaTypeLoggedIn"] as bool? ?? false;
+    // When set (the Stremio /configure page, which is anime-only), media-type.js
+    // silently selects this mode for a first-time visitor instead of forcing the
+    // chooser modal open.
+    var mtAutoDefault = ViewData["MediaTypeAutoDefault"] as string;
     var mtOptions = new[]
     {
         (Type: MetaType.anime,  Title: "Anime",  Blurb: "Track across AniList, MAL & Kitsu"),
@@ -18,6 +22,7 @@
 <div class="mt-modal" data-media-type-modal role="dialog" aria-modal="true"
      aria-labelledby="mt-modal-title"
      data-logged-in="@(mtLoggedIn ? "true" : "false")"
+     data-autodefault="@mtAutoDefault"
      hidden>
     <div class="mt-modal-card">
         <button type="button" class="mt-modal-close" aria-label="Close" data-media-type-close>×</button>

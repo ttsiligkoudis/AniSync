@@ -868,6 +868,12 @@
     {
         ["MediaTypeEnabled"] = layoutEnabled,
         ["MediaTypeLoggedIn"] = layoutLoggedIn,
+        // The /configure (Stremio addon) page only deals in anime — Stremio
+        // support is anime-only for now — so a first-time visitor there should
+        // be defaulted to anime silently rather than blocked by the forced
+        // chooser modal. media-type.js reads this and auto-selects instead of
+        // opening the modal when no set is stored yet.
+        ["MediaTypeAutoDefault"] = activeNav == "stremio" ? "anime" : null,
     })
 
     @* Toast container — receives "Saved!" / "Error" feedback from in-page
