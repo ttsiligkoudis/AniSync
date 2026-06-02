@@ -592,8 +592,10 @@
    same [data-shelf] loader. *@
 @if (animeEnabled)
 {
-@* Discovery shelves — New Episodes Today + Most Popular this Season +
-   Most Anticipated. Same horizontal-scroll _PosterGrid the anime detail
+@* Discovery shelves — New Episodes Today + Trending + Popular +
+   Most Anticipated (Trending / Popular mirror the Discover Trending /
+   Popular tabs, matching the movies/series shelves). Same horizontal-scroll
+   _PosterGrid the anime detail
    page's Recommended carousel uses, so the card chrome (poster + score +
    format / episodes / year info row) is identical across surfaces.
    Rendered for every visitor — the underlying AniList data is public;
@@ -617,10 +619,26 @@
     </div>
 </section>
 
-<section class="dashboard-section" data-dash-section="anime-popular" data-media-type="anime" data-shelf data-shelf-src="/Home/PopularThisSeasonData">
+<section class="dashboard-section" data-dash-section="anime-trending" data-media-type="anime" data-shelf data-shelf-src="/Home/TrendingAnimeData">
     <div class="dashboard-section-header">
-        <h2 class="dashboard-section-title">Most Popular this Season@(animeSuffix)</h2>
-        <a class="dashboard-section-link" href="/discover?list=seasonal&amp;season=@Uri.EscapeDataString(CurrentSeasonLabel())&amp;type=anime">
+        <h2 class="dashboard-section-title">Trending@(animeSuffix)</h2>
+        <a class="dashboard-section-link" href="/discover?list=trending&amp;type=anime">
+            <span>View all</span>
+            <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+        </a>
+    </div>
+    <div data-shelf-container>
+        @await Html.PartialAsync("_PosterScrollSkeleton")
+    </div>
+</section>
+
+<section class="dashboard-section" data-dash-section="anime-popular" data-media-type="anime" data-shelf data-shelf-src="/Home/PopularAnimeData">
+    <div class="dashboard-section-header">
+        <h2 class="dashboard-section-title">Popular@(animeSuffix)</h2>
+        <a class="dashboard-section-link" href="/discover?list=popular&amp;type=anime">
             <span>View all</span>
             <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <line x1="5" y1="12" x2="19" y2="12"></line>
