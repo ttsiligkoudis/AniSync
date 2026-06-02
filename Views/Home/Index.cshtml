@@ -248,11 +248,17 @@
        widget only mounts under the HasStats branch. *@
     <script>
         (function () {
+            function init() {
             // First-run: the media-type modal is forced — don't fetch anything
             // behind it; the reload after the user chooses will load what's needed.
             if (document.body.classList.contains('mt-unset')) return;
             var section = document.querySelector('[data-stats-section]');
             if (!section) return;
+            // Skip when the user hid "Your stats" in the layout: dashboard-layout.js
+            // (run by DOMContentLoaded) stamps [hidden] on the panel section, so
+            // there's no point fetching /Home/AnilistStats for a hidden tile.
+            var statsPanel = section.closest('[data-dash-section]');
+            if (statsPanel && statsPanel.hidden) return;
 
             // ── Popover open/close (click-only, both desktop + touch) ──
             var wrap = section.querySelector('.dashboard-stats-info');
@@ -385,16 +391,26 @@
             if (window.AniSyncRevalidate) {
                 window.AniSyncRevalidate.on(function () { if (!readCache()) fetchAndRender(); });
             }
+            }
+            // Run after DOMContentLoaded so dashboard-layout.js has applied the
+            // layout (and set [hidden] on disabled tiles) before we decide to fetch.
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+            else init();
         })();
     </script>
     <script>
         (function () {
+            function init() {
             // First-run: skip while the forced media-type modal is up.
             if (document.body.classList.contains('mt-unset')) return;
             // Trakt row of the unified "Your stats" panel. Guarded on the row's
             // presence, so it no-ops when only the anime row rendered.
             var group = document.querySelector('[data-trakt-stats]');
             if (!group) return;
+            // Skip when the user hid "Your stats" in the layout (the panel
+            // section carries [hidden] by now) — don't fetch a hidden tile.
+            var panel = group.closest('[data-dash-section]');
+            if (panel && panel.hidden) return;
             // Hide just this row on an empty/failed fetch; if that leaves the
             // panel with no live row (Trakt-only dashboard, upstream blip), hide
             // the whole "Your stats" section rather than show a bare header.
@@ -422,6 +438,10 @@
                     group.removeAttribute('data-stats-loading');
                 })
                 .catch(function () { hideRow(); });
+            }
+            // Run after DOMContentLoaded so the layout's [hidden] is applied first.
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+            else init();
         })();
     </script>
 }
@@ -469,10 +489,14 @@
     </section>
     <script>
         (function () {
+            function init() {
             // First-run: skip while the forced media-type modal is up.
             if (document.body.classList.contains('mt-unset')) return;
             var section = document.querySelector('[data-continue-watching-section]');
             if (!section) return;
+            // Skip when the user hid this tile in the layout — by DOMContentLoaded
+            // dashboard-layout.js has stamped [hidden] on it, so don't fetch.
+            if (section.hidden) return;
             var container = section.querySelector('[data-continue-watching-container]');
             if (!container) return;
 
@@ -555,6 +579,10 @@
             if (window.AniSyncRevalidate) {
                 window.AniSyncRevalidate.on(function () { if (readCache() == null) fetchAndPaint(); });
             }
+            }
+            // Run after DOMContentLoaded so the layout's [hidden] is applied first.
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+            else init();
         })();
     </script>
 }
