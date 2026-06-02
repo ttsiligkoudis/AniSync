@@ -8305,8 +8305,37 @@ body.streams-modal-open .floating-save-bar { z-index: 260; }
     flex: 1 1 auto;
     min-height: 0;            /* let it shrink below content height so it scrolls */
     overflow-y: auto;
+    /* Reserve a stable scrollbar gutter so the body's scrollbar doesn't sit
+       under the close button (which made the button hard to hit). */
+    scrollbar-gutter: stable;
     padding: 0.4rem;
 }
+/* Close button — its own class (not dash-modal-close) so it can stack above
+   the scrolling body + its scrollbar, and an SVG glyph centres cleanly in the
+   circle (the × character sat slightly off). */
+.streams-modal-close {
+    position: absolute;
+    top: 0.55rem;
+    right: 0.55rem;
+    z-index: 2;
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: var(--overlay-06);
+    color: var(--text-2);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.streams-modal-close:hover {
+    background: var(--overlay-12);
+    color: var(--text-strong);
+}
+.streams-modal-close svg { display: block; }
 /* The inner _StreamsSection is a .section-card; the modal card already
    provides the surface, so strip its chrome to avoid a card-in-a-card. */
 .streams-modal-body .section-card {

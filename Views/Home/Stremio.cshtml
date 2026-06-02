@@ -161,7 +161,14 @@
 
     </section>
 
-    @* Preferences — same shared partial /configure renders, so every site
+    <!-- ─── STREAMS ─────────────────────────────────────────────────── -->
+    @* Shared partial — the same card renders inside the /account Streams
+       modal with isStremio=false. Kept above Preferences so stream sources
+       lead the addon-focused settings. *@
+    @await Html.PartialAsync("_StreamsSection", Model,
+        new ViewDataDictionary(ViewData) { ["isStremio"] = true })
+
+    @* Preferences — same shared partial /account renders, so every site
        and addon-wide toggle is configurable from either page and Save
        persists the full set regardless of which page the click came
        from (_ConfigurePageScript's bitFor() reads every checkbox on the
@@ -169,12 +176,6 @@
        initial value, so the partial moving in or out doesn't lose
        state). *@
     @await Html.PartialAsync("_PreferencesSection", Model)
-
-    <!-- ─── STREAMS ─────────────────────────────────────────────────── -->
-    @* Shared partial — same card lives on /advanced with isStremio=false
-       so RD + external-services configuration stays in one place. *@
-    @await Html.PartialAsync("_StreamsSection", Model,
-        new ViewDataDictionary(ViewData) { ["isStremio"] = true })
 
     <!-- ─── INSTALLATION OPTIONS ────────────────────────────────────── -->
     <section class="section-card">
