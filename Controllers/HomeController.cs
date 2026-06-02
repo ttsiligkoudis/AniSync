@@ -589,22 +589,6 @@ public class HomeController : Controller
         return ShelfPartial(metas, uid);
     }
 
-    [HttpGet("Home/SeasonStatsData")]
-    public async Task<JsonResult> SeasonStatsData()
-    {
-        try
-        {
-            var (airing, newThis, total) = await _anilistFallback.GetSeasonStatsAsync();
-            return new JsonResult(new { success = true, airing, newThis, total });
-        }
-        catch
-        {
-            // Transient AniList failure — the client keeps its placeholders
-            // hidden rather than showing a row of zeros.
-            return new JsonResult(new { success = false });
-        }
-    }
-
     // Shared _PosterGrid scroll-row partial for every client-loaded shelf.
     // Empty Items + no EmptyMessage renders an empty body, which the shelf
     // loader reads as "hide this section".
