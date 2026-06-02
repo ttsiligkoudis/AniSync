@@ -3,6 +3,10 @@
     ViewData["ActiveNav"] = "home";
     ViewData["ShowMediaTypeSwitch"] = true;
     ViewData["Title"] = "Dashboard";
+    // Lets site.css pull the dashboard's main content up tight under the
+    // media-type pills (the standalone top padding the other pages keep
+    // reads as dead space here, above the "Your stats" panel).
+    ViewData["BodyClass"] = "dash-page";
     var tokenData = Model.TokenData;
     var isLoggedIn = tokenData != null;
     var anonymousUser = tokenData?.anonymousUser ?? false;
