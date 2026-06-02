@@ -684,7 +684,72 @@
     // detail page by default — no JS interception. The modal is reserved
     // for explicit edit-intent actions (Edit button, +1 quick-action,
     // episode click) so the card surface stays predictable.
+    // Quick-add heart toggle on the /meta/{id} detail page. One click adds the
+    // entry to (or removes it from) Currently Watching — no modal. Reuses the
+    // same server save/delete path the modal does, scoped to the Watching
+    // status. The button only renders for logged-in users on anime detail
+    // pages (see Detail.cshtml), so this handler is inert everywhere else.
+    function setHeartState(heart, filled) {
+        heart.classList.toggle('anime-detail-heart-filled', filled);
+        heart.setAttribute('aria-pressed', filled ? 'true' : 'false');
+        var label = filled ? 'Remove from Currently Watching' : 'Add to Currently Watching';
+        heart.setAttribute('aria-label', label);
+        heart.setAttribute('title', label);
+    }
+
+    function toggleWatching(heart) {
+        var id = heart.getAttribute('data-meta-id');
+        if (!id) return;
+        var serviceAttr = heart.getAttribute('data-meta-service-override');
+        var serviceOverride = serviceAttr ? parseInt(serviceAttr, 10) : null;
+
+        // Optimistic flip; reconciled against the server response below.
+        var wasFilled = heart.classList.contains('anime-detail-heart-filled');
+        setHeartState(heart, !wasFilled);
+        heart.disabled = true;
+
+        var payload = { id: id };
+        if (serviceOverride !== null && !isNaN(serviceOverride)) payload.service = serviceOverride;
+
+        fetch('/api/library/watching/toggle', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(payload),
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data && data.success) {
+                    setHeartState(heart, !!data.watching);
+                    invalidateContinueWatchingCache();
+                    showToast(data.watching ? 'Added to Watching' : 'Removed from Watching');
+                } else if (data && data.hidden) {
+                    // Server says the entry moved into another list (raced a save
+                    // elsewhere) — the heart isn't the right control anymore.
+                    heart.hidden = true;
+                } else {
+                    setHeartState(heart, wasFilled);
+                    showToast('Save failed');
+                }
+            })
+            .catch(function () {
+                setHeartState(heart, wasFilled);
+                showToast('Network error');
+            })
+            .finally(function () {
+                heart.disabled = false;
+            });
+    }
+
     document.addEventListener('click', function (e) {
+        var heart = e.target.closest && e.target.closest('button[data-watching-toggle]');
+        if (heart) {
+            e.preventDefault();
+            if (heart.disabled) return;
+            if (window.AniSyncHaptics) window.AniSyncHaptics.tick();
+            toggleWatching(heart);
+            return;
+        }
         var plusBtn = e.target.closest && e.target.closest('button.library-card-plus');
         if (plusBtn) {
             e.preventDefault();

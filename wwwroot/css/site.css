@@ -6676,6 +6676,62 @@ button.anime-detail-user-state:hover {
     color: #93c5fd;
 }
 
+/* Quick-add "heart" toggle — sits right after the Add to List / status
+   pill in the hero badge row. A circular icon button: outline heart when
+   the entry isn't on a list (click adds to Watching), filled rose heart
+   when it's already Watching (click removes). Matches the pill's pill-
+   radius + cobalt-on-dark hero treatment so the two read as one control
+   cluster. */
+.anime-detail-heart {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.1rem;
+    height: 2.1rem;
+    padding: 0;
+    flex-shrink: 0;
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 999px;
+    color: #c4daff;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
+}
+
+.anime-detail-heart:hover {
+    background: rgba(244, 63, 94, 0.16);
+    border-color: rgba(244, 63, 94, 0.4);
+    color: #fda4af;
+}
+
+.anime-detail-heart:active {
+    transform: scale(0.92);
+}
+
+.anime-detail-heart:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+/* Filled state — the heart is "on" (entry is Watching). Rose fill so it
+   pops against the cobalt pill cluster and reads as an active toggle. */
+.anime-detail-heart-filled {
+    background: rgba(244, 63, 94, 0.18);
+    border-color: rgba(244, 63, 94, 0.5);
+    color: #fb7185;
+}
+
+.anime-detail-heart-filled svg {
+    fill: currentColor;
+}
+
+.anime-detail-heart-filled:hover {
+    background: rgba(244, 63, 94, 0.26);
+    border-color: rgba(244, 63, 94, 0.6);
+    color: #fda4af;
+}
+
 /* "Not on your list" variant — fired when the requested anime has no
    mapping to the user's primary service AND the source provider it
    came from isn't linked, so there's nowhere AniSync can write a

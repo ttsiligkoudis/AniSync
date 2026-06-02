@@ -307,6 +307,37 @@
                         </svg>
                     </button>
                 }
+                @* Quick-add heart — one-click toggle for the Currently Watching
+                   list, sitting right after the Add to List / status pill. Shown
+                   only when the entry is either NOT on any list (outline heart →
+                   adds to Watching) or already Watching (filled heart → removes).
+                   Hidden when the entry is in any other list (Completed / Planning
+                   / Paused / Dropped / Rewatching) — those are managed via the
+                   modal — and for anonymous viewers, multi-cour grouped renders,
+                   the unavailable case, and video (movie / series) pages. The
+                   server re-checks membership on toggle and returns hidden:true if
+                   this ever races a status change made elsewhere. *@
+                @{
+                    var heartStatusNorm = NormalizeListStatus(Model.Entry?.Status);
+                    var showHeart = !isVideo && canEdit && !Model.EntryUnavailable && !Model.IsMultiSeasonGroup
+                        && (heartStatusNorm == null || heartStatusNorm == "watching");
+                    var heartFilled = heartStatusNorm == "watching";
+                    var heartLabel = heartFilled ? "Remove from Currently Watching" : "Add to Currently Watching";
+                }
+                @if (showHeart)
+                {
+                    <button type="button"
+                            class="anime-detail-heart @(heartFilled ? "anime-detail-heart-filled" : "")"
+                            data-watching-toggle data-meta-id="@a.id"
+                            data-meta-service-override="@overrideAttr"
+                            aria-pressed="@(heartFilled ? "true" : "false")"
+                            aria-label="@heartLabel" title="@heartLabel">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+                        </svg>
+                    </button>
+                }
             </div>
 
             @* Continue-watching CTA. Lives on its own centered row beneath the

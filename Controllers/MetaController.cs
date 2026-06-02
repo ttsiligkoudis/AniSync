@@ -1116,6 +1116,122 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
+        /// One-click "heart" toggle for the Currently Watching list, backing the
+        /// outline / filled heart on the /meta/{id} detail page. Resolves the
+        /// entry's current list membership server-side before acting:
+        ///   - In a non-Watching list (Completed / Planning / Paused / Dropped /
+        ///     Rewatching): no-op, returns <c>hidden:true</c> so the client drops
+        ///     the heart — the user manages those via the Manage Entry modal.
+        ///   - Already Watching: removes the entry (delete + fan-out), returns
+        ///     <c>watching:false</c>.
+        ///   - Not on any list: adds it to Watching (preserving any progress the
+        ///     entry already carried), returns <c>watching:true</c>.
+        /// Reuses the exact same per-service save / delete + fan-out + cache-
+        /// invalidation path the Manage Entry modal save runs, just pinned to the
+        /// Watching status with no form. Session-authenticated like the other
+        /// /api/library/* endpoints (the detail page carries no config in its URL).
+        /// </summary>
+        [HttpPost("/api/library/watching/toggle")]
+        public async Task<JsonResult> ToggleWatchingByApi([FromBody] SaveEntryRequest request)
+        {
+            try
+            {
+                var tokenData = await _tokenService.GetAccessTokenAsync();
+                if (tokenData == null || tokenData.anonymousUser ||
+                    string.IsNullOrWhiteSpace(tokenData.access_token))
+                    return new JsonResult(new { success = false, error = "not-authenticated" });
+
+                if (string.IsNullOrEmpty(request?.Id))
+                    return new JsonResult(new { success = false, error = "missing-id" });
+
+                // Same linked-secondary override path the modal uses: an anime with
+                // no mapping to the user's primary but present on a linked provider
+                // is read / written through that token instead.
+                var overrideToken = await ResolveServiceOverrideTokenAsync(tokenData, request.Service);
+                var effectiveToken = overrideToken ?? tokenData;
+                var isOverride = overrideToken != null;
+                var animeService = effectiveToken.anime_service;
+
+                // Resolve the per-cour entry id (native anilist:/kitsu:/mal: ids
+                // short-circuit to themselves; cross-service ids resolve to the
+                // matching mapping). The heart is hidden in the view for multi-cour
+                // grouped renders, so this lands on a single concrete entry.
+                var (_, selectedEntryId, _) =
+                    await BuildSeasonsAsync(request.Id, isSeries: true, animeService, videos: null, request.Season, episode: null);
+
+                var entry = animeService switch
+                {
+                    AnimeService.Anilist     => await _anilistService.GetAnimeEntryAsync(effectiveToken, selectedEntryId, null),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(effectiveToken, selectedEntryId, null),
+                    _                        => await _kitsuService.GetAnimeEntryAsync(effectiveToken, selectedEntryId, null),
+                };
+
+                var norm = NormalizeListStatus(entry?.Status);
+
+                // Entry lives in some other list — the heart isn't the control for
+                // that (the modal is). Tell the client to hide it; change nothing.
+                if (norm != null && norm != "watching")
+                    return new JsonResult(new { success = false, hidden = true });
+
+                if (norm == "watching")
+                {
+                    // Currently Watching → remove from the list entirely.
+                    switch (animeService)
+                    {
+                        case AnimeService.Anilist:
+                            await _anilistService.DeleteAnimeEntryAsync(effectiveToken, selectedEntryId, null);
+                            break;
+                        case AnimeService.MyAnimeList:
+                            await _malService.DeleteAnimeEntryAsync(effectiveToken, selectedEntryId, null);
+                            break;
+                        default:
+                            await _kitsuService.DeleteAnimeEntryAsync(effectiveToken, selectedEntryId, null);
+                            break;
+                    }
+                    if (!isOverride)
+                    {
+                        await _syncService.FanOutDeleteAsync(tokenData, selectedEntryId, null);
+                        _listCache.Invalidate(tokenData);
+                    }
+                    return new JsonResult(new { success = true, watching = false });
+                }
+
+                // Not on any list → add to Watching, keeping any progress the entry
+                // already had (0 for a brand-new entry). Status is translated to the
+                // provider's native vocabulary just like the modal save does.
+                var watchingStatus = TranslateStatusForService("watching", effectiveToken);
+                var progress = entry?.Progress ?? 0;
+                switch (animeService)
+                {
+                    case AnimeService.Anilist:
+                        await _anilistService.SaveAnimeEntryAsync(effectiveToken, selectedEntryId, null, progress,
+                            watchingStatus, null, null, null, null, null);
+                        break;
+                    case AnimeService.MyAnimeList:
+                        await _malService.SaveAnimeEntryAsync(effectiveToken, selectedEntryId, null, progress,
+                            watchingStatus, null, null, null, null, null);
+                        break;
+                    default:
+                        await _kitsuService.SaveAnimeEntryAsync(effectiveToken, selectedEntryId, null, progress,
+                            watchingStatus, null, null, null, null, null);
+                        break;
+                }
+                if (!isOverride)
+                {
+                    await _syncService.FanOutSaveAsync(tokenData, selectedEntryId, null, progress,
+                        watchingStatus, null, null, null, null, null);
+                    _listCache.Invalidate(tokenData);
+                }
+                return new JsonResult(new { success = true, watching = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ToggleWatchingByApi failed (id={Id}).", request?.Id);
+                return new JsonResult(new { success = false, error = "exception" });
+            }
+        }
+
+        /// <summary>
         /// Manage-Entry save for a Cinemeta video tracked on Trakt. Maps the
         /// modal's status onto Trakt watchlist / history actions and the score
         /// onto a Trakt rating. For a series, "watching" marks episodes 1..N and
