@@ -113,6 +113,16 @@
         }
         <div class="anime-detail-meta">
             <h1 class="anime-detail-title">@a.name</h1>
+            @* Community score on its own line above the format/duration info
+               row. Pulled out of the badges row below so that row only carries
+               the airing status + action controls (Add to List / heart / Hide),
+               which then fit on a single line even on mobile. *@
+            @if (a.score is double scTop && scTop > 0)
+            {
+                <div class="anime-detail-score-row">
+                    <span class="anime-detail-score">★ @scTop.ToString("0.0")</span>
+                </div>
+            }
             @{
                 var infoBits = new List<string>();
                 if (!string.IsNullOrEmpty(a.format)) infoBits.Add(a.format);
@@ -126,17 +136,12 @@
             {
                 <div class="anime-detail-info">@string.Join(" · ", infoBits)</div>
             }
-            @* Score (community) + airing status + user-state side by side.
-               The status pill color-shifts on "Airing" / "On hiatus" /
-               "Cancelled" so the state reads at a glance. The user-state
-               pill (cobalt-tinted) folds into the same row so the viewer's
-               personal status reads as one of the at-a-glance facts about
-               the show, not as an orphan badge below the tag list. *@
+            @* Airing status + user-state pill + heart + Hide on one row. Score
+               now lives above the info line (see above), so this row stays
+               compact enough to fit on a single line even on mobile. The status
+               pill color-shifts on "Airing" / "On hiatus" / "Cancelled" so the
+               state reads at a glance. *@
             <div class="anime-detail-badges">
-                @if (a.score is double sc && sc > 0)
-                {
-                    <span class="anime-detail-score">★ @sc.ToString("0.0")</span>
-                }
                 @if (!string.IsNullOrEmpty(a.airStatus))
                 {
                     var statusKey = a.airStatus.ToLowerInvariant().Replace(" ", "-");
@@ -148,11 +153,6 @@
                         @a.airStatus
                     </span>
                 }
-                @* Action controls (Add to List / status pill + quick-add heart +
-                   Hide) grouped so they wrap together as one unit beneath the
-                   score/status info badges — keeps the row tidy on mobile instead
-                   of the buttons scattering across lines. *@
-                <span class="anime-detail-actions">
                 @* User-state pill — three render shapes:
                      1. Logged-in user with a list entry → cobalt pill
                         ("Watching · Ep 2/24") with a trailing pencil icon;
@@ -376,7 +376,6 @@
                         <span class="anime-detail-hide-label">@(Model.IsHidden ? "Unhide" : "Hide")</span>
                     </button>
                 }
-                </span>
             </div>
 
             @* Continue-watching CTA. Lives on its own centered row beneath the
