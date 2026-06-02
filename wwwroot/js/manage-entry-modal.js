@@ -689,10 +689,22 @@
     // same server save/delete path the modal does, scoped to the Watching
     // status. The button only renders for logged-in users on anime detail
     // pages (see Detail.cshtml), so this handler is inert everywhere else.
+    // The heart renders in two contexts: the /meta/{id} hero (.anime-detail-heart)
+    // and poster cards in the lists (.library-card-heart). They share this code;
+    // the only differences are which "filled" class they carry and, on success,
+    // whether we full-reload (detail hero, so the pill/episode ticks/CTA update)
+    // or update in place (cards — no reload, per the list UX).
+    function isCardHeart(heart) {
+        return heart.classList.contains('library-card-heart');
+    }
+
     function setHeartState(heart, filled) {
-        heart.classList.toggle('anime-detail-heart-filled', filled);
+        var card = isCardHeart(heart);
+        heart.classList.toggle(card ? 'library-card-heart-filled' : 'anime-detail-heart-filled', filled);
         heart.setAttribute('aria-pressed', filled ? 'true' : 'false');
-        var label = filled ? 'Remove from Currently Watching' : 'Add to Currently Watching';
+        var label = filled
+            ? (card ? 'Remove from Watching' : 'Remove from Currently Watching')
+            : (card ? 'Add to Watching' : 'Add to Currently Watching');
         heart.setAttribute('aria-label', label);
         heart.setAttribute('title', label);
     }
@@ -705,11 +717,10 @@
         // "movie"/"series" routes the toggle through Trakt; absent for anime.
         var mediaType = heart.getAttribute('data-meta-media-type');
 
-        var wasFilled = heart.classList.contains('anime-detail-heart-filled');
-        // Optimistic flip so the heart reacts instantly, then reload so the rest
-        // of the hero (Add-to-List pill, episode ticks, Continue CTA) reflects
-        // the new entry state — same full-refresh the modal save does, no
-        // confirmation toast.
+        var onCard = isCardHeart(heart);
+        var card = onCard ? heart.closest('a.library-card') : null;
+        var wasFilled = heart.classList.contains(onCard ? 'library-card-heart-filled' : 'anime-detail-heart-filled');
+        // Optimistic flip so the heart reacts instantly.
         setHeartState(heart, !wasFilled);
         heart.disabled = true;
 
@@ -727,11 +738,24 @@
             .then(function (data) {
                 if (data && data.success) {
                     invalidateContinueWatchingCache();
-                    // Queue the toast through the navigation so it shows once after
-                    // the reload (same channel the modal save uses).
-                    try { sessionStorage.setItem('anisync-toast', data.watching ? 'Added to Watching' : 'Removed from Watching'); }
-                    catch (e) { /* private mode — toast is best-effort */ }
-                    window.location.reload();
+                    if (onCard) {
+                        // List card: update in place, no reload.
+                        setHeartState(heart, !!data.watching);
+                        heart.disabled = false;
+                        showToast(data.watching ? 'Added to Watching' : 'Removed from Watching');
+                        // Removing while viewing the Watching list drops the card
+                        // (it no longer belongs there) — same as the modal save.
+                        if (!data.watching && card && getPageListFilter() === 'current') {
+                            fadeOutCard(card);
+                        }
+                    } else {
+                        // Detail hero: reload so the pill / episode ticks / Continue
+                        // CTA all reflect the new entry state. Toast rides through
+                        // the navigation (same channel the modal save uses).
+                        try { sessionStorage.setItem('anisync-toast', data.watching ? 'Added to Watching' : 'Removed from Watching'); }
+                        catch (e) { /* private mode — toast is best-effort */ }
+                        window.location.reload();
+                    }
                 } else if (data && data.hidden) {
                     // Server says the entry moved into another list (raced a save
                     // elsewhere) — the heart isn't the right control anymore.
@@ -804,6 +828,9 @@
         var heart = e.target.closest && e.target.closest('button[data-watching-toggle]');
         if (heart) {
             e.preventDefault();
+            // On a poster card the heart sits inside the card's <a> — stop the
+            // click from bubbling so the card doesn't navigate to the detail page.
+            e.stopPropagation();
             if (heart.disabled) return;
             if (window.AniSyncHaptics) window.AniSyncHaptics.tick();
             toggleWatching(heart);
