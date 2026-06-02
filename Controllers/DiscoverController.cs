@@ -385,6 +385,14 @@ namespace AnimeList.Controllers
             var catalogToken = fallbackToKitsu
                 ? new TokenData { anime_service = AnimeService.Kitsu }
                 : tokenData;
+            // MAL / Kitsu have no real "trending" sort — their catalogs are
+            // popularity-based — so serve Trending from AniList's TRENDING_DESC
+            // always and translate the ids back into the user's primary for
+            // click-through. Skipped when AniList is the primary (served direct) or
+            // down (per-service popularity is the outage fallback).
+            var routeTrendingViaAnilist = listForCall == ListType.Trending_Desc
+                && tokenData.anime_service != AnimeService.Anilist
+                && !AnilistHealthMonitor.IsDown;
 
             // Per-service translation. The services internally accept an
             // item-count skip (matching the Stremio addon's catalog-extras
@@ -394,7 +402,7 @@ namespace AnimeList.Controllers
             // duplicates a constant that lives on each service, but the
             // alternative is exposing CatalogPageSize through every
             // service interface for one consumer.
-            var pageSize = (catalogService == AnimeService.Kitsu && !routeSeasonalViaAnilist) ? 20 : 50;
+            var pageSize = (catalogService == AnimeService.Kitsu && !routeSeasonalViaAnilist && !routeTrendingViaAnilist) ? 20 : 50;
             var skip = page <= 1 ? null : ((page - 1) * pageSize).ToString();
             if (page < 1) page = 1;
 
@@ -413,6 +421,17 @@ namespace AnimeList.Controllers
                     groupSeasons: groupSeasonsForCall, season: season,
                     hideUnreleased: hideUnreleased, hideAdult: hideAdult);
                 metas = await _anilistFallback.TranslateMetaIdsAsync(metas, AnimeService.Kitsu, groupSeasons);
+            }
+            else if (routeTrendingViaAnilist)
+            {
+                // Real AniList trending, then translate anilist:N → the user's
+                // primary id-space so Manage Entry / detail hand-offs still work.
+                metas = await _anilistService.GetAnimeListAsync(
+                    tokenData: null, ListType.Trending_Desc,
+                    skip: skip, genre: genre,
+                    groupSeasons: groupSeasonsForCall,
+                    hideUnreleased: hideUnreleased, hideAdult: hideAdult);
+                metas = await _anilistFallback.TranslateMetaIdsAsync(metas, tokenData.anime_service, groupSeasons);
             }
             else
             {
@@ -473,6 +492,26 @@ namespace AnimeList.Controllers
                             : $"Couldn't load {activeLabel.ToLower()} anime — try again later.")
                     : null,
             };
+
+            // A full-pane swap from filter-search.js on a non-search filter submit
+            // (genre/season/list change, or an empty Search to reload) replaces the
+            // whole results pane — so it needs the paginator wrapper, not the bare
+            // grid, or infinite scroll dies after the swap. Search stays bare (it's
+            // single-shot, no pagination). Mirrors the Index view's two branches.
+            if (fullPane && !hasSearch)
+            {
+                ViewData["PaginatorList"] = activeList switch
+                {
+                    ListType.Popularity_Desc => "popular",
+                    ListType.Seasonal => "seasonal",
+                    ListType.Airing => "airing",
+                    _ => "trending",
+                };
+                ViewData["PaginatorGenre"] = genre;
+                ViewData["PaginatorSeason"] = season;
+                ViewData["PaginatorTag"] = tag;
+                return PartialView("_DiscoverPaginator", gridModel);
+            }
 
             return PartialView("_PosterGrid", gridModel);
         }

@@ -372,7 +372,7 @@ namespace AnimeList.Services
 
             bool isUserList = !list.HasValue || _userLists.Contains(list.Value);
 
-            if (list == ListType.Trending_Desc || list == ListType.Seasonal || list == ListType.Search)
+            if (list == ListType.Trending_Desc || list == ListType.Popularity_Desc || list == ListType.Seasonal || list == ListType.Search)
                 result = data.Page.media;
             else if (!string.IsNullOrEmpty(resolvedAnimeId))
                 result = data.MediaList == null ? Array.Empty<dynamic>() : [data.MediaList];
