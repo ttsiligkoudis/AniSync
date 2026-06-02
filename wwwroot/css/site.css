@@ -4492,6 +4492,14 @@ body.modal-open {
    bumps the visual weight when there are unsaved toggle changes; the
    clean state stays muted so the bar isn't visually shouting at a
    user who's just scrolling. */
+/* Settings pages (/account, /configure, /stremio, /advanced) carry the fixed
+   floating Save bar (~5rem off the bottom). Without extra room the last
+   section's buttons scroll underneath it; add bottom clearance so the final
+   controls always sit above the bar. */
+body.config-page main {
+    padding-bottom: calc(9rem + env(safe-area-inset-bottom, 0px));
+}
+
 .floating-save-bar {
     position: fixed;
     left: 50%;

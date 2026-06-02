@@ -2,6 +2,9 @@
 @{
     ViewData["ActiveNav"] = "stremio";
     ViewData["Title"] = "Stremio addon";
+    // Clears the fixed floating Save bar so the last section's buttons aren't
+    // hidden behind it when scrolled to the bottom (see body.config-page CSS).
+    ViewData["BodyClass"] = "config-page";
     var stremioStr = "https://web.stremio.com/#/addons?addon=";
     var cfg = Model.Configuration;
 }
