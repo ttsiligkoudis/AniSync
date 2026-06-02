@@ -5321,9 +5321,10 @@ body.modal-open {
 /* Unified "Your stats" panel: one section holds a row per tracker (the AniList
    anime row and/or the Trakt movies-&-series row). Each .stats-group is one
    such row — a small head (sub-label + "via <service>" attribution) above its
-   stats-strip. Rows stack with a little breathing room under the shared title. */
+   stats-strip. Rows stack tight: the second row's sub-label provides enough
+   separation on its own, so only a hair of margin sits between the strips. */
 .stats-group + .stats-group {
-    margin-top: 0.85rem;
+    margin-top: 0.15rem;
 }
 
 .stats-group-head {
