@@ -62,6 +62,9 @@
         catch { /* fall back to cookie below */ }
     }
     var layoutEnabled = AnimeList.Services.MediaTypePreference.ResolveEnabled(Context, layoutWebSettings);
+    // First-run (no enabled set chosen yet): the "What do you want to watch?"
+    // modal is forced, so the dashboard skips its client-side fetches behind it.
+    var layoutMediaTypeUnset = AnimeList.Services.MediaTypePreference.IsEnabledUnset(Context, layoutWebSettings);
     var layoutMediaType = AnimeList.Services.MediaTypePreference.ResolveActive(Context, layoutEnabled);
     var layoutMediaTypeLabel = layoutMediaType == MetaType.movie ? "Movies"
         : layoutMediaType == MetaType.series ? "Series"
@@ -205,7 +208,7 @@
         })();
     </script>
 </head>
-<body class="@ViewData["BodyClass"]">
+<body class="@ViewData["BodyClass"]@(layoutMediaTypeUnset ? " mt-unset" : "")">
     @* Persistent site chrome: slide-in drawer + mobile bottom-nav are lifted
        out of per-page views so every page gets the same shell. The site-
        header is rendered inside `main` (just below) so it inherits main's

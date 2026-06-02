@@ -102,6 +102,16 @@ namespace AnimeList.Services
             return cookie.Count > 0 ? cookie : new() { FromCookie(ctx) };
         }
 
+        /// <summary>
+        /// True when the visitor has never chosen an enabled set — no account
+        /// setting AND no cookie. This is the first-run state where the web UI
+        /// forces the "What do you want to watch?" modal; the dashboard uses it
+        /// to skip its client-side data fetches until a choice is made (so we
+        /// don't fetch shelves behind the modal that the reload will discard).
+        /// </summary>
+        public static bool IsEnabledUnset(HttpContext ctx, WebSettings ws)
+            => ParseCsv(ws?.EnabledMediaTypes).Count == 0 && EnabledFromCookie(ctx).Count == 0;
+
         /// <summary>The active mode clamped into the supplied enabled set.</summary>
         public static MetaType ResolveActive(HttpContext ctx, List<MetaType> enabled)
         {
