@@ -3,6 +3,7 @@
     ViewData["Title"] = "Actors";
     ViewData["BodyClass"] = "library-page";
     ViewData["ActiveNav"] = "discover";
+    ViewData["ShowMediaTypeSwitch"] = true;
     ViewData["MtActive"] = (ViewData["ActorType"] as string) == "series" ? MetaType.series : MetaType.movie;
     ViewData["MtReturnUrl"] = "/discover";
 
@@ -29,7 +30,6 @@
    client-side filter would only catch already-loaded tiles). The paginator
    forwards the term on subsequent page fetches via data-search. *@
 <form method="get" action="/discover/actors" class="filter-bar" role="search">
-    <input type="hidden" name="type" value="@actorType" />
     <input type="search"
            name="search"
            value="@actorSearch"
@@ -39,7 +39,7 @@
     <button type="submit" class="filter-bar-submit">Search</button>
     @if (hasActorSearch)
     {
-        <a class="filter-bar-clear" href="/discover/actors?type=@actorType">Clear</a>
+        <a class="filter-bar-clear" href="/discover/actors">Clear</a>
     }
 </form>
 

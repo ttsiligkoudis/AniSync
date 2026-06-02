@@ -66,6 +66,10 @@
     var layoutMediaTypeLabel = layoutMediaType == MetaType.movie ? "Movies"
         : layoutMediaType == MetaType.series ? "Series"
         : "Anime";
+    // Search placeholder reflects the enabled set: a single mode names it
+    // ("Search movies…"); multiple modes stay generic since the search spans them.
+    var layoutSearchNoun = layoutEnabled.Count == 1 ? layoutMediaTypeLabel.ToLowerInvariant() : null;
+    var layoutSearchPlaceholder = layoutSearchNoun != null ? $"Search {layoutSearchNoun}…" : "Search…";
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -387,7 +391,7 @@
                    typeahead pattern for screen readers. JS lives in
                    wwwroot/js/site-search.js. *@
                 <form class="site-search" role="search" autocomplete="off"
-                      onsubmit="return false;" aria-label="Search anime">
+                      onsubmit="return false;" aria-label="@(layoutSearchNoun != null ? $"Search {layoutSearchNoun}" : "Search")">
                     <span class="site-search-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
                              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -397,7 +401,7 @@
                     </span>
                     <input class="site-search-input"
                            type="search"
-                           placeholder="Search anime…"
+                           placeholder="@layoutSearchPlaceholder"
                            role="combobox"
                            aria-controls="site-search-results"
                            aria-expanded="false"
@@ -527,11 +531,14 @@
         </div>
     </header>
 
-    @* Fixed media-type switch (anime / movies / series) below the header on the
-       dashboard, Discover and Library. Renders only when more than one mode is
-       enabled; the dashboard variant adds an "All" pill + client-side section
-       filtering, the others reload into the chosen mode. *@
-    @if (activeNav == "home" || activeNav == "library" || activeNav == "discover")
+    @* Fixed media-type switch (anime / movies / series) below the header — only on
+       the surfaces that opt in via ViewData["ShowMediaTypeSwitch"] (dashboard,
+       Library, Discover + its browse-by pages). Detail / watch pages set
+       ActiveNav="discover" too, so we gate on the explicit flag rather than the
+       nav so the switch doesn't leak onto /meta. Renders only when more than one
+       mode is enabled; the dashboard variant adds an "All" pill + client-side
+       section filtering, the others reload into the chosen mode. *@
+    @if (ViewData["ShowMediaTypeSwitch"] as bool? ?? false)
     {
         @await Html.PartialAsync("_MediaTypeSwitch", new ViewDataDictionary(ViewData)
         {

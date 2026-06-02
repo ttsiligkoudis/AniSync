@@ -669,12 +669,15 @@ namespace AnimeList.Controllers
         [Route("/discover/actors")]
         public async Task<IActionResult> Actors(string type = null, string search = null)
         {
-            // Movies / series surface; honour a ?type= so the mode stays in sync
-            // after arriving from the dashboard's "Browse By · Actors" tile.
+            // Movies / series surface; honour an explicit ?type= when present.
             MediaTypePreference.ApplyTypeQuery(HttpContext, type);
-            // Anime has no actor directory — if the user flipped the switch to
-            // anime while here, bounce to /discover (anime browse).
-            if (MediaTypePreference.FromCookie(HttpContext) == MetaType.anime) return Redirect("/discover");
+            // Actors spans movies + series and has no anime directory, so it isn't
+            // pinned to one type in the URL. When the active mode is anime (arriving
+            // in "All" mode, or the user flipped the switch to anime here), default
+            // to movies so the page stays usable and the switch shows a video mode —
+            // rather than bouncing away or stranding the toggle on anime.
+            if (MediaTypePreference.FromCookie(HttpContext) == MetaType.anime)
+                MediaTypePreference.SetActiveCookie(HttpContext, MetaType.movie);
 
             var hasSearch = !string.IsNullOrWhiteSpace(search);
             var (people, hasNext) = hasSearch

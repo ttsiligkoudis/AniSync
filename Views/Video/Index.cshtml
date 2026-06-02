@@ -6,6 +6,7 @@
     // IS the Discover surface for video, so the nav highlights Discover and the
     // filter form posts back to /discover (the old /movies · /series routes are gone).
     ViewData["ActiveNav"] = "discover";
+    ViewData["ShowMediaTypeSwitch"] = true;
 
     var label = isMovies ? "Movies" : "Series";
     var hasSearch = !string.IsNullOrEmpty(Model.Search);
@@ -40,7 +41,7 @@
            role="tab"
            aria-selected="@(isActive ? "true" : "false")">@lbl</a>
     }
-    <a class="library-tab" href="/discover/actors?type=@(isMovies ? "movie" : "series")" role="tab" aria-selected="false">Actors</a>
+    <a class="library-tab" href="/discover/actors" role="tab" aria-selected="false">Actors</a>
 </nav>
 
 @* Trakt connection is now managed from the Account page (Trakt is a first-class

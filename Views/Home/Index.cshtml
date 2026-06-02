@@ -1,6 +1,7 @@
 @model AnimeList.Models.DashboardViewModel
 @{
     ViewData["ActiveNav"] = "home";
+    ViewData["ShowMediaTypeSwitch"] = true;
     ViewData["Title"] = "Dashboard";
     var tokenData = Model.TokenData;
     var isLoggedIn = tokenData != null;
@@ -925,7 +926,7 @@
             </div>
         </a>
 
-        <a class="browse-tile" href="/discover/actors?type=@(Model.MediaType == MetaType.series ? "series" : "movie")">
+        <a class="browse-tile" href="/discover/actors">
             <span class="browse-tile-icon browse-tile-icon-blue">
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
