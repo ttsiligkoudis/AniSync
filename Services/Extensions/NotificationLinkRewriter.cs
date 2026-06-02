@@ -31,6 +31,14 @@ namespace AnimeList.Services.Extensions
             bool groupSeasons = false)
         {
             if (records == null || records.Count == 0) return;
+
+            // Trakt isn't an anime id-space — there's nothing to translate anime
+            // ids *to*, and GetServicePrefix(Trakt) throws. A Trakt-primary user's
+            // notifications keep their stored links (already valid /meta/ deep-
+            // links in whatever id-space they were minted with). Without this the
+            // whole notifications page / bell list 500s for Trakt-primary users.
+            if (targetService == AnimeService.Trakt) return;
+
             var targetPrefix = GetServicePrefix(targetService);
             foreach (var r in records)
             {
