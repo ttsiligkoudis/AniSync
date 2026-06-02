@@ -23,17 +23,20 @@ namespace AnimeList.Controllers
         private readonly IConfigStore _configStore;
         private readonly INotificationStore _store;
         private readonly IAnimeMappingService _mapping;
+        private readonly ILogger<NotificationsViewController> _logger;
 
         public NotificationsViewController(
             ITokenService tokenService,
             IConfigStore configStore,
             INotificationStore store,
-            IAnimeMappingService mapping)
+            IAnimeMappingService mapping,
+            ILogger<NotificationsViewController> logger)
         {
             _tokenService = tokenService;
             _configStore = configStore;
             _store = store;
             _mapping = mapping;
+            _logger = logger;
         }
 
         [HttpGet("/notifications")]
@@ -42,14 +45,27 @@ namespace AnimeList.Controllers
             var (token, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             if (uid == null) return RedirectToAction("Index", "Home");
 
-            var items = await _store.ListForUserAsync(uid, PageSize);
-            // Translate stored anime_id / LinkPath into the user's CURRENT
-            // primary service (or the imdb-grouped franchise umbrella when
-            // their pref is on) so a click lands on the id-space the rest
-            // of the site is using right now.
-            var cfg = await GetConfigByUidAsync(uid, _configStore);
-            var groupSeasons = cfg?.enableSeasonGrouping == true;
-            await _mapping.RewriteLinksToServiceAsync(items, token.anime_service, groupSeasons);
+            List<NotificationRecord> items;
+            try
+            {
+                items = await _store.ListForUserAsync(uid, PageSize);
+                // Translate stored anime_id / LinkPath into the user's CURRENT
+                // primary service (or the imdb-grouped franchise umbrella when
+                // their pref is on) so a click lands on the id-space the rest
+                // of the site is using right now.
+                var cfg = await GetConfigByUidAsync(uid, _configStore);
+                var groupSeasons = cfg?.enableSeasonGrouping == true;
+                await _mapping.RewriteLinksToServiceAsync(items, token.anime_service, groupSeasons);
+            }
+            catch (Exception ex)
+            {
+                // Render the page instead of 500 — a notifications-store or
+                // link-rewrite hiccup shouldn't black out the whole page. Logged
+                // so the underlying cause stays visible in the server logs.
+                _logger.LogError(ex, "Notifications page load failed (uid={Uid}).", uid);
+                items = [];
+            }
+
             return View(new NotificationsPageViewModel
             {
                 Items = items,
@@ -72,10 +88,19 @@ namespace AnimeList.Controllers
             if (uid == null) return Unauthorized();
 
             if (skip < 0) skip = 0;
-            var items = await _store.ListForUserAsync(uid, PageSize, skip);
-            var cfg = await GetConfigByUidAsync(uid, _configStore);
-            var groupSeasons = cfg?.enableSeasonGrouping == true;
-            await _mapping.RewriteLinksToServiceAsync(items, token.anime_service, groupSeasons);
+            List<NotificationRecord> items;
+            try
+            {
+                items = await _store.ListForUserAsync(uid, PageSize, skip);
+                var cfg = await GetConfigByUidAsync(uid, _configStore);
+                var groupSeasons = cfg?.enableSeasonGrouping == true;
+                await _mapping.RewriteLinksToServiceAsync(items, token.anime_service, groupSeasons);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Notifications page chunk failed (uid={Uid}, skip={Skip}).", uid, skip);
+                items = [];
+            }
             return PartialView("_NotificationRows", items);
         }
     }
