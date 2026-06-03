@@ -68,15 +68,6 @@
 
     var canEdit = !Model.AnonymousUser && !string.IsNullOrEmpty(Model.ConfigUid);
 
-    // Trakt-primary user viewing an anime: it's tracked as an imdb-keyed Trakt
-    // video entry, so the status pill + Manage Entry + heart route through the
-    // Trakt path (media type stamped on the triggers) rather than the anime
-    // dispatch. TraktAnimeType is "movie"/"series"; only set for this case.
-    var traktAnime = !isVideo && Model.TraktConnected && !string.IsNullOrEmpty(Model.TraktAnimeType);
-    // Media type to stamp on the Trakt-routed triggers (video pages use their
-    // own MediaType; Trakt-primary anime uses the resolved TraktAnimeType).
-    var traktPillType = isVideo ? (Model.MediaType == MetaType.movie ? "movie" : "series") : Model.TraktAnimeType;
-
     // Group external links by category so the page shows distinct sections
     // (Streaming, Character, etc.) rather than one flat list.
     // Filters:
@@ -179,7 +170,7 @@
                    Trakt status from Model.Entry, or "Add to List" when none.
                    Only when Trakt is connected; the anime chain below is guarded
                    with !isVideo so exactly one pill renders. *@
-                @if ((isVideo || traktAnime) && Model.TraktConnected)
+                @if (isVideo && Model.TraktConnected)
                 {
                     var vStatus = Model.Entry?.Status;
                     string vLabel;
@@ -193,14 +184,14 @@
                     {
                         // "watching" — show episode progress for series only;
                         // a movie is a single unit.
-                        vLabel = traktPillType == "series" && Model.Entry?.TotalEpisodes is int vt && vt > 0
+                        vLabel = Model.MediaType == MetaType.series && Model.Entry?.TotalEpisodes is int vt && vt > 0
                             ? $"Watching · Ep {Model.Entry.Progress}/{vt}"
                             : "Watching";
                     }
                     var vIsAdd = string.IsNullOrEmpty(vStatus);
                     <button type="button" class="anime-detail-user-state"
                             data-open-modal data-meta-id="@a.id" data-meta-name="@a.name"
-                            data-meta-media-type="@traktPillType">
+                            data-meta-media-type="@(Model.MediaType == MetaType.movie ? "movie" : "series")">
                         <span>@vLabel</span>
                         <svg class="anime-detail-user-state-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
                              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -238,7 +229,7 @@
                     // token; otherwise PrettyStatus uses the primary's labels.
                     var statusService = overrideService ?? Model.AnimeService;
                 }
-                @if (!isVideo && !traktAnime && Model.EntryUnavailable && canEdit)
+                @if (!isVideo && Model.EntryUnavailable && canEdit)
                 {
                     @* No mapping to the user's primary AND the source provider
                        (anilist: / kitsu: / mal:) isn't linked as a secondary —
@@ -252,7 +243,7 @@
                         Not available
                     </span>
                 }
-                else if (!isVideo && !traktAnime && Model.IsMultiSeasonGroup && canEdit)
+                else if (!isVideo && Model.IsMultiSeasonGroup && canEdit)
                 {
                     @* Multi-cour grouped (id is imdb:tt..., franchise spans
                        more than one season) → the user's per-cour entry can't
@@ -273,7 +264,7 @@
                         </svg>
                     </button>
                 }
-                else if (!isVideo && !traktAnime && Model.Entry != null)
+                else if (!isVideo && Model.Entry != null)
                 {
                     var statusLabel = PrettyStatus(statusService, Model.Entry.Status);
                     var userBits = new List<string>();
@@ -306,7 +297,7 @@
                         }
                     }
                 }
-                else if (!isVideo && !traktAnime && canEdit)
+                else if (!isVideo && canEdit)
                 {
                     <button type="button" class="anime-detail-user-state"
                             data-open-modal data-meta-id="@a.id" data-meta-name="@a.name"
@@ -337,19 +328,12 @@
                     // Watching state. Same membership rule either way: visible only
                     // when the entry is not on any list (add) or already Watching
                     // (remove); hidden when it's in some other list.
-                    // For a Trakt-primary anime the whole imdb franchise is one
-                    // Trakt entry, so the heart shows even on a multi-cour group;
-                    // otherwise the per-cour group hides it.
-                    var heartEligible = canEdit && !Model.EntryUnavailable
-                        && (traktAnime
-                            ? true
-                            : (!Model.IsMultiSeasonGroup && (!isVideo || Model.TraktConnected)));
+                    var heartEligible = canEdit && !Model.EntryUnavailable && !Model.IsMultiSeasonGroup
+                        && (!isVideo || Model.TraktConnected);
                     var showHeart = heartEligible && (heartStatusNorm == null || heartStatusNorm == "watching");
                     var heartFilled = heartStatusNorm == "watching";
                     var heartLabel = heartFilled ? "Remove from Currently Watching" : "Add to Currently Watching";
-                    var heartMediaType = isVideo
-                        ? (Model.MediaType == MetaType.movie ? "movie" : "series")
-                        : (traktAnime ? Model.TraktAnimeType : null);
+                    var heartMediaType = isVideo ? (Model.MediaType == MetaType.movie ? "movie" : "series") : null;
                 }
                 @if (showHeart)
                 {

@@ -125,51 +125,7 @@ namespace AnimeList.Controllers
             EntryViewState entry = null;
             AnimeService? entryServiceOverride = null;
             var entryUnavailable = false;
-            string traktAnimeType = null;
-            var traktConnected = false;
-            if (animeService == AnimeService.Trakt && !string.IsNullOrEmpty(uid))
-            {
-                // Trakt primary: the anime is tracked as an imdb-keyed Trakt video
-                // entry. Read it from Trakt and flag the media type so the hero
-                // pill + Manage Entry / heart route through the Trakt path (the
-                // triggers stamp the type and the existing video GET/SAVE handle
-                // it) instead of the anime-provider dispatch, which has no Trakt
-                // branch. Runs even for multi-cour groups — Trakt tracks the
-                // whole imdb franchise as one entry.
-                try
-                {
-                    var imdbId = !string.IsNullOrEmpty(anime.id) && anime.id.StartsWith(imdbPrefix, StringComparison.Ordinal)
-                        ? anime.id
-                        : sourceLinks.ImdbId;
-                    if (!string.IsNullOrEmpty(imdbId))
-                    {
-                        traktAnimeType = anime.type == MetaType.movie.ToString() ? "movie" : "series";
-                        var traktToken = await _configStore.GetTraktTokenAsync(uid);
-                        traktConnected = traktToken?.Connected == true;
-                        if (traktConnected)
-                        {
-                            var v = await _traktService.GetVideoEntryAsync(uid, traktAnimeType, imdbId);
-                            int? total = traktAnimeType == "series" ? anime.videos?.Count : 1;
-                            var (tStatus, tProgress) = DeriveTraktVideoStatus(traktAnimeType, v, total);
-                            if (!string.IsNullOrEmpty(tStatus))
-                            {
-                                entry = new EntryViewState
-                                {
-                                    Status = tStatus,
-                                    Progress = tProgress,
-                                    TotalEpisodes = total > 0 ? total : null,
-                                    UserScore = v.Rating,
-                                };
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "AnimeDetail: Trakt entry fetch failed for {Id}.", anime.id);
-                }
-            }
-            else if (!tokenData.anonymousUser && !isMultiSeasonGroup)
+            if (!tokenData.anonymousUser && !isMultiSeasonGroup)
             {
                 // Fetch the user's entry against the resolved per-service id so
                 // the hero can surface "You're watching · Ep 5/12 · Your score:
@@ -300,8 +256,6 @@ namespace AnimeList.Controllers
                 DeferredSupplementaryLinks = deferredSupplementaryLinks,
                 IsMultiSeasonGroup = isMultiSeasonGroup,
                 IsHidden = isHidden,
-                TraktConnected = traktConnected,
-                TraktAnimeType = traktAnimeType,
             });
         }
 
@@ -1817,13 +1771,6 @@ namespace AnimeList.Controllers
         // catalogs. Drives the Hide / Unhide button's label + pressed state.
         // Always false for anonymous viewers (no per-user hidden list).
         public bool IsHidden { get; set; }
-
-        // Set for a Trakt-primary user viewing an anime: the media type
-        // ("movie"/"series") to stamp on the Manage Entry / heart triggers so
-        // the modal routes the entry GET + save through the Trakt video path
-        // (the anime is tracked as an imdb-keyed Trakt entry). Null for anime
-        // primaries — they use the normal per-service anime dispatch.
-        public string TraktAnimeType { get; set; }
     }
 
     /// <summary>
