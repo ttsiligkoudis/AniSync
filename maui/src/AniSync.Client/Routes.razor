@@ -1,0 +1,18 @@
+@*
+    App router shared by both heads. AppAssembly points at this RCL so the
+    [Route] attributes on the Pages/* components are discovered regardless of
+    which head (MAUI or Web) is hosting them.
+*@
+<Router AppAssembly="@typeof(Routes).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <LayoutView Layout="@typeof(MainLayout)">
+            <section class="container">
+                <p class="hint-text">Page not found.</p>
+            </section>
+        </LayoutView>
+    </NotFound>
+</Router>

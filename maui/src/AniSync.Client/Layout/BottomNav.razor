@@ -1,0 +1,20 @@
+@* Mobile bottom navigation — ported from _Layout.cshtml's .bottom-nav. The
+   shared site.css hides it at desktop widths and shows it on phones/tablets,
+   so the same component is correct on both heads. *@
+<nav class="bottom-nav" aria-label="Primary">
+    <NavLink class="bottom-nav-item" href="/" Match="NavLinkMatch.All">
+        <span class="bottom-nav-label">Home</span>
+    </NavLink>
+    <NavLink class="bottom-nav-item" href="/library">
+        <span class="bottom-nav-label">Library</span>
+    </NavLink>
+    <NavLink class="bottom-nav-item" href="/discover">
+        <span class="bottom-nav-label">Discover</span>
+    </NavLink>
+    <NavLink class="bottom-nav-item" href="/calendar">
+        <span class="bottom-nav-label">Calendar</span>
+    </NavLink>
+    <NavLink class="bottom-nav-item" href="/settings">
+        <span class="bottom-nav-label">More</span>
+    </NavLink>
+</nav>
