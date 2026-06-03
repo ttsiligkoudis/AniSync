@@ -28,6 +28,7 @@ public class HomeController : Controller
     private readonly ICinemetaService _cinemeta;
     private readonly ITraktService _trakt;
     private readonly IHiddenEntryStore _hiddenStore;
+    private readonly IAnimeMappingService _mappingService;
 
     // Day-stale rankings are indistinguishable from live ones for the
     // popularity shelves — same TTL the seasonal-stats cache uses inside
@@ -50,7 +51,8 @@ public class HomeController : Controller
         IMergedListService mergedListService,
         ICinemetaService cinemeta,
         ITraktService trakt,
-        IHiddenEntryStore hiddenStore)
+        IHiddenEntryStore hiddenStore,
+        IAnimeMappingService mappingService)
     {
         _tokenService = tokenService;
         _configStore = configStore;
@@ -63,6 +65,7 @@ public class HomeController : Controller
         _cinemeta = cinemeta;
         _trakt = trakt;
         _hiddenStore = hiddenStore;
+        _mappingService = mappingService;
     }
 
     /// <summary>
@@ -739,6 +742,9 @@ public class HomeController : Controller
         {
             metas = [];
         }
+        // Anime is tracked on the AniList side — keep it out of the movie /
+        // series dashboard shelves (Trending / Popular / Anticipated).
+        metas = await metas.ExcludeAnimeAsync(_mappingService);
         return await VideoShelfPartial(metas, uid);
     }
 
@@ -755,7 +761,12 @@ public class HomeController : Controller
         // type when one is given.
         if (type is "movie" or "series")
             playback = playback.Where(i => i.Type == type);
-        var metas = playback.Take(ContinueWatchingMaxItems).ToList().ToVideoMetas();
+        // Anime belongs to the AniList-side Continue Watching shelf, so drop it
+        // from the movie / series playback shelf (e.g. an anime scrobbled via
+        // Trakt shouldn't appear under "Continue watching · Series"). Filter
+        // before the Take so anime entries don't eat into the item budget.
+        var metas = await playback.ToList().ToVideoMetas().ExcludeAnimeAsync(_mappingService);
+        metas = metas.Take(ContinueWatchingMaxItems).ToList();
         return await VideoShelfPartial(metas, uid);
     }
 
