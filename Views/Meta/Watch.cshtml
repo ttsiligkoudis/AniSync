@@ -3703,10 +3703,98 @@
             }
 
 
+            // Across ALL add-ons, keep only the best few sources per resolution.
+            // Each addon now returns its full (uncapped) set, the fan-out merges
+            // them into one list, and this trims that merged list to N per
+            // resolution so the user sees a tight, curated set rather than 20
+            // near-identical 1080p rows. Selection within a resolution favours
+            // sources a browser can actually play — releases whose audio no
+            // browser can decode (Dolby/DTS/TrueHD → silent video) sink to the
+            // back of their bucket so the kept picks are the ones that just play,
+            // then ties break on seeders (popular = likelier a clean release).
+            // Duplicate torrents returned by more than one addon (same infoHash)
+            // are merged first so a dup pair doesn't eat two of the slots.
+            var STREAMS_PER_RESOLUTION = 5;
+            var RESOLUTION_ORDER = ['2160p', '1440p', '1080p', '720p', '480p'];
+            function streamResolutionKey(s) {
+                var q = (s && s.quality) ? String(s.quality).toLowerCase().trim() : '';
+                return q || 'unknown';
+            }
+            function capStreamsPerResolution(streams) {
+                if (!streams || streams.length <= 1) return streams || [];
+                // 1. Merge duplicate torrents across add-ons by infoHash, keeping
+                //    the first seen (fan-out append order already favours the
+                //    fastest addon). Fall back to URL when no hash was emitted.
+                var seen = Object.create(null);
+                var deduped = [];
+                streams.forEach(function (s) {
+                    var key = ((s && (s.infoHash || s.url)) || '').toLowerCase();
+                    if (key) {
+                        if (seen[key]) return;
+                        seen[key] = true;
+                    }
+                    deduped.push(s);
+                });
+                // 2. Bucket by resolution, remembering arrival order for stable
+                //    ties.
+                var buckets = Object.create(null);
+                deduped.forEach(function (s, i) {
+                    var r = streamResolutionKey(s);
+                    (buckets[r] || (buckets[r] = [])).push({ s: s, i: i });
+                });
+                // 3. Emit resolutions high→low (then any unrecognised labels),
+                //    keeping the top N of each after the playable-first sort.
+                var order = RESOLUTION_ORDER.slice();
+                Object.keys(buckets).forEach(function (r) {
+                    if (order.indexOf(r) === -1) order.push(r);
+                });
+                var out = [];
+                order.forEach(function (r) {
+                    var bucket = buckets[r];
+                    if (!bucket) return;
+                    bucket.sort(function (a, b) {
+                        var aBad = a.s.audioUnsupported ? 1 : 0;
+                        var bBad = b.s.audioUnsupported ? 1 : 0;
+                        if (aBad !== bBad) return aBad - bBad;
+                        var aSeed = a.s.seeders || 0, bSeed = b.s.seeders || 0;
+                        if (aSeed !== bSeed) return bSeed - aSeed;
+                        return a.i - b.i;
+                    });
+                    bucket.slice(0, STREAMS_PER_RESOLUTION).forEach(function (x) {
+                        out.push(x.s);
+                    });
+                });
+                return out;
+            }
+
             function renderSources(data) {
                 sourcesBody.innerHTML = '';
 
                 var debrid = (data && data.debridStreams) || [];
+
+                // Merge + trim every add-on's streams to the best 5 per
+                // resolution before anything else looks at the list (provider
+                // tabs, browser-specific sorts and the rows all read the capped
+                // set). Runs on every progressive re-render as slower addons
+                // land, so the list stays curated throughout the fan-out.
+                debrid = capStreamsPerResolution(debrid);
+
+                // Universal playability pass: push sources whose audio no
+                // browser can decode (Dolby/DTS/TrueHD) below the audio-OK
+                // picks, on EVERY browser — these play as silent video, the
+                // exact problem this list had with movie releases. Stable, so
+                // the per-resolution ordering above is preserved within each
+                // group. Applied before the browser-specific HEVC / iOS
+                // container sorts below so those stay primary where they fire.
+                if (debrid.length > 1) {
+                    debrid = debrid
+                        .map(function (s, i) { return { s: s, i: i, bad: !!s.audioUnsupported }; })
+                        .sort(function (a, b) {
+                            if (a.bad !== b.bad) return a.bad ? 1 : -1;
+                            return a.i - b.i;
+                        })
+                        .map(function (x) { return x.s; });
+                }
                 var external = (data && data.externalLinks) || [];
                 // Fan-out progress while the per-addon requests are
                 // still in flight — { completed, total }. Drives the

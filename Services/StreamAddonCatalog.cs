@@ -120,16 +120,18 @@ namespace AnimeList.Services
         // in the URL path, with the pipes percent-encoded as %7C exactly as
         // its own /configure page emits them. We bake in a curated default
         // set — sort by seeders, drop cam / screener / 480p junk via
-        // qualityfilter, cap at 2 results per resolution (Torrentio's `limit`
-        // is a per-quality cap, matching the per-resolution limit we set on
-        // Comet / MediaFusion), and trim the catalog + download-link noise from
-        // the debrid output — then append the debrid credential as the final
-        // segment. No language priority: left neutral so the default suits any
+        // qualityfilter, and trim the catalog + download-link noise from the
+        // debrid output — then append the debrid credential as the final
+        // segment. We deliberately DON'T set Torrentio's `limit` (its
+        // per-quality cap) anymore: the watch page now merges every addon's
+        // results and keeps only the best 5 per resolution ACROSS all addons,
+        // so each addon should hand back its full set and let the app do the
+        // capping. No language priority: left neutral so the default suits any
         // user. The API key isn't escaped: debrid tokens are URL-safe
         // alphanumerics and Torrentio parses the raw segment, so escaping would
         // corrupt it.
         private const string TorrentioOptions =
-            "sort=seeders%7Cqualityfilter=480p,scr,cam%7Climit=2%7Cdebridoptions=nocatalog,nodownloadlinks";
+            "sort=seeders%7Cqualityfilter=480p,scr,cam%7Cdebridoptions=nocatalog,nodownloadlinks";
 
         private static string BuildTorrentio(DebridProvider provider, string key)
             => $"https://torrentio.strem.fun/{TorrentioOptions}%7C{provider.TorrentioKey}={key}/manifest.json";
@@ -149,9 +151,11 @@ namespace AnimeList.Services
         {
             var config = new
             {
-                // Cap streams to 2 per resolution (0 would be unlimited),
-                // matching the per-resolution limit on Torrentio / MediaFusion.
-                maxResultsPerResolution = 2,
+                // No per-resolution cap at the addon (0 = unlimited). AniSync's
+                // watch page merges every addon's results and keeps only the
+                // best 5 per resolution across all of them, so we want Comet's
+                // full set here rather than a pre-trimmed 2.
+                maxResultsPerResolution = 0,
                 maxSize = 0,
                 cachedOnly = true,
                 sortCachedUncachedTogether = false,
@@ -251,8 +255,12 @@ namespace AnimeList.Services
                 enable_imdb_metadata = false,
                 max_size = "inf",
                 min_size = 0,
-                // 2 per resolution, matching the cap set on Torrentio / Comet.
-                max_streams_per_resolution = 2,
+                // No per-resolution cap at the addon — AniSync caps to the best
+                // 5 per resolution across all addons in the watch-page merge.
+                // Set to a high ceiling rather than 0 (whose MediaFusion meaning
+                // isn't documented, and risks "show none"); the overall
+                // max_streams below still bounds the response body size.
+                max_streams_per_resolution = 100,
                 nudity_filter = new[] { "Severe" },
                 certification_filter = new[] { "Adults+" },
                 language_sorting = new[]
@@ -271,7 +279,10 @@ namespace AnimeList.Services
                 include_anime = true,
                 enable_telegram_streams = false,
                 enable_acestream_streams = false,
-                max_streams = 25,
+                // Roomier overall ceiling now that the per-resolution cap is
+                // lifted, so the app-side 5-per-resolution merge has enough
+                // candidates across several resolutions to choose from.
+                max_streams = 50,
                 stream_type_grouping = "separate",
                 stream_type_order = new[] { "torrent", "usenet", "telegram", "http", "acestream", "youtube" },
                 provider_grouping = "separate",
