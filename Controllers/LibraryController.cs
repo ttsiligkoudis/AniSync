@@ -20,17 +20,20 @@ namespace AnimeList.Controllers
         private readonly IConfigStore _configStore;
         private readonly IMergedListService _mergedListService;
         private readonly ITraktService _traktService;
+        private readonly IAnimeMappingService _mappingService;
 
         public LibraryController(
             ITokenService tokenService,
             IConfigStore configStore,
             IMergedListService mergedListService,
-            ITraktService traktService)
+            ITraktService traktService,
+            IAnimeMappingService mappingService)
         {
             _tokenService = tokenService;
             _configStore = configStore;
             _mergedListService = mergedListService;
             _traktService = traktService;
+            _mappingService = mappingService;
         }
 
         // The list tabs that make sense for movies / series (sourced from Trakt):
@@ -264,7 +267,9 @@ namespace AnimeList.Controllers
             var kind = mediaType == MetaType.movie ? "movies" : "series";
 
             var items = await _traktService.GetListAsync(uid, activeList, mediaType);
-            var metas = items.ToVideoMetas();
+            // Anime is tracked on the AniList side, so keep it out of the Trakt
+            // video library — drop entries whose imdb id maps to a known anime.
+            var metas = await items.ToVideoMetas().ExcludeAnimeAsync(_mappingService);
 
             if (hasSearch && metas.Count > 0)
             {
