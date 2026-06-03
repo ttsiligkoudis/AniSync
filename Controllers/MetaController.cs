@@ -1445,35 +1445,42 @@ namespace AnimeList.Controllers
 
                 if (type == "series" && (traktStatus == "watching" || traktStatus == "completed"))
                 {
-                    // Use Trakt's OWN episode list to build the coordinates we
-                    // write back to Trakt — its season/episode numbering is the
-                    // authority for the scrobble. (Cinemeta is only the episode
-                    // source for rendering; deriving Trakt writes from it risks a
-                    // numbering mismatch.) Falls back to Cinemeta if Trakt has no
-                    // episode list for this id.
+                    // Numbering differs between sources for anime: the cross-service
+                    // mapping + Cinemeta use TMDB seasons (so courSeason lines up
+                    // with them), but Trakt often numbers the same show as one long
+                    // absolute season. So compute HOW MANY episodes to mark from
+                    // Cinemeta's season structure, then map that count onto Trakt's
+                    // OWN episode list so the coordinates we actually write always
+                    // exist on Trakt (otherwise the write lands nowhere and the show
+                    // drops out of continue-watching).
+                    var cinemetaOrdered = ((await _cinemeta.GetVideoMetaAsync("series", imdb))?.videos ?? new List<Video>())
+                        .OrderBy(v => v.season > 0 ? v.season : 1)
+                        .ThenBy(v => v.episode)
+                        .ToList();
+                    var watchedCount = traktStatus == "completed"
+                        ? cinemetaOrdered.Count
+                        : cinemetaOrdered.Count(v =>
+                        {
+                            var s = v.season > 0 ? v.season : 1;
+                            return s < courSeason || (s == courSeason && v.episode <= progress);
+                        });
+
+                    // Trakt's own episodes give the coords we write back; fall back
+                    // to Cinemeta only when Trakt has no list for this id.
                     var traktEps = await _traktService.GetEpisodesAsync(imdb);
-                    if (traktEps == null || traktEps.Count == 0)
-                        traktEps = (await _cinemeta.GetVideoMetaAsync("series", imdb))?.videos ?? new List<Video>();
-                    var ordered = traktEps
+                    var coordSource = traktEps is { Count: > 0 } ? traktEps : cinemetaOrdered;
+                    var ordered = coordSource
                         .OrderBy(v => v.season > 0 ? v.season : 1)
                         .ThenBy(v => v.episode)
                         .Select(v => (Season: v.season > 0 ? v.season : 1, Episode: v.episode))
                         .ToList();
 
-                    if (traktStatus == "completed")
-                    {
-                        episodes = ordered;
-                    }
-                    else
-                    {
-                        // Watched everything up to (courSeason, progress) — earlier
-                        // seasons in full + this season through `progress`.
-                        episodes = ordered
-                            .Where(x => x.Season < courSeason || (x.Season == courSeason && x.Episode <= progress))
-                            .ToList();
-                        if (episodes.Count < ordered.Count)
-                            inProgress = ordered[episodes.Count]; // next unwatched → continue-watching
-                    }
+                    watchedCount = Math.Clamp(watchedCount, 0, ordered.Count);
+                    episodes = ordered.Take(watchedCount).ToList();
+                    if (traktStatus == "watching" && ordered.Count > 0)
+                        // Next unwatched → "up next"; if we've marked everything Trakt
+                        // knows (latest aired), seed the last so it stays surfaced.
+                        inProgress = watchedCount < ordered.Count ? ordered[watchedCount] : ordered[ordered.Count - 1];
                 }
 
                 int? rating = score is double r && r > 0 ? (int)Math.Round(r) : null;
