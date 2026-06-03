@@ -1954,7 +1954,14 @@ body.modal-open {
 
 .site-search-result-poster-placeholder {
     /* Matches the dimensions of the real <img> variant so missing-poster
-       rows don't reflow the dropdown. */
+       rows don't reflow the dropdown. A faint film/poster glyph centred on
+       the tile reads as an intentional "no artwork" state rather than a bare
+       grey box or the browser's broken-image icon. */
+    background-color: var(--overlay-06);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-opacity='0.28' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2' ry='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpath d='M21 15l-5-5L5 21'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 22px 22px;
 }
 
 .site-search-result-name {
