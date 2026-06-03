@@ -157,7 +157,17 @@ namespace AnimeList.Services
         // digits ("DDP" → "5" is \w→\w), so requiring one there
         // would break the common "DDP5.1" / "AAC2.0" packing.
         private static readonly Regex AudioRegex = new(
-            @"\b(Atmos|TrueHD|DTS-?HD(?:[\s.]?MA)?|DTS-?X|DDP|E-?AC-?3|EAC3|AC-?3|DD\+|DTS|FLAC|AAC|Opus|MP3|PCM|Vorbis)(?:[\s.]?(\d\.\d)(?:ch)?)?\b",
+            @"\b(Dolby[\s.]*Atmos|Dolby[\s.]*TrueHD|Dolby[\s.]*Digital[\s.]*Plus|Dolby[\s.]*Digital|Atmos|TrueHD|DTS-?HD(?:[\s.]?MA)?|DTS-?X|DDP|E-?AC-?3|EAC3|AC-?3|DD\+|DTS|FLAC|AAC|Opus|MP3|PCM|Vorbis)(?:[\s.]?(\d\.\d)(?:ch)?)?\b",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        // Standalone channel-layout token ("8CH", "7.1", "5.1", "2.0") for
+        // releases that name the channel count but NOT the codec — very common
+        // on 2160p BluRay movie rips ("...HDR.DV.BluRay.8CH.x265.HEVC..."). Used
+        // only as a fallback when AudioRegex finds no codec, so we can still
+        // surface an audio pill and flag the surround layouts the browser can't
+        // decode (a 6+ channel track at these tiers is almost always Dolby/DTS).
+        private static readonly Regex ChannelRegex = new(
+            @"\b(\d)\s?CH\b|\b(\d\.\d)\b",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         public AddonStreamService(
@@ -801,11 +811,18 @@ namespace AnimeList.Services
         private static string DetectAudio(string haystack)
         {
             var m = AudioRegex.Match(haystack);
-            if (!m.Success) return null;
-            // Collapse runs of whitespace to a single space — "DTS-HD MA  5.1"
-            // → "DTS-HD MA 5.1" — but keep the single space between codec
-            // and channel info intact for readability. "DDP5.1" stays packed.
-            return Regex.Replace(m.Value.Trim(), @"\s+", " ");
+            if (m.Success)
+                // Collapse runs of whitespace to a single space — "DTS-HD MA  5.1"
+                // → "DTS-HD MA 5.1" — but keep the single space between codec
+                // and channel info intact for readability. "DDP5.1" stays packed.
+                return Regex.Replace(m.Value.Trim(), @"\s+", " ");
+            // No named codec — fall back to a bare channel-layout token if one is
+            // present ("8CH" / "5.1"), so a "BluRay 8CH x265" release still gets an
+            // audio pill and can be flagged as browser-unsupported surround.
+            var c = ChannelRegex.Match(haystack);
+            if (c.Success)
+                return c.Value.Trim().ToUpperInvariant().Replace(" ", "");
+            return null;
         }
 
         private static bool IsBrowserPlayable(string url, string nameAndDescription)

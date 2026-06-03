@@ -1283,11 +1283,24 @@ namespace AnimeList.Controllers
         {
             if (string.IsNullOrEmpty(audioLabel)) return false;
             var a = audioLabel.ToUpperInvariant();
-            return a.Contains("AC3") || a.Contains("AC-3")
+            if (a.Contains("AC3") || a.Contains("AC-3")
                 || a.Contains("EAC3") || a.Contains("E-AC-3")
                 || a.Contains("DD+") || a.Contains("DDP") || a.Contains("DOLBY")
                 || a.Contains("ATMOS") || a.Contains("TRUEHD")
-                || a.Contains("DTS");
+                || a.Contains("DTS"))
+                return true;
+            // Channel-layout-only label (no codec named, e.g. "8CH" / "7.1" /
+            // "5.1" parsed from a "2160p BluRay 8CH x265" release). A 6+ channel
+            // surround track at these tiers is overwhelmingly a Dolby/DTS stream
+            // the browser plays as silent video, so flag it — UNLESS a browser-safe
+            // codec (AAC/MP3/Opus/Vorbis/FLAC/PCM, which downmix fine) is also named.
+            var hasSafeCodec = a.Contains("AAC") || a.Contains("MP3") || a.Contains("OPUS")
+                || a.Contains("VORBIS") || a.Contains("FLAC") || a.Contains("PCM");
+            if (!hasSafeCodec
+                && (a.Contains("8CH") || a.Contains("7CH") || a.Contains("6CH")
+                    || a.Contains("7.1") || a.Contains("6.1") || a.Contains("5.1")))
+                return true;
+            return false;
         }
 
         private async Task<IReadOnlyList<SubtitleTrack>> SafeOpenSubtitlesSearch(
