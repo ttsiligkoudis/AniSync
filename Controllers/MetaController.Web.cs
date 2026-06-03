@@ -1090,6 +1090,10 @@ namespace AnimeList.Controllers
                     seeders = s.Seeders,
                     language = s.Language,
                     provider = addon.Name,
+                    // Torrent hash — the client merge dedups identical releases
+                    // returned by more than one addon (e.g. Torrentio + Comet)
+                    // before applying the 5-per-resolution cap.
+                    infoHash = s.InfoHash,
                     isHevc = s.IsHevc,
                     source = s.Source,
                     hdr = s.Hdr,
