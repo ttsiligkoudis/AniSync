@@ -1,0 +1,25 @@
+@* Episode-release notification bell — exact port of the .notif-bell block in
+   _Layout.cshtml. The polling/render behaviour is handled by the ported
+   notifications.js (data-notif-* hooks) loaded per head; this component just
+   renders the identical DOM. *@
+<div class="notif-bell" data-notif-bell>
+    <button class="notif-bell-btn" type="button" aria-label="Notifications"
+            aria-expanded="false" aria-controls="notif-panel" data-notif-toggle>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+        </svg>
+        <span class="notif-bell-badge" data-notif-count hidden>0</span>
+    </button>
+    <div class="notif-panel" id="notif-panel" role="dialog" aria-label="Notifications" hidden>
+        <header class="notif-panel-header">
+            <span class="notif-panel-title">Notifications</span>
+            <button type="button" data-notif-read-all class="notif-read-all">Mark all read</button>
+        </header>
+        <div class="notif-panel-body" data-notif-list>
+            <div class="notif-empty" data-notif-empty>You're all caught up.</div>
+        </div>
+        <a class="notif-panel-footer" href="/notifications" data-notif-view-all>View all</a>
+    </div>
+</div>

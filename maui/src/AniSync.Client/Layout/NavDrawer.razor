@@ -1,0 +1,86 @@
+@inject NavigationManager Nav
+@inject AppState State
+
+@* Slide-in navigation drawer — exact port of _Layout.cshtml's .nav-drawer.
+   Toggled by the body.drawer-open class (the hamburger / close / backdrop set
+   it via literal onclick passthrough, identical to the web app). *@
+<aside class="nav-drawer" aria-label="Site navigation">
+    <div class="nav-drawer-header">
+        <a class="site-logo" href="/" aria-label="AniSync home">
+            <img src="_content/AniSync.Client/img/logo.png" alt="AniSync" width="1024" height="1024" />
+        </a>
+        <button class="drawer-close" aria-label="Close menu"
+                onclick="document.body.classList.remove('drawer-open')">×</button>
+    </div>
+    <nav class="nav-drawer-nav">
+        <a href="/" class="@Cls("home")">
+            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 12L12 3l9 9"></path>
+                <path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path>
+            </svg>
+            <span class="nav-label">Home</span>
+        </a>
+        @if (State.LoggedIn)
+        {
+            <a href="/library" class="@Cls("library")">
+                <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span class="nav-label">Library</span>
+            </a>
+        }
+        <a href="/discover" class="@Cls("discover")">
+            <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <span class="nav-label">Discover</span>
+        </a>
+        @if (State.LoggedIn)
+        {
+            <a href="/calendar" class="@Cls("calendar")">
+                <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+                <span class="nav-label">Calendar</span>
+            </a>
+        }
+        @if (State.LoggedIn)
+        {
+            <a href="/settings" class="@(_active is "configure" ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+                <span class="nav-label">Settings</span>
+            </a>
+        }
+    </nav>
+    <div class="nav-drawer-footer">
+        @if (State.HasSession)
+        {
+            <span class="nav-drawer-status">
+                @(State.LoggedIn ? $"✓ Connected to {State.ConnectedLabel}" : "✓ Connected without account")
+            </span>
+            <a class="nav-drawer-cta nav-drawer-cta-secondary" href="/logout" data-disconnect>Disconnect</a>
+        }
+        else
+        {
+            <a class="nav-drawer-cta nav-drawer-cta-primary" href="/settings">Sign in</a>
+        }
+    </div>
+</aside>
+<div class="drawer-backdrop"
+     onclick="document.body.classList.remove('drawer-open')"></div>
+
+@code {
+    private string _active = "";
+
+    protected override void OnParametersSet()
+        => _active = NavActive.From(Nav.ToBaseRelativePath(Nav.Uri));
+
+    private string Cls(string section) => _active == section ? "active" : "";
+}

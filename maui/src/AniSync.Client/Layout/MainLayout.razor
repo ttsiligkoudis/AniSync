@@ -1,14 +1,42 @@
 @inherits LayoutComponentBase
+@implements IDisposable
+@inject NavigationManager Nav
+@inject AppState State
 
-@*
-    Shared chrome for every page, ported from the MVC _Layout.cshtml so it
-    reuses the same site.css classes (site-header / container / bottom-nav) and
-    therefore looks identical across the MAUI and Web heads.
-*@
+@* Shared chrome for every page — composed to match _Layout.cshtml's body
+   order exactly: drawer (+ backdrop), site header, fixed media-type switch,
+   centered .container > main, then the mobile bottom nav (+ more sheet). The
+   layout persists across navigation, so we re-render it on LocationChanged and
+   AppState.Changed to keep the active-nav highlight and the switch in sync. *@
+<NavDrawer />
+
 <AppHeader />
 
-<main role="main">
-    @Body
-</main>
+<MediaTypeSwitch />
+
+<div class="container">
+    <main role="main" style="min-height: 100vh;">
+        @Body
+    </main>
+</div>
 
 <BottomNav />
+
+@code {
+    protected override void OnInitialized()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        State.Changed += OnStateChanged;
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => StateHasChanged();
+
+    private void OnStateChanged() => StateHasChanged();
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+        State.Changed -= OnStateChanged;
+    }
+}

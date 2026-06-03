@@ -1,43 +1,27 @@
 @page "/"
+@implements IDisposable
 @inject IAniSyncApi Api
+@inject AppState State
 
-@* Home dashboard — ported shell of HomeController.Index / Views/Home/Index.cshtml.
-   Reuses the dashboard / stats / shelf CSS classes from site.css. Stats and the
-   Trakt-backed shelves need JSON endpoints on the server (see maui/README.md →
-   "API surface to add"); for now the structure renders and the trending anime
-   shelf below is wired to the existing /api/v1/discover endpoint as a working
-   end-to-end slice. *@
+@* Home dashboard — ported shell of Views/Home/Index.cshtml. The media-type
+   switch now lives in the layout (MediaTypeSwitch); this page reacts to its
+   "All / Anime / Movies / Series" filter via AppState.DashboardFilter and
+   shows/hides sections by their data-media-type, matching media-type-switch.js.
+   Stats + Trakt shelves need JSON endpoints (see README roadmap); the Trending
+   anime shelf is wired to the existing /api/v1/discover as a working slice. *@
 
 <PageTitle>AniSync</PageTitle>
 
-<section class="container">
-    @* Media-type switch (All / Anime / Movies / Series) — port of _MediaTypeSwitch. *@
-    <div class="mt-switch-bar" data-mt-switch="dashboard">
-        <div class="container mt-switch-inner">
-            <div class="mt-switch" role="tablist" aria-label="Media type">
-                @foreach (var (value, label) in _mediaTabs)
-                {
-                    <button type="button"
-                            class="mt-switch-btn @(_activeType == value ? "active" : "")"
-                            data-mt-value="@value"
-                            role="tab"
-                            aria-selected="@(_activeType == value)"
-                            @onclick="() => SetType(value)">
-                        <span class="mt-switch-label">@label</span>
-                    </button>
-                }
-            </div>
-        </div>
-    </div>
+@* Your stats — structure only for this milestone (awaiting JSON stats API). *@
+<section class="dashboard-section stats-section" data-dash-section="stats">
+    <h2 class="dashboard-section-title">Your stats</h2>
+    <p class="hint-text">Stats wiring lands with the <code>/api/v1/stats</code> endpoints (see README roadmap).</p>
+</section>
 
-    @* Your stats — structure only for this milestone (awaiting JSON stats API). *@
-    <section class="dashboard-section stats-section" data-dash-section="stats">
-        <h2 class="dashboard-section-title">Your stats</h2>
-        <p class="hint-text">Stats wiring lands with the <code>/api/v1/stats</code> endpoints (see README roadmap).</p>
-    </section>
-
-    @* Working slice: Trending anime via the existing /api/v1/discover/trending. *@
-    <section class="dashboard-section">
+@* Trending · Anime — working slice via /api/v1/discover/trending. *@
+@if (Visible("anime"))
+{
+    <section class="dashboard-section" data-dash-section="trending" data-media-type="anime">
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">Trending · Anime</h2>
         </div>
@@ -73,17 +57,13 @@
             </div>
         }
     </section>
-</section>
+}
 
 @code {
-    private readonly (string Value, string Label)[] _mediaTabs =
-    {
-        ("all", "All"), ("anime", "Anime"), ("movie", "Movies"), ("series", "Series"),
-    };
-
-    private string _activeType = "all";
     private bool _loading = true;
     private List<MetaCard> _trending = new();
+
+    protected override void OnInitialized() => State.Changed += OnFilterChanged;
 
     protected override async Task OnInitializedAsync()
     {
@@ -98,5 +78,11 @@
         }
     }
 
-    private void SetType(string value) => _activeType = value;
+    // A section shows when the dashboard filter is "All" or matches its media type.
+    private bool Visible(string mediaType)
+        => State.DashboardFilter is "all" || State.DashboardFilter == mediaType;
+
+    private void OnFilterChanged() => StateHasChanged();
+
+    public void Dispose() => State.Changed -= OnFilterChanged;
 }
