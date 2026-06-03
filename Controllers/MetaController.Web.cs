@@ -84,6 +84,13 @@ namespace AnimeList.Controllers
             // existing "anonymousUser → no uid" branching for us.
             var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
+            // Trakt primary: the per-entry hero state + Manage Entry run on the
+            // linked AniList (then MAL/Kitsu) token so the modal keeps its
+            // per-cour Season dropdown and edits sync to those providers. The
+            // meta load below is id-prefix-driven, so it still renders the same
+            // IMDb-grouped anime regardless of which token this is. No-op for
+            // anime primaries / the anonymous fallback.
+            tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
             var animeService = tokenData.anime_service;
 
             // 18+ gate gets its toggle from the user's config; null for
