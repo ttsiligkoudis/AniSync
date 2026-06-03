@@ -1428,23 +1428,67 @@ namespace AnimeList.Controllers
                 var (uid, _) = await _configStore.FindUidByIdentityAsync(traktToken);
                 if (string.IsNullOrEmpty(uid) || string.IsNullOrEmpty(courId)) return;
 
-                var imdb = (await _mappingService.BuildSourceLinksAsync(courId))?.ImdbId;
+                // Resolve the cour's franchise imdb id AND its imdb season — the
+                // saved progress is an episode number *within that season*, not an
+                // absolute index across the whole franchise. (Marking it as
+                // absolute is what made a S4E7 save show up on Trakt as S1E5.)
+                var mapping = await ResolveCourMappingAsync(courId);
+                var imdb = mapping?.ImdbId;
                 if (string.IsNullOrEmpty(imdb)) return;
+                var courSeason = mapping.Season is int s && s > 0 ? s : 1;
 
+                var traktStatus = MapToTraktStatus(status);
                 var type = await DeriveImdbVideoTypeAsync(imdb);
-                await ApplyTraktVideoSaveAsync(uid, new SaveEntryRequest
+
+                IReadOnlyList<(int Season, int Episode)> episodes = Array.Empty<(int, int)>();
+                (int Season, int Episode)? inProgress = null;
+
+                if (type == "series" && (traktStatus == "watching" || traktStatus == "completed"))
                 {
-                    Id = imdb,
-                    Type = type,
-                    Status = MapToTraktStatus(status),
-                    Progress = progress,
-                    Score = score,
-                });
+                    var meta = await _cinemeta.GetVideoMetaAsync("series", imdb);
+                    var ordered = (meta?.videos ?? new List<Video>())
+                        .OrderBy(v => v.season > 0 ? v.season : 1)
+                        .ThenBy(v => v.episode)
+                        .Select(v => (Season: v.season > 0 ? v.season : 1, Episode: v.episode))
+                        .ToList();
+
+                    if (traktStatus == "completed")
+                    {
+                        episodes = ordered;
+                    }
+                    else
+                    {
+                        // Watched everything up to (courSeason, progress) — earlier
+                        // seasons in full + this season through `progress`.
+                        episodes = ordered
+                            .Where(x => x.Season < courSeason || (x.Season == courSeason && x.Episode <= progress))
+                            .ToList();
+                        if (episodes.Count < ordered.Count)
+                            inProgress = ordered[episodes.Count]; // next unwatched → continue-watching
+                    }
+                }
+
+                int? rating = score is double r && r > 0 ? (int)Math.Round(r) : null;
+                await _traktService.SaveVideoEntryAsync(uid, type, imdb, traktStatus, episodes, rating, inProgress);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Trakt anime push failed for cour {Id}.", courId);
             }
+        }
+
+        // Resolves a per-cour anime id to its cross-service mapping row (which
+        // carries the franchise imdb id + the cour's imdb season). Used by the
+        // Trakt push to place a per-cour save on the right franchise season.
+        private async Task<AnimeIdMapping> ResolveCourMappingAsync(string courId)
+        {
+            if (string.IsNullOrEmpty(courId)) return null;
+            if (courId.StartsWith(anilistPrefix, StringComparison.Ordinal)) return await _mappingService.GetAnilistMapping(courId);
+            if (courId.StartsWith(malPrefix, StringComparison.Ordinal)) return await _mappingService.GetMalMapping(courId);
+            if (courId.StartsWith(kitsuPrefix, StringComparison.Ordinal)) return await _mappingService.GetKitsuMapping(courId);
+            if (courId.StartsWith(imdbPrefix, StringComparison.Ordinal))
+                return (await _mappingService.GetImdbMapping(courId))?.FirstOrDefault();
+            return null;
         }
 
         // movie vs series for an imdb id, via Cinemeta (cached). Defaults to
