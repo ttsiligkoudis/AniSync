@@ -1,21 +1,151 @@
-@* Top site header — mirrors _Layout.cshtml's .site-header structure so the
-   shared site.css styles it identically. Nav links are bare <a> styled by
-   `.site-header-nav a` (NavLink stamps `active` automatically when matched).
-   The global search box is a Blazor port of site-search.js. *@
+@inject NavigationManager Nav
+@inject AppState State
+
+@* Site header — exact port of _Layout.cshtml's .site-header. Back button, logo,
+   inline desktop nav (collapses to the hamburger under 992px via site.css), the
+   global SearchBox typeahead, notification bell, media-type + theme buttons, the
+   desktop auth CTA and the hamburger. Behaviour (back, theme, more) is wired by
+   the ported chrome.js / theme-toggle.js loaded in each head. *@
 <header class="site-header">
     <div class="container site-header-inner">
+        <button type="button" class="site-back-btn" aria-label="Go back" data-site-back>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M15 18l-6-6 6-6"/>
+            </svg>
+        </button>
         <a class="site-logo" href="/" aria-label="AniSync home">
             <img src="_content/AniSync.Client/img/logo.png" alt="AniSync" width="1024" height="1024" />
         </a>
-
         <nav class="site-header-nav" aria-label="Primary">
-            <NavLink href="/" Match="NavLinkMatch.All"><span class="nav-label">Home</span></NavLink>
-            <NavLink href="/library"><span class="nav-label">Library</span></NavLink>
-            <NavLink href="/discover"><span class="nav-label">Discover</span></NavLink>
-            <NavLink href="/calendar"><span class="nav-label">Calendar</span></NavLink>
-            <NavLink href="/settings"><span class="nav-label">Settings</span></NavLink>
+            <a href="/" class="@Cls("home")">
+                <svg class="nav-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 12L12 3l9 9"></path>
+                    <path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path>
+                </svg>
+                <span class="nav-label">Home</span>
+            </a>
+            @if (State.LoggedIn)
+            {
+                <a href="/library" class="@Cls("library")">
+                    <svg class="nav-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    <span class="nav-label">Library</span>
+                </a>
+            }
+            <a href="/discover" class="@Cls("discover")">
+                <svg class="nav-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <span class="nav-label">Discover</span>
+            </a>
+            @if (State.LoggedIn)
+            {
+                <a href="/calendar" class="@Cls("calendar")">
+                    <svg class="nav-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+                        <line x1="16" y1="2" x2="16" y2="6"></line>
+                        <line x1="8" y1="2" x2="8" y2="6"></line>
+                        <line x1="3" y1="10" x2="21" y2="10"></line>
+                    </svg>
+                    <span class="nav-label">Calendar</span>
+                </a>
+            }
+            @if (State.LoggedIn)
+            {
+                <a href="/settings" class="@(_active is "configure" ? "active" : "")">
+                    <svg class="nav-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                    <span class="nav-label">Settings</span>
+                </a>
+            }
         </nav>
 
         <SearchBox />
+
+        @if (State.LoggedIn)
+        {
+            <NotifBell />
+        }
+
+        <button type="button" class="media-type-btn" data-media-type-open
+                aria-label="Change mode (currently @_mtBtnLabel)" title="Change mode">
+            <span class="media-type-btn-icon" aria-hidden="true">
+                @if (_mtMultiple)
+                {
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                        <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                        <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                        <rect x="14" y="14" width="7" height="7" rx="1.5" />
+                    </svg>
+                }
+                else if (State.MediaType == MetaType.movie)
+                {
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="4" width="18" height="16" rx="2" />
+                        <line x1="7" y1="4" x2="7" y2="20" /><line x1="17" y1="4" x2="17" y2="20" />
+                        <line x1="3" y1="12" x2="21" y2="12" />
+                    </svg>
+                }
+                else if (State.MediaType == MetaType.series)
+                {
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="7" width="20" height="13" rx="2" />
+                        <polyline points="8 3 12 7 16 3" />
+                    </svg>
+                }
+                else
+                {
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z" />
+                    </svg>
+                }
+            </span>
+            <span class="media-type-btn-label">@_mtBtnLabel</span>
+        </button>
+
+        <button type="button" class="theme-toggle-btn" data-theme-toggle
+                aria-label="Switch theme" title="Switch theme">
+            <svg class="theme-icon-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="4"></circle>
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+            </svg>
+            <svg class="theme-icon-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+        </button>
+
+        @if (State.HasSession)
+        {
+            <a class="site-header-cta site-header-cta-secondary" href="/logout" data-disconnect>Disconnect</a>
+        }
+        else
+        {
+            <a class="site-header-cta site-header-cta-primary" href="/settings">Sign in</a>
+        }
+
+        <button class="hamburger-btn" aria-label="Open menu"
+                onclick="document.body.classList.toggle('drawer-open')">
+            <span></span><span></span><span></span>
+        </button>
     </div>
 </header>
+
+@code {
+    private string _active = "";
+    private bool _mtMultiple;
+    private string _mtBtnLabel = "All";
+
+    protected override void OnParametersSet()
+    {
+        _active = NavActive.From(Nav.ToBaseRelativePath(Nav.Uri));
+        _mtMultiple = State.EnabledMediaTypes.Count > 1;
+        _mtBtnLabel = _mtMultiple ? "All" : State.MediaTypeLabel;
+    }
+
+    private string Cls(string section) => _active == section ? "active" : "";
+}

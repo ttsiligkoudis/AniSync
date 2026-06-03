@@ -84,11 +84,19 @@ this library's router:
 ```html
 <!-- <head> -->
 <link rel="stylesheet" href="_content/AniSync.Client/css/site.css" />
+<meta name="theme-color" content="#0b0d12" />
+<!-- before </body> (after the framework script) -->
+<script src="_content/AniSync.Client/js/chrome.js"></script>
 ```
 ```razor
 @* App root *@
 <Routes />   @* from AniSync.Client *@
 ```
+
+`chrome.js` drives the shared shell behaviour (theme toggle, back button, the
+mobile "More" sheet, Escape/outside-click closes) via document-level delegation,
+so it works no matter when Blazor mounts the layout. The drawer open/close uses
+literal `onclick="document.body.classList…"` passthrough, exactly like the web.
 
 ---
 
@@ -99,6 +107,7 @@ differ.
 
 ```csharp
 // shared registrations (call from MauiProgram.cs and Web Program.cs)
+builder.Services.AddScoped<AppState>();          // session/nav/media-type state
 builder.Services.AddScoped<IAniSyncApi, AniSyncApi>();
 builder.Services.AddHttpClient<IAniSyncApi, AniSyncApi>((sp, http) =>
 {
@@ -160,7 +169,8 @@ These return the same DTO shapes already used by the client models.
 
 ## Roadmap
 
-- [x] **M1 — Foundation** *(this commit)*: shared RCL, design system (verbatim `site.css`), app shell (header/bottom-nav), working search typeahead, Home trending slice, service seams (`IAppEnvironment`/`IMediaPlayer`/`IAniSyncApi`).
+- [x] **M1 — Foundation**: shared RCL, design system (verbatim `site.css`), service seams (`IAppEnvironment`/`IMediaPlayer`/`IAniSyncApi`), working search typeahead, Home trending slice.
+- [x] **M1.5 — Full chrome parity**: exact-DOM port of `_Layout.cshtml` — slide-in drawer + backdrop, full site header (back/logo/nav/search/notif bell/media-type + theme buttons/auth CTA/hamburger), fixed media-type switch, mobile bottom-nav + floating "More" sheet — with real SVG icons, C#-driven active-nav + media-type state (`AppState`), and `chrome.js` for theme/back/more-sheet behaviour.
 - [ ] **M2 — Heads + run**: generate MAUI + Web heads from template, wire DI, confirm the shell renders identically on Web + Android/Windows.
 - [ ] **M3 — Stats + shelves**: add the JSON endpoints above; port Home dashboard fully (stats strip, continue-watching, trending/popular shelves) with the skeleton-match + anime-exclusion behaviour from the web app.
 - [ ] **M4 — Library + Discover + Search results + Calendar**.
