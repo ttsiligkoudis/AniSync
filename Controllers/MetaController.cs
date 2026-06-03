@@ -1338,6 +1338,32 @@ namespace AnimeList.Controllers
                 return new JsonResult(new { success = false, error = "no-uid" });
 
             var ok = await ApplyTraktVideoSaveAsync(uid, request);
+
+            // When the imdb id is a known anime (Trakt-primary anime tracking),
+            // mirror the change to the user's linked anime providers — combining
+            // Trakt with AniList/MAL/Kitsu the same way an anime-primary save
+            // fans out. Best-effort + anime-only: genuine movies/series have no
+            // anime mapping, so this no-ops for them.
+            if (ok && !string.IsNullOrEmpty(request.Id))
+            {
+                try
+                {
+                    var mapping = await _mappingService.GetImdbMapping(request.Id);
+                    if (mapping is { Count: > 0 })
+                    {
+                        if (string.IsNullOrEmpty(request.Status))
+                            await _syncService.FanOutDeleteAsync(tokenData, request.Id, request.Season);
+                        else
+                            await _syncService.FanOutSaveAsync(tokenData, request.Id, request.Season,
+                                request.Progress, request.Status, request.Score, null, null, null, null);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Trakt anime fan-out to linked providers failed for {Id}.", request.Id);
+                }
+            }
+
             return new JsonResult(new { success = ok, error = ok ? null : "trakt-not-connected" });
         }
 
