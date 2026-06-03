@@ -5460,13 +5460,27 @@ a.stats-cell-link:hover {
 
 .stats-number {
     grid-area: number;
-    /* Number is now the secondary line below the label, so it reads smaller
-       than the (now headline) label above it. */
-    font-size: 1.05rem;
-    font-weight: 600;
-    color: var(--text-dim);
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-strong);
     line-height: 1.1;
     white-space: nowrap;
+}
+
+/* Desktop: pull the number up onto the label's row and pin it to the right
+   edge of the cell (icon · LABEL ······ number). Tablets and phones keep the
+   stacked layout below where the number sits on its own second row. */
+@media (min-width: 1024px) {
+    .stats-cell {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        grid-template-areas: "icon label number";
+        column-gap: 0.6rem;
+    }
+    .stats-number {
+        justify-self: end;
+        text-align: right;
+        font-size: 1.2rem;
+    }
 }
 
 /* ── Skeleton placeholders for client-fetched dashboard sections ──
@@ -5517,7 +5531,7 @@ a.stats-cell-link:hover {
     user-select: none;
     border-radius: 5px;
     min-width: 3rem;
-    height: 1.05rem;
+    height: 1.1rem;
     background-color: var(--overlay-05);
     background-image: linear-gradient(
         90deg,
@@ -5667,8 +5681,8 @@ a.stats-cell-link:hover {
         row-gap: 0.15rem;
     }
     .stats-number {
-        font-size: 0.72rem;
-        font-weight: 600;
+        font-size: 0.78rem;
+        font-weight: 700;
     }
     .stats-label {
         font-size: 0.78rem;
@@ -5676,7 +5690,7 @@ a.stats-cell-link:hover {
     }
     [data-stats-loading] .stats-number {
         min-width: 1.8rem;
-        height: 0.72rem;
+        height: 0.78rem;
     }
 }
 
