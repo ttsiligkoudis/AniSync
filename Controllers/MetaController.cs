@@ -1,4 +1,5 @@
 using AnimeList.Models;
+using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
@@ -907,6 +908,11 @@ namespace AnimeList.Controllers
                 if (type == "movie" || type == "series")
                     return await GetTraktVideoEntryAsync(tokenData, type, id);
 
+                // Trakt primary: read the entry per-cour through the linked
+                // AniList (then MAL/Kitsu) token so the modal's Season dropdown +
+                // status come from the provider that actually tracks anime cours.
+                tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
+
                 // service: <int> override — the detail page stamps it on the
                 // Manage Entry button when the requested anime has no mapping
                 // to the user's primary but lives on a linked secondary
@@ -1034,6 +1040,12 @@ namespace AnimeList.Controllers
                 if (request.Type == "movie" || request.Type == "series")
                     return await SaveTraktVideoEntryAsync(tokenData, request);
 
+                // Trakt primary: write the selected cour through the linked
+                // AniList (then MAL/Kitsu) token; the fan-out below then mirrors
+                // it to the remaining linked anime providers. Browsing stays on
+                // Trakt/IMDb — only this per-entry write re-points.
+                tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
+
                 // service: <int> override — the modal sends it when the entry
                 // was loaded through a linked-secondary token (anime had no
                 // mapping to the user's primary, e.g. anilist:N for an
@@ -1153,6 +1165,10 @@ namespace AnimeList.Controllers
                 // not tracked → add) on top of Trakt's vocabulary.
                 if (request.Type == "movie" || request.Type == "series")
                     return await ToggleTraktWatchingAsync(tokenData, request);
+
+                // Trakt primary: toggle Watching through the linked AniList (then
+                // MAL/Kitsu) token; fan-out mirrors to the rest.
+                tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
 
                 // Same linked-secondary override path the modal uses: an anime with
                 // no mapping to the user's primary but present on a linked provider
@@ -1338,32 +1354,6 @@ namespace AnimeList.Controllers
                 return new JsonResult(new { success = false, error = "no-uid" });
 
             var ok = await ApplyTraktVideoSaveAsync(uid, request);
-
-            // When the imdb id is a known anime (Trakt-primary anime tracking),
-            // mirror the change to the user's linked anime providers — combining
-            // Trakt with AniList/MAL/Kitsu the same way an anime-primary save
-            // fans out. Best-effort + anime-only: genuine movies/series have no
-            // anime mapping, so this no-ops for them.
-            if (ok && !string.IsNullOrEmpty(request.Id))
-            {
-                try
-                {
-                    var mapping = await _mappingService.GetImdbMapping(request.Id);
-                    if (mapping is { Count: > 0 })
-                    {
-                        if (string.IsNullOrEmpty(request.Status))
-                            await _syncService.FanOutDeleteAsync(tokenData, request.Id, request.Season);
-                        else
-                            await _syncService.FanOutSaveAsync(tokenData, request.Id, request.Season,
-                                request.Progress, request.Status, request.Score, null, null, null, null);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Trakt anime fan-out to linked providers failed for {Id}.", request.Id);
-                }
-            }
-
             return new JsonResult(new { success = ok, error = ok ? null : "trakt-not-connected" });
         }
 
