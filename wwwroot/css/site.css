@@ -5462,7 +5462,7 @@ a.stats-cell-link:hover {
     grid-area: number;
     /* Number is now the secondary line below the label, so it reads smaller
        than the (now headline) label above it. */
-    font-size: 0.9rem;
+    font-size: 1.05rem;
     font-weight: 600;
     color: var(--text-dim);
     line-height: 1.1;
@@ -5517,7 +5517,7 @@ a.stats-cell-link:hover {
     user-select: none;
     border-radius: 5px;
     min-width: 3rem;
-    height: 0.9rem;
+    height: 1.05rem;
     background-color: var(--overlay-05);
     background-image: linear-gradient(
         90deg,
@@ -5667,16 +5667,16 @@ a.stats-cell-link:hover {
         row-gap: 0.15rem;
     }
     .stats-number {
-        font-size: 0.62rem;
+        font-size: 0.72rem;
         font-weight: 600;
     }
     .stats-label {
-        font-size: 0.72rem;
+        font-size: 0.78rem;
         letter-spacing: 0;
     }
     [data-stats-loading] .stats-number {
         min-width: 1.8rem;
-        height: 0.62rem;
+        height: 0.72rem;
     }
 }
 
