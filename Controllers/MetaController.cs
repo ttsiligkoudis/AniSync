@@ -1042,9 +1042,14 @@ namespace AnimeList.Controllers
 
                 // Trakt primary: write the selected cour through the linked
                 // AniList (then MAL/Kitsu) token; the fan-out below then mirrors
-                // it to the remaining linked anime providers. Browsing stays on
-                // Trakt/IMDb — only this per-entry write re-points.
+                // it to the remaining linked anime providers, and pushToTrakt
+                // below also pushes the franchise back to Trakt itself. Browsing
+                // stays on Trakt/IMDb — only this per-entry write re-points. (The
+                // no-linked case never reaches here: the detail page stamps the
+                // media type so the Trakt video branch above handles it.)
+                var traktPrimaryToken = tokenData.anime_service == AnimeService.Trakt ? tokenData : null;
                 tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
+                var pushToTrakt = traktPrimaryToken != null && tokenData.anime_service != AnimeService.Trakt;
 
                 // service: <int> override — the modal sends it when the entry
                 // was loaded through a linked-secondary token (anime had no
@@ -1079,6 +1084,7 @@ namespace AnimeList.Controllers
                         await _syncService.FanOutDeleteAsync(tokenData, request.Id, request.Season);
                         _listCache.Invalidate(tokenData);
                     }
+                    if (pushToTrakt) await PushAnimeToTraktAsync(traktPrimaryToken, request.Id, null, 0, null);
                     return new JsonResult(new { success = true });
                 }
 
@@ -1110,6 +1116,10 @@ namespace AnimeList.Controllers
 
                     _listCache.Invalidate(tokenData);
                 }
+                // Push the franchise to Trakt too (the primary) — map the saved
+                // cour to its imdb id and write it via the Trakt video path.
+                if (pushToTrakt)
+                    await PushAnimeToTraktAsync(traktPrimaryToken, request.Id, request.Status, request.Progress, request.Score);
                 // success = true even when a linked secondary failed — the primary save
                 // landed, which is what the user really cares about. `failedProviders`
                 // surfaces the partial-failure so the modal toast can say "Saved on AniList,
@@ -1167,8 +1177,12 @@ namespace AnimeList.Controllers
                     return await ToggleTraktWatchingAsync(tokenData, request);
 
                 // Trakt primary: toggle Watching through the linked AniList (then
-                // MAL/Kitsu) token; fan-out mirrors to the rest.
+                // MAL/Kitsu) token; fan-out mirrors to the rest, and pushToTrakt
+                // mirrors the change back to Trakt itself. (The no-linked case
+                // sends a media type and is handled by the Trakt branch above.)
+                var traktPrimaryToken = tokenData.anime_service == AnimeService.Trakt ? tokenData : null;
                 tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
+                var pushToTrakt = traktPrimaryToken != null && tokenData.anime_service != AnimeService.Trakt;
 
                 // Same linked-secondary override path the modal uses: an anime with
                 // no mapping to the user's primary but present on a linked provider
@@ -1219,6 +1233,7 @@ namespace AnimeList.Controllers
                         await _syncService.FanOutDeleteAsync(tokenData, selectedEntryId, null);
                         _listCache.Invalidate(tokenData);
                     }
+                    if (pushToTrakt) await PushAnimeToTraktAsync(traktPrimaryToken, selectedEntryId, null, 0, null);
                     return new JsonResult(new { success = true, watching = false });
                 }
 
@@ -1248,6 +1263,7 @@ namespace AnimeList.Controllers
                         watchingStatus, null, null, null, null, null);
                     _listCache.Invalidate(tokenData);
                 }
+                if (pushToTrakt) await PushAnimeToTraktAsync(traktPrimaryToken, selectedEntryId, "watching", progress, null);
                 return new JsonResult(new { success = true, watching = true });
             }
             catch (Exception ex)
@@ -1395,6 +1411,66 @@ namespace AnimeList.Controllers
 
             return await _traktService.SaveVideoEntryAsync(uid, request.Type, request.Id, status, episodes, rating, inProgress);
         }
+
+        /// <summary>
+        /// Pushes a just-saved anime cour up to the user's Trakt primary so the
+        /// franchise is tracked there too — alongside the per-cour write to the
+        /// linked anime providers. Maps the cour id to its imdb id, derives the
+        /// movie/series type, translates the status into Trakt's vocabulary, and
+        /// writes via the Trakt video path. Best-effort: an unmappable id or a
+        /// Trakt hiccup is logged and swallowed so the linked save still wins.
+        /// An empty status removes the entry from Trakt.
+        /// </summary>
+        private async Task PushAnimeToTraktAsync(TokenData traktToken, string courId, string status, int progress, double? score)
+        {
+            try
+            {
+                var (uid, _) = await _configStore.FindUidByIdentityAsync(traktToken);
+                if (string.IsNullOrEmpty(uid) || string.IsNullOrEmpty(courId)) return;
+
+                var imdb = (await _mappingService.BuildSourceLinksAsync(courId))?.ImdbId;
+                if (string.IsNullOrEmpty(imdb)) return;
+
+                var type = await DeriveImdbVideoTypeAsync(imdb);
+                await ApplyTraktVideoSaveAsync(uid, new SaveEntryRequest
+                {
+                    Id = imdb,
+                    Type = type,
+                    Status = MapToTraktStatus(status),
+                    Progress = progress,
+                    Score = score,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Trakt anime push failed for cour {Id}.", courId);
+            }
+        }
+
+        // movie vs series for an imdb id, via Cinemeta (cached). Defaults to
+        // series — most anime are, and it's the only branch that marks episodes.
+        private async Task<string> DeriveImdbVideoTypeAsync(string imdbId)
+        {
+            try
+            {
+                var s = await _cinemeta.GetVideoMetaAsync("series", imdbId);
+                return (s?.videos?.Count ?? 0) > 0 ? "series" : "movie";
+            }
+            catch { return "series"; }
+        }
+
+        // Anime-provider status → Trakt's video status vocabulary. Empty/unknown
+        // maps to "" (remove from list / not tracked).
+        private static string MapToTraktStatus(string status) => NormalizeListStatus(status) switch
+        {
+            "watching" => "watching",
+            "completed" => "completed",
+            "planning" => "planning",
+            "paused" => "onhold",
+            "dropped" => "dropped",
+            "rewatching" => "rewatching",
+            _ => string.Empty,
+        };
 
         /// <summary>
         /// Resolves a service-override int (the integer value of
