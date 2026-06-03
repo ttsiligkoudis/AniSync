@@ -5543,6 +5543,16 @@ a.stats-cell-link:hover {
     animation: skeleton-shimmer 1.4s linear infinite;
 }
 
+/* While the shimmer is up, reveal the Mean / Hours cells that sit [hidden]
+   until their value proves non-zero, so the loading skeleton shows the SAME
+   cells (and titles) as the loaded card — no extra cell / title popping in
+   when the numbers land. Beats the global [hidden] !important gate via the
+   extra ancestor; once the JS clears data-stats-loading, any still-zero cell
+   collapses back to hidden. */
+[data-stats-loading] .stats-cell[hidden] {
+    display: grid !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
     [data-stats-loading] .stats-number {
         animation: none;
