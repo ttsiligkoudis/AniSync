@@ -459,12 +459,22 @@ namespace AnimeList.Controllers
                     if (!enabled.Contains(vt)) continue;
                     var t = vt == MetaType.movie ? "movie" : "series";
                     var vids = await _cinemetaService.GetVideoCatalogAsync(t, search: title);
-                    foreach (var m in vids.OrderByDescending(m => ScoreMatch(normalised, m.name)).Take(limit))
+                    var added = 0;
+                    foreach (var m in vids.OrderByDescending(m => ScoreMatch(normalised, m.name)))
                     {
+                        if (added >= limit) break;
                         if (string.IsNullOrEmpty(m.id)) continue;
                         // Same title already covered by an anime hit → skip the dup.
                         if (animeImdbIds.Contains(m.id)) continue;
+                        // Anime is tracked on the AniList side, so keep it out of the
+                        // movie / series suggestions even when Cinemeta's catalog
+                        // indexes it (e.g. "Naruto" surfaces as IMDb movies / series).
+                        // Filter before the per-type cap so genuine non-anime hits
+                        // still fill the list. Catches the case where anime is not an
+                        // enabled type at all (no anime block ran to dedup against).
+                        if (await _mappingService.IsAnimeImdbAsync(m.id)) continue;
                         scored.Add((m.id, m.name, m.poster, t, ScoreMatch(normalised, m.name)));
+                        added++;
                     }
                 }
             }
