@@ -5385,8 +5385,8 @@ body.config-page main {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     grid-template-areas:
-        "icon number"
-        "label label";
+        "icon label"
+        "number number";
     align-items: center;
     column-gap: 0.55rem;
     row-gap: 0.1rem;
@@ -5460,9 +5460,11 @@ a.stats-cell-link:hover {
 
 .stats-number {
     grid-area: number;
-    font-size: 1.4rem;
-    font-weight: 700;
-    color: var(--text-strong);
+    /* Number is now the secondary line below the label, so it reads smaller
+       than the (now headline) label above it. */
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-dim);
     line-height: 1.1;
     white-space: nowrap;
 }
@@ -5514,8 +5516,8 @@ a.stats-cell-link:hover {
     color: transparent;
     user-select: none;
     border-radius: 5px;
-    min-width: 4.2rem;
-    height: 1.4rem;
+    min-width: 3rem;
+    height: 0.9rem;
     background-color: var(--overlay-05);
     background-image: linear-gradient(
         90deg,
@@ -5631,10 +5633,14 @@ a.stats-cell-link:hover {
 
 .stats-label {
     grid-area: label;
-    font-size: 0.72rem;
-    color: var(--text-dim);
+    /* Label is the headline of each cell now — larger and stronger than the
+       number sitting below it. */
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-strong);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.03em;
+    line-height: 1.15;
 }
 
 /* Phone: keep all 2-4 cells on a single row (no 2x2 wrap) and the icon +
@@ -5654,22 +5660,23 @@ a.stats-cell-link:hover {
         padding: 0.6rem 0.3rem;
         grid-template-columns: 1fr;
         grid-template-areas:
-            "number"
-            "label";
+            "label"
+            "number";
         justify-items: center;
         text-align: center;
         row-gap: 0.15rem;
     }
     .stats-number {
-        font-size: 1.05rem;
+        font-size: 0.62rem;
+        font-weight: 600;
     }
     .stats-label {
-        font-size: 0.62rem;
-        letter-spacing: 0.01em;
+        font-size: 0.72rem;
+        letter-spacing: 0;
     }
     [data-stats-loading] .stats-number {
-        min-width: 2.2rem;
-        height: 1.05rem;
+        min-width: 1.8rem;
+        height: 0.62rem;
     }
 }
 
