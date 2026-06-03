@@ -84,13 +84,20 @@ namespace AnimeList.Controllers
             // existing "anonymousUser → no uid" branching for us.
             var (tokenData, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
-            // Trakt primary: the per-entry hero state + Manage Entry run on the
-            // linked AniList (then MAL/Kitsu) token so the modal keeps its
-            // per-cour Season dropdown and edits sync to those providers. The
-            // meta load below is id-prefix-driven, so it still renders the same
-            // IMDb-grouped anime regardless of which token this is. No-op for
-            // anime primaries / the anonymous fallback.
-            tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
+            // Trakt primary handling:
+            //   - WITH a linked anime provider → per-entry ops (hero state +
+            //     Manage Entry) run on the linked AniList (then MAL/Kitsu) token,
+            //     so the modal keeps its per-cour Season dropdown and edits sync
+            //     to those providers (+ Trakt, pushed by the save).
+            //   - WITHOUT any linked anime provider → there's no per-cour tracker,
+            //     so the entry runs straight through Trakt (the modal drops the
+            //     dropdown). Flagged via traktAnimeType for the view.
+            // Either way the meta load below is id-prefix-driven, so it renders
+            // the same IMDb-grouped anime. No-op for anime primaries.
+            var traktPrimary = tokenData.anime_service == AnimeService.Trakt;
+            var animeToken = await _configStore.ResolveAnimeTokenAsync(tokenData);
+            var hasLinkedAnime = traktPrimary && animeToken.anime_service != AnimeService.Trakt;
+            if (hasLinkedAnime) tokenData = animeToken;
             var animeService = tokenData.anime_service;
 
             // 18+ gate gets its toggle from the user's config; null for
@@ -132,7 +139,48 @@ namespace AnimeList.Controllers
             EntryViewState entry = null;
             AnimeService? entryServiceOverride = null;
             var entryUnavailable = false;
-            if (!tokenData.anonymousUser && !isMultiSeasonGroup)
+            string traktAnimeType = null;
+            var traktConnected = false;
+            if (traktPrimary && !hasLinkedAnime && !string.IsNullOrEmpty(uid))
+            {
+                // Trakt-only (no linked anime provider): the anime is tracked
+                // straight on Trakt as an imdb-keyed entry. Read it from Trakt
+                // and flag the media type so the hero pill + Manage Entry / heart
+                // route through the Trakt video path (no per-cour dropdown).
+                try
+                {
+                    var imdbId = !string.IsNullOrEmpty(anime.id) && anime.id.StartsWith(imdbPrefix, StringComparison.Ordinal)
+                        ? anime.id
+                        : sourceLinks.ImdbId;
+                    if (!string.IsNullOrEmpty(imdbId))
+                    {
+                        traktAnimeType = anime.type == MetaType.movie.ToString() ? "movie" : "series";
+                        var traktTok = await _configStore.GetTraktTokenAsync(uid);
+                        traktConnected = traktTok?.Connected == true;
+                        if (traktConnected)
+                        {
+                            var v = await _traktService.GetVideoEntryAsync(uid, traktAnimeType, imdbId);
+                            int? total = traktAnimeType == "series" ? anime.videos?.Count : 1;
+                            var (tStatus, tProgress) = DeriveTraktVideoStatus(traktAnimeType, v, total);
+                            if (!string.IsNullOrEmpty(tStatus))
+                            {
+                                entry = new EntryViewState
+                                {
+                                    Status = tStatus,
+                                    Progress = tProgress,
+                                    TotalEpisodes = total > 0 ? total : null,
+                                    UserScore = v.Rating,
+                                };
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "AnimeDetail: Trakt-only entry fetch failed for {Id}.", anime.id);
+                }
+            }
+            else if (!tokenData.anonymousUser && !isMultiSeasonGroup)
             {
                 // Fetch the user's entry against the resolved per-service id so
                 // the hero can surface "You're watching · Ep 5/12 · Your score:
@@ -263,6 +311,8 @@ namespace AnimeList.Controllers
                 DeferredSupplementaryLinks = deferredSupplementaryLinks,
                 IsMultiSeasonGroup = isMultiSeasonGroup,
                 IsHidden = isHidden,
+                TraktConnected = traktConnected,
+                TraktAnimeType = traktAnimeType,
             });
         }
 
@@ -1778,6 +1828,13 @@ namespace AnimeList.Controllers
         // catalogs. Drives the Hide / Unhide button's label + pressed state.
         // Always false for anonymous viewers (no per-user hidden list).
         public bool IsHidden { get; set; }
+
+        // Set only for a Trakt-primary user with NO linked anime provider: the
+        // media type ("movie"/"series") to stamp on the Manage Entry / heart
+        // triggers so they route through the Trakt video path (the anime is
+        // tracked straight on Trakt, no per-cour dropdown). With a linked anime
+        // provider this stays null — those use the normal per-cour anime path.
+        public string TraktAnimeType { get; set; }
     }
 
     /// <summary>
