@@ -1,0 +1,14 @@
+@inherits LayoutComponentBase
+
+@*
+    Shared chrome for every page, ported from the MVC _Layout.cshtml so it
+    reuses the same site.css classes (site-header / container / bottom-nav) and
+    therefore looks identical across the MAUI and Web heads.
+*@
+<AppHeader />
+
+<main role="main">
+    @Body
+</main>
+
+<BottomNav />

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!--
+    Shared Razor Class Library — the actual AniSync client UI.
+    Referenced by BOTH heads of the .NET 9 "MAUI Blazor Hybrid and Web App"
+    solution (AniSync.Maui and AniSync.Web), so every page/component/service
+    is written once and runs on Android / Windows / iOS / macOS AND the web.
+
+    Host-specific concerns (the video player, the API base address, secure
+    token storage) are injected per-head behind the interfaces in Services/,
+    so this library stays platform-agnostic.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AddRazorSupportForMvc>false</AddRazorSupportForMvc>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="9.0.0" />
+  </ItemGroup>
+
+</Project>

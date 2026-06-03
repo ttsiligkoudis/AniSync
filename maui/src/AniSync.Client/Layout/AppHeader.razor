@@ -1,0 +1,21 @@
+@* Top site header — mirrors _Layout.cshtml's .site-header structure so the
+   shared site.css styles it identically. Nav links are bare <a> styled by
+   `.site-header-nav a` (NavLink stamps `active` automatically when matched).
+   The global search box is a Blazor port of site-search.js. *@
+<header class="site-header">
+    <div class="container site-header-inner">
+        <a class="site-logo" href="/" aria-label="AniSync home">
+            <img src="_content/AniSync.Client/img/logo.png" alt="AniSync" width="1024" height="1024" />
+        </a>
+
+        <nav class="site-header-nav" aria-label="Primary">
+            <NavLink href="/" Match="NavLinkMatch.All"><span class="nav-label">Home</span></NavLink>
+            <NavLink href="/library"><span class="nav-label">Library</span></NavLink>
+            <NavLink href="/discover"><span class="nav-label">Discover</span></NavLink>
+            <NavLink href="/calendar"><span class="nav-label">Calendar</span></NavLink>
+            <NavLink href="/settings"><span class="nav-label">Settings</span></NavLink>
+        </nav>
+
+        <SearchBox />
+    </div>
+</header>

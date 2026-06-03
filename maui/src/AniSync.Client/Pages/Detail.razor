@@ -1,0 +1,9 @@
+@page "/detail/{Id}"
+<PageTitle>Details · AniSync</PageTitle>
+<section class="container">
+    <h1 class="dashboard-section-title">Details</h1>
+    <p class="hint-text">Detail + watch (LibVLCSharp player) land in the playback milestone. Id: <code>@Id</code></p>
+</section>
+@code {
+    [Parameter] public string Id { get; set; } = "";
+}

@@ -1,0 +1,130 @@
+@inject IAniSyncApi Api
+@inject NavigationManager Nav
+@implements IDisposable
+
+@*
+    Global search typeahead — Blazor port of wwwroot/js/site-search.js. Same
+    .site-search-* markup/classes as the web app (so the enlarged posters and
+    broken-image placeholder styling carry over), but the debounce, fetch and
+    render are C# instead of vanilla JS.
+*@
+<div class="site-search" role="combobox" aria-expanded="@(_open ? "true" : "false")">
+    <div class="site-search-input-wrap">
+        <input class="site-search-input"
+               type="search"
+               placeholder="Search…"
+               autocomplete="off"
+               @bind-value="_query"
+               @bind-value:event="oninput"
+               @oninput="OnInput" />
+    </div>
+
+    @if (_open)
+    {
+        <div class="site-search-results" role="listbox">
+            @if (_loading)
+            {
+                <div class="site-search-status">Searching…</div>
+            }
+            else if (_results.Count == 0)
+            {
+                <div class="site-search-status">No matches</div>
+            }
+            else
+            {
+                @foreach (var m in _results)
+                {
+                    <a class="site-search-result" role="option" href="@HrefFor(m)">
+                        @if (!string.IsNullOrEmpty(m.Poster) && !_broken.Contains(m.Id))
+                        {
+                            <img class="site-search-result-poster"
+                                 src="@m.Poster" alt="" loading="lazy"
+                                 @onerror="@(() => MarkBroken(m.Id))" />
+                        }
+                        else
+                        {
+                            <div class="site-search-result-poster site-search-result-poster-placeholder" aria-hidden="true"></div>
+                        }
+                        <span class="site-search-result-name">@m.Name</span>
+                        @if (string.Equals(m.Type, "movie", StringComparison.OrdinalIgnoreCase))
+                        {
+                            <span class="site-search-result-type site-search-result-type-movie">Movie</span>
+                        }
+                        else
+                        {
+                            <span class="site-search-result-type site-search-result-type-tv">TV</span>
+                        }
+                    </a>
+                }
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private const int MinChars = 3;
+    private const int DebounceMs = 250;
+    private const int Limit = 8;
+
+    private string _query = "";
+    private bool _open;
+    private bool _loading;
+    private List<SuggestMatch> _results = new();
+    private readonly HashSet<string> _broken = new(StringComparer.OrdinalIgnoreCase);
+    private CancellationTokenSource? _cts;
+
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        _query = e.Value?.ToString() ?? "";
+        // Cancel the in-flight request/debounce so a slower response can't
+        // overwrite a fresher query (mirrors site-search.js's AbortController).
+        _cts?.Cancel();
+        if (_query.Trim().Length < MinChars)
+        {
+            _open = false;
+            _results = new();
+            return;
+        }
+
+        _cts = new CancellationTokenSource();
+        var token = _cts.Token;
+        _open = true;
+        _loading = true;
+        try
+        {
+            await Task.Delay(DebounceMs, token);
+            var matches = await Api.SuggestAsync(_query.Trim(), Limit, token);
+            if (token.IsCancellationRequested) return;
+            _results = matches.ToList();
+            _broken.Clear();
+        }
+        catch (OperationCanceledException) { return; }
+        finally
+        {
+            if (!token.IsCancellationRequested)
+            {
+                _loading = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private void MarkBroken(string id)
+    {
+        _broken.Add(id);
+        StateHasChanged();
+    }
+
+    // Anime results carry a service prefix (anilist:/mal:/kitsu:) and link to the
+    // anime detail route; video results are IMDb ids and append ?type=.
+    private static string HrefFor(SuggestMatch m)
+    {
+        var isVideo = string.Equals(m.Type, "movie", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(m.Type, "series", StringComparison.OrdinalIgnoreCase);
+        return isVideo
+            ? $"/detail/{Uri.EscapeDataString(m.Id)}?type={m.Type}"
+            : $"/detail/{Uri.EscapeDataString(m.Id)}";
+    }
+
+    public void Dispose() => _cts?.Cancel();
+}

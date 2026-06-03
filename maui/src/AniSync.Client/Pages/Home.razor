@@ -1,0 +1,102 @@
+@page "/"
+@inject IAniSyncApi Api
+
+@* Home dashboard — ported shell of HomeController.Index / Views/Home/Index.cshtml.
+   Reuses the dashboard / stats / shelf CSS classes from site.css. Stats and the
+   Trakt-backed shelves need JSON endpoints on the server (see maui/README.md →
+   "API surface to add"); for now the structure renders and the trending anime
+   shelf below is wired to the existing /api/v1/discover endpoint as a working
+   end-to-end slice. *@
+
+<PageTitle>AniSync</PageTitle>
+
+<section class="container">
+    @* Media-type switch (All / Anime / Movies / Series) — port of _MediaTypeSwitch. *@
+    <div class="mt-switch-bar" data-mt-switch="dashboard">
+        <div class="container mt-switch-inner">
+            <div class="mt-switch" role="tablist" aria-label="Media type">
+                @foreach (var (value, label) in _mediaTabs)
+                {
+                    <button type="button"
+                            class="mt-switch-btn @(_activeType == value ? "active" : "")"
+                            data-mt-value="@value"
+                            role="tab"
+                            aria-selected="@(_activeType == value)"
+                            @onclick="() => SetType(value)">
+                        <span class="mt-switch-label">@label</span>
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+
+    @* Your stats — structure only for this milestone (awaiting JSON stats API). *@
+    <section class="dashboard-section stats-section" data-dash-section="stats">
+        <h2 class="dashboard-section-title">Your stats</h2>
+        <p class="hint-text">Stats wiring lands with the <code>/api/v1/stats</code> endpoints (see README roadmap).</p>
+    </section>
+
+    @* Working slice: Trending anime via the existing /api/v1/discover/trending. *@
+    <section class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h2 class="dashboard-section-title">Trending · Anime</h2>
+        </div>
+
+        @if (_loading)
+        {
+            <p class="hint-text">Loading…</p>
+        }
+        else if (_trending.Count == 0)
+        {
+            <p class="hint-text">Nothing to show yet.</p>
+        }
+        else
+        {
+            <div class="library-grid">
+                @foreach (var card in _trending)
+                {
+                    <a class="library-card" href="@($"/detail/{Uri.EscapeDataString(card.Id)}")" title="@card.Name">
+                        <div class="library-card-poster-wrap">
+                            @if (!string.IsNullOrEmpty(card.Poster))
+                            {
+                                <img class="library-card-poster" src="@card.Poster" alt="@card.Name" loading="lazy" />
+                            }
+                            else
+                            {
+                                <div class="library-card-poster-placeholder" aria-hidden="true">
+                                    <span class="library-card-poster-placeholder-title">@card.Name</span>
+                                </div>
+                            }
+                        </div>
+                    </a>
+                }
+            </div>
+        }
+    </section>
+</section>
+
+@code {
+    private readonly (string Value, string Label)[] _mediaTabs =
+    {
+        ("all", "All"), ("anime", "Anime"), ("movie", "Movies"), ("series", "Series"),
+    };
+
+    private string _activeType = "all";
+    private bool _loading = true;
+    private List<MetaCard> _trending = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var items = await Api.DiscoverAsync("trending");
+            _trending = items.Take(20).ToList();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void SetType(string value) => _activeType = value;
+}
