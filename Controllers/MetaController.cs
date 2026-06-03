@@ -1445,16 +1445,8 @@ namespace AnimeList.Controllers
 
                 if (type == "series" && (traktStatus == "watching" || traktStatus == "completed"))
                 {
-                    // Use Trakt's OWN episode list to build the coordinates we
-                    // write back to Trakt — its season/episode numbering is the
-                    // authority for the scrobble. (Cinemeta is only the episode
-                    // source for rendering; deriving Trakt writes from it risks a
-                    // numbering mismatch.) Falls back to Cinemeta if Trakt has no
-                    // episode list for this id.
-                    var traktEps = await _traktService.GetEpisodesAsync(imdb);
-                    if (traktEps == null || traktEps.Count == 0)
-                        traktEps = (await _cinemeta.GetVideoMetaAsync("series", imdb))?.videos ?? new List<Video>();
-                    var ordered = traktEps
+                    var meta = await _cinemeta.GetVideoMetaAsync("series", imdb);
+                    var ordered = (meta?.videos ?? new List<Video>())
                         .OrderBy(v => v.season > 0 ? v.season : 1)
                         .ThenBy(v => v.episode)
                         .Select(v => (Season: v.season > 0 ? v.season : 1, Episode: v.episode))
