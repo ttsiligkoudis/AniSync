@@ -26,6 +26,7 @@ namespace AnimeList.Controllers
         private readonly ITmdbService _tmdb;
         private readonly IConfigStore _configStore;
         private readonly IHiddenEntryStore _hiddenStore;
+        private readonly IAnimeMappingService _mappingService;
 
         public DiscoverController(
             ITokenService tokenService,
@@ -37,7 +38,8 @@ namespace AnimeList.Controllers
             ITraktService trakt,
             ITmdbService tmdb,
             IConfigStore configStore,
-            IHiddenEntryStore hiddenStore)
+            IHiddenEntryStore hiddenStore,
+            IAnimeMappingService mappingService)
         {
             _tokenService = tokenService;
             _anilistService = anilistService;
@@ -49,6 +51,7 @@ namespace AnimeList.Controllers
             _tmdb = tmdb;
             _configStore = configStore;
             _hiddenStore = hiddenStore;
+            _mappingService = mappingService;
         }
 
         // Hand-curated video genre picker (intersection of Cinemeta's movie / series
@@ -358,6 +361,9 @@ namespace AnimeList.Controllers
             // same as the anime catalog. Mostly affects search here — the popular
             // browse hands page 1 to the paginator (VideoPage), which filters too.
             items = await StripHiddenAsync(uid, items);
+            // Keep anime out of the video search results — it's tracked on the
+            // AniList side and surfaces through the anime catalog/search instead.
+            items = await items.ExcludeAnimeAsync(_mappingService);
 
             return View("/Views/Video/Index.cshtml", new VideoBrowseViewModel
             {
@@ -1022,6 +1028,9 @@ namespace AnimeList.Controllers
             // Drop hidden + (pref-gated) completed entries so a hidden movie/series
             // stays gone across the video browse + its infinite-scroll appends.
             items = await StripHiddenAsync(uid, items);
+            // Anime is tracked on the AniList side — exclude it from the Trakt /
+            // Cinemeta movie & series listings (trending / popular / genre browse).
+            items = await items.ExcludeAnimeAsync(_mappingService);
 
             return PartialView("_PosterGrid", new PosterGridViewModel
             {

@@ -12,6 +12,17 @@ namespace AnimeList.Services.Interfaces
         Task<AnimeIdMapping> GetKitsuMapping(string kitsuId);
         Task<AnimeIdMapping> GetMalMapping(string malId);
         Task<List<AnimeIdMapping>> GetImdbMapping(string imdb, int? season = null);
+
+        /// <summary>
+        /// True when the given IMDb id resolves to a known anime in the
+        /// cross-service mapping. Used to EXCLUDE anime from the Trakt /
+        /// Cinemeta video surfaces (library, browse, search), since anime is
+        /// tracked on the AniList side. A null / empty / unmapped id is not
+        /// anime. Convenience over <see cref="GetImdbMapping"/> for callers
+        /// that only need the yes/no.
+        /// </summary>
+        Task<bool> IsAnimeImdbAsync(string imdb);
+
         Task<List<AnimeIdMapping>> GetTmdbMapping(string tmdbId, int? season = null);
         Task<string> GetIdByService(string animeId, AnimeService service, int? season = null);
 

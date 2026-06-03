@@ -164,6 +164,16 @@ namespace AnimeList.Services
                 .ToList();
         }
 
+        public async Task<bool> IsAnimeImdbAsync(string imdb)
+        {
+            if (string.IsNullOrEmpty(imdb)) return false;
+            await EnsureMappingsLoadedAsync();
+            // A present imdb key in the anime mapping table ⇒ this title is a
+            // known anime. Direct dictionary probe (no allocation / enrichment)
+            // since we only need the yes/no, not the mapping rows.
+            return _imdbMapping.ContainsKey(imdb);
+        }
+
         public async Task<List<AnimeIdMapping>> GetTmdbMapping(string tmdbId, int? season = null)
         {
             await EnsureMappingsLoadedAsync();
