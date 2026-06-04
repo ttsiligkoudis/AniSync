@@ -1,0 +1,502 @@
+using AnimeList.Services.Interfaces;
+using Microsoft.Extensions.Caching.Memory;
+using System.Text;
+using System.Text.RegularExpressions;
+
+namespace AnimeList.Services
+{
+    /// <summary>
+    /// Talks to the opensubtitles-v3 Stremio addon at
+    /// <c>https://opensubtitles-v3.strem.io</c> — the default subtitle
+    /// addon Stremio installs ship with. URL shape:
+    /// <c>/subtitles/{type}/{stremioId}.json</c>; response payload is
+    /// <c>{ subtitles: [{ id, url, lang }] }</c> per the Stremio addon
+    /// spec. Subtitle URLs come back pointing at the upstream
+    /// providers (opensubtitles.com / .org / .stream); we proxy each
+    /// fetch through /anime/subtitle to keep the &lt;track&gt; load
+    /// same-origin and to convert SRT to WebVTT inline.
+    /// </summary>
+    public class OpenSubtitlesService : ISubtitleService
+    {
+        private readonly IHttpClientFactory _clientFactory;
+        private readonly IMemoryCache _cache;
+        private readonly ILogger<OpenSubtitlesService> _logger;
+
+        private const string AddonBase = "https://opensubtitles-v3.strem.io";
+        private static readonly TimeSpan ListCacheTtl = TimeSpan.FromHours(2);
+
+        // Common language pool surfaced first in the player's captions
+        // menu. The addon returns ISO-639-2/B codes (eng, spa, fre …);
+        // the first match per language wins, with everything else
+        // appended after for completionism.
+        private static readonly string[] PreferredLanguages =
+        [
+            "eng", "spa", "por", "fre", "ger", "ita", "rus", "ara", "jpn",
+        ];
+
+        // Pretty-print labels for the language picker. ISO-639-2/B
+        // codes are unfriendly in a UI; falls back to upper-casing the
+        // raw code when we don't have a mapping (anime occasionally
+        // gets exotic language entries from the addon).
+        private static readonly Dictionary<string, string> LanguageLabels =
+            new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["eng"] = "English",
+            ["spa"] = "Spanish",
+            ["por"] = "Portuguese",
+            ["fre"] = "French",
+            ["fra"] = "French",
+            ["ger"] = "German",
+            ["deu"] = "German",
+            ["ita"] = "Italian",
+            ["rus"] = "Russian",
+            ["ara"] = "Arabic",
+            ["jpn"] = "Japanese",
+            ["chi"] = "Chinese",
+            ["zho"] = "Chinese",
+            ["kor"] = "Korean",
+            ["tur"] = "Turkish",
+            ["pol"] = "Polish",
+            ["dut"] = "Dutch",
+            ["nld"] = "Dutch",
+            ["swe"] = "Swedish",
+            ["fin"] = "Finnish",
+            ["nor"] = "Norwegian",
+            ["dan"] = "Danish",
+            ["heb"] = "Hebrew",
+            ["hun"] = "Hungarian",
+            ["ces"] = "Czech",
+            ["cze"] = "Czech",
+            ["rum"] = "Romanian",
+            ["ron"] = "Romanian",
+            ["bul"] = "Bulgarian",
+            ["gre"] = "Greek",
+            ["ell"] = "Greek",
+            ["tha"] = "Thai",
+            ["vie"] = "Vietnamese",
+            ["ind"] = "Indonesian",
+            ["may"] = "Malay",
+            ["msa"] = "Malay",
+        };
+
+        public OpenSubtitlesService(
+            IHttpClientFactory clientFactory,
+            IMemoryCache cache,
+            ILogger<OpenSubtitlesService> logger)
+        {
+            _clientFactory = clientFactory;
+            _cache = cache;
+            _logger = logger;
+        }
+
+        public async Task<IReadOnlyList<SubtitleTrack>> SearchAsync(
+            string imdbId, int? season, int? episode, string filename = null, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(imdbId) || !imdbId.StartsWith("tt"))
+            {
+                return [];
+            }
+
+            // Filename narrows results to release-matched subs — same
+            // signal Stremio's web player passes. Normalise to a
+            // short, stable cache fingerprint so e.g. two slightly-
+            // different display titles of the same file don't churn
+            // cache entries (we lowercase and strip the extension).
+            var normalisedFilename = !string.IsNullOrWhiteSpace(filename)
+                ? filename.Trim().ToLowerInvariant()
+                : null;
+            var filenameKey = string.IsNullOrEmpty(normalisedFilename) ? "_" : normalisedFilename;
+            var cacheKey = $"opensubs:list:{imdbId}:{season ?? 0}:{episode ?? 0}:{filenameKey}";
+            if (_cache.TryGetValue<IReadOnlyList<SubtitleTrack>>(cacheKey, out var hit) && hit != null)
+            {
+                return hit;
+            }
+
+            // Stremio addon URL shape: /subtitles/{type}/{stremioId}.json
+            // - series → tt{imdb}:{s}:{e}
+            // - movie  → tt{imdb}
+            // When we know the source filename, append
+            // /filename={encoded}.json — the addon spec passes that
+            // through to OpenSubtitles for release-aware matching, so
+            // the timing of the returned subtitles actually lines up
+            // with the user's file (this is what fixes the "subs are
+            // off" symptom).
+            string streamioPath;
+            if (episode.HasValue && episode.Value > 0)
+            {
+                var s = season ?? 1;
+                streamioPath = $"series/{Uri.EscapeDataString($"{imdbId}:{s}:{episode.Value}")}";
+            }
+            else
+            {
+                streamioPath = $"movie/{Uri.EscapeDataString(imdbId)}";
+            }
+
+            var url = string.IsNullOrEmpty(normalisedFilename)
+                ? $"{AddonBase}/subtitles/{streamioPath}.json"
+                : $"{AddonBase}/subtitles/{streamioPath}/filename={Uri.EscapeDataString(normalisedFilename)}.json";
+
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(6));
+                var client = _clientFactory.CreateClient();
+                var raw = await client.GetStringAsync(url, cts.Token);
+                var parsed = ParseList(raw);
+                _cache.Set(cacheKey, parsed, new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = ListCacheTtl });
+                return parsed;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "OpenSubtitles addon search failed ({Imdb} s{S}e{E}).", imdbId, season, episode);
+                return [];
+            }
+        }
+
+        public async Task<string> FetchAsVttAsync(string url, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return null;
+            // Hard-cap to known subtitle providers so the proxy can't
+            // be turned into a generic SSRF tool. The addon mostly
+            // returns opensubtitles.* URLs, with a long tail to
+            // strem.io's own proxy and a handful of legacy CDNs.
+            if (!IsAllowedSubtitleHost(url))
+            {
+                _logger.LogWarning("Subtitle proxy refused host: {Host}", SafeHost(url));
+                return null;
+            }
+
+            // Cached VTT served from memory for the (long-ish) lifetime
+            // of the sub URL. Important for the external-launch flow:
+            // strem.io's subs5 endpoint is rate-limited per Fly IP and
+            // a second fetch for the same URL within a couple minutes
+            // tends to 502, even when the first one succeeded. Caching
+            // lets the watch page's in-browser player and the
+            // external-launch sidecar both come off one upstream
+            // round-trip. Cache key includes the full URL since
+            // OpenSubtitles' "subencoding-stremio-utf8" transform is
+            // path-bearing — different paths fetch different bytes.
+            var cacheKey = "subtitle-vtt:" + url;
+            if (_cache.TryGetValue<string>(cacheKey, out var cached) && !string.IsNullOrEmpty(cached))
+            {
+                return cached;
+            }
+
+            var fetchUrl = EnsureUtf8Transform(url);
+
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(8));
+                var client = _clientFactory.CreateClient();
+                var bytes = await client.GetByteArrayAsync(fetchUrl, cts.Token);
+                var text = DecodeText(bytes);
+                var vtt = text.TrimStart().StartsWith("WEBVTT", StringComparison.OrdinalIgnoreCase)
+                    ? text
+                    : SrtToVtt(text);
+                // VTT spec only supports <c>, <i>, <b>, <u>, <ruby>, <rt>,
+                // <v>, <lang>, plus class spans. <font ...> is a SubRip
+                // (SRT) leftover — many providers ship .vtt files with
+                // <font face="…" size="…"> wrappers anyway. ArtPlayer's
+                // renderer prints unknown tags as literal text instead of
+                // ignoring them, so the line "It's so far away" shows up
+                // as "&lt;font face=...&gt;It's so far away&lt;/font&gt;"
+                // on screen. Strip the opening + closing tags (preserve
+                // the inner text) before returning.
+                vtt = StripFontTags(vtt);
+                // ASS / SSA override blocks ({\an8}, {\fad(200,200)},
+                // {\pos(x,y)}, {\c&Hxxxxxx&}, …) leak through when an
+                // OpenSubtitles release re-packages an .ass track as
+                // .srt / .vtt without normalising the body — common
+                // for anime where the original sub author authored in
+                // ASS for typesetting / karaoke. Native VTT renderers
+                // have no concept of these tags, so they paint them as
+                // literal text on the cue. Same shape as the embedded-
+                // MKV converter's ASS_OVERRIDE_RE (Watch.cshtml) so a
+                // file routed through either path renders the same.
+                vtt = StripAssOverrides(vtt);
+                // Lift cues off the bottom edge so they don't collide
+                // with ArtPlayer's controls bar / sit flush against
+                // the video frame. Provider VTTs almost never set a
+                // line position, so they all render at line:auto
+                // (~bottom). Uses snap-to-lines integer mode (line:-3
+                // = third row from bottom) rather than percentages —
+                // Chromium browsers appear to ignore percentage line
+                // offsets for bottom-anchored default cues; the
+                // integer form is honoured uniformly. Cues that
+                // already declared a line stay untouched.
+                vtt = ApplyDefaultLineMargin(vtt);
+
+                // Cache the final VTT body keyed by upstream URL.
+                // 15-minute TTL covers a normal "open + watch + maybe
+                // re-open externally" session window; short enough
+                // that an actually-rotated URL doesn't get pinned to
+                // a stale response, long enough that the rate-limit
+                // window passes before the next cache miss.
+                _cache.Set(cacheKey, vtt, new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(15),
+                });
+                return vtt;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Subtitle fetch failed ({Url}).", SafeHost(url));
+                return null;
+            }
+        }
+
+        // Cap on how many entries we surface per language. The addon
+        // can return 10+ "English" variants for popular shows; menu
+        // sanity wins over completeness. Variant 1 is unlabelled
+        // ("English"), variants 2+ get a numeric suffix
+        // ("English 2", "English 3", …).
+        private const int MaxVariantsPerLanguage = 5;
+
+        /// <summary>
+        /// Parses the addon's <c>{ subtitles: [{ id, url, lang }] }</c>
+        /// response. Emits multiple entries per language so the user
+        /// can pick a different variant when the first one's timing /
+        /// translation is off. The addon returns variants in its own
+        /// quality order, so taking them in that order keeps the
+        /// best-guess pick first.
+        /// </summary>
+        private static IReadOnlyList<SubtitleTrack> ParseList(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return [];
+            dynamic root = DeserializeObject<dynamic>(json);
+            if (root?.subtitles == null) return [];
+
+            var entries = new List<(string Lang, string Url)>();
+            foreach (var s in root.subtitles)
+            {
+                var url = (string)s.url;
+                if (string.IsNullOrWhiteSpace(url)) continue;
+                var lang = ((string)s.lang ?? string.Empty).Trim().ToLowerInvariant();
+                if (string.IsNullOrEmpty(lang)) continue;
+                entries.Add((lang, url));
+            }
+
+            // Group by language preserving the addon's emit order
+            // within each group (so variant 1 stays the addon-ranked
+            // top hit).
+            var byLang = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var e in entries)
+            {
+                if (!byLang.TryGetValue(e.Lang, out var list))
+                {
+                    list = new List<string>();
+                    byLang[e.Lang] = list;
+                }
+                list.Add(e.Url);
+            }
+
+            var picked = new List<SubtitleTrack>();
+            var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void EmitGroup(string lang, List<string> urls)
+            {
+                var baseLabel = FriendlyLabel(lang);
+                var take = Math.Min(MaxVariantsPerLanguage, urls.Count);
+                for (var i = 0; i < take; i++)
+                {
+                    var label = i == 0 ? baseLabel : $"{baseLabel} {i + 1}";
+                    picked.Add(new SubtitleTrack(lang, label, ProxyUrl(urls[i]), "opensubtitles"));
+                }
+                emitted.Add(lang);
+            }
+
+            // Preferred languages first (English at the top, then
+            // Spanish / Portuguese / French / …), each with up to
+            // MaxVariantsPerLanguage entries.
+            foreach (var pref in PreferredLanguages)
+            {
+                if (byLang.TryGetValue(pref, out var urls))
+                {
+                    EmitGroup(pref, urls);
+                }
+            }
+            // Long tail: every language the addon returned that
+            // wasn't already emitted above.
+            foreach (var kv in byLang)
+            {
+                if (!emitted.Contains(kv.Key))
+                {
+                    EmitGroup(kv.Key, kv.Value);
+                }
+            }
+            return picked;
+        }
+
+        private static string FriendlyLabel(string lang)
+        {
+            if (LanguageLabels.TryGetValue(lang, out var pretty)) return pretty;
+            return lang.ToUpperInvariant();
+        }
+
+        private static string ProxyUrl(string upstreamUrl)
+        {
+            // Relative /meta/subtitle?url=... — same-origin as the
+            // host page so the <track> tag loads without needing a
+            // CORS opt-in on the player. The endpoint is id-agnostic.
+            var encoded = Uri.EscapeDataString(upstreamUrl);
+            return $"/meta/subtitle?url={encoded}";
+        }
+
+        private static bool IsAllowedSubtitleHost(string url)
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var u)) return false;
+            var host = u.Host.ToLowerInvariant();
+            // subs5.strem.io is the actual SRT-serving host the
+            // opensubtitles-v3 addon returns URLs for; the addon itself
+            // lives on opensubtitles-v3.strem.io. Both call through the
+            // strem.io suffix anyway, but listing the specific subs
+            // host first documents the chain explicitly.
+            //
+            // Domain match is `host == domain || host endswith "." + domain`
+            // rather than a bare suffix check — a bare `EndsWith("strem.io")`
+            // would also match an attacker-controlled `evilstrem.io`, which is
+            // exactly the substring trap a host allowlist must not fall into.
+            return host == "subs5.strem.io"
+                || MatchesDomain(host, "opensubtitles.org")
+                || MatchesDomain(host, "opensubtitles.com")
+                || MatchesDomain(host, "opensubtitles-v3.strem.io")
+                || MatchesDomain(host, "strem.io")
+                || MatchesDomain(host, "subdl.com");
+        }
+
+        private static bool MatchesDomain(string host, string domain) =>
+            host == domain || host.EndsWith("." + domain, StringComparison.Ordinal);
+
+        /// <summary>
+        /// Inserts subs5.strem.io's <c>subencoding-stremio-utf8</c>
+        /// transform into the path when it's missing. The transform
+        /// asks the server to re-encode the subtitle as UTF-8 inline,
+        /// avoiding the Latin-1 / Windows-1252 guess we'd otherwise
+        /// do client-side in DecodeText(). Stremio's player injects
+        /// this segment itself; our proxy mirrors that.
+        /// </summary>
+        private static string EnsureUtf8Transform(string url)
+        {
+            const string transform = "/subencoding-stremio-utf8/";
+            if (string.IsNullOrEmpty(url) || url.Contains(transform, StringComparison.Ordinal))
+            {
+                return url;
+            }
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var u)) return url;
+            // Scoped to subs5.strem.io — other providers (opensubtitles.com /
+            // .org / subdl) serve their own URL shapes and don't accept this
+            // transform.
+            if (!u.Host.Equals("subs5.strem.io", StringComparison.OrdinalIgnoreCase))
+            {
+                return url;
+            }
+            // Stremio's transform sits after /<lang>/download/ — for
+            // example /en/download/src-api/file/123 →
+            // /en/download/subencoding-stremio-utf8/src-api/file/123.
+            const string anchor = "/download/";
+            var idx = u.AbsolutePath.IndexOf(anchor, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return url;
+            var newPath = u.AbsolutePath.Insert(idx + anchor.Length, "subencoding-stremio-utf8/");
+            var builder = new UriBuilder(u) { Path = newPath };
+            return builder.Uri.ToString();
+        }
+
+        private static string SafeHost(string url)
+        {
+            return Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.Host : "<invalid>";
+        }
+
+        private static string DecodeText(byte[] bytes)
+        {
+            try
+            {
+                return Encoding.GetEncoding("utf-8", new EncoderExceptionFallback(), new DecoderExceptionFallback())
+                    .GetString(bytes);
+            }
+            catch
+            {
+                return Encoding.GetEncoding("ISO-8859-1").GetString(bytes);
+            }
+        }
+
+        // SRT → VTT differs mainly in a "WEBVTT" header line and
+        // timestamps using "." instead of "," as the millisecond
+        // separator. Cue text is copied verbatim. Lenient browsers
+        // accept raw SRT served as text/vtt but Firefox does not.
+        private static readonly Regex SrtTimestamp = new(
+            @"(\d{2}:\d{2}:\d{2}),(\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}),(\d{3})",
+            RegexOptions.Compiled);
+
+        private static string SrtToVtt(string srt)
+        {
+            var body = SrtTimestamp.Replace(srt, m =>
+                $"{m.Groups[1].Value}.{m.Groups[2].Value} --> {m.Groups[3].Value}.{m.Groups[4].Value}");
+            return "WEBVTT\n\n" + body.Replace("\r\n", "\n");
+        }
+
+        // Matches <font ...> / </font> in any case, with any attribute soup
+        // (including the unquoted `size=24` form some converters emit).
+        // Singleline so a stray newline inside the attribute list doesn't
+        // leave half the tag behind.
+        private static readonly Regex FontTag = new(
+            @"<\s*/?\s*font\b[^>]*>",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        private static string StripFontTags(string vtt) =>
+            string.IsNullOrEmpty(vtt) ? vtt : FontTag.Replace(vtt, string.Empty);
+
+        // ASS / SSA override block: "{" + at least one backslash-
+        // prefixed tag (\an8, \pos, \fad, \c&H…&, \b1, …) + "}". The
+        // negated char class on the body bounds the match non-greedy,
+        // so two adjacent overrides on the same line ("{\an8}{\fad
+        // (200,200)}Lyrics…") strip independently instead of swallowing
+        // the text between them. Requiring the backslash leaves
+        // legitimate dialogue like "He muttered {something}" untouched
+        // — ASS overrides are the only case in this corpus where
+        // braces are syntax rather than text.
+        private static readonly Regex AssOverride = new(
+            @"\{\\[^}]*\}",
+            RegexOptions.Compiled);
+
+        private static string StripAssOverrides(string vtt) =>
+            string.IsNullOrEmpty(vtt) ? vtt : AssOverride.Replace(vtt, string.Empty);
+
+        // Cue-header lines look like "00:00:01.500 --> 00:00:04.000"
+        // optionally followed by space-separated cue settings. WebVTT
+        // also allows the short form "MM:SS.mmm --> MM:SS.mmm" when no
+        // timestamp crosses an hour — many OpenSubtitles tracks use
+        // that form for short episodes, so the hours half is optional.
+        // Captures any existing settings tail so we can decide whether
+        // to append our default.
+        private static readonly Regex CueHeader = new(
+            @"^((?:\d{2}:)?\d{2}:\d{2}\.\d{3}\s+-->\s+(?:\d{2}:)?\d{2}:\d{2}\.\d{3})([^\r\n]*)$",
+            RegexOptions.Compiled | RegexOptions.Multiline);
+
+        /// <summary>
+        /// Appends <c>line:-2</c> (snap-to-lines, second row from
+        /// bottom) to every VTT cue header that doesn't already carry
+        /// a <c>line:</c> setting. Lifts the cue's bottom edge one
+        /// text-line height up from the video's bottom edge — small
+        /// breathing room so dialogue doesn't sit flush against the
+        /// player frame / ArtPlayer controls bar. Uses the integer
+        /// snap-to-lines mode rather than a percentage because
+        /// Chromium browsers appear to ignore percentage line offsets
+        /// for bottom-anchored default cues — the integer form is
+        /// honoured uniformly across browsers. Cues that did set a
+        /// line (sign translations, song-lyric overlays) stay
+        /// untouched.
+        /// </summary>
+        private static string ApplyDefaultLineMargin(string vtt)
+        {
+            if (string.IsNullOrEmpty(vtt)) return vtt;
+            return CueHeader.Replace(vtt, m =>
+            {
+                var settings = m.Groups[2].Value;
+                // Already positioned by the source — leave it alone.
+                if (settings.IndexOf("line:", StringComparison.Ordinal) >= 0) return m.Value;
+                return m.Groups[1].Value + settings + " line:-2";
+            });
+        }
+    }
+}
