@@ -7,32 +7,37 @@
 <PageTitle>@Tag · AniSync</PageTitle>
 
 <section>
-    <div class="discover-browse-header">
-        <a class="watch-back" href="/discover/tag">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
-            <span>All tags</span>
-        </a>
-        <h1 class="dashboard-section-title">@Tag</h1>
-    </div>
+    <header class="page-header">
+        <p class="page-subtitle">Tag</p>
+        <h1 class="page-title">@Tag</h1>
+    </header>
 
-    <div class="discover-results-pane">
-        @if (_loading && _items.Count == 0)
-        {
-            <div class="library-grid">
-                @for (var i = 0; i < 12; i++)
-                {
-                    <div class="library-card library-card-skeleton">
-                        <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
-                        <span class="library-card-skeleton-line"></span>
-                    </div>
-                }
+    @if (_loading && _items.Count == 0)
+    {
+        <div class="library-grid">
+            @for (var i = 0; i < 12; i++)
+            {
+                <div class="library-card library-card-skeleton">
+                    <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
+                    <span class="library-card-skeleton-line"></span>
+                </div>
+            }
+        </div>
+    }
+    else if (HasItems)
+    {
+        <div class="tag-detail-paginator" data-tag="@Tag" data-page="1">
+            <PosterGrid Items="_items" EmptyMessage="@EmptyMessage" />
+            <div class="paginator-loader" hidden="@(!_loading)" aria-hidden="true">
+                <div class="paginator-loader-spinner"></div>
             </div>
-        }
-        else
-        {
-            <PosterGrid Items="_items" Variant="grid" EmptyMessage="No anime found for this tag." />
-        }
-    </div>
+            <div class="tag-detail-sentinel" aria-hidden="true"></div>
+        </div>
+    }
+    else
+    {
+        <PosterGrid Items="_items" EmptyMessage="@EmptyMessage" />
+    }
 
     @if (_canLoadMore)
     {
@@ -50,6 +55,9 @@
     private readonly List<MetaDto> _items = new();
     private bool _loading;
     private bool _canLoadMore;
+
+    private bool HasItems => _items.Count > 0;
+    private string EmptyMessage => $"No anime found for the {Tag} tag.";
 
     protected override async Task OnParametersSetAsync()
     {

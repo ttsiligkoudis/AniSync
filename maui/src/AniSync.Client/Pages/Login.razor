@@ -32,14 +32,14 @@
         <div class="service-toggle" id="serviceToggle">
             @foreach (var p in _available)
             {
-                <span class="label @(p.Key == _selected ? "active" : "")" role="button" tabindex="0"
+                <span class="label @(p.Key == _selected ? "active" : "")" id="@PillId(p.Key)" role="button" tabindex="0"
+                      data-service="@PillIndex(p.Key)" data-service-name="@p.Key"
                       @onclick="() => _selected = p.Key"
-                      @onkeydown="@(e => { if (e.Key is "Enter" or " ") _selected = p.Key; })"
-                      data-service-name="@p.Key">@p.Display</span>
+                      @onkeydown="@(e => { if (e.Key is "Enter" or " ") _selected = p.Key; })">@p.Display</span>
             }
         </div>
 
-        <div class="card-section">
+        <div class="card-section" id="loginCard">
             @if (_selected == "Kitsu")
             {
                 @if (Native.IsSupported)
@@ -64,27 +64,28 @@
                 }
                 else
                 {
-                    <form method="post" action="@AuthAction("LoginKitsu")" autocomplete="on">
+                    <form id="kitsuLoginForm" method="post" action="@AuthAction("LoginKitsu")" autocomplete="on">
                         <input type="hidden" name="returnUrl" value="@PostLoginReturnUrl" />
-                        <div class="cred-group">
-                            <label for="username" class="required">Username</label>
-                            <input type="text" id="username" name="username" autocomplete="username" required />
+                        <div id="kitsuCreds">
+                            <div class="cred-group">
+                                <label for="username" class="required">Username</label>
+                                <input type="text" id="username" name="username" autocomplete="username" required />
+                            </div>
+                            <div class="cred-group">
+                                <label for="password" class="required">Password</label>
+                                <input type="password" id="password" name="password" autocomplete="current-password" required />
+                            </div>
+                            <p class="option-name-sub" style="margin-top:0.5rem;">
+                                AniSync uses your password only for the initial sign-in to Kitsu — it is not stored
+                                in the configuration. After login we keep just the OAuth tokens Kitsu issues, and
+                                refresh them automatically when they expire.
+                            </p>
                         </div>
-                        <div class="cred-group">
-                            <label for="password" class="required">Password</label>
-                            <input type="password" id="password" name="password" autocomplete="current-password" required />
-                        </div>
-                        <p class="option-name-sub" style="margin-top:0.5rem;">
-                            AniSync uses your password only for the initial sign-in to Kitsu — it is not stored.
-                            After login we keep just the OAuth tokens Kitsu issues, and refresh them automatically.
-                        </p>
-                        <button type="submit" class="btn-primary-action btn-login">Login with Kitsu</button>
+                        <button type="submit" id="kitsuLoginBtn" class="btn-primary-action btn-login">Login with Kitsu</button>
                     </form>
                 }
-                <div class="kitsu-register">
-                    <a href="@AuthAction("Register")?returnUrl=@Uri.EscapeDataString(PostLoginReturnUrl)" class="hint-text">
-                        Don't have a Kitsu account? <span class="kitsu-register-link">Create one</span>
-                    </a>
+                <div id="kitsuRegister" class="kitsu-register">
+                    <a href="@AuthAction("Register")?returnUrl=@Uri.EscapeDataString(PostLoginReturnUrl)" class="hint-text">Don't have a Kitsu account? <span class="kitsu-register-link">Create one</span></a>
                 </div>
             }
             else
@@ -97,7 +98,7 @@
                 }
                 else
                 {
-                    <a class="btn-primary-action btn-login" href="@OauthUrl(_selected)">Login with @SelectedDisplay</a>
+                    <a id="loginUrl" class="btn-primary-action btn-login" data-return-url="@PostLoginReturnUrl" href="@OauthUrl(_selected)">Login with <span id="loginServiceName">@SelectedDisplay</span></a>
                 }
                 @if (_selected == "Anilist")
                 {
@@ -191,6 +192,26 @@
     }
 
     private string SelectedDisplay => _available.FirstOrDefault(p => p.Key == _selected).Display ?? _selected;
+
+    // Mirror the web app's per-pill ids / indices (_AccountSection.cshtml) so the
+    // rendered service-toggle DOM matches the original markup.
+    private static string PillId(string key) => key switch
+    {
+        "Kitsu" => "labelKitsu",
+        "Anilist" => "labelAnilist",
+        "MyAnimeList" => "labelMal",
+        "Trakt" => "labelTrakt",
+        _ => $"label{key}",
+    };
+
+    private static string PillIndex(string key) => key switch
+    {
+        "Kitsu" => "0",
+        "Anilist" => "1",
+        "MyAnimeList" => "2",
+        "Trakt" => "3",
+        _ => "0",
+    };
 
     // Auth endpoints live on the API host. On the Web head that's the same origin
     // (relative path is fine); an explicit base keeps it correct if ApiBaseUrl is
