@@ -232,6 +232,7 @@
         var hasSeasons = _episodes.Select(e => e.Season).Distinct().Count() > 1;
         _seasonLabel = hasSeasons ? $"S{season} · E{Episode}" : $"Episode {Episode}";
         _metaDate = null;
+        _metaThumbnail = null;
 
         // Prev/next within the same season ordering.
         var ordered = _episodes.Where(e => e.Season == season).OrderBy(e => e.Episode).ToList();
