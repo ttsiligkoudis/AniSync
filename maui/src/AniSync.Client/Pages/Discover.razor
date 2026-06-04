@@ -4,17 +4,17 @@
 @inject AppState State
 @inject NavigationManager Nav
 
-@* Discover — port of Views/Discover/Index.cshtml. Catalog tabs (Trending /
-   Most Popular / Seasonal / Airing), a genre filter, and a poster grid with
-   skip-offset "Load more" pagination over /api/v1/discover/{kind}. The layout's
-   media-type switch picks anime/movies/series; the anime catalog is wired here,
-   video catalogs (Trakt) land with their JSON endpoints. *@
+@* Discover — port of Views/Discover/Index.cshtml. Catalog tabs + (anime) genre
+   filter + poster grid with skip-offset "Load more". The layout's media-type
+   switch picks the surface: Anime uses /api/v1/discover/{kind}; Movies/Series
+   use /api/v1/discover/video/{type}/{mode} (Trakt-backed). Cards in video mode
+   append ?type= via PosterGrid's VideoLinks. *@
 
 <PageTitle>Discover · AniSync</PageTitle>
 
 <section class="container">
     <nav class="library-tabs" role="tablist" aria-label="Discover catalogs">
-        @foreach (var (kind, label) in _kinds)
+        @foreach (var (kind, label) in Kinds)
         {
             <button type="button" role="tab"
                     class="library-tab @(_kind == kind ? "library-tab-active" : "")"
@@ -25,57 +25,59 @@
         }
     </nav>
 
-    <form class="filter-bar" role="search" @onsubmit="Reload" @onsubmit:preventDefault>
-        <select class="filter-bar-select" @bind="_genre" @bind:after="Reload">
-            <option value="">All genres</option>
-            @foreach (var g in _genres)
-            {
-                <option value="@g">@g</option>
-            }
-        </select>
-    </form>
-
-    @if (State.MediaType != MetaType.anime)
+    @if (IsAnime)
     {
-        <p class="hint-text">Movie &amp; series discovery is coming next — switch to Anime for now.</p>
+        <form class="filter-bar" role="search" @onsubmit="Reload" @onsubmit:preventDefault>
+            <select class="filter-bar-select" @bind="_genre" @bind:after="Reload">
+                <option value="">All genres</option>
+                @foreach (var g in _genres)
+                {
+                    <option value="@g">@g</option>
+                }
+            </select>
+        </form>
     }
-    else
-    {
-        <div class="discover-results-pane">
-            @if (_loading && _items.Count == 0)
-            {
-                <div class="library-grid">
-                    @for (var i = 0; i < 12; i++)
-                    {
-                        <div class="library-card library-card-skeleton">
-                            <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
-                            <span class="library-card-skeleton-line"></span>
-                            <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
-                        </div>
-                    }
-                </div>
-            }
-            else
-            {
-                <PosterGrid Items="_items" Variant="grid" EmptyMessage="Nothing to show here." />
-            }
-        </div>
 
-        @if (_canLoadMore)
+    <div class="discover-results-pane">
+        @if (_loading && _items.Count == 0)
         {
-            <div class="discover-pagination">
-                <button type="button" class="discover-paginator" disabled="@_loading" @onclick="LoadMore">
-                    @(_loading ? "Loading…" : "Load more")
-                </button>
+            <div class="library-grid">
+                @for (var i = 0; i < 12; i++)
+                {
+                    <div class="library-card library-card-skeleton">
+                        <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
+                        <span class="library-card-skeleton-line"></span>
+                        <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                    </div>
+                }
             </div>
         }
+        else
+        {
+            <PosterGrid Items="_items" Variant="grid" VideoLinks="!IsAnime" EmptyMessage="Nothing to show here." />
+        }
+    </div>
+
+    @if (_canLoadMore)
+    {
+        <div class="discover-pagination">
+            <button type="button" class="discover-paginator" disabled="@_loading" @onclick="LoadMore">
+                @(_loading ? "Loading…" : "Load more")
+            </button>
+        </div>
     }
 </section>
 
 @code {
-    private readonly (string Kind, string Label)[] _kinds =
+    // Catalog tabs differ by surface: anime has the AniList list types; video
+    // (Trakt) has trending / popular / anticipated.
+    private static readonly (string, string)[] AnimeKinds =
     {
         ("trending", "Trending"), ("popular", "Most Popular"), ("seasonal", "Seasonal"), ("airing", "Airing"),
+    };
+    private static readonly (string, string)[] VideoKinds =
+    {
+        ("trending", "Trending"), ("popular", "Most Popular"), ("anticipated", "Anticipated"),
     };
 
     private readonly string[] _genres =
@@ -90,6 +92,9 @@
     private bool _loading;
     private bool _canLoadMore;
     private readonly List<MetaDto> _items = new();
+
+    private bool IsAnime => State.MediaType == MetaType.anime;
+    private (string Kind, string Label)[] Kinds => IsAnime ? AnimeKinds : VideoKinds;
 
     protected override void OnInitialized() => State.Changed += OnStateChanged;
 
@@ -106,11 +111,21 @@
 
     private async Task Load()
     {
-        if (State.MediaType != MetaType.anime) return;
         _loading = true;
         StateHasChanged();
         var skip = _items.Count > 0 ? _items.Count.ToString() : null;
-        var page = await Api.DiscoverAsync(_kind, string.IsNullOrEmpty(_genre) ? null : _genre, skip);
+
+        IReadOnlyList<MetaDto> page;
+        if (IsAnime)
+        {
+            page = await Api.DiscoverAsync(_kind, string.IsNullOrEmpty(_genre) ? null : _genre, skip);
+        }
+        else
+        {
+            var type = State.MediaType == MetaType.movie ? "movie" : "series";
+            page = await Api.DiscoverVideoAsync(type, _kind, skip);
+        }
+
         _items.AddRange(page);
         _canLoadMore = page.Count >= 20;   // a full-ish page implies more pages
         _loading = false;
@@ -124,7 +139,12 @@
         await Reload();
     }
 
-    private async void OnStateChanged() => await InvokeAsync(Reload);
+    // On a media-type switch, reset to a tab valid for the new surface, then reload.
+    private async void OnStateChanged()
+    {
+        if (!Kinds.Any(k => k.Item1 == _kind)) _kind = "trending";
+        await InvokeAsync(Reload);
+    }
 
     public void Dispose() => State.Changed -= OnStateChanged;
 }

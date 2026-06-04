@@ -47,6 +47,14 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Results ?? new();
     }
 
+    public async Task<IReadOnlyList<MetaDto>> DiscoverVideoAsync(string type, string mode, string? skip = null, CancellationToken ct = default)
+    {
+        var url = $"api/v1/discover/video/{Uri.EscapeDataString(type)}/{Uri.EscapeDataString(mode)}";
+        if (!string.IsNullOrWhiteSpace(skip)) url += $"?skip={Uri.EscapeDataString(skip)}";
+        var resp = await GetOrDefault<MetaListResponse>(url, ct);
+        return resp?.Results ?? new();
+    }
+
     public async Task<IReadOnlyList<MetaDto>> AiringTodayAsync(CancellationToken ct = default)
     {
         var resp = await GetOrDefault<AiringTodayResponse>("api/v1/airing/today", ct);
