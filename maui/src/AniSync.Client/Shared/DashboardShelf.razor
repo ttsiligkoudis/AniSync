@@ -31,7 +31,7 @@
             @if (_loading)
             {
                 <div class="poster-scroll-row">
-                    @for (var i = 0; i < 6; i++)
+                    @for (var i = 0; i < SkeletonCount; i++)
                     {
                         <div class="library-card library-card-skeleton">
                             <div class="library-card-poster-wrap">
@@ -59,6 +59,10 @@
     [Parameter] public string? ViewAllHref { get; set; }
     [Parameter] public string? MutedNote { get; set; }
     [Parameter] public bool VideoLinks { get; set; }
+    // Skeleton placeholder count: discovery shelves fill the full scroll row
+    // (12, matching _PosterScrollSkeleton); Continue watching uses 6 (matching
+    // the inline skeletons in Index.cshtml).
+    [Parameter] public int SkeletonCount { get; set; } = 12;
 
     private bool _loading = true;
     private IReadOnlyList<MetaDto> _items = Array.Empty<MetaDto>();

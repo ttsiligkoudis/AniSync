@@ -50,8 +50,9 @@
     <section class="section-card">
         <span class="section-title">Linked Accounts</span>
         <p class="section-description">
-            Optional sync targets. When you save or auto-track an entry, AniSync writes to your
-            primary account first and then mirrors the change to every linked provider it can map.
+            Optional sync targets. When you save or auto-track an entry, AniSync writes
+            to your primary account first and then mirrors the change to every linked
+            provider it can map the anime onto.
         </p>
         <div class="linked-accounts">
             @foreach (var svc in AllServices)
@@ -99,7 +100,7 @@
                             <input type="password" name="password" placeholder="Kitsu password" required />
                             <input type="hidden" name="returnUrl" value="/configure" />
                             <button type="submit" class="btn-primary-action btn-login">Link Kitsu</button>
-                            <p class="option-name-sub" style="margin:0;">Used only to obtain an OAuth token from Kitsu — your password is not stored.</p>
+                            <p class="option-name-sub" style="margin:0;">Used only to obtain an OAuth token from Kitsu — your password is not stored in the configuration.</p>
                         </form>
                     }
                 </div>
@@ -186,6 +187,15 @@
     {
         "Anilist" => "AniList",
         "MyAnimeList" => "MyAnimeList",
+        null or "" => "—",
+        _ => service,
+    };
+
+    // The original uses the raw AnimeService enum name for the connected-badge
+    // and the linked-account row name (MyAnimeList stays "MyAnimeList", others
+    // render their enum string, e.g. "Anilist"). The picker pills keep Pretty().
+    private static string RawName(string? service) => service switch
+    {
         null or "" => "—",
         _ => service,
     };

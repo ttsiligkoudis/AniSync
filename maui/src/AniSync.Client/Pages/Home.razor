@@ -91,6 +91,7 @@
     <DashboardShelf Title="@($"Continue watching{_animeSuffix}")"
                     MediaType="anime"
                     DashSection="anime-continue"
+                    SkeletonCount="6"
                     ViewAllHref="/library?list=current&type=anime"
                     Fetch="@(() => Api.ContinueWatchingAsync())" />
 
@@ -131,6 +132,7 @@
                         MediaType="@VideoSlug(vt)"
                         DashSection="@($"video-continue-{VideoSlug(vt)}")"
                         VideoLinks="true"
+                        SkeletonCount="6"
                         ViewAllHref="@($"/library?list=current&type={VideoSlug(vt)}")"
                         Fetch="@(() => Api.VideoListAsync(VideoSlug(vt), "current"))" />
     }
