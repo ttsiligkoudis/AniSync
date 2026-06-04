@@ -26,6 +26,7 @@ public interface IAniSyncApi
     Task<IReadOnlyList<StreamingLinkDto>> StreamsAsync(string id, CancellationToken ct = default);
     Task<IReadOnlyList<EpisodeInfoDto>> EpisodesAsync(string id, CancellationToken ct = default);
     Task<IReadOnlyList<StremioStream>> PlaybackSourcesAsync(string config, string type, string streamId, CancellationToken ct = default);
+    Task<IReadOnlyList<SubtitleTrack>> SubtitlesAsync(string id, int episode, int? season = null, CancellationToken ct = default);
 
     // Tracking (manage-entry modal)
     Task<AnimeEntryDto?> GetEntryAsync(string id, int? season = null, CancellationToken ct = default);

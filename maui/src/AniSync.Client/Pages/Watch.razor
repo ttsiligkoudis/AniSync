@@ -145,6 +145,7 @@
     private MetaDto? _meta;
     private IReadOnlyList<EpisodeInfoDto> _episodes = Array.Empty<EpisodeInfoDto>();
     private IReadOnlyList<StremioStream> _sources = Array.Empty<StremioStream>();
+    private IReadOnlyList<SubtitleTrack> _subtitles = Array.Empty<SubtitleTrack>();
     private EpisodeInfoDto? _prev, _next;
     private bool _loadingSources;
     private string? _playingUrl;
@@ -194,6 +195,9 @@
             _sources = await Api.PlaybackSourcesAsync(State.StreamConfig!, _type, streamId);
             _loadingSources = false;
         }
+
+        // External subtitle tracks (OpenSubtitles) — attached to native playback.
+        _subtitles = await Api.SubtitlesAsync(Id, Episode, Season);
     }
 
     private async Task PlayAsync(StremioStream s)
@@ -210,6 +214,7 @@
                 Url: s.Url!,
                 Title: _title,
                 ResumeSeconds: resume,
+                Subtitles: _subtitles,
                 OnProgress: OnProgress,
                 OnEnded: OnEnded));
         }

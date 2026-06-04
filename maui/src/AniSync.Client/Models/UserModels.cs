@@ -65,5 +65,17 @@ public sealed class UpcomingEpisodeDto
 
 public sealed class UpcomingResponse { public List<UpcomingEpisodeDto> Items { get; set; } = new(); }
 
+// ── Subtitles (/api/v1/anime/{id}/episodes/{ep}/subtitles) ───────────────────
+
+public sealed class SubtitleTrackDto
+{
+    public string? Lang { get; set; }
+    public string? Label { get; set; }
+    public string? Url { get; set; }
+    public string? Source { get; set; }
+}
+
+public sealed class SubtitlesApiResponse { public List<SubtitleTrackDto> Subtitles { get; set; } = new(); }
+
 // StremioStream / StremioStreamsResponse are defined in ApiModels.cs (the
 // "Playback sources" section) — kept there to avoid a duplicate definition.

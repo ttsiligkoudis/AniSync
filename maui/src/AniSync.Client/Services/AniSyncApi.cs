@@ -95,6 +95,17 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Episodes ?? new();
     }
 
+    public async Task<IReadOnlyList<SubtitleTrack>> SubtitlesAsync(string id, int episode, int? season = null, CancellationToken ct = default)
+    {
+        var url = $"api/v1/anime/{Uri.EscapeDataString(id)}/episodes/{episode}/subtitles";
+        if (season.HasValue) url += $"?season={season.Value}";
+        var resp = await GetOrDefault<SubtitlesApiResponse>(url, ct);
+        return (resp?.Subtitles ?? new())
+            .Where(s => !string.IsNullOrEmpty(s.Url))
+            .Select(s => new SubtitleTrack(s.Url!, s.Label ?? s.Lang ?? "Subtitle", s.Lang))
+            .ToList();
+    }
+
     public async Task<IReadOnlyList<StremioStream>> PlaybackSourcesAsync(string config, string type, string streamId, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(config)) return Array.Empty<StremioStream>();
