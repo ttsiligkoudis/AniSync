@@ -88,6 +88,10 @@
     <div class="watch-section-header">
         <h2 class="watch-section-title">Sources</h2>
         <label class="watch-toggle">
+            <input type="checkbox" @bind="_autoTrack" @bind:after="SaveAutoTrackPref" />
+            <span class="watch-toggle-dot"></span> Auto-track
+        </label>
+        <label class="watch-toggle">
             <input type="checkbox" @bind="_autoPlayNext" />
             <span class="watch-toggle-dot"></span> Auto-play next
         </label>
@@ -148,13 +152,19 @@
     private string _title = "Watch";
     private string _seasonLabel = "";
     private bool _autoPlayNext = true;
+    private bool _autoTrack = true;
+    private bool _tracked;
     private double _lastSaved;
 
     protected override async Task OnParametersSetAsync()
     {
         _playingUrl = null;
+        _tracked = false;
         _type = QueryValue("type") ?? "series";
         var season = Season ?? 1;
+
+        // Auto-track preference persists across episodes/launches.
+        _autoTrack = await Store.GetAsync("pref:autotrack") is not "0";
 
         var metaTask = Api.AnimeAsync(Id);
         var epsTask = Api.EpisodesAsync(Id);
@@ -219,6 +229,12 @@
     // finished episode doesn't reopen mid-credits next time.
     private async void OnProgress(double positionSec, double durationSec)
     {
+        // Auto-track once past ~90% — the first-party equivalent of a scrobble:
+        // bump the tracker entry's progress to this episode via the entries API
+        // (no media-server webhook needed; uses the config credential already set).
+        if (durationSec > 0 && positionSec >= durationSec * 0.9)
+            await AutoTrackAsync();
+
         if (durationSec > 0 && positionSec > durationSec - 15)
         {
             await Store.SetAsync(ResumeKey, null);
@@ -227,12 +243,11 @@
         if (Math.Abs(positionSec - _lastSaved) < 5) return;
         _lastSaved = positionSec;
         await Store.SetAsync(ResumeKey, positionSec.ToString("0"));
-        // TODO server scrobble: POST /api/v1/scrobble/{token} once the per-user
-        // scrobble token is surfaced to the client (distinct from the config).
     }
 
     private async void OnEnded()
     {
+        await AutoTrackAsync();
         await Store.SetAsync(ResumeKey, null);
         _playingUrl = null;
         if (_autoPlayNext && _next is not null)
@@ -240,6 +255,16 @@
         else
             await InvokeAsync(StateHasChanged);
     }
+
+    // Mark this episode watched on the tracker (once per episode view).
+    private async Task AutoTrackAsync()
+    {
+        if (_tracked || !_autoTrack || string.IsNullOrEmpty(State.StreamConfig)) return;
+        _tracked = true;
+        await Api.SaveEntryAsync(Id, new EntrySaveRequest { Status = "Watching", Progress = Episode }, Season);
+    }
+
+    private Task SaveAutoTrackPref() => Store.SetAsync("pref:autotrack", _autoTrack ? "1" : "0");
 
     private string BackHref
     {

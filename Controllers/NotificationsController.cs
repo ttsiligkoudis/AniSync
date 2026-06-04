@@ -45,6 +45,22 @@ namespace AnimeList.Controllers
 
         private async Task<(string uid, TokenData token)> ResolveCurrentAsync()
         {
+            // Thin-client (MAUI) auth: when an X-AniSync-Config header is present
+            // (the same credential the /api/v1/me endpoints use) resolve the uid +
+            // primary token from it, so the bell + /notifications work outside a
+            // cookie-backed browser session. Falls back to the session otherwise.
+            var header = Request.Headers["X-AniSync-Config"].FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(header))
+            {
+                var cfg = await Utils.ResolveConfigAsync(header.Trim(), _configStore);
+                var cfgUid = cfg?.tokenUid;
+                if (!string.IsNullOrEmpty(cfgUid))
+                {
+                    var cfgToken = await _tokenService.GetAccessTokenAsync(header.Trim());
+                    return (cfgUid, cfgToken);
+                }
+            }
+
             var (token, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             return (uid, token);
         }
