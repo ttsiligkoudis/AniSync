@@ -65,21 +65,5 @@ public sealed class UpcomingEpisodeDto
 
 public sealed class UpcomingResponse { public List<UpcomingEpisodeDto> Items { get; set; } = new(); }
 
-// ── Stremio stream sources (/{config}/stream/{type}/{id}.json) ───────────────
-
-/// <summary>One source returned by the Stremio stream endpoint. A direct
-/// <see cref="Url"/> is playable (LibVLC on MAUI / HTML5 on web); an
-/// <see cref="ExternalUrl"/> (e.g. "Watch on Crunchyroll", "Manage Entry") opens
-/// out of the player.</summary>
-public sealed class StremioStream
-{
-    public string? Url { get; set; }
-    public string? ExternalUrl { get; set; }
-    public string? Name { get; set; }
-    public string? Title { get; set; }
-
-    public bool IsPlayable => !string.IsNullOrEmpty(Url);
-    public string Label => Title ?? Name ?? "Source";
-}
-
-public sealed class StremioStreamsResponse { public List<StremioStream> Streams { get; set; } = new(); }
+// StremioStream / StremioStreamsResponse are defined in ApiModels.cs (the
+// "Playback sources" section) — kept there to avoid a duplicate definition.

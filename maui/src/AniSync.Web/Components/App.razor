@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <meta name="theme-color" content="#0b0d12" />
+    <ResourcePreloader />
+    <!-- Shared design system (verbatim site.css) from the AniSync.Client RCL. -->
+    <link rel="stylesheet" href="_content/AniSync.Client/css/site.css" />
+    <link rel="stylesheet" href="AniSync.Web.styles.css" />
+    <ImportMap />
+    <link rel="icon" href="_content/AniSync.Client/favicon.ico" />
+    <HeadOutlet @rendermode="InteractiveServer" />
+</head>
+
+<body>
+    <Routes @rendermode="InteractiveServer" />
+    <ReconnectModal />
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <!-- Shared shell behaviour (theme toggle, back button, mobile "More" sheet). -->
+    <script src="_content/AniSync.Client/js/chrome.js"></script>
+</body>
+
+</html>
