@@ -103,6 +103,66 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Streams.Where(s => !string.IsNullOrEmpty(s.Url)).ToList() ?? new();
     }
 
+    public async Task<AnimeEntryDto?> GetEntryAsync(string id, int? season = null, CancellationToken ct = default)
+    {
+        var url = $"api/v1/me/entries/{Uri.EscapeDataString(id)}";
+        if (season.HasValue) url += $"?season={season.Value}";
+        var resp = await GetOrDefault<EntryResponse>(url, ct);
+        return resp?.Entry;
+    }
+
+    public async Task<SaveEntryResponse?> SaveEntryAsync(string id, EntrySaveRequest request, int? season = null, CancellationToken ct = default)
+    {
+        var url = $"api/v1/me/entries/{Uri.EscapeDataString(id)}";
+        if (season.HasValue) url += $"?season={season.Value}";
+        return await PostJson<EntrySaveRequest, SaveEntryResponse>(url, request, ct);
+    }
+
+    public async Task<IReadOnlyList<NotificationDto>> NotificationsAsync(int limit = 20, int skip = 0, CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<NotificationsResponse>($"api/v1/notifications?limit={limit}&skip={skip}", ct);
+        return resp?.Items ?? new();
+    }
+
+    public async Task<NotificationCount> NotificationCountAsync(CancellationToken ct = default)
+        => await GetOrDefault<NotificationCount>("api/v1/notifications/count", ct) ?? new();
+
+    public async Task MarkNotificationReadAsync(long id, CancellationToken ct = default)
+        => await PostJson<object, object>($"api/v1/notifications/{id}/read", new { }, ct);
+
+    public async Task MarkAllNotificationsReadAsync(CancellationToken ct = default)
+        => await PostJson<object, object>("api/v1/notifications/read-all", new { }, ct);
+
+    public async Task<IReadOnlyList<UpcomingEpisodeDto>> UpcomingAsync(CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<UpcomingResponse>("api/v1/me/upcoming", ct);
+        return resp?.Items ?? new();
+    }
+
+    private async Task<TResp?> PostJson<TReq, TResp>(string url, TReq body, CancellationToken ct)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = JsonContent.Create(body),
+            };
+            if (!string.IsNullOrEmpty(_state.StreamConfig))
+                req.Headers.TryAddWithoutValidation(ConfigHeader, _state.StreamConfig);
+
+            using var resp = await _http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return default;
+            if (typeof(TResp) == typeof(object)) return default;
+            return await resp.Content.ReadFromJsonAsync<TResp>(cancellationToken: ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "POST {Url} failed.", url);
+            return default;
+        }
+    }
+
     private async Task<T?> GetOrDefault<T>(string url, CancellationToken ct)
     {
         try

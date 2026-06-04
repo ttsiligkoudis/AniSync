@@ -1,0 +1,163 @@
+@inject IAniSyncApi Api
+
+@* Manage-entry dialog — the Blazor equivalent of the server-rendered
+   ManageEntry modal, driven by the clean JSON API (/api/v1/me/entries/{id}).
+   Status options are the canonical ListStatus names the POST expects; the
+   loaded entry's service-specific status is normalised onto them. Reuses the
+   entry-modal-* classes from site.css. *@
+
+@if (Visible)
+{
+    <div class="entry-modal-backdrop" @onclick="Close"></div>
+    <div class="entry-modal" role="dialog" aria-modal="true" aria-label="Manage entry" @onclick:stopPropagation>
+        <div class="entry-modal-header">
+            <span class="entry-modal-title">@Name</span>
+            <button type="button" class="entry-modal-close" aria-label="Close" @onclick="Close">×</button>
+        </div>
+
+        @if (_loading)
+        {
+            <div class="entry-modal-loading">
+                <div class="entry-modal-skeleton-field"></div>
+                <div class="entry-modal-skeleton-field entry-modal-skeleton-field-wide"></div>
+            </div>
+        }
+        else
+        {
+            <form class="entry-modal-form" @onsubmit="Save" @onsubmit:preventDefault>
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <p class="entry-modal-error">@_error</p>
+                }
+                <div class="entry-modal-field">
+                    <label class="entry-modal-label" for="entry-status">Status</label>
+                    <select id="entry-status" class="entry-modal-select" @bind="_status">
+                        <option value="">— Not in list —</option>
+                        <option value="Watching">Watching</option>
+                        <option value="Completed">Completed</option>
+                        <option value="Planning">Planning</option>
+                        <option value="Paused">Paused</option>
+                        <option value="Dropped">Dropped</option>
+                        <option value="Rewatching">Rewatching</option>
+                    </select>
+                </div>
+                <div class="entry-modal-field entry-modal-progress-row">
+                    <label class="entry-modal-label" for="entry-progress">Progress</label>
+                    <input id="entry-progress" class="entry-modal-input" type="number" min="0"
+                           max="@(_total?.ToString())" @bind="_progress" />
+                    @if (_total is int t && t > 0)
+                    {
+                        <span class="entry-modal-total">/ @t</span>
+                    }
+                </div>
+                <div class="entry-modal-field">
+                    <label class="entry-modal-label" for="entry-score">Score</label>
+                    <input id="entry-score" class="entry-modal-input" type="number" min="0" max="10" step="0.5" @bind="_score" />
+                </div>
+                <div class="entry-modal-actions">
+                    <button type="button" class="entry-modal-cancel" @onclick="Close">Cancel</button>
+                    <span class="entry-modal-actions-end">
+                        <button type="submit" class="entry-modal-save" disabled="@_saving">
+                            @(_saving ? "Saving…" : "Save")
+                        </button>
+                    </span>
+                </div>
+            </form>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Id { get; set; } = "";
+    [Parameter] public string Name { get; set; } = "";
+    [Parameter] public int? Season { get; set; }
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private bool _loading;
+    private bool _saving;
+    private string? _error;
+    private string _status = "";
+    private int _progress;
+    private double? _score;
+    private int? _total;
+    private bool _loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Visible && !_loadedFor)
+        {
+            _loadedFor = true;
+            await LoadAsync();
+        }
+        else if (!Visible)
+        {
+            _loadedFor = false;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        var entry = await Api.GetEntryAsync(Id, Season);
+        if (entry is not null)
+        {
+            _status = Canonicalize(entry.Status);
+            _progress = entry.Progress;
+            _score = entry.Score is > 0 ? entry.Score : null;
+            _total = entry.TotalEpisodes;
+        }
+        else
+        {
+            _status = "";
+            _progress = 0;
+            _score = null;
+            _total = null;
+        }
+        _loading = false;
+    }
+
+    private async Task Save()
+    {
+        if (string.IsNullOrEmpty(_status))
+        {
+            _error = "Pick a status (removal isn't wired up yet).";
+            return;
+        }
+        _saving = true;
+        _error = null;
+        var resp = await Api.SaveEntryAsync(Id, new EntrySaveRequest
+        {
+            Status = _status,
+            Progress = _progress,
+            Score = _score,
+        }, Season);
+        _saving = false;
+        if (resp is { Ok: true })
+        {
+            await OnSaved.InvokeAsync();
+            await Close();
+        }
+        else
+        {
+            _error = "Couldn't save — check your connection and try again.";
+        }
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    // Map a tracker's service-specific status onto the canonical ListStatus the
+    // save endpoint expects (AniList CURRENT, MAL watching, Kitsu current, …).
+    private static string Canonicalize(string? s) => (s ?? "").ToLowerInvariant() switch
+    {
+        "current" or "watching" => "Watching",
+        "completed" => "Completed",
+        "planning" or "planned" or "plan_to_watch" => "Planning",
+        "paused" or "on_hold" => "Paused",
+        "dropped" => "Dropped",
+        "repeating" or "rewatching" => "Rewatching",
+        _ => "",
+    };
+}

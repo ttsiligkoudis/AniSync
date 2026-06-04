@@ -1,6 +1,75 @@
 @page "/calendar"
+@inject IAniSyncApi Api
+@inject AppState State
+
+@* Calendar — upcoming episodes for the user's tracked anime, grouped by day.
+   Sourced from /api/v1/me/upcoming (the same feed the notification bell uses).
+   Each day is a dashboard section; episodes reuse the PosterGrid card (cover +
+   "Ep N" airing badge) by projecting the upcoming rows onto MetaDto. *@
+
 <PageTitle>Calendar · AniSync</PageTitle>
+
 <section class="container">
     <h1 class="dashboard-section-title">Calendar</h1>
-    <p class="hint-text">Ported in a later milestone.</p>
+
+    @if (string.IsNullOrEmpty(State.StreamConfig))
+    {
+        <p class="hint-text"><a href="/settings">Sign in</a> to see upcoming episodes for your list.</p>
+    }
+    else if (_loading)
+    {
+        <p class="hint-text">Loading…</p>
+    }
+    else if (_days.Count == 0)
+    {
+        <p class="hint-text">No upcoming episodes for your Watching list.</p>
+    }
+    else
+    {
+        @foreach (var day in _days)
+        {
+            <section class="dashboard-section">
+                <div class="dashboard-section-header">
+                    <h2 class="dashboard-section-title">@day.Label</h2>
+                </div>
+                <PosterGrid Items="day.Items" Variant="grid" />
+            </section>
+        }
+    }
 </section>
+
+@code {
+    private bool _loading = true;
+    private readonly List<DayGroup> _days = new();
+
+    private sealed record DayGroup(string Label, List<MetaDto> Items);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (string.IsNullOrEmpty(State.StreamConfig)) { _loading = false; return; }
+
+        var upcoming = await Api.UpcomingAsync();
+        var today = DateTimeOffset.Now.Date;
+
+        foreach (var grp in upcoming
+            .OrderBy(e => e.AiringAt)
+            .GroupBy(e => DateTimeOffset.FromUnixTimeSeconds(e.AiringAt).LocalDateTime.Date))
+        {
+            var label = grp.Key == today ? "Today"
+                : grp.Key == today.AddDays(1) ? "Tomorrow"
+                : grp.Key.ToString("dddd, MMM d");
+            var items = grp.Select(e => new MetaDto
+            {
+                Id = e.AnimeId,
+                Name = e.Title,
+                Poster = e.CoverImage,
+                AiringEpisode = e.Episode,
+                AiringAt = e.AiringAt,
+                Type = "anime",
+            }).ToList();
+            _days.Add(new DayGroup(label, items));
+        }
+
+        _loading = false;
+    }
+}

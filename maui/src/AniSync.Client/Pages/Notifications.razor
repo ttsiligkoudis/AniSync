@@ -1,0 +1,81 @@
+@page "/notifications"
+@inject IAniSyncApi Api
+
+@* Notifications — full episode-release history. Port of the /notifications page
+   over /api/v1/notifications (list + read-all). Note: that API is session-
+   authenticated on the server today, so on the Web head it works as-is; the
+   MAUI head needs the controller to also accept the X-AniSync-Config header
+   (see README). Reuses the notif-page-* classes from site.css. *@
+
+<PageTitle>Notifications · AniSync</PageTitle>
+
+<section class="container">
+    <div class="notif-page-toolbar">
+        <h1 class="dashboard-section-title">Notifications</h1>
+        @if (_items.Count > 0)
+        {
+            <button type="button" class="notif-page-action" @onclick="MarkAllRead">Mark all read</button>
+        }
+    </div>
+
+    <div class="notif-page-body">
+        @if (_loading)
+        {
+            <div class="notif-page-loader">Loading…</div>
+        }
+        else if (_items.Count == 0)
+        {
+            <div class="notif-empty">You're all caught up.</div>
+        }
+        else
+        {
+            <ul class="notif-page-list">
+                @foreach (var n in _items)
+                {
+                    <li class="notif-page-item @(n.IsRead ? "" : "notif-page-item-unread")">
+                        <a href="@(string.IsNullOrEmpty(n.LinkPath) ? "#" : n.LinkPath)" class="notif-page-item-link">
+                            @if (!string.IsNullOrEmpty(n.ThumbnailUrl))
+                            {
+                                <img class="notif-page-thumb" src="@n.ThumbnailUrl" alt="" loading="lazy" onerror="this.remove()" />
+                            }
+                            else
+                            {
+                                <span class="notif-page-thumb notif-page-thumb-placeholder" aria-hidden="true"></span>
+                            }
+                            <span class="notif-page-title">@n.AnimeTitle · Episode @n.EpisodeNumber</span>
+                            <span class="notif-page-meta">@RelativeTime(n.CreatedAt)</span>
+                        </a>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+</section>
+
+@code {
+    private bool _loading = true;
+    private IReadOnlyList<NotificationDto> _items = Array.Empty<NotificationDto>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _items = await Api.NotificationsAsync(limit: 50);
+        _loading = false;
+    }
+
+    private async Task MarkAllRead()
+    {
+        await Api.MarkAllNotificationsReadAsync();
+        _items = await Api.NotificationsAsync(limit: 50);
+    }
+
+    private static string RelativeTime(long unixSeconds)
+    {
+        var then = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
+        var span = DateTimeOffset.UtcNow - then;
+        if (span.TotalMinutes < 1) return "just now";
+        if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m ago";
+        if (span.TotalHours < 24) return $"{(int)span.TotalHours}h ago";
+        if (span.TotalDays < 7) return $"{(int)span.TotalDays}d ago";
+        return then.LocalDateTime.ToString("MMM d");
+    }
+}

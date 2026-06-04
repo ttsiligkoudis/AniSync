@@ -48,6 +48,19 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
                 _player.AddSlave(MediaSlaveType.Subtitle, sub.Url, select: false);
         }
 
+        // Report progress + completion back to the Watch page (it owns resume
+        // persistence + scrobble). libVLC raises these on its own thread; the
+        // page's handlers marshal back to the renderer (InvokeAsync / NavigateTo).
+        if (request.OnProgress is not null)
+        {
+            _player.TimeChanged += (_, e) =>
+                request.OnProgress(e.Time / 1000.0, _player!.Length / 1000.0);
+        }
+        if (request.OnEnded is not null)
+        {
+            _player.EndReached += (_, _) => request.OnEnded();
+        }
+
         // Hand the configured player to a native page on the UI thread.
         await MainThread.InvokeOnMainThreadAsync(async () =>
         {
