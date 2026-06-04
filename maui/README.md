@@ -105,9 +105,14 @@ literal `onclick="document.body.classList…"` passthrough, exactly like the web
 Both heads register the same services; only `IAppEnvironment` and `IMediaPlayer`
 differ.
 
+The typed `AniSyncApi` attaches the user's config string as the `X-AniSync-Config`
+header (the credential for `/api/v1/me/*`) on every request, reading it from
+`AppState.StreamConfig`. That value is persisted per-host through `ISecureStore`
+(MAUI `MauiSecureStore` / Web `WebSecureStore`) and hydrated at startup.
+
 ```csharp
 // shared registrations (call from MauiProgram.cs and Web Program.cs)
-builder.Services.AddScoped<AppState>();          // session/nav/media-type state
+builder.Services.AddScoped<AppState>();          // session/nav/media-type/config state
 builder.Services.AddScoped<IAniSyncApi, AniSyncApi>();
 builder.Services.AddHttpClient<IAniSyncApi, AniSyncApi>((sp, http) =>
 {
@@ -173,10 +178,10 @@ These return the same DTO shapes already used by the client models.
 - [x] **M1.5 — Full chrome parity**: exact-DOM port of `_Layout.cshtml` — slide-in drawer + backdrop, full site header (back/logo/nav/search/notif bell/media-type + theme buttons/auth CTA/hamburger), fixed media-type switch, mobile bottom-nav + floating "More" sheet — with real SVG icons, C#-driven active-nav + media-type state (`AppState`), and `chrome.js` for theme/back/more-sheet behaviour.
 - [ ] **M2 — Heads + run**: generate MAUI + Web heads from template, wire DI (snippets above + `maui/heads/`), confirm the shell renders identically on Web + Android/Windows.
 - [x] **M3 — Stats + shelves**: full Home dashboard — `StatsStrip` (AniList + Trakt rows, real values), `DashboardShelf` (async load, skeletons, hide-when-empty, media-type filter), shelves for Continue watching / New Episodes Today / Trending / Most Popular. All over existing JSON endpoints (`/api/v1/me/stats`, `/api/v1/me/continue-watching`, `/api/v1/airing/today`, `/api/v1/discover`, `/Home/TraktStatsData`); added `popular` to `/api/v1/discover`.
-- [ ] **M4 — Library + Discover + Search results + Calendar** (stubs in place).
+- [x] **M4 — Library + Discover** (Calendar + dedicated search-results still to come): Discover with catalog tabs (Trending/Popular/Seasonal/Airing), genre filter and skip-offset "Load more"; Library with status tabs (Watching/Completed/Planning/Paused/Dropped/Rewatching) + search, over a new `/api/v1/me/list?status=` endpoint (Meta shape, mirrors `continue-watching`).
 - [x] **M5 — Detail page** (`/meta/{id}`): hero (backdrop/poster/score/title/info/status/genres), collapsible synopsis, episodes list (→ /watch), streaming-service links. Tracking pill / manage-entry modal still to come.
 - [x] **M6 — Watch + LibVLCSharp player** (`/meta/{id}/watch/{ep}`): header + player surface + prev/next + source picker over the Stremio addon config. Native head plays through LibVLCSharp (`maui/heads/AniSync.Maui/VlcMediaPlayer.cs` + `VlcPlayerPage.cs`) — the HEVC/AC3/EAC3/DTS/TrueHD audio-codec fix; Web head falls back to HTML5 `<video>`. Still to add: scrobble/auto-track + resume persistence, subtitle UI.
-- [ ] **M7 — Auth + Settings/Streams config** (the `AppState.StreamConfig` source), notifications, PWA/offline parity on the Web head.
+- [x] **M7 — Auth + Settings (thin-client model)**: the config string is the credential (`X-AniSync-Config`) AND the Stremio addon config. Settings lets the user save it; it's persisted via `ISecureStore` and hydrated at startup, so the dashboard / Library / Watch all authenticate and stream. Full OAuth account management still links out to the web account page. Remaining: notifications, PWA/offline parity on the Web head, Calendar, manage-entry modal.
 
 ### Playback wiring (per head)
 
@@ -186,7 +191,8 @@ The shared **Watch** page calls `IMediaPlayer` only when `IAppEnvironment.Suppor
   ```csharp
   builder.Services.AddSingleton(_ => new LibVLC());
   builder.Services.AddSingleton<IMediaPlayer, VlcMediaPlayer>();
+  builder.Services.AddSingleton<ISecureStore, MauiSecureStore>();
   ```
-- **Web**: `WebAppEnvironment`, `Html5MediaPlayer` (no-op — the page renders `<video>`).
+- **Web**: `WebAppEnvironment`, `Html5MediaPlayer` (no-op — the page renders `<video>`), and `builder.Services.AddScoped<ISecureStore, WebSecureStore>();`.
 
 `AppState.StreamConfig` (the user's Stremio addon config string) gates source resolution; until M7 wires sign-in it stays null and the Watch page shows the "set up streaming" prompt, exactly like the web app.

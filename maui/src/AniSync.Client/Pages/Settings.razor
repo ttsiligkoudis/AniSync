@@ -1,6 +1,84 @@
 @page "/settings"
+@inject AppState State
+@inject ISecureStore Store
+@inject IAppEnvironment Env
+
+@* Settings — the thin-client account surface (M7). In this architecture the
+   AniSync config string is both the credential for /api/v1/me and the Stremio
+   addon config used to resolve playable sources, so "connecting" = saving that
+   string. It's persisted per-host via ISecureStore (SecureStorage on MAUI,
+   localStorage on Web) and pushed into AppState so the dashboard, Library and
+   Watch pages all light up. Full account management (OAuth link, addon builder)
+   still lives on the web account page, linked below. *@
+
 <PageTitle>Settings · AniSync</PageTitle>
+
 <section class="container">
     <h1 class="dashboard-section-title">Settings</h1>
-    <p class="hint-text">Account / streams / preferences — ported in a later milestone.</p>
+
+    <section class="anime-detail-section">
+        <h2 class="anime-detail-section-title">Connection</h2>
+        @if (!string.IsNullOrEmpty(State.StreamConfig))
+        {
+            <p class="account-status">✓ Connected</p>
+            <button type="button" class="account-disconnect-btn" @onclick="DisconnectAsync">Disconnect</button>
+        }
+        else
+        {
+            <p class="hint-text">Not connected yet. Paste your AniSync config below to sign in and enable streaming.</p>
+        }
+    </section>
+
+    <section class="anime-detail-section">
+        <h2 class="anime-detail-section-title">AniSync config</h2>
+        <p class="hint-text">
+            Find this on your <a href="@AccountUrl" target="_blank" rel="noopener">AniSync account page</a>
+            (it's the config segment of your addon install URL). It's stored securely on this device.
+        </p>
+        <form class="filter-bar" @onsubmit="SaveAsync" @onsubmit:preventDefault>
+            <input type="text" class="filter-bar-search" placeholder="Paste config…"
+                   value="@_input" @oninput="e => _input = e.Value?.ToString() ?? string.Empty"
+                   autocomplete="off" spellcheck="false" />
+            <button type="submit" class="site-header-cta site-header-cta-primary">Save</button>
+        </form>
+        @if (_saved)
+        {
+            <p class="account-status">Saved.</p>
+        }
+    </section>
 </section>
+
+@code {
+    private string _input = "";
+    private bool _saved;
+
+    private string AccountUrl => $"{Env.ApiBaseUrl.TrimEnd('/')}/configure";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Hydrate from secure storage on first open (also done app-wide in
+        // MainLayout, but harmless to repeat and keeps the field populated).
+        if (string.IsNullOrEmpty(State.StreamConfig))
+        {
+            var saved = await Store.GetAsync(ISecureStore.ConfigKey);
+            if (!string.IsNullOrEmpty(saved)) State.SetStreamConfig(saved);
+        }
+        _input = State.StreamConfig ?? "";
+    }
+
+    private async Task SaveAsync()
+    {
+        var value = _input.Trim();
+        await Store.SetAsync(ISecureStore.ConfigKey, value);
+        State.SetStreamConfig(string.IsNullOrEmpty(value) ? null : value);
+        _saved = true;
+    }
+
+    private async Task DisconnectAsync()
+    {
+        await Store.SetAsync(ISecureStore.ConfigKey, null);
+        State.SetStreamConfig(null);
+        _input = "";
+        _saved = false;
+    }
+}

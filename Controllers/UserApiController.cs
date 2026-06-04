@@ -857,6 +857,52 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
+        /// The user's list for a given status, in the <c>Meta</c> shape (poster +
+        /// progress) so a client can render a poster grid — the data behind the
+        /// /library tabs. <paramref name="status"/> maps to a tracker list type:
+        /// watching/current, completed, planning, paused, dropped, rewatching.
+        /// Defaults to the Watching list.
+        /// </summary>
+        [HttpGet("list")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(MetaListResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> List(string status = null)
+        {
+            try
+            {
+                var resolvedConfig = ResolvedConfig;
+                var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
+                if (string.IsNullOrEmpty(tokenData?.access_token))
+                    return Unauthorized(new ApiError("config has no primary token"));
+
+                var listType = (status ?? "").Trim().ToLowerInvariant() switch
+                {
+                    "completed" => ListType.Completed,
+                    "planning" => ListType.Planning,
+                    "paused" => ListType.Paused,
+                    "dropped" => ListType.Dropped,
+                    "rewatching" or "repeating" => ListType.Repeating,
+                    _ => ListType.Current,
+                };
+
+                var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
+                var hideAdult = configuration?.showAdultContent != true;
+                var metas = tokenData.anime_service switch
+                {
+                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, hideAdult: hideAdult),
+                    _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, hideAdult: hideAdult),
+                };
+                return new JsonResult(new MetaListResponse(metas ?? []));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API List failed (status={Status}).", status);
+                return StatusCode(500, new ApiError("list lookup failed"));
+            }
+        }
+
+        /// <summary>
         /// Episodes airing in the next 24h that match this user's "Watching"
         /// list — same source the bell uses to fire notifications. Reads from
         /// the in-memory <see cref="IAnimeScheduleService"/> snapshot

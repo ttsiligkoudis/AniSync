@@ -12,13 +12,14 @@ public interface IAniSyncApi
 {
     // Search + discovery
     Task<IReadOnlyList<SuggestMatch>> SuggestAsync(string title, int limit = 8, CancellationToken ct = default);
-    Task<IReadOnlyList<MetaDto>> DiscoverAsync(string kind, string? genre = null, CancellationToken ct = default);
+    Task<IReadOnlyList<MetaDto>> DiscoverAsync(string kind, string? genre = null, string? skip = null, CancellationToken ct = default);
     Task<IReadOnlyList<MetaDto>> AiringTodayAsync(CancellationToken ct = default);
 
-    // Dashboard (user-scoped)
+    // Dashboard + library (user-scoped — require X-AniSync-Config)
     Task<AnilistUserStatsDto?> AnilistStatsAsync(CancellationToken ct = default);
     Task<TraktUserStatsDto?> TraktStatsAsync(CancellationToken ct = default);
     Task<IReadOnlyList<MetaDto>> ContinueWatchingAsync(int limit = 15, CancellationToken ct = default);
+    Task<IReadOnlyList<MetaDto>> ListAsync(string status, CancellationToken ct = default);
 
     // Detail + watch
     Task<MetaDto?> AnimeAsync(string id, CancellationToken ct = default);
