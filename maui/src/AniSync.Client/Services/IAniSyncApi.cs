@@ -13,6 +13,8 @@ public interface IAniSyncApi
     // Search + discovery
     Task<IReadOnlyList<SuggestMatch>> SuggestAsync(string title, int limit = 8, CancellationToken ct = default);
     Task<IReadOnlyList<MetaDto>> DiscoverAsync(string kind, string? genre = null, string? skip = null, CancellationToken ct = default);
+    /// <summary>Video (movie/series) discovery via Trakt — /api/v1/discover/video/{type}/{mode}.</summary>
+    Task<IReadOnlyList<MetaDto>> DiscoverVideoAsync(string type, string mode, string? skip = null, CancellationToken ct = default);
     Task<IReadOnlyList<MetaDto>> AiringTodayAsync(CancellationToken ct = default);
 
     // Dashboard + library (user-scoped — require X-AniSync-Config)
