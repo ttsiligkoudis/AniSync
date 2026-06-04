@@ -17,13 +17,13 @@
     {
         <h1 class="dashboard-section-title">Library</h1>
         <p class="hint-text">
-            <a href="/settings">Sign in</a> to see your tracked anime here.
+            <a href="/login">Sign in</a> to see your tracked library here.
         </p>
     }
     else
     {
         <nav class="library-tabs" role="tablist" aria-label="Library lists">
-            @foreach (var (status, label) in _tabs)
+            @foreach (var (status, label) in Tabs)
             {
                 <button type="button" role="tab"
                         class="library-tab @(_status == status ? "library-tab-active" : "")"
@@ -70,7 +70,7 @@
             }
             else
             {
-                <PosterGrid Items="_filtered" Variant="grid"
+                <PosterGrid Items="_filtered" Variant="grid" VideoLinks="@(!IsAnime)"
                             EmptyMessage="@($"Nothing in your {_activeLabel} list.")" />
             }
         </div>
@@ -78,11 +78,20 @@
 </section>
 
 @code {
-    private readonly (string Status, string Label)[] _tabs =
+    // Anime tracks the merged tracker lists (six statuses); movies / series come from
+    // Trakt, which only maps onto Continue Watching / Watched / Watchlist.
+    private static readonly (string Status, string Label)[] AnimeTabs =
     {
         ("current", "Watching"), ("completed", "Completed"), ("planning", "Planning"),
         ("paused", "Paused"), ("dropped", "Dropped"), ("repeating", "Rewatching"),
     };
+    private static readonly (string Status, string Label)[] VideoTabs =
+    {
+        ("current", "Continue Watching"), ("completed", "Watched"), ("planning", "Watchlist"),
+    };
+
+    private bool IsAnime => State.MediaType == MetaType.anime;
+    private (string Status, string Label)[] Tabs => IsAnime ? AnimeTabs : VideoTabs;
 
     private string _status = "current";
     private string _search = "";
@@ -91,7 +100,7 @@
     private bool _loading;
     private IReadOnlyList<MetaDto> _items = Array.Empty<MetaDto>();
 
-    private string _activeLabel => _tabs.FirstOrDefault(t => t.Status == _status).Label ?? "";
+    private string _activeLabel => Tabs.FirstOrDefault(t => t.Status == _status).Label ?? "";
 
     // Genre options are derived from the loaded list so they always match what's
     // actually filterable (the list API doesn't take a genre parameter).
@@ -129,9 +138,15 @@
     private async Task Load()
     {
         if (string.IsNullOrEmpty(State.StreamConfig)) return;
+        // The active tab may not exist for the current media type (e.g. switching to
+        // movies while on the anime-only "Rewatching" tab) — clamp to a valid one.
+        if (!Tabs.Any(t => t.Status == _status)) _status = "current";
+
         _loading = true;
         StateHasChanged();
-        _items = await Api.ListAsync(_status);
+        _items = IsAnime
+            ? await Api.ListAsync(_status)
+            : await Api.VideoListAsync(State.MediaType == MetaType.movie ? "movie" : "series", _status);
         _loading = false;
         StateHasChanged();
     }

@@ -1,6 +1,7 @@
 using AnimeList.Filters;
 using AnimeList.Models;
 using AnimeList.Models.Api;
+using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -1007,6 +1008,38 @@ namespace AnimeList.Controllers
                 _logger.LogError(ex, "API Linked failed.");
                 return StatusCode(500, new ApiError("linked lookup failed"));
             }
+        }
+
+        /// <summary>
+        /// The user's movies / series library from Trakt for the active tab — the
+        /// header-authed twin of LibraryController.VideoPaneAsync. <paramref name="type"/>
+        /// is <c>movie</c> or <c>series</c>; <paramref name="list"/> is
+        /// <c>current</c> (Continue Watching) / <c>completed</c> (Watched) /
+        /// <c>planning</c> (Watchlist). Returns hydrated, anime-excluded video Metas.
+        /// Empty when Trakt isn't configured or the config has no stored row.
+        /// </summary>
+        [HttpGet("video-list")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(MetaListResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> VideoList(string type = "movie", string list = "current")
+        {
+            var cfg = await Utils.ResolveConfigAsync(ResolvedConfig, _configStore);
+            var uid = cfg?.tokenUid;
+            if (string.IsNullOrEmpty(uid) || !_traktService.IsConfigured)
+                return Ok(new MetaListResponse([]));
+
+            var mediaType = string.Equals(type, "series", StringComparison.OrdinalIgnoreCase)
+                ? MetaType.series : MetaType.movie;
+            var listType = list?.ToLowerInvariant() switch
+            {
+                "completed" or "watched" => ListType.Completed,
+                "planning" or "watchlist" or "planned" => ListType.Planning,
+                _ => ListType.Current,
+            };
+
+            var items = await _traktService.GetListAsync(uid, listType, mediaType);
+            var metas = await items.ToVideoMetas().ExcludeAnimeAsync(_mappingService);
+            return Ok(new MetaListResponse(metas));
         }
 
         /// <summary>

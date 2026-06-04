@@ -98,6 +98,13 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Results ?? new();
     }
 
+    public async Task<IReadOnlyList<MetaDto>> VideoListAsync(string type, string list, CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<MetaListResponse>(
+            $"api/v1/me/video-list?type={Uri.EscapeDataString(type)}&list={Uri.EscapeDataString(list)}", ct);
+        return resp?.Results ?? new();
+    }
+
     public async Task<MetaDto?> AnimeAsync(string id, CancellationToken ct = default)
     {
         var resp = await GetOrDefault<AnimeResponse>($"api/v1/anime/{Uri.EscapeDataString(id)}", ct);

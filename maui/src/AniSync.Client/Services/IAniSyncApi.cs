@@ -35,6 +35,9 @@ public interface IAniSyncApi
     Task<TraktUserStatsDto?> TraktStatsAsync(CancellationToken ct = default);
     Task<IReadOnlyList<MetaDto>> ContinueWatchingAsync(int limit = 15, CancellationToken ct = default);
     Task<IReadOnlyList<MetaDto>> ListAsync(string status, CancellationToken ct = default);
+    /// <summary>The user's movies / series library from Trakt — /api/v1/me/video-list.
+    /// type = movie|series; list = current|completed|planning.</summary>
+    Task<IReadOnlyList<MetaDto>> VideoListAsync(string type, string list, CancellationToken ct = default);
     Task<LibraryResponse?> LibraryAsync(string? status = null, CancellationToken ct = default);
 
     // Detail + watch
