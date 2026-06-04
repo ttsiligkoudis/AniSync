@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject NavigationManager Nav
 @inject AppState State
+@inject ISecureStore Store
 
 @* Shared chrome for every page — composed to match _Layout.cshtml's body
    order exactly: drawer (+ backdrop), site header, fixed media-type switch,
@@ -27,6 +28,17 @@
     {
         Nav.LocationChanged += OnLocationChanged;
         State.Changed += OnStateChanged;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Hydrate the saved config credential once at startup so the dashboard,
+        // Library and Watch pages authenticate without a trip through Settings.
+        if (string.IsNullOrEmpty(State.StreamConfig))
+        {
+            var saved = await Store.GetAsync(ISecureStore.ConfigKey);
+            if (!string.IsNullOrEmpty(saved)) State.SetStreamConfig(saved);
+        }
     }
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)

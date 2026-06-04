@@ -1,6 +1,111 @@
 @page "/library"
+@implements IDisposable
+@inject IAniSyncApi Api
+@inject AppState State
+@inject NavigationManager Nav
+
+@* Library — port of Views/Library/Index.cshtml. Status tabs (Watching /
+   Completed / Planning / Paused / Dropped / Rewatching) over /api/v1/me/list,
+   plus a search filter, rendered as a poster grid. User-scoped, so it needs the
+   config credential; when streaming/sign-in isn't set up it shows the same
+   "sign in" prompt the web app does for anonymous visitors. *@
+
 <PageTitle>Library · AniSync</PageTitle>
+
 <section class="container">
-    <h1 class="dashboard-section-title">Library</h1>
-    <p class="hint-text">Ported next milestone — needs the JSON library endpoints (see README roadmap).</p>
+    @if (string.IsNullOrEmpty(State.StreamConfig))
+    {
+        <h1 class="dashboard-section-title">Library</h1>
+        <p class="hint-text">
+            <a href="/settings">Sign in</a> to see your tracked anime here.
+        </p>
+    }
+    else
+    {
+        <nav class="library-tabs" role="tablist" aria-label="Library lists">
+            @foreach (var (status, label) in _tabs)
+            {
+                <button type="button" role="tab"
+                        class="library-tab @(_status == status ? "library-tab-active" : "")"
+                        aria-selected="@(_status == status)"
+                        @onclick="() => SetStatus(status)">
+                    @label
+                </button>
+            }
+        </nav>
+
+        <form class="filter-bar" role="search" @onsubmit:preventDefault>
+            <input type="search" class="filter-bar-search" placeholder="Search your list…"
+                   value="@_search" @oninput="OnSearch" autocomplete="off" />
+        </form>
+
+        <div class="library-results-pane">
+            @if (_loading)
+            {
+                <div class="library-grid">
+                    @for (var i = 0; i < 12; i++)
+                    {
+                        <div class="library-card library-card-skeleton">
+                            <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
+                            <span class="library-card-skeleton-line"></span>
+                            <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <PosterGrid Items="_filtered" Variant="grid"
+                            EmptyMessage="@($"Nothing in your {_activeLabel} list.")" />
+            }
+        </div>
+    }
 </section>
+
+@code {
+    private readonly (string Status, string Label)[] _tabs =
+    {
+        ("current", "Watching"), ("completed", "Completed"), ("planning", "Planning"),
+        ("paused", "Paused"), ("dropped", "Dropped"), ("repeating", "Rewatching"),
+    };
+
+    private string _status = "current";
+    private string _search = "";
+    private bool _loading;
+    private IReadOnlyList<MetaDto> _items = Array.Empty<MetaDto>();
+
+    private string _activeLabel => _tabs.FirstOrDefault(t => t.Status == _status).Label ?? "";
+
+    private IReadOnlyList<MetaDto> _filtered =>
+        string.IsNullOrWhiteSpace(_search)
+            ? _items
+            : _items.Where(m => m.Name.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+
+    protected override void OnInitialized() => State.Changed += OnStateChanged;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        if (string.IsNullOrEmpty(State.StreamConfig)) return;
+        _loading = true;
+        StateHasChanged();
+        _items = await Api.ListAsync(_status);
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async void SetStatus(string status)
+    {
+        if (_status == status) return;
+        _status = status;
+        _search = "";
+        await Load();
+    }
+
+    private void OnSearch(ChangeEventArgs e) => _search = e.Value?.ToString() ?? "";
+
+    private async void OnStateChanged() => await InvokeAsync(Load);
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+}

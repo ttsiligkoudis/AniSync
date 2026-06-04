@@ -6,18 +6,25 @@ namespace AniSync.Client.Services;
 
 /// <summary>
 /// Default <see cref="IAniSyncApi"/> implementation. Registered as a typed
-/// HttpClient per head; the head sets BaseAddress to the backend URL (and, on
-/// MAUI, attaches the auth token / cookie handler). Every call degrades to an
-/// empty/null result on failure so a single dead shelf never breaks the page.
+/// HttpClient per head; the head sets BaseAddress to the backend URL. User-scoped
+/// endpoints (/api/v1/me/*) authenticate with the <c>X-AniSync-Config</c> header
+/// carrying the user's config string — that string is the credential AND the
+/// Stremio addon config, held in <see cref="AppState.StreamConfig"/>. Every call
+/// degrades to an empty/null result on failure so one dead shelf never breaks
+/// the page.
 /// </summary>
 public sealed class AniSyncApi : IAniSyncApi
 {
+    private const string ConfigHeader = "X-AniSync-Config";
+
     private readonly HttpClient _http;
+    private readonly AppState _state;
     private readonly ILogger<AniSyncApi> _logger;
 
-    public AniSyncApi(HttpClient http, ILogger<AniSyncApi> logger)
+    public AniSyncApi(HttpClient http, AppState state, ILogger<AniSyncApi> logger)
     {
         _http = http;
+        _state = state;
         _logger = logger;
     }
 
@@ -29,10 +36,13 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Matches ?? new();
     }
 
-    public async Task<IReadOnlyList<MetaDto>> DiscoverAsync(string kind, string? genre = null, CancellationToken ct = default)
+    public async Task<IReadOnlyList<MetaDto>> DiscoverAsync(string kind, string? genre = null, string? skip = null, CancellationToken ct = default)
     {
         var url = $"api/v1/discover/{Uri.EscapeDataString(kind)}";
-        if (!string.IsNullOrWhiteSpace(genre)) url += $"?genre={Uri.EscapeDataString(genre)}";
+        var q = new List<string>();
+        if (!string.IsNullOrWhiteSpace(genre)) q.Add($"genre={Uri.EscapeDataString(genre)}");
+        if (!string.IsNullOrWhiteSpace(skip)) q.Add($"skip={Uri.EscapeDataString(skip)}");
+        if (q.Count > 0) url += "?" + string.Join("&", q);
         var resp = await GetOrDefault<MetaListResponse>(url, ct);
         return resp?.Results ?? new();
     }
@@ -51,7 +61,6 @@ public sealed class AniSyncApi : IAniSyncApi
 
     public async Task<TraktUserStatsDto?> TraktStatsAsync(CancellationToken ct = default)
     {
-        // Trakt stats are only exposed by the MVC JSON action, not /api/v1.
         var resp = await GetOrDefault<TraktStatsEnvelope>("Home/TraktStatsData", ct);
         return resp is { Success: true } ? resp.Stats : null;
     }
@@ -60,6 +69,12 @@ public sealed class AniSyncApi : IAniSyncApi
     {
         var resp = await GetOrDefault<ContinueWatchingResponse>($"api/v1/me/continue-watching?limit={limit}", ct);
         return resp?.Items ?? new();
+    }
+
+    public async Task<IReadOnlyList<MetaDto>> ListAsync(string status, CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<MetaListResponse>($"api/v1/me/list?status={Uri.EscapeDataString(status)}", ct);
+        return resp?.Results ?? new();
     }
 
     public async Task<MetaDto?> AnimeAsync(string id, CancellationToken ct = default)
@@ -85,7 +100,6 @@ public sealed class AniSyncApi : IAniSyncApi
         if (string.IsNullOrEmpty(config)) return Array.Empty<StremioStream>();
         var url = $"{config.Trim('/')}/stream/{Uri.EscapeDataString(type)}/{Uri.EscapeDataString(streamId)}.json";
         var resp = await GetOrDefault<StremioStreamsResponse>(url, ct);
-        // Only direct-URL sources are playable in a thin client.
         return resp?.Streams.Where(s => !string.IsNullOrEmpty(s.Url)).ToList() ?? new();
     }
 
@@ -93,7 +107,14 @@ public sealed class AniSyncApi : IAniSyncApi
     {
         try
         {
-            return await _http.GetFromJsonAsync<T>(url, ct);
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            // User-scoped endpoints need the config credential; harmless on public ones.
+            if (!string.IsNullOrEmpty(_state.StreamConfig))
+                req.Headers.TryAddWithoutValidation(ConfigHeader, _state.StreamConfig);
+
+            using var resp = await _http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return default;
+            return await resp.Content.ReadFromJsonAsync<T>(cancellationToken: ct);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
