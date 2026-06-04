@@ -1,25 +1,87 @@
-@* Episode-release notification bell — exact port of the .notif-bell block in
-   _Layout.cshtml. The polling/render behaviour is handled by the ported
-   notifications.js (data-notif-* hooks) loaded per head; this component just
-   renders the identical DOM. *@
-<div class="notif-bell" data-notif-bell>
+@inject IAniSyncApi Api
+@inject NavigationManager Nav
+
+@* Episode-release notification bell — interactive C# port of the header bell
+   (the web version was driven by notifications.js). Shows the unread badge from
+   /api/v1/notifications/count and, on open, the most recent rows; "Mark all
+   read" clears them. Reuses the notif-* classes from site.css. *@
+<div class="notif-bell @(_open ? "notif-bell-open" : "")" data-notif-bell>
     <button class="notif-bell-btn" type="button" aria-label="Notifications"
-            aria-expanded="false" aria-controls="notif-panel" data-notif-toggle>
+            aria-expanded="@_open" @onclick="Toggle">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path>
             <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
         </svg>
-        <span class="notif-bell-badge" data-notif-count hidden>0</span>
+        @if (_count > 0)
+        {
+            <span class="notif-bell-badge">@(_count > 99 ? "99+" : _count.ToString())</span>
+        }
     </button>
-    <div class="notif-panel" id="notif-panel" role="dialog" aria-label="Notifications" hidden>
-        <header class="notif-panel-header">
-            <span class="notif-panel-title">Notifications</span>
-            <button type="button" data-notif-read-all class="notif-read-all">Mark all read</button>
-        </header>
-        <div class="notif-panel-body" data-notif-list>
-            <div class="notif-empty" data-notif-empty>You're all caught up.</div>
+    @if (_open)
+    {
+        <div class="notif-panel" role="dialog" aria-label="Notifications">
+            <header class="notif-panel-header">
+                <span class="notif-panel-title">Notifications</span>
+                <button type="button" class="notif-read-all" @onclick="MarkAllRead">Mark all read</button>
+            </header>
+            <div class="notif-panel-body">
+                @if (_loading)
+                {
+                    <div class="notif-empty">Loading…</div>
+                }
+                else if (_items.Count == 0)
+                {
+                    <div class="notif-empty">You're all caught up.</div>
+                }
+                else
+                {
+                    @foreach (var n in _items)
+                    {
+                        <a class="notif-item @(n.IsRead ? "" : "notif-item-unread")"
+                           href="@(string.IsNullOrEmpty(n.LinkPath) ? "#" : n.LinkPath)">
+                            @if (!string.IsNullOrEmpty(n.ThumbnailUrl))
+                            {
+                                <img class="notif-thumb" src="@n.ThumbnailUrl" alt="" loading="lazy" onerror="this.remove()" />
+                            }
+                            else
+                            {
+                                <span class="notif-thumb notif-thumb-placeholder" aria-hidden="true"></span>
+                            }
+                            <span class="notif-title">@n.AnimeTitle · Ep @n.EpisodeNumber</span>
+                        </a>
+                    }
+                }
+            </div>
+            <a class="notif-panel-footer" href="/notifications">View all</a>
         </div>
-        <a class="notif-panel-footer" href="/notifications" data-notif-view-all>View all</a>
-    </div>
+    }
 </div>
+
+@code {
+    private bool _open;
+    private bool _loading;
+    private int _count;
+    private IReadOnlyList<NotificationDto> _items = Array.Empty<NotificationDto>();
+
+    protected override async Task OnInitializedAsync()
+        => _count = (await Api.NotificationCountAsync()).Count;
+
+    private async Task Toggle()
+    {
+        _open = !_open;
+        if (_open)
+        {
+            _loading = true;
+            _items = await Api.NotificationsAsync(limit: 20);
+            _loading = false;
+        }
+    }
+
+    private async Task MarkAllRead()
+    {
+        await Api.MarkAllNotificationsReadAsync();
+        _count = 0;
+        _items = await Api.NotificationsAsync(limit: 20);
+    }
+}

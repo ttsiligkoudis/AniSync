@@ -1,9 +1,11 @@
 @page "/meta/{Id}/watch/{Episode:int}"
 @page "/meta/{Id}/watch/{Season:int}/{Episode:int}"
+@implements IDisposable
 @inject IAniSyncApi Api
 @inject AppState State
 @inject IAppEnvironment Env
 @inject IMediaPlayer Player
+@inject ISecureStore Store
 @inject NavigationManager Nav
 
 @* Watch page — port of Views/Meta/Watch.cshtml. Header + player surface +
@@ -85,6 +87,10 @@
 <section class="watch-sources">
     <div class="watch-section-header">
         <h2 class="watch-section-title">Sources</h2>
+        <label class="watch-toggle">
+            <input type="checkbox" @bind="_autoPlayNext" />
+            <span class="watch-toggle-dot"></span> Auto-play next
+        </label>
     </div>
     <div class="watch-sources-body">
         @if (string.IsNullOrEmpty(State.StreamConfig))
@@ -141,6 +147,8 @@
     private string _type = "series";
     private string _title = "Watch";
     private string _seasonLabel = "";
+    private bool _autoPlayNext = true;
+    private double _lastSaved;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -184,9 +192,53 @@
         _playingUrl = s.Url;
         if (Env.SupportsNativePlayback)
         {
-            await Player.PlayAsync(new PlaybackRequest(s.Url!, _title));
+            // Resume from the last saved position and let the host player report
+            // progress back so we can persist resume + scrobble (kept here so
+            // both heads share the logic).
+            var resume = await ReadResumeAsync();
+            await Player.PlayAsync(new PlaybackRequest(
+                Url: s.Url!,
+                Title: _title,
+                ResumeSeconds: resume,
+                OnProgress: OnProgress,
+                OnEnded: OnEnded));
         }
-        // Web head: the <video> element bound to _playingUrl renders + autoplays.
+        // Web head: the <video> element bound to _playingUrl renders + autoplays;
+        // its Html5MediaPlayer wires the same resume/scrobble via JS interop.
+    }
+
+    private string ResumeKey => $"pos:{Id}:{Season ?? 1}:{Episode}";
+
+    private async Task<double?> ReadResumeAsync()
+    {
+        var saved = await Store.GetAsync(ResumeKey);
+        return double.TryParse(saved, out var v) && v > 0 ? v : null;
+    }
+
+    // Persist resume at most every ~5s; clear it within 15s of the end so a
+    // finished episode doesn't reopen mid-credits next time.
+    private async void OnProgress(double positionSec, double durationSec)
+    {
+        if (durationSec > 0 && positionSec > durationSec - 15)
+        {
+            await Store.SetAsync(ResumeKey, null);
+            return;
+        }
+        if (Math.Abs(positionSec - _lastSaved) < 5) return;
+        _lastSaved = positionSec;
+        await Store.SetAsync(ResumeKey, positionSec.ToString("0"));
+        // TODO server scrobble: POST /api/v1/scrobble/{token} once the per-user
+        // scrobble token is surfaced to the client (distinct from the config).
+    }
+
+    private async void OnEnded()
+    {
+        await Store.SetAsync(ResumeKey, null);
+        _playingUrl = null;
+        if (_autoPlayNext && _next is not null)
+            Nav.NavigateTo(EpisodeHref(_next));
+        else
+            await InvokeAsync(StateHasChanged);
     }
 
     private string BackHref
@@ -216,4 +268,7 @@
         }
         return null;
     }
+
+    // Tear down native playback when leaving the page (web <video> unmounts itself).
+    public void Dispose() => _ = Player.StopAsync();
 }

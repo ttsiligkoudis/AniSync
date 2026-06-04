@@ -1,6 +1,7 @@
 @page "/meta/{Id}"
 @inject IAniSyncApi Api
 @inject NavigationManager Nav
+@inject AppState State
 
 @* Anime/title detail — port of Views/Meta/Detail.cshtml. Hero (backdrop +
    poster + score + title + info + status + genre chips), collapsible synopsis,
@@ -62,6 +63,17 @@ else
                             }
                             @a.AirStatus
                         </span>
+                    }
+                    @if (!string.IsNullOrEmpty(State.StreamConfig))
+                    {
+                        <button type="button" class="anime-detail-user-state" @onclick="() => _modalOpen = true">
+                            <span>Manage Entry</span>
+                            <svg class="anime-detail-user-state-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
+                                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M12 20h9"></path>
+                                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                            </svg>
+                        </button>
                     }
                 </div>
                 @if (a.Genres is { Count: > 0 })
@@ -143,9 +155,15 @@ else
     }
 }
 
+<ManageEntryModal Id="@Id" Name="@(_meta?.Name ?? string.Empty)"
+                  Visible="_modalOpen"
+                  OnClose="() => _modalOpen = false"
+                  OnSaved="OnEntrySaved" />
+
 @code {
     [Parameter] public string Id { get; set; } = "";
 
+    private bool _modalOpen;
     private bool _loading = true;
     private MetaDto? _meta;
     private IReadOnlyList<EpisodeInfoDto> _episodes = Array.Empty<EpisodeInfoDto>();
@@ -194,6 +212,10 @@ else
                 || (e.Title?.Contains(_filter.Trim(), StringComparison.OrdinalIgnoreCase) ?? false));
 
     private void OnFilter(ChangeEventArgs e) => _filter = e.Value?.ToString() ?? "";
+
+    // After a successful save the modal closes itself; nothing else on the
+    // detail hero reflects entry state yet, so just trigger a re-render.
+    private Task OnEntrySaved() => Task.CompletedTask;
 
     private static string EpisodeLabel(EpisodeInfoDto ep)
         => string.IsNullOrEmpty(ep.Title) ? $"Episode {ep.Episode}" : $"{ep.Episode}. {ep.Title}";

@@ -24,10 +24,17 @@ public interface IMediaPlayer
 /// <param name="Title">Display title shown in the player chrome.</param>
 /// <param name="ResumeSeconds">Where to resume from, if any.</param>
 /// <param name="Subtitles">Optional external subtitle tracks (url + label).</param>
+/// <param name="OnProgress">Position callback (positionSeconds, durationSeconds)
+///   raised periodically by the host player. The Watch page uses it to persist
+///   resume position and scrobble — keeping that logic in the shared layer so
+///   both the native (LibVLCSharp) and web (HTML5) hosts stay dumb.</param>
+/// <param name="OnEnded">Raised when playback reaches the end (drives auto-play-next).</param>
 public record PlaybackRequest(
     string Url,
     string Title,
     double? ResumeSeconds = null,
-    IReadOnlyList<SubtitleTrack>? Subtitles = null);
+    IReadOnlyList<SubtitleTrack>? Subtitles = null,
+    Action<double, double>? OnProgress = null,
+    Action? OnEnded = null);
 
 public record SubtitleTrack(string Url, string Label, string? Language = null);
