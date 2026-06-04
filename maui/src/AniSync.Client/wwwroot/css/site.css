@@ -506,6 +506,17 @@ textarea:focus-visible {
   border-color: var(--accent);
 }
 
+/* FocusOnNavigate (SPA accessibility) sets tabindex="-1" on the page <h1> and
+   programmatically focuses it after each navigation; :focus-visible then paints
+   the accent ring on a non-interactive title, which read as a stray blue box
+   around every page heading. Suppress the ring on elements that are only
+   focusable as a navigation/scroll target — genuine interactive controls
+   (tabindex >= 0 / natively focusable) keep theirs. */
+[tabindex="-1"]:focus,
+[tabindex="-1"]:focus-visible {
+  outline: none;
+}
+
 html {
   position: relative;
   min-height: 100%;
