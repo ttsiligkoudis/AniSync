@@ -1,0 +1,85 @@
+@implements IDisposable
+@inject AppState State
+
+@* One dashboard shelf — port of the .dashboard-section [data-shelf] blocks in
+   Index.cshtml. Async-loads its items via Fetch, shows 6 skeleton cards while
+   loading, renders the scroll-row PosterGrid when they arrive, and hides itself
+   entirely when empty (matching the web's "empty body → hide shelf" loader). A
+   shelf is also hidden when the dashboard media-type filter excludes it. *@
+
+@if (_visible)
+{
+    <section class="dashboard-section" data-dash-section="@DashSection" data-media-type="@MediaType">
+        <div class="dashboard-section-header">
+            <h2 class="dashboard-section-title">@Title</h2>
+            @if (!string.IsNullOrEmpty(ViewAllHref))
+            {
+                <a class="dashboard-section-link" href="@ViewAllHref">
+                    <span>View all</span>
+                    <svg class="dashboard-section-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                        <polyline points="12 5 19 12 12 19"></polyline>
+                    </svg>
+                </a>
+            }
+            else if (!string.IsNullOrEmpty(MutedNote))
+            {
+                <span class="dashboard-section-link-muted">@MutedNote</span>
+            }
+        </div>
+        <div data-shelf-container>
+            @if (_loading)
+            {
+                <div class="poster-scroll-row">
+                    @for (var i = 0; i < 6; i++)
+                    {
+                        <div class="library-card library-card-skeleton">
+                            <div class="library-card-poster-wrap">
+                                <div class="library-card-poster skeleton-shimmer"></div>
+                            </div>
+                            <span class="library-card-skeleton-line"></span>
+                            <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <PosterGrid Items="_items" Variant="scroll" VideoLinks="VideoLinks" />
+            }
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter, EditorRequired] public string MediaType { get; set; } = "anime";
+    [Parameter, EditorRequired] public string DashSection { get; set; } = "";
+    [Parameter, EditorRequired] public Func<Task<IReadOnlyList<MetaDto>>> Fetch { get; set; } = default!;
+    [Parameter] public string? ViewAllHref { get; set; }
+    [Parameter] public string? MutedNote { get; set; }
+    [Parameter] public bool VideoLinks { get; set; }
+
+    private bool _loading = true;
+    private IReadOnlyList<MetaDto> _items = Array.Empty<MetaDto>();
+
+    // Shown while loading (skeletons) and after load only if it returned items.
+    // Always hidden when the dashboard filter excludes this shelf's media type.
+    private bool _visible => PassesFilter && (_loading || _items.Count > 0);
+
+    private bool PassesFilter
+        => State.DashboardFilter is "all" || State.DashboardFilter == MediaType
+           || MediaType.Split(' ').Contains(State.DashboardFilter);
+
+    protected override void OnInitialized() => State.Changed += OnFilterChanged;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _items = await Fetch(); }
+        finally { _loading = false; }
+    }
+
+    private void OnFilterChanged() => StateHasChanged();
+
+    public void Dispose() => State.Changed -= OnFilterChanged;
+}

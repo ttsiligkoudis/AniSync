@@ -14,8 +14,7 @@
                type="search"
                placeholder="Search…"
                autocomplete="off"
-               @bind-value="_query"
-               @bind-value:event="oninput"
+               value="@_query"
                @oninput="OnInput" />
     </div>
 
@@ -122,8 +121,8 @@
         var isVideo = string.Equals(m.Type, "movie", StringComparison.OrdinalIgnoreCase)
                    || string.Equals(m.Type, "series", StringComparison.OrdinalIgnoreCase);
         return isVideo
-            ? $"/detail/{Uri.EscapeDataString(m.Id)}?type={m.Type}"
-            : $"/detail/{Uri.EscapeDataString(m.Id)}";
+            ? $"/meta/{Uri.EscapeDataString(m.Id)}?type={m.Type}"
+            : $"/meta/{Uri.EscapeDataString(m.Id)}";
     }
 
     public void Dispose() => _cts?.Cancel();

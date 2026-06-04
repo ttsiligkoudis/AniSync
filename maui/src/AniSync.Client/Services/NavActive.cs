@@ -12,7 +12,7 @@ public static class NavActive
         var p = "/" + relativePath.Split('?', '#')[0].Trim('/');
         if (p == "/") return "home";
         if (p.StartsWith("/library")) return "library";
-        if (p.StartsWith("/discover") || p.StartsWith("/detail") || p.StartsWith("/watch")) return "discover";
+        if (p.StartsWith("/discover") || p.StartsWith("/meta") || p.StartsWith("/watch")) return "discover";
         if (p.StartsWith("/calendar")) return "calendar";
         if (p.StartsWith("/notifications")) return "notifications";
         if (p.StartsWith("/settings") || p.StartsWith("/configure") || p.StartsWith("/stremio")) return "configure";

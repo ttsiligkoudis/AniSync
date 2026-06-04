@@ -1,0 +1,166 @@
+@implements IDisposable
+@inject IAniSyncApi Api
+@inject AppState State
+
+@* "Your stats" panel — port of the stats-section in Index.cshtml. The web
+   filled the cells from JS (localStorage + /Home/AnilistStats + TraktStatsData);
+   here we fetch in C# and render the numbers directly. Anime row sources from
+   AniList, the movies/series row from Trakt; group labels show only when both
+   are present ("combined"). Rows hide per the dashboard media-type filter. *@
+
+@if (_anime is not null || _trakt is not null)
+{
+    <section class="dashboard-section stats-section" data-dash-section="stats" data-media-type="anime movie series">
+        <div class="dashboard-section-header">
+            <h2 class="dashboard-section-title">Your stats</h2>
+        </div>
+
+        @if (_anime is not null && ShowAnime)
+        {
+            <div class="stats-group" data-media-type="anime">
+                <div class="stats-group-head">
+                    @if (_combined)
+                    {
+                        <span class="stats-group-label">Anime</span>
+                    }
+                    <span class="dashboard-section-actions stats-group-actions">
+                        <span class="dashboard-section-link-muted">via AniList</span>
+                    </span>
+                </div>
+                <div class="stats-strip">
+                    <div class="stats-cell" data-stat="watching">
+                        <span class="stats-icon stats-icon-blue">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect>
+                                <polyline points="17 2 12 7 7 2"></polyline>
+                            </svg>
+                        </span>
+                        <div class="stats-number">@_anime.Watching</div>
+                        <div class="stats-label">Watching</div>
+                    </div>
+                    <div class="stats-cell" data-stat="completed">
+                        <span class="stats-icon stats-icon-green">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                            </svg>
+                        </span>
+                        <div class="stats-number">@_anime.Completed</div>
+                        <div class="stats-label">Completed</div>
+                    </div>
+                    @if (_anime.MeanScore is > 0)
+                    {
+                        <div class="stats-cell" data-stat="mean">
+                            <span class="stats-icon stats-icon-purple">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                                </svg>
+                            </span>
+                            <div class="stats-number">@_anime.MeanScore!.Value.ToString("0.0")</div>
+                            <div class="stats-label">Mean</div>
+                        </div>
+                    }
+                    @if (_anime.TotalHoursWatched > 0)
+                    {
+                        <div class="stats-cell" data-stat="hours">
+                            <span class="stats-icon stats-icon-amber">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polyline points="12 6 12 12 16 14"></polyline>
+                                </svg>
+                            </span>
+                            <div class="stats-number">@_anime.TotalHoursWatched</div>
+                            <div class="stats-label">Hours</div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        @if (_trakt is not null && ShowVideo)
+        {
+            <div class="stats-group" data-media-type="movie series">
+                <div class="stats-group-head">
+                    @if (_combined)
+                    {
+                        <span class="stats-group-label">Movies &amp; Series</span>
+                    }
+                    <span class="dashboard-section-actions stats-group-actions">
+                        <span class="dashboard-section-link-muted">via Trakt</span>
+                    </span>
+                </div>
+                <div class="stats-strip">
+                    <div class="stats-cell" data-trakt-stat="movies">
+                        <span class="stats-icon stats-icon-blue">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+                                <line x1="7" y1="4" x2="7" y2="20"></line><line x1="17" y1="4" x2="17" y2="20"></line>
+                                <line x1="3" y1="12" x2="21" y2="12"></line>
+                            </svg>
+                        </span>
+                        <div class="stats-number">@_trakt.MoviesWatched</div>
+                        <div class="stats-label">Movies</div>
+                    </div>
+                    <div class="stats-cell" data-trakt-stat="shows">
+                        <span class="stats-icon stats-icon-green">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="7" width="20" height="13" rx="2"></rect>
+                                <polyline points="8 3 12 7 16 3"></polyline>
+                            </svg>
+                        </span>
+                        <div class="stats-number">@_trakt.ShowsWatched</div>
+                        <div class="stats-label">Shows</div>
+                    </div>
+                    <div class="stats-cell" data-trakt-stat="episodes">
+                        <span class="stats-icon stats-icon-purple">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="3" width="20" height="14" rx="2"></rect>
+                                <line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line>
+                            </svg>
+                        </span>
+                        <div class="stats-number">@_trakt.EpisodesWatched</div>
+                        <div class="stats-label">Episodes</div>
+                    </div>
+                    @if (_trakt.TotalHoursWatched > 0)
+                    {
+                        <div class="stats-cell" data-trakt-stat="hours">
+                            <span class="stats-icon stats-icon-amber">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polyline points="12 6 12 12 16 14"></polyline>
+                                </svg>
+                            </span>
+                            <div class="stats-number">@_trakt.TotalHoursWatched</div>
+                            <div class="stats-label">Hours</div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private AnilistUserStatsDto? _anime;
+    private TraktUserStatsDto? _trakt;
+    private bool _combined => _anime is not null && _trakt is not null;
+
+    private bool ShowAnime => State.DashboardFilter is "all" or "anime";
+    private bool ShowVideo => State.DashboardFilter is "all" or "movie" or "series";
+
+    protected override void OnInitialized() => State.Changed += OnFilterChanged;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Independent fetches — a missing Trakt/AniList link just drops that row.
+        var anime = Api.AnilistStatsAsync();
+        var trakt = Api.TraktStatsAsync();
+        await Task.WhenAll(anime, trakt);
+        _anime = anime.Result;
+        _trakt = trakt.Result;
+    }
+
+    private void OnFilterChanged() => StateHasChanged();
+
+    public void Dispose() => State.Changed -= OnFilterChanged;
+}

@@ -510,11 +510,12 @@ namespace AnimeList.Controllers
                 var listType = kind?.ToLowerInvariant() switch
                 {
                     "trending" => ListType.Trending_Desc,
+                    "popular" => ListType.Popularity_Desc,
                     "seasonal" => ListType.Seasonal,
                     "airing" => ListType.Airing,
                     _ => (ListType?)null,
                 };
-                if (!listType.HasValue) return BadRequest(new ApiError("kind must be trending|seasonal|airing"));
+                if (!listType.HasValue) return BadRequest(new ApiError("kind must be trending|popular|seasonal|airing"));
 
                 var metas = service switch
                 {

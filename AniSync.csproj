@@ -5,6 +5,13 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>AniSync</AssemblyName>
+    <!-- The maui/ folder is a separate .NET 9 MAUI Blazor Hybrid + Web solution
+         (its own projects). Keep it out of THIS web app's default Compile /
+         Content / None / RazorComponent globs so `dotnet publish` here never
+         tries to build the shared client RCL into the ASP.NET app (which caused
+         MetaType clashes + _Imports namespace errors). Covers both path
+         separators so it excludes on Linux CI and Windows alike. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);maui/**;maui\**</DefaultItemExcludes>
     <!-- Picked up by Swashbuckle so /api/docs surfaces the XML comments already
          written on the API controller's actions. CS1591 is the "missing XML
          comment" warning — silenced because we don't doc-comment internal

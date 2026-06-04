@@ -1,0 +1,77 @@
+@* Shared poster-grid renderer — exact port of Views/Shared/_PosterGrid.cshtml.
+   "scroll" → horizontal-overflow row (dashboard shelves); default → CSS grid
+   (library/discover). Cards link to /meta/{id}; video ids append ?type=. *@
+
+@if (Items is { Count: > 0 })
+{
+    <div class="@(Variant == "scroll" ? "poster-scroll-row" : "library-grid")">
+        @foreach (var meta in Items)
+        {
+            var detailHref = (VideoLinks && !meta.IsAnime)
+                ? $"/meta/{meta.Id}?type={(string.Equals(meta.Type, "movie", StringComparison.OrdinalIgnoreCase) ? "movie" : "series")}"
+                : $"/meta/{meta.Id}";
+
+            var infoBits = new List<string>();
+            if (!string.IsNullOrEmpty(meta.Format)) infoBits.Add(meta.Format!);
+            if (meta.Episodes is int eps && eps > 0) infoBits.Add($"{eps} ep{(eps > 1 ? "s" : "")}");
+            if (meta.Year is int yr && yr > 0) infoBits.Add(yr.ToString());
+
+            var hasScore = meta.Score is > 0;
+            var hasProgress = meta.Progress is > 0;
+            var progressLabel = hasProgress
+                ? (meta.Episodes is int totalEps && totalEps > 0 ? $"{meta.Progress!.Value} / {totalEps}" : $"Ep {meta.Progress!.Value}")
+                : null;
+
+            <a class="library-card" href="@detailHref" title="@meta.Name"
+               data-meta-id="@meta.Id" data-meta-name="@meta.Name"
+               data-meta-status="@(string.IsNullOrEmpty(meta.EntryStatus) ? null : meta.EntryStatus)"
+               data-meta-progress="@(meta.Progress?.ToString())"
+               data-meta-total="@((meta.Episodes is int t && t > 0) ? t.ToString() : null)">
+                <div class="library-card-poster-wrap">
+                    <div class="library-card-poster-placeholder" aria-hidden="true">
+                        <svg class="library-card-poster-placeholder-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <rect x="3" y="5" width="18" height="14" rx="1.5" stroke="currentColor" stroke-width="1.5" />
+                            <path d="m4 16 4.2-4.2a1 1 0 0 1 1.4 0L13 15.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                            <path d="m11.5 14 2.8-2.8a1 1 0 0 1 1.4 0L20 15.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                            <circle cx="15.5" cy="9" r="1.25" fill="currentColor" />
+                        </svg>
+                        <span class="library-card-poster-placeholder-title">@meta.Name</span>
+                    </div>
+                    @if (!string.IsNullOrEmpty(meta.Poster))
+                    {
+                        <img class="library-card-poster" src="@meta.Poster" alt="@meta.Name"
+                             loading="lazy" decoding="async" onerror="this.remove()" />
+                    }
+                    @if (hasProgress)
+                    {
+                        <span class="library-card-progress">@progressLabel</span>
+                    }
+                    else if (meta.AiringEpisode.HasValue)
+                    {
+                        <span class="library-card-progress" data-airing-at="@meta.AiringAt">Ep @meta.AiringEpisode.Value</span>
+                    }
+                    @if (hasScore)
+                    {
+                        <span class="library-card-score">★ @meta.Score!.Value.ToString("0.0")</span>
+                    }
+                </div>
+                <span class="library-card-title">@meta.Name</span>
+                @if (infoBits.Count > 0)
+                {
+                    <span class="library-card-meta">@string.Join(" · ", infoBits)</span>
+                }
+            </a>
+        }
+    </div>
+}
+else if (!string.IsNullOrEmpty(EmptyMessage))
+{
+    <p class="library-empty">@EmptyMessage</p>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<MetaDto>? Items { get; set; }
+    [Parameter] public string Variant { get; set; } = "grid";
+    [Parameter] public bool VideoLinks { get; set; }
+    [Parameter] public string? EmptyMessage { get; set; }
+}
