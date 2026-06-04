@@ -37,6 +37,20 @@ public sealed class AppState
     /// </summary>
     public string DashboardFilter { get; private set; } = "all";
 
+    /// <summary>
+    /// The user's Stremio addon config string, used to resolve playable sources
+    /// (GET /{config}/stream/...). Held in secure storage on MAUI and supplied
+    /// at sign-in; null/empty means streaming isn't set up yet, so the watch
+    /// page shows a "set up streaming" prompt.
+    /// </summary>
+    public string? StreamConfig { get; private set; }
+
+    public void SetStreamConfig(string? config)
+    {
+        StreamConfig = config;
+        Changed?.Invoke();
+    }
+
     public event Action? Changed;
 
     public void SetMediaType(MetaType type)

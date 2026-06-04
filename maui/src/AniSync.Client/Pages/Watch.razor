@@ -1,0 +1,219 @@
+@page "/meta/{Id}/watch/{Episode:int}"
+@page "/meta/{Id}/watch/{Season:int}/{Episode:int}"
+@inject IAniSyncApi Api
+@inject AppState State
+@inject IAppEnvironment Env
+@inject IMediaPlayer Player
+@inject NavigationManager Nav
+
+@* Watch page — port of Views/Meta/Watch.cshtml. Header + player surface +
+   prev/next nav + source picker. Playback diverges by host (the only place it
+   has to): the native MAUI head plays the selected source through LibVLCSharp
+   (IMediaPlayer), fixing the browser's audio-codec gaps; the Web head plays it
+   in an HTML5 <video>. Sources come from the user's Stremio addon config; when
+   that isn't set up the page shows the same "set up streaming" prompt the web
+   app does. *@
+
+<PageTitle>@_title · AniSync</PageTitle>
+
+<section class="watch-header">
+    <a class="watch-back" href="@BackHref">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M15 18l-6-6 6-6"></path>
+        </svg>
+        <span>@(_meta?.Name ?? "Back")</span>
+    </a>
+    <h1 class="watch-title">@_title</h1>
+    <p class="watch-meta">@_seasonLabel</p>
+</section>
+
+<section class="watch-player-wrap">
+    <div class="watch-player">
+        @if (_playingUrl is not null && !Env.SupportsNativePlayback)
+        {
+            @* Web head: HTML5 fallback (browser codec limits apply). *@
+            <video class="watch-player-video" controls autoplay src="@_playingUrl"
+                   style="width:100%;height:100%;background:#000;"></video>
+        }
+        else
+        {
+            <div class="watch-player-empty">
+                @if (!string.IsNullOrEmpty(_meta?.Background))
+                {
+                    <img class="watch-player-backdrop" src="@_meta!.Background" alt="" loading="lazy" decoding="async" />
+                }
+                <span class="watch-player-prompt">
+                    @if (Env.SupportsNativePlayback && _playingUrl is not null)
+                    {
+                        @:Playing in the native player…
+                    }
+                    else
+                    {
+                        @:Pick a source below to start watching.
+                    }
+                </span>
+            </div>
+        }
+    </div>
+</section>
+
+<nav class="watch-nav">
+    @if (_prev is not null)
+    {
+        <a class="watch-nav-btn watch-nav-prev" href="@EpisodeHref(_prev)">
+            <span class="watch-nav-direction">← Previous</span>
+            <span class="watch-nav-label">Episode @_prev.Episode</span>
+        </a>
+    }
+    else
+    {
+        <span class="watch-nav-btn watch-nav-btn-disabled" aria-hidden="true"></span>
+    }
+    @if (_next is not null)
+    {
+        <a class="watch-nav-btn watch-nav-next" href="@EpisodeHref(_next)">
+            <span class="watch-nav-direction">Next →</span>
+            <span class="watch-nav-label">Episode @_next.Episode</span>
+        </a>
+    }
+    else
+    {
+        <span class="watch-nav-btn watch-nav-btn-disabled" aria-hidden="true"></span>
+    }
+</nav>
+
+<section class="watch-sources">
+    <div class="watch-section-header">
+        <h2 class="watch-section-title">Sources</h2>
+    </div>
+    <div class="watch-sources-body">
+        @if (string.IsNullOrEmpty(State.StreamConfig))
+        {
+            <p class="hint-text">
+                Streaming isn't set up yet. <a href="/settings">Set up streaming</a> to play episodes here.
+            </p>
+        }
+        else if (_loadingSources)
+        {
+            <div class="episode-stream-skeleton">
+                @for (var i = 0; i < 4; i++)
+                {
+                    <div class="episode-stream-skeleton-row">
+                        <div class="episode-stream-skeleton-quality"></div>
+                        <div class="episode-stream-skeleton-meta">
+                            <span class="episode-stream-skeleton-line"></span>
+                            <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short"></span>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        else if (_sources.Count == 0)
+        {
+            <p class="hint-text">No playable sources found for this episode.</p>
+        }
+        else
+        {
+            <div class="episode-stream-actions">
+                @foreach (var s in _sources)
+                {
+                    <button type="button" class="episode-stream-action @(_playingUrl == s.Url ? "is-loading" : "")"
+                            @onclick="() => PlayAsync(s)">
+                        @s.Label
+                    </button>
+                }
+            </div>
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+    [Parameter] public int? Season { get; set; }
+    [Parameter] public int Episode { get; set; }
+
+    private MetaDto? _meta;
+    private IReadOnlyList<EpisodeInfoDto> _episodes = Array.Empty<EpisodeInfoDto>();
+    private IReadOnlyList<StremioStream> _sources = Array.Empty<StremioStream>();
+    private EpisodeInfoDto? _prev, _next;
+    private bool _loadingSources;
+    private string? _playingUrl;
+    private string _type = "series";
+    private string _title = "Watch";
+    private string _seasonLabel = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _playingUrl = null;
+        _type = QueryValue("type") ?? "series";
+        var season = Season ?? 1;
+
+        var metaTask = Api.AnimeAsync(Id);
+        var epsTask = Api.EpisodesAsync(Id);
+        await Task.WhenAll(metaTask, epsTask);
+        _meta = metaTask.Result;
+        _episodes = epsTask.Result;
+
+        _title = $"Episode {Episode}";
+        _seasonLabel = Season is int s ? $"Season {s} · Episode {Episode}" : $"Episode {Episode}";
+
+        // Prev/next within the same season ordering.
+        var ordered = _episodes.Where(e => e.Season == season).OrderBy(e => e.Episode).ToList();
+        var idx = ordered.FindIndex(e => e.Episode == Episode);
+        if (idx >= 0)
+        {
+            _prev = idx > 0 ? ordered[idx - 1] : null;
+            _next = idx < ordered.Count - 1 ? ordered[idx + 1] : null;
+            var cur = ordered[idx];
+            if (!string.IsNullOrEmpty(cur.Title)) _title = $"{Episode}. {cur.Title}";
+        }
+
+        // Resolve playable sources once streaming is configured.
+        if (!string.IsNullOrEmpty(State.StreamConfig))
+        {
+            _loadingSources = true;
+            var streamId = _type == "movie" ? Id : $"{Id}:{season}:{Episode}";
+            _sources = await Api.PlaybackSourcesAsync(State.StreamConfig!, _type, streamId);
+            _loadingSources = false;
+        }
+    }
+
+    private async Task PlayAsync(StremioStream s)
+    {
+        if (string.IsNullOrEmpty(s.Url)) return;
+        _playingUrl = s.Url;
+        if (Env.SupportsNativePlayback)
+        {
+            await Player.PlayAsync(new PlaybackRequest(s.Url!, _title));
+        }
+        // Web head: the <video> element bound to _playingUrl renders + autoplays.
+    }
+
+    private string BackHref
+    {
+        get
+        {
+            var q = QueryValue("type") is { Length: > 0 } t ? $"?type={t}" : "";
+            return $"/meta/{Uri.EscapeDataString(Id)}{q}";
+        }
+    }
+
+    private string EpisodeHref(EpisodeInfoDto ep)
+    {
+        var q = QueryValue("type") is { Length: > 0 } t ? $"?type={t}" : "";
+        return Season is int
+            ? $"/meta/{Uri.EscapeDataString(Id)}/watch/{ep.Season}/{ep.Episode}{q}"
+            : $"/meta/{Uri.EscapeDataString(Id)}/watch/{ep.Episode}{q}";
+    }
+
+    private string? QueryValue(string key)
+    {
+        foreach (var pair in new Uri(Nav.Uri).Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = pair.Split('=', 2);
+            if (Uri.UnescapeDataString(kv[0]) == key)
+                return kv.Length > 1 ? Uri.UnescapeDataString(kv[1]) : "";
+        }
+        return null;
+    }
+}
