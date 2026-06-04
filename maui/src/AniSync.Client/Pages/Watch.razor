@@ -7,6 +7,7 @@
 @inject IMediaPlayer Player
 @inject ISecureStore Store
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 @* Watch page — port of Views/Meta/Watch.cshtml. Header + player surface +
    prev/next nav + source picker. Playback diverges by host (the only place it
@@ -33,8 +34,10 @@
     <div class="watch-player">
         @if (_playingUrl is not null && !Env.SupportsNativePlayback)
         {
-            @* Web head: HTML5 fallback (browser codec limits apply). *@
-            <video class="watch-player-video" controls autoplay src="@_playingUrl"
+            @* Web head: HTML5 fallback (browser codec limits apply). The
+               Html5MediaPlayer attaches to this element by id to wire resume,
+               progress (auto-track) and ended (auto-play-next) via JS interop. *@
+            <video id="watch-video" class="watch-player-video" controls src="@_playingUrl"
                    style="width:100%;height:100%;background:#000;"></video>
         }
         else
@@ -55,6 +58,12 @@
                     }
                 </span>
             </div>
+        }
+        @if (_activeSkip is not null && _playingUrl is not null && !Env.SupportsNativePlayback)
+        {
+            <button type="button" class="watch-skip-btn" @onclick="SkipCurrentAsync">
+                Skip @(IsOutro(_activeSkip) ? "Outro" : "Intro")
+            </button>
         }
     </div>
 </section>
@@ -95,6 +104,27 @@
             <input type="checkbox" @bind="_autoPlayNext" />
             <span class="watch-toggle-dot"></span> Auto-play next
         </label>
+        @if (_skips.Count > 0)
+        {
+            <label class="watch-toggle">
+                <input type="checkbox" @bind="_autoSkip" @bind:after="SaveAutoSkipPref" />
+                <span class="watch-toggle-dot"></span> Auto-skip
+            </label>
+        }
+        @if (!Env.SupportsNativePlayback && _subtitles.Count > 0 && _playingUrl is not null)
+        {
+            <label class="watch-sub-select-label">
+                <span>Subtitles</span>
+                <select class="watch-sub-select" @onchange="OnSubtitleChange">
+                    <option value="-1" selected="@(_subtitleIndex < 0)">Off</option>
+                    @for (var i = 0; i < _subtitles.Count; i++)
+                    {
+                        var idx = i;
+                        <option value="@idx" selected="@(idx == _subtitleIndex)">@_subtitles[idx].Label</option>
+                    }
+                </select>
+            </label>
+        }
     </div>
     <div class="watch-sources-body">
         @if (string.IsNullOrEmpty(State.StreamConfig))
@@ -149,23 +179,33 @@
     private EpisodeInfoDto? _prev, _next;
     private bool _loadingSources;
     private string? _playingUrl;
+    private PlaybackRequest? _pendingWebPlay;
     private string _type = "series";
     private string _title = "Watch";
     private string _seasonLabel = "";
     private bool _autoPlayNext = true;
     private bool _autoTrack = true;
+    private bool _autoSkip;
     private bool _tracked;
     private double _lastSaved;
+    private IReadOnlyList<SkipMarker> _skips = Array.Empty<SkipMarker>();
+    private SkipMarker? _activeSkip;
+    private readonly HashSet<SkipMarker> _skipped = new();
+    private int _subtitleIndex = -1;
 
     protected override async Task OnParametersSetAsync()
     {
         _playingUrl = null;
         _tracked = false;
+        _activeSkip = null;
+        _skipped.Clear();
+        _subtitleIndex = -1;
         _type = QueryValue("type") ?? "series";
         var season = Season ?? 1;
 
-        // Auto-track preference persists across episodes/launches.
+        // Preferences persist across episodes/launches.
         _autoTrack = await Store.GetAsync("pref:autotrack") is not "0";
+        _autoSkip = await Store.GetAsync("pref:autoskip") is "1";
 
         var metaTask = Api.AnimeAsync(Id);
         var epsTask = Api.EpisodesAsync(Id);
@@ -196,30 +236,53 @@
             _loadingSources = false;
         }
 
-        // External subtitle tracks (OpenSubtitles) — attached to native playback.
-        _subtitles = await Api.SubtitlesAsync(Id, Episode, Season);
+        // External subtitle tracks (OpenSubtitles) + AniSkip OP/ED markers.
+        var subsTask = Api.SubtitlesAsync(Id, Episode, Season);
+        var skipTask = Api.SkipMarkersAsync(Id, Episode);
+        await Task.WhenAll(subsTask, skipTask);
+        _subtitles = subsTask.Result;
+        _skips = skipTask.Result;
     }
 
     private async Task PlayAsync(StremioStream s)
     {
         if (string.IsNullOrEmpty(s.Url)) return;
         _playingUrl = s.Url;
+
+        // Resume from the last saved position and let the host player report
+        // progress + completion back so we can persist resume + auto-track +
+        // auto-play-next (kept here so both heads share the logic).
+        var resume = await ReadResumeAsync();
+        var request = new PlaybackRequest(
+            Url: s.Url!,
+            Title: _title,
+            ResumeSeconds: resume,
+            Subtitles: _subtitles,
+            OnProgress: OnProgress,
+            OnEnded: OnEnded);
+
         if (Env.SupportsNativePlayback)
         {
-            // Resume from the last saved position and let the host player report
-            // progress back so we can persist resume + scrobble (kept here so
-            // both heads share the logic).
-            var resume = await ReadResumeAsync();
-            await Player.PlayAsync(new PlaybackRequest(
-                Url: s.Url!,
-                Title: _title,
-                ResumeSeconds: resume,
-                Subtitles: _subtitles,
-                OnProgress: OnProgress,
-                OnEnded: OnEnded));
+            await Player.PlayAsync(request);
         }
-        // Web head: the <video> element bound to _playingUrl renders + autoplays;
-        // its Html5MediaPlayer wires the same resume/scrobble via JS interop.
+        else
+        {
+            // Web head: the <video> element must exist in the DOM before the JS
+            // player can attach, so defer the PlayAsync call to OnAfterRenderAsync
+            // (it renders this frame because _playingUrl is now set).
+            _pendingWebPlay = request;
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_pendingWebPlay is not null)
+        {
+            var req = _pendingWebPlay;
+            _pendingWebPlay = null;
+            await Player.PlayAsync(req);
+        }
     }
 
     private string ResumeKey => $"pos:{Id}:{Season ?? 1}:{Episode}";
@@ -234,6 +297,18 @@
     // finished episode doesn't reopen mid-credits next time.
     private async void OnProgress(double positionSec, double durationSec)
     {
+        // AniSkip: surface a "Skip Intro/Outro" button while inside an OP/ED band,
+        // and seek past it automatically when auto-skip is on (once per marker).
+        var prevActive = _activeSkip;
+        _activeSkip = _skips.FirstOrDefault(m => IsSkippable(m) && positionSec >= m.Start && positionSec < m.End);
+        if (_autoSkip && _activeSkip is not null && _skipped.Add(_activeSkip))
+        {
+            var end = _activeSkip.End;
+            _activeSkip = null;
+            await Player.SeekAsync(end);
+        }
+        if (!ReferenceEquals(prevActive, _activeSkip)) await InvokeAsync(StateHasChanged);
+
         // Auto-track once past ~90% — the first-party equivalent of a scrobble:
         // bump the tracker entry's progress to this episode via the entries API
         // (no media-server webhook needed; uses the config credential already set).
@@ -270,6 +345,34 @@
     }
 
     private Task SaveAutoTrackPref() => Store.SetAsync("pref:autotrack", _autoTrack ? "1" : "0");
+    private Task SaveAutoSkipPref() => Store.SetAsync("pref:autoskip", _autoSkip ? "1" : "0");
+
+    // Only OP/ED bands drive the skip button; recap/preview markers are informational.
+    private static bool IsSkippable(SkipMarker m)
+    {
+        var t = (m.Type ?? "").ToLowerInvariant();
+        return t is "op" or "ed" or "mixed-op" or "mixed-ed";
+    }
+
+    private static bool IsOutro(SkipMarker m) => (m.Type ?? "").ToLowerInvariant().Contains("ed");
+
+    private async Task SkipCurrentAsync()
+    {
+        if (_activeSkip is null) return;
+        var end = _activeSkip.End;
+        _skipped.Add(_activeSkip);
+        _activeSkip = null;
+        await Player.SeekAsync(end);
+    }
+
+    private async Task OnSubtitleChange(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var idx))
+        {
+            _subtitleIndex = idx;
+            await JS.InvokeVoidAsync("anisyncWatch.setSubtitle", idx);
+        }
+    }
 
     private string BackHref
     {

@@ -15,7 +15,8 @@ public static class NavActive
         if (p.StartsWith("/discover") || p.StartsWith("/meta") || p.StartsWith("/watch")) return "discover";
         if (p.StartsWith("/calendar")) return "calendar";
         if (p.StartsWith("/notifications")) return "notifications";
-        if (p.StartsWith("/settings") || p.StartsWith("/configure") || p.StartsWith("/stremio")) return "configure";
+        if (p.StartsWith("/settings") || p.StartsWith("/configure") || p.StartsWith("/stremio")
+            || p.StartsWith("/account") || p.StartsWith("/advanced")) return "configure";
         return "";
     }
 }

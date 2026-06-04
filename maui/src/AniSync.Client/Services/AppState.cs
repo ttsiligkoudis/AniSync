@@ -6,15 +6,16 @@ namespace AniSync.Client.Services;
 /// Session + chrome state that the layout reads to gate links and label the
 /// media-type switch — the Blazor equivalent of the layoutLoggedIn /
 /// layoutHasSession / layoutEnabled / layoutMediaType locals computed at the
-/// top of _Layout.cshtml. Hydrated from the server (GET /api/v1/session) once
-/// that endpoint exists; defaults below describe a connected AniList user so
-/// the full chrome renders for now.
+/// top of _Layout.cshtml. Hydrated at startup by MainLayout: "logged in" means a
+/// config credential is stored (<see cref="StreamConfig"/>), and the connected-
+/// services label is resolved from GET /api/v1/me/linked. Defaults are logged-out
+/// so anonymous users correctly see the signed-out chrome.
 /// </summary>
 public sealed class AppState
 {
-    public bool LoggedIn { get; private set; } = true;
-    public bool HasSession { get; private set; } = true;
-    public string ConnectedLabel { get; private set; } = "AniList";
+    public bool LoggedIn { get; private set; }
+    public bool HasSession { get; private set; }
+    public string ConnectedLabel { get; private set; } = "";
 
     /// <summary>Modes the user enabled in the chooser (drives the switch + button icon).</summary>
     public IReadOnlyList<MetaType> EnabledMediaTypes { get; private set; } =
@@ -67,13 +68,23 @@ public sealed class AppState
         Changed?.Invoke();
     }
 
-    /// <summary>Apply session data fetched from the backend.</summary>
-    public void Hydrate(bool loggedIn, bool hasSession, string connectedLabel,
-        IReadOnlyList<MetaType> enabled, MetaType active)
+    /// <summary>
+    /// Apply session state resolved at startup. <paramref name="loggedIn"/> is
+    /// whether a config credential is stored; <paramref name="connectedLabel"/>
+    /// is the resolved "Primary · Linked" services string (empty when it can't
+    /// be resolved, in which case the chrome shows no "Connected to X" line).
+    /// </summary>
+    public void HydrateSession(bool loggedIn, string connectedLabel)
     {
         LoggedIn = loggedIn;
-        HasSession = hasSession;
-        ConnectedLabel = connectedLabel;
+        HasSession = loggedIn;
+        ConnectedLabel = connectedLabel ?? "";
+        Changed?.Invoke();
+    }
+
+    /// <summary>Apply the user's enabled/active media types (from persistence).</summary>
+    public void SetEnabledMediaTypes(IReadOnlyList<MetaType> enabled, MetaType active)
+    {
         EnabledMediaTypes = enabled;
         MediaType = active;
         Changed?.Invoke();

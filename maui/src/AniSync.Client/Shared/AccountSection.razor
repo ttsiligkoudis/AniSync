@@ -1,0 +1,149 @@
+@inject IAniSyncApi Api
+@inject IAppEnvironment Env
+
+@* Account + Linked Accounts cards — Blazor port of _AccountSection.cshtml +
+   _LinkedAccountsSection.cshtml. Shared by /configure and /account. The primary
+   provider shows a "Primary" badge; healthy linked providers can be promoted to
+   primary (tap, header-authed /me/primary) or unlinked (/me/unlink). Linking a new
+   OAuth provider needs a browser redirect, so those are anchors into
+   /Auth/LinkProvider; Kitsu link/re-link uses its inline credentials form
+   (/Auth/LinkKitsu). All redirect flows return through /auth/complete. *@
+
+<section class="section-card">
+    <span class="section-title">Account</span>
+    @if (Config is null)
+    {
+        <p class="hint-text">Loading account…</p>
+    }
+    else
+    {
+        <div class="account-status">
+            <span class="success-badge">✓ Connected to @Pretty(Config.AnimeService)</span>
+            <a class="account-disconnect-btn" href="/logout" data-disconnect>Disconnect</a>
+        </div>
+        @if (!string.IsNullOrEmpty(_message))
+        {
+            <p class="account-status">@_message</p>
+        }
+    }
+</section>
+
+@if (Config is not null)
+{
+    <section class="section-card">
+        <span class="section-title">Linked Accounts</span>
+        <p class="section-description">
+            Optional sync targets. When you save or auto-track an entry, AniSync writes to your
+            primary account first and then mirrors the change to every linked provider it can map.
+        </p>
+        <div class="linked-accounts">
+            @foreach (var svc in AllServices)
+            {
+                var isPrimary = string.Equals(svc, Config.AnimeService, StringComparison.OrdinalIgnoreCase);
+                var linked = Config.Linked.FirstOrDefault(l => string.Equals(l.Service, svc, StringComparison.OrdinalIgnoreCase));
+                <div class="linked-account-row" data-service-name="@svc">
+                    <div class="linked-account-name">@Pretty(svc)</div>
+                    <div class="linked-account-actions">
+                        @if (isPrimary)
+                        {
+                            <span class="linked-account-badge linked-account-primary">Primary</span>
+                        }
+                        else if (linked is not null)
+                        {
+                            <span class="linked-account-badge @(linked.NeedsReauth ? "linked-account-warn" : "linked-account-connected")">
+                                @(linked.NeedsReauth ? "Needs re-auth" : "Linked")
+                            </span>
+                            @if (!linked.NeedsReauth)
+                            {
+                                <button type="button" class="btn-ghost btn-ghost-sm"
+                                        disabled="@(_busy == svc)" @onclick="() => PromoteAsync(svc)">
+                                    @(_busy == svc ? "Switching…" : "Make primary")
+                                </button>
+                            }
+                            else if (svc != "Kitsu")
+                            {
+                                <a class="btn-ghost btn-ghost-sm" href="@LinkUrl(svc)">Re-link ↗</a>
+                            }
+                            <button type="button" class="btn-ghost btn-ghost-sm"
+                                    disabled="@(_busy == svc)" @onclick="() => UnlinkAsync(svc)">Unlink</button>
+                        }
+                        else if (svc == "Kitsu")
+                        {
+                            <button type="button" class="btn-ghost btn-ghost-sm" @onclick="() => _kitsuOpen = !_kitsuOpen">Link</button>
+                        }
+                        else
+                        {
+                            <a class="btn-ghost btn-ghost-sm" href="@LinkUrl(svc)">Link ↗</a>
+                        }
+                    </div>
+                    @if (svc == "Kitsu" && !isPrimary && (linked is null || linked.NeedsReauth) && _kitsuOpen)
+                    {
+                        <form method="post" action="@AuthAction("LinkKitsu")" class="linked-account-creds linked-kitsu-form">
+                            <input type="text" name="username" placeholder="Kitsu username" required />
+                            <input type="password" name="password" placeholder="Kitsu password" required />
+                            <input type="hidden" name="returnUrl" value="/configure" />
+                            <button type="submit" class="btn-primary-action btn-login">Link Kitsu</button>
+                            <p class="option-name-sub" style="margin:0;">Used only to obtain an OAuth token from Kitsu — your password is not stored.</p>
+                        </form>
+                    }
+                </div>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter] public ConfigStateDto? Config { get; set; }
+    [Parameter] public EventCallback OnReload { get; set; }
+
+    private static readonly string[] AllServices = { "Kitsu", "Anilist", "MyAnimeList", "Trakt" };
+    private string? _busy;
+    private string? _message;
+    private bool _kitsuOpen;
+
+    private string AuthAction(string action) => $"{Env.ApiBaseUrl.TrimEnd('/')}/Auth/{action}";
+    private string LinkUrl(string service) => $"{AuthAction("LinkProvider")}?service={Uri.EscapeDataString(service)}&returnUrl=/configure";
+
+    private async Task PromoteAsync(string service, bool force = false)
+    {
+        _busy = service; _message = null;
+        var result = await Api.PromotePrimaryAsync(service, force);
+        if (result is { Ok: true })
+        {
+            _message = $"{Pretty(service)} is now your primary account.";
+            await OnReload.InvokeAsync();
+        }
+        else if (result?.Reason == "collision" && !force)
+        {
+            _message = "Switching anyway — this may overwrite differing entries.";
+            await PromoteAsync(service, force: true);
+            return;
+        }
+        else
+        {
+            _message = result?.Reason switch
+            {
+                "needs-reauth" => $"{Pretty(service)} needs re-authentication first.",
+                "not-linked" => $"{Pretty(service)} isn't linked.",
+                _ => "Couldn't switch primary account right now.",
+            };
+        }
+        _busy = null;
+    }
+
+    private async Task UnlinkAsync(string service)
+    {
+        _busy = service; _message = null;
+        if (await Api.UnlinkAsync(service)) await OnReload.InvokeAsync();
+        else _message = "Couldn't unlink right now.";
+        _busy = null;
+    }
+
+    private static string Pretty(string? service) => service switch
+    {
+        "Anilist" => "AniList",
+        "MyAnimeList" => "MyAnimeList",
+        null or "" => "—",
+        _ => service,
+    };
+}

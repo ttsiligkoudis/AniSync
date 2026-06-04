@@ -1,0 +1,66 @@
+@page "/account"
+@inject IAniSyncApi Api
+@inject AppState State
+@inject ISecureStore Store
+@inject NavigationManager Nav
+
+@* Account-focused settings — Blazor port of Configure.cshtml (/account). Identity +
+   linked accounts (shared AccountSection component); catalogs, streams, preferences
+   and the install URL live on /configure, advanced actions on /advanced. *@
+
+<PageTitle>Account · AniSync</PageTitle>
+
+<section class="container config-page">
+    <header class="page-header">
+        <h1 class="page-title">Account</h1>
+        <p class="page-subtitle">Provider · linked accounts</p>
+    </header>
+
+    @if (_loading)
+    {
+        <p class="hint-text">Loading account…</p>
+    }
+    else if (_config is null)
+    {
+        <section class="section-card">
+            <p class="hint-text">This device is connected with an inline (no-account) config. <a href="/login">Sign in</a> with a tracker to manage your account.</p>
+        </section>
+    }
+    else
+    {
+        <AccountSection Config="_config" OnReload="ReloadAsync" />
+
+        <section class="section-card">
+            <span class="section-title">More settings</span>
+            <p class="section-description">Catalogs, stream sources, preferences and your Stremio install URL live on the addon page. Sync, backups and destructive actions live under Advanced.</p>
+            <div class="btn-action-row">
+                <a class="btn-primary-action" href="/configure">Stremio addon &amp; install URL</a>
+                <a class="btn-ghost" href="/advanced">Advanced</a>
+            </div>
+        </section>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private ConfigStateDto? _config;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // localStorage (the credential) is unreadable during prerender — wait for
+        // interactive so a logged-in user isn't bounced to /login. Re-runs interactively.
+        if (!RendererInfo.IsInteractive) return;
+
+        if (string.IsNullOrEmpty(State.StreamConfig))
+        {
+            var saved = await Store.GetAsync(ISecureStore.ConfigKey);
+            if (!string.IsNullOrEmpty(saved)) State.SetStreamConfig(saved);
+        }
+        if (string.IsNullOrEmpty(State.StreamConfig)) { Nav.NavigateTo("/login"); return; }
+
+        await ReloadAsync();
+        _loading = false;
+    }
+
+    private async Task ReloadAsync() => _config = await Api.GetConfigAsync();
+}

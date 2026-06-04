@@ -17,11 +17,17 @@ public sealed class ApiOnlyControllerProvider : ControllerFeatureProvider
     {
         "ApiController",            // /api/v1/*
         "UserApiController",        // /api/v1/me/*
+        "ConfigApiController",      // /api/v1/me/config, stream-addons, scrobble, export/import, danger zone
         "NotificationsController",  // /api/v1/notifications/*
         "CronController",           // /api/v1/cron/*
         "ScrobbleController",       // /api/v1/scrobble/{token}
         "PushController",           // /api/v1/push/*
         "StreamController",         // {config}/stream/{type}/{id}.json (Watch sources)
+        // AuthController is the ported MVC login/link/logout flow (conventional
+        // /Auth/{action} routes). Unlike the filtered-out Home/Meta/Discover UI
+        // controllers it doesn't collide with a Blazor page route, and the Web head
+        // needs it so the same provider-OAuth + Kitsu sign-in the web app uses works.
+        "AuthController",           // /Auth/{action}
     };
 
     protected override bool IsController(TypeInfo typeInfo)

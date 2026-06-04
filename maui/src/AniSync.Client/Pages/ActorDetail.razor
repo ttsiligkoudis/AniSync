@@ -1,0 +1,57 @@
+@page "/discover/actor/tmdb/{TmdbId:int}"
+@inject IAniSyncApi Api
+
+@* Actor filmography — port of Views/Discover/ActorDetail.cshtml. Movies + series
+   credits (Trakt-backed) as poster grids that link into the video detail pages. *@
+
+<PageTitle>@(_credits?.Name ?? "Actor") · AniSync</PageTitle>
+
+<section class="container">
+    <div class="discover-browse-header">
+        <a class="watch-back" href="/discover/actors">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
+            <span>All actors</span>
+        </a>
+        <h1 class="dashboard-section-title">@(_credits?.Name ?? "Actor")</h1>
+    </div>
+
+    @if (_loading)
+    {
+        <p class="hint-text">Loading…</p>
+    }
+    else if (_credits is null || (_credits.Movies.Count == 0 && _credits.Series.Count == 0))
+    {
+        <p class="hint-text">No credits found for this person.</p>
+    }
+    else
+    {
+        @if (_credits.Movies.Count > 0)
+        {
+            <section class="anime-detail-section">
+                <h2 class="anime-detail-section-title">Movies</h2>
+                <PosterGrid Items="_credits.Movies" Variant="grid" VideoLinks="true" />
+            </section>
+        }
+        @if (_credits.Series.Count > 0)
+        {
+            <section class="anime-detail-section">
+                <h2 class="anime-detail-section-title">Series</h2>
+                <PosterGrid Items="_credits.Series" Variant="grid" VideoLinks="true" />
+            </section>
+        }
+    }
+</section>
+
+@code {
+    [Parameter] public int TmdbId { get; set; }
+
+    private ActorCreditsResponse? _credits;
+    private bool _loading = true;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _credits = await Api.ActorCreditsAsync(TmdbId);
+        _loading = false;
+    }
+}

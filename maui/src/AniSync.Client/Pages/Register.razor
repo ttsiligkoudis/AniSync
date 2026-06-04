@@ -1,0 +1,72 @@
+@page "/register"
+@inject IAppEnvironment Env
+
+@* Kitsu signup — Blazor port of Views/Auth/Register.cshtml. Posts to the server's
+   /Auth/Register, which creates the Kitsu account then drops straight into the
+   password-grant login and routes back through /auth/complete (seeding the
+   credential), exactly like the web app. Validation errors come back as query
+   params (the old app re-rendered the View with ViewBag). *@
+
+<PageTitle>Create Kitsu account · AniSync</PageTitle>
+
+<section class="container">
+    <header class="page-header">
+        <h1 class="page-title">Create Kitsu account</h1>
+        <p class="page-subtitle">Sign up directly through Kitsu — AniSync will log you in once your account exists.</p>
+    </header>
+
+    <div class="card-section" style="max-width: 28rem; margin: 0 auto;">
+        @if (!string.IsNullOrEmpty(Error))
+        {
+            <div class="register-error" role="alert">@Error</div>
+        }
+
+        <form method="post" action="@($"{Env.ApiBaseUrl.TrimEnd('/')}/Auth/Register")" autocomplete="on">
+            @if (!string.IsNullOrEmpty(ReturnUrl))
+            {
+                <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+            }
+            <div class="cred-group">
+                <label for="name" class="required">Username</label>
+                <input type="text" id="name" name="name" value="@Name" required autocomplete="username" />
+            </div>
+            <div class="cred-group">
+                <label for="email" class="required">Email</label>
+                <input type="email" id="email" name="email" value="@Email" required autocomplete="email" />
+            </div>
+            <div class="cred-group">
+                <label for="password" class="required">Password</label>
+                <input type="password" id="password" name="password" required minlength="8" autocomplete="new-password" />
+            </div>
+            <div class="cred-group">
+                <label for="confirmPassword" class="required">Confirm password</label>
+                <input type="password" id="confirmPassword" name="confirmPassword" required minlength="8" autocomplete="new-password" />
+            </div>
+            <p class="option-name-sub" style="margin: 0.25rem 0 0.75rem;">
+                Your account is created on Kitsu directly — AniSync only sees the password
+                long enough to obtain an OAuth token, then drops it from memory. Kitsu emails
+                you a confirmation link; clicking it is optional for AniSync (you'll already be
+                logged in here) but recommended to fully activate your Kitsu account.
+            </p>
+            <button type="submit" class="btn-primary-action btn-login">Create account</button>
+        </form>
+
+        <p class="hint-text" style="margin-top: 0.75rem;">
+            Already have an account? <a href="/login">Back to login</a>.
+        </p>
+        <p class="hint-text" style="margin-top: 0.25rem;">
+            Want AniList or MyAnimeList instead? Sign up on
+            <a href="https://anilist.co/signup" target="_blank" rel="noopener noreferrer">AniList</a>
+            or
+            <a href="https://myanimelist.net/register.php" target="_blank" rel="noopener noreferrer">MyAnimeList</a>,
+            then come back and log in.
+        </p>
+    </div>
+</section>
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")] public string? Error { get; set; }
+    [SupplyParameterFromQuery(Name = "name")] public string? Name { get; set; }
+    [SupplyParameterFromQuery(Name = "email")] public string? Email { get; set; }
+    [SupplyParameterFromQuery(Name = "returnUrl")] public string? ReturnUrl { get; set; }
+}

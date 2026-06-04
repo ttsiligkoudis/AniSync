@@ -1,9 +1,10 @@
 @inject IAniSyncApi Api
 
-@* Manage-entry dialog — the Blazor equivalent of the server-rendered
-   ManageEntry modal, driven by the clean JSON API (/api/v1/me/entries/{id}).
-   Status options are the canonical ListStatus names the POST expects; the
-   loaded entry's service-specific status is normalised onto them. Reuses the
+@* Manage-entry dialog — the Blazor equivalent of the server-rendered ManageEntry
+   modal, driven by the clean JSON API (/api/v1/me/entries/{id}). Status options
+   are the canonical ListStatus names the POST expects; the loaded entry's
+   service-specific status is normalised onto them. Supports progress, score,
+   rewatch count, start/finish dates, notes, and removal (DELETE). Reuses the
    entry-modal-* classes from site.css. *@
 
 @if (Visible)
@@ -54,11 +55,38 @@
                     <label class="entry-modal-label" for="entry-score">Score</label>
                     <input id="entry-score" class="entry-modal-input" type="number" min="0" max="10" step="0.5" @bind="_score" />
                 </div>
+                <div class="entry-modal-field">
+                    <label class="entry-modal-label" for="entry-rewatch">Rewatches</label>
+                    <input id="entry-rewatch" class="entry-modal-input" type="number" min="0" @bind="_rewatchCount" />
+                </div>
+                <div class="entry-modal-field entry-modal-dates">
+                    <div>
+                        <label class="entry-modal-label" for="entry-started">Started</label>
+                        <input id="entry-started" class="entry-modal-input" type="date" @bind="_startedAt" />
+                    </div>
+                    <div>
+                        <label class="entry-modal-label" for="entry-finished">Finished</label>
+                        <input id="entry-finished" class="entry-modal-input" type="date" @bind="_finishedAt" />
+                    </div>
+                </div>
+                <div class="entry-modal-field">
+                    <label class="entry-modal-label" for="entry-notes">Notes</label>
+                    <textarea id="entry-notes" class="entry-modal-input entry-modal-textarea" rows="3" @bind="_notes"></textarea>
+                </div>
                 <div class="entry-modal-actions">
-                    <button type="button" class="entry-modal-cancel" @onclick="Close">Cancel</button>
+                    @if (_inList)
+                    {
+                        <button type="button" class="entry-modal-delete" disabled="@_saving" @onclick="Remove">
+                            @(_removing ? "Removing…" : "Remove")
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" class="entry-modal-cancel" @onclick="Close">Cancel</button>
+                    }
                     <span class="entry-modal-actions-end">
-                        <button type="submit" class="entry-modal-save" disabled="@_saving">
-                            @(_saving ? "Saving…" : "Save")
+                        <button type="submit" class="entry-modal-save" disabled="@(_saving || string.IsNullOrEmpty(_status))">
+                            @(_saving && !_removing ? "Saving…" : "Save")
                         </button>
                     </span>
                 </div>
@@ -77,11 +105,17 @@
 
     private bool _loading;
     private bool _saving;
+    private bool _removing;
     private string? _error;
     private string _status = "";
     private int _progress;
     private double? _score;
+    private int _rewatchCount;
+    private DateOnly? _startedAt;
+    private DateOnly? _finishedAt;
+    private string? _notes;
     private int? _total;
+    private bool _inList;
     private bool _loadedFor;
 
     protected override async Task OnParametersSetAsync()
@@ -105,15 +139,24 @@
         if (entry is not null)
         {
             _status = Canonicalize(entry.Status);
+            _inList = !string.IsNullOrEmpty(_status);
             _progress = entry.Progress;
             _score = entry.Score is > 0 ? entry.Score : null;
+            _rewatchCount = entry.RewatchCount;
+            _startedAt = entry.StartedAt is DateTime sd ? DateOnly.FromDateTime(sd) : null;
+            _finishedAt = entry.FinishedAt is DateTime fd ? DateOnly.FromDateTime(fd) : null;
+            _notes = entry.Notes;
             _total = entry.TotalEpisodes;
         }
         else
         {
             _status = "";
+            _inList = false;
             _progress = 0;
             _score = null;
+            _rewatchCount = 0;
+            _startedAt = _finishedAt = null;
+            _notes = null;
             _total = null;
         }
         _loading = false;
@@ -121,11 +164,7 @@
 
     private async Task Save()
     {
-        if (string.IsNullOrEmpty(_status))
-        {
-            _error = "Pick a status (removal isn't wired up yet).";
-            return;
-        }
+        if (string.IsNullOrEmpty(_status)) { _error = "Pick a status, or use Remove to take it off your list."; return; }
         _saving = true;
         _error = null;
         var resp = await Api.SaveEntryAsync(Id, new EntrySaveRequest
@@ -133,6 +172,10 @@
             Status = _status,
             Progress = _progress,
             Score = _score,
+            RewatchCount = _rewatchCount,
+            StartedAt = _startedAt?.ToString("yyyy-MM-dd"),
+            FinishedAt = _finishedAt?.ToString("yyyy-MM-dd"),
+            Notes = _notes,
         }, Season);
         _saving = false;
         if (resp is { Ok: true })
@@ -143,6 +186,25 @@
         else
         {
             _error = "Couldn't save — check your connection and try again.";
+        }
+    }
+
+    private async Task Remove()
+    {
+        _saving = true;
+        _removing = true;
+        _error = null;
+        var resp = await Api.DeleteEntryAsync(Id, Season);
+        _saving = false;
+        _removing = false;
+        if (resp is { Ok: true })
+        {
+            await OnSaved.InvokeAsync();
+            await Close();
+        }
+        else
+        {
+            _error = "Couldn't remove this entry — try again.";
         }
     }
 

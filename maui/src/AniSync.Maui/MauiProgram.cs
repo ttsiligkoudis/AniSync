@@ -36,6 +36,10 @@ public static class MauiProgram
         // ---- MAUI head: native environment + secure storage (Keychain/KeyStore/DPAPI) ----
         builder.Services.AddSingleton<IAppEnvironment>(new MauiAppEnvironment("https://anisync.fly.dev/"));
         builder.Services.AddSingleton<ISecureStore, MauiSecureStore>();
+        // Native sign-in: WebAuthenticator OAuth (anisync:// callback) + Kitsu password
+        // grant, exchanged for the config segment. See MauiNativeAuth for the per-platform
+        // URI-scheme wiring the callback needs.
+        builder.Services.AddSingleton<INativeAuth, MauiNativeAuth>();
 
         // ---- LibVLCSharp: software-decodes HEVC/AC3/EAC3/DTS/TrueHD (the audio-codec fix) ----
         Core.Initialize();

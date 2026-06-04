@@ -56,6 +56,42 @@ namespace AnimeList.Controllers
             var (_, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
             if (uid == null) return RedirectToAction("Index", "Home");
 
+            var model = await BuildCalendarModelAsync(uid, d);
+            ViewData["ActiveNav"] = "calendar";
+            ViewData["Title"] = "Calendar";
+            return View(model);
+        }
+
+        /// <summary>
+        /// Header-authed JSON twin of <see cref="Index"/> for the thin client's
+        /// Calendar page. Resolves the user from the <c>X-AniSync-Config</c> header
+        /// (the Blazor heads don't carry the server session cookie the MVC view
+        /// relies on) and returns the same <see cref="CalendarViewModel"/> the view
+        /// renders — week of recent + upcoming episodes, day-bucketed, with
+        /// prev/next week anchors.
+        /// </summary>
+        [HttpGet("/api/v1/me/calendar")]
+        public async Task<IActionResult> CalendarJson(string d)
+        {
+            var header = Request.Headers["X-AniSync-Config"].FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(header))
+                return Unauthorized(new { error = "not signed in" });
+
+            var token = await _tokenService.GetAccessTokenAsync(header.Trim());
+            if (string.IsNullOrEmpty(token?.access_token))
+                return Unauthorized(new { error = "config has no primary token" });
+
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(token);
+            if (string.IsNullOrEmpty(uid))
+                return Unauthorized(new { error = "config not stored" });
+
+            return new JsonResult(await BuildCalendarModelAsync(uid, d));
+        }
+
+        // Builds the weekly agenda for a resolved uid — shared by the MVC view and
+        // the JSON endpoint so both surfaces agree.
+        private async Task<CalendarViewModel> BuildCalendarModelAsync(string uid, string d)
+        {
             var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
             // ?d=yyyy-MM-dd is the selected day; default = today.
@@ -119,9 +155,7 @@ namespace AnimeList.Controllers
                 });
             }
 
-            ViewData["ActiveNav"] = "calendar";
-            ViewData["Title"] = "Calendar";
-            return View(new CalendarViewModel
+            return new CalendarViewModel
             {
                 Days = dayList,
                 SelectedDateIso = selectedDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
@@ -130,7 +164,7 @@ namespace AnimeList.Controllers
                 NextDate = selectedDate.AddDays(7).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 SelectedIsToday = selectedDate == today,
                 TotalEpisodes = total,
-            });
+            };
         }
 
         // "Friday, May 29th" — weekday, month, ordinal day (per-day section heading).

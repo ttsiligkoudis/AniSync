@@ -3,6 +3,7 @@
 @inject NavigationManager Nav
 @inject AppState State
 @inject ISecureStore Store
+@inject IAniSyncApi Api
 
 @* Shared chrome for every page — composed to match _Layout.cshtml's body
    order exactly: drawer (+ backdrop), site header, fixed media-type switch,
@@ -39,7 +40,44 @@
             var saved = await Store.GetAsync(ISecureStore.ConfigKey);
             if (!string.IsNullOrEmpty(saved)) State.SetStreamConfig(saved);
         }
+
+        await HydrateSessionAsync();
     }
+
+    // Resolve login + the "Connected to X · Y" chrome label. Logged-in == a config
+    // credential is stored; the connected-services label comes from /me/linked
+    // (empty when the config can't be resolved upstream, matching the web app's
+    // "only show when known" behaviour).
+    private async Task HydrateSessionAsync()
+    {
+        if (string.IsNullOrEmpty(State.StreamConfig))
+        {
+            State.HydrateSession(false, "");
+            return;
+        }
+
+        var linked = await Api.LinkedAsync();
+        if (linked is null || string.IsNullOrEmpty(linked.Primary))
+        {
+            // Config present but couldn't resolve linked accounts — still logged
+            // in (the credential exists), just without a resolved services label.
+            State.HydrateSession(true, "");
+            return;
+        }
+
+        var services = new List<string> { PrettyService(linked.Primary) };
+        services.AddRange(linked.Linked
+            .Where(l => !string.IsNullOrEmpty(l.Service))
+            .Select(l => PrettyService(l.Service!)));
+        State.HydrateSession(true, string.Join(" · ", services.Distinct(StringComparer.OrdinalIgnoreCase)));
+    }
+
+    private static string PrettyService(string service) => service switch
+    {
+        "Anilist" => "AniList",
+        "MyAnimeList" => "MAL",
+        _ => service,
+    };
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
         => StateHasChanged();

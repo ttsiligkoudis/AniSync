@@ -3,7 +3,9 @@ using System.Threading.RateLimiting;
 using AniSync.Web;
 using AniSync.Web.Components;
 using AniSync.Client.Services;
+using AnimeList.Models;
 using AnimeList.Services;
+using AnimeList.Services.Extensions;
 using AnimeList.Services.Filters;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -33,19 +35,33 @@ builder.Services.AddRazorComponents()
 // ---- Shared client registrations (identical on both heads) ----
 builder.Services.AddScoped<AppState>();                 // session/nav/media-type/config state
 builder.Services.AddScoped<IAniSyncApi, AniSyncApi>();
-builder.Services.AddHttpClient<IAniSyncApi, AniSyncApi>((sp, http) =>
-{
-    var env = sp.GetRequiredService<IAppEnvironment>();
-    http.BaseAddress = new Uri(env.ApiBaseUrl);
-});
+// AniSyncApi sets HttpClient.BaseAddress from IAppEnvironment in its constructor
+// (the circuit scope), so the factory leaves it unset — the Web head's base URL is
+// the per-request origin (scoped), which can't be read from the root provider the
+// factory delegate would run under.
+builder.Services.AddHttpClient<IAniSyncApi, AniSyncApi>()
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        var handler = new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) };
+        // This head calls its OWN https origin server-side (the API is in-process). In
+        // Development trust the loopback dev cert so logged-in /api/v1/me/* self-calls
+        // don't fail when the ASP.NET dev cert isn't installed in the machine trust store.
+        if (builder.Environment.IsDevelopment())
+            handler.SslOptions.RemoteCertificateValidationCallback = (_, _, _, _) => true;
+        return handler;
+    });
 
 // ---- Web head: browser environment, HTML5 <video> player, localStorage secure store ----
-// NOTE: this base URL is also what the server-side prerender HttpClient uses to
-// reach the API. Now that this head hosts the API at the same origin you may
-// point it at the local address in dev; left at the Fly origin for parity.
-builder.Services.AddSingleton<IAppEnvironment>(new WebAppEnvironment("https://anisync.fly.dev/"));
+// IAppEnvironment is scoped so it can resolve the same-origin API base URL from
+// NavigationManager per circuit: this head hosts the API + SQLite store, and an
+// OAuth/Kitsu login writes the account row HERE, so the seeded X-AniSync-Config
+// credential only resolves when /api/v1/me/* calls hit this same origin. Set the
+// "ApiBaseUrl" config value to override (e.g. point a dev UI at a deployed backend).
+builder.Services.AddScoped<IAppEnvironment, WebAppEnvironment>();
 builder.Services.AddScoped<IMediaPlayer, Html5MediaPlayer>();
 builder.Services.AddScoped<ISecureStore, WebSecureStore>();
+// Web sign-in is the server redirect flow — the Login page uses /Auth/* anchors.
+builder.Services.AddScoped<INativeAuth, NoopNativeAuth>();
 
 // ===========================================================================
 //  Server / API services (mirrors the ASP.NET app's Program.cs).
@@ -59,6 +75,12 @@ builder.Services.ConfigureHttpClientDefaults(b =>
     {
         PooledConnectionLifetime = TimeSpan.FromMinutes(5),
     }));
+
+// Session is backed by IDistributedCache (DistributedSessionStore). Register the
+// in-memory implementation so the copied HomeController's HttpContext.Session
+// works without an external cache — required by AddSession() below, and the DI
+// container validates it on build in Development.
+builder.Services.AddDistributedMemoryCache();
 
 // Persistent session cookie (30d) so the installed PWA "stays logged in".
 builder.Services.AddSession(options =>
@@ -246,6 +268,8 @@ builder.Services.AddScoped<IMergedListService, MergedListService>();
 builder.Services.AddSingleton<IAniSkipService, AniSkipService>();
 builder.Services.AddSingleton<IFillerListService, FillerListService>();
 builder.Services.AddSingleton<IUserListCache, UserListCache>();
+// One-time codes bridging native (MAUI) OAuth logins back to the app via anisync://.
+builder.Services.AddSingleton<INativeAuthCodeStore, NativeAuthCodeStore>();
 
 // Episode-release notification stack.
 builder.Services.AddSingleton<INotificationStore, NotificationStore>();
@@ -324,9 +348,95 @@ app.UseSwaggerUI(c =>
 // API endpoints (attribute-routed: /api/v1/*, {config}/stream/*).
 app.MapControllers();
 
+// AuthController is the ported MVC controller (conventional /Auth/{action} routes,
+// no [ApiController]/[Route]) that drives the OAuth + Kitsu login/link/logout flows
+// against the session. Attribute-routed API controllers above are unaffected.
+app.MapControllerRoute("auth", "Auth/{action}", new { controller = "Auth" });
+
+// Debrid provider + catalog-addon list for the configure page's one-click stream
+// setup (public — no per-user data). Mirrors what _StreamsSection.cshtml rendered
+// server-side from StreamAddonCatalog.
+app.MapGet("/api/v1/stream-catalog", () => Results.Json(new
+{
+    providers = AnimeList.Services.StreamAddonCatalog.Providers
+        .Select(p => new { id = p.Id, name = p.DisplayName, apiKeyUrl = p.ApiKeyUrl, signUpUrl = p.SignUpUrl }),
+    addons = AnimeList.Services.StreamAddonCatalog.Addons
+        .Select(a => new { id = a.Id, name = a.DisplayName }),
+}));
+
+// Which login providers this host can actually start. Kitsu uses a username/
+// password grant (no app registration), so it's always available; the OAuth
+// providers are only offered when their ClientId is configured — the login UI
+// hides the rest rather than dead-ending users on a "not configured" error.
+app.MapGet("/api/v1/auth/providers", (IConfiguration cfg) => Results.Json(new
+{
+    kitsu = true,
+    anilist = !string.IsNullOrWhiteSpace(cfg["Anilist:ClientId"]),
+    mal = !string.IsNullOrWhiteSpace(cfg["Mal:ClientId"]),
+    trakt = !string.IsNullOrWhiteSpace(cfg["Trakt:ClientId"]),
+}));
+
+// Native (MAUI) auth — one-time-code exchange + Kitsu password grant. The native app
+// runs OAuth in its system browser against /Auth/Login?...&native=1, which redirects to
+// anisync://auth?code=… on success; the app then exchanges the code here for its config
+// segment. Kitsu (password grant) skips the browser entirely and posts straight here.
+app.MapPost("/api/v1/auth/native/exchange", (NativeExchangeBody body, INativeAuthCodeStore codes) =>
+{
+    var uid = codes.Redeem(body?.Code);
+    return string.IsNullOrEmpty(uid)
+        ? Results.NotFound(new { error = "invalid or expired code" })
+        : Results.Json(new { config = AnimeList.Utils.EncodeV5Config(uid) });
+});
+
+app.MapPost("/api/v1/auth/native/kitsu", async (NativeKitsuBody body, ITokenService tokenService, IConfigStore configStore) =>
+{
+    if (string.IsNullOrWhiteSpace(body?.Username) || string.IsNullOrWhiteSpace(body?.Password))
+        return Results.BadRequest(new { error = "username and password required" });
+    var token = await tokenService.GetAccessTokenByCredsAsync(body.Username, body.Password, setContext: false);
+    if (token is null || string.IsNullOrEmpty(token.access_token))
+        return Results.Json(new { error = "Kitsu credentials were rejected" }, statusCode: StatusCodes.Status401Unauthorized);
+    var uid = await configStore.UpsertAsync(token);
+    return Results.Json(new { config = AnimeList.Utils.EncodeV5Config(uid) });
+});
+
+// Auth → client config-seeding bridge. After a server-side OAuth/Kitsu login the
+// session identifies the account; resolve its UID, encode the v5 config segment
+// (the X-AniSync-Config credential the thin client sends), and hand it to the
+// Blazor client via localStorage before navigating into the app. No resolvable
+// session (e.g. just after logout) clears the stored credential instead. This runs
+// as a normal HTTP request, so the session + anisync_uid cookie are present —
+// unlike Blazor's server-side HttpClient calls, which can't see browser cookies.
+app.MapGet("/auth/complete", async (HttpContext ctx, ITokenService tokenService, IConfigStore configStore) =>
+{
+    var returnUrl = ctx.Request.Query["returnUrl"].ToString();
+    if (string.IsNullOrEmpty(returnUrl) || !returnUrl.StartsWith('/') || returnUrl.StartsWith("//"))
+        returnUrl = "/";
+
+    var (token, uid) = await tokenService.ResolveCurrentAsync(configStore);
+    var segment = token is { anonymousUser: false } && !string.IsNullOrEmpty(uid)
+        ? AnimeList.Utils.EncodeV5Config(uid)
+        : null;
+
+    var op = string.IsNullOrEmpty(segment)
+        ? "localStorage.removeItem('anisync.config');"
+        : $"localStorage.setItem('anisync.config', {System.Text.Json.JsonSerializer.Serialize(segment)});";
+    var nav = System.Text.Json.JsonSerializer.Serialize(returnUrl);
+
+    var html =
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Signing in…</title>" +
+        "<meta name=\"robots\" content=\"noindex\"></head>" +
+        $"<body><script>try{{{op}}}catch(e){{}}location.replace({nav});</script>" +
+        $"<noscript>Signed in. <a href=\"{System.Net.WebUtility.HtmlEncode(returnUrl)}\">Continue</a>.</noscript></body></html>";
+    return Results.Content(html, "text/html");
+});
+
 // Blazor UI.
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode()
     .AddAdditionalAssemblies(typeof(AniSync.Client.Routes).Assembly);
 
 app.Run();
+
+// Request bodies for the native-auth minimal APIs (bound case-insensitively from JSON).
+record NativeExchangeBody(string Code);
+record NativeKitsuBody(string Username, string Password);

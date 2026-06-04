@@ -71,6 +71,15 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
         });
     }
 
+    public Task SeekAsync(double seconds)
+    {
+        if (_player is null) return Task.CompletedTask;
+        return MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            try { _player.Time = (long)(seconds * 1000); } catch { /* not seekable yet */ }
+        });
+    }
+
     public Task StopAsync()
     {
         if (_player is null) return Task.CompletedTask;

@@ -24,6 +24,10 @@
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <!-- Shared shell behaviour (theme toggle, back button, mobile "More" sheet). -->
     <script src="_content/AniSync.Client/js/chrome.js"></script>
+    <!-- Web-head HTML5 <video> driver (resume / progress / ended interop). -->
+    <script src="js/watch-player.js"></script>
+    <!-- Web Push opt-in interop (subscribe / unsubscribe). -->
+    <script src="js/push.js"></script>
     <script>
         // Register the PWA service worker (network-first; safe across deploys).
         if ('serviceWorker' in navigator) {

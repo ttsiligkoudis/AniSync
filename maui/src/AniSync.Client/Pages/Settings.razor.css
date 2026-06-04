@@ -1,0 +1,89 @@
+/* Settings — connected-accounts + sync sections. Scoped to the page; reuses the
+   global design tokens (dark surface, subtle borders) used across the app. */
+
+.linked-accounts-list,
+.sync-diff-list {
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.linked-account-row,
+.sync-diff-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.85rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.linked-account-name {
+    font-weight: 600;
+}
+
+.linked-account-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.linked-account-badge-primary {
+    background: rgba(99, 102, 241, 0.18);
+    color: #a5b4fc;
+}
+
+.linked-account-badge-warn {
+    background: rgba(245, 158, 11, 0.18);
+    color: #fcd34d;
+}
+
+.linked-account-action {
+    margin-left: auto;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: transparent;
+    color: inherit;
+    border-radius: 8px;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.linked-account-action:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.linked-account-action:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.sync-diff-counts {
+    margin-left: auto;
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 0.88rem;
+}
+
+.settings-pref-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+}
+
+.settings-pref {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    cursor: pointer;
+}
+
+.settings-pref input:disabled { cursor: default; }
+.settings-pref input:disabled + span { opacity: 0.55; }
