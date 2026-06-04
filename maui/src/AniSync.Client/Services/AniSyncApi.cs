@@ -80,6 +80,15 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Episodes ?? new();
     }
 
+    public async Task<IReadOnlyList<StremioStream>> PlaybackSourcesAsync(string config, string type, string streamId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(config)) return Array.Empty<StremioStream>();
+        var url = $"{config.Trim('/')}/stream/{Uri.EscapeDataString(type)}/{Uri.EscapeDataString(streamId)}.json";
+        var resp = await GetOrDefault<StremioStreamsResponse>(url, ct);
+        // Only direct-URL sources are playable in a thin client.
+        return resp?.Streams.Where(s => !string.IsNullOrEmpty(s.Url)).ToList() ?? new();
+    }
+
     private async Task<T?> GetOrDefault<T>(string url, CancellationToken ct)
     {
         try

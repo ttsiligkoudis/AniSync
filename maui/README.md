@@ -171,9 +171,22 @@ These return the same DTO shapes already used by the client models.
 
 - [x] **M1 — Foundation**: shared RCL, design system (verbatim `site.css`), service seams (`IAppEnvironment`/`IMediaPlayer`/`IAniSyncApi`), working search typeahead, Home trending slice.
 - [x] **M1.5 — Full chrome parity**: exact-DOM port of `_Layout.cshtml` — slide-in drawer + backdrop, full site header (back/logo/nav/search/notif bell/media-type + theme buttons/auth CTA/hamburger), fixed media-type switch, mobile bottom-nav + floating "More" sheet — with real SVG icons, C#-driven active-nav + media-type state (`AppState`), and `chrome.js` for theme/back/more-sheet behaviour.
-- [ ] **M2 — Heads + run**: generate MAUI + Web heads from template, wire DI, confirm the shell renders identically on Web + Android/Windows.
-- [ ] **M3 — Stats + shelves**: add the JSON endpoints above; port Home dashboard fully (stats strip, continue-watching, trending/popular shelves) with the skeleton-match + anime-exclusion behaviour from the web app.
-- [ ] **M4 — Library + Discover + Search results + Calendar**.
-- [ ] **M5 — Detail page**.
-- [ ] **M6 — Watch + LibVLCSharp player**: native playback with the audio-codec fix; subtitle tracks; scrobble/auto-track; resume.
-- [ ] **M7 — Auth + Settings/Streams config**, notifications, PWA/offline parity on the Web head.
+- [ ] **M2 — Heads + run**: generate MAUI + Web heads from template, wire DI (snippets above + `maui/heads/`), confirm the shell renders identically on Web + Android/Windows.
+- [x] **M3 — Stats + shelves**: full Home dashboard — `StatsStrip` (AniList + Trakt rows, real values), `DashboardShelf` (async load, skeletons, hide-when-empty, media-type filter), shelves for Continue watching / New Episodes Today / Trending / Most Popular. All over existing JSON endpoints (`/api/v1/me/stats`, `/api/v1/me/continue-watching`, `/api/v1/airing/today`, `/api/v1/discover`, `/Home/TraktStatsData`); added `popular` to `/api/v1/discover`.
+- [ ] **M4 — Library + Discover + Search results + Calendar** (stubs in place).
+- [x] **M5 — Detail page** (`/meta/{id}`): hero (backdrop/poster/score/title/info/status/genres), collapsible synopsis, episodes list (→ /watch), streaming-service links. Tracking pill / manage-entry modal still to come.
+- [x] **M6 — Watch + LibVLCSharp player** (`/meta/{id}/watch/{ep}`): header + player surface + prev/next + source picker over the Stremio addon config. Native head plays through LibVLCSharp (`maui/heads/AniSync.Maui/VlcMediaPlayer.cs` + `VlcPlayerPage.cs`) — the HEVC/AC3/EAC3/DTS/TrueHD audio-codec fix; Web head falls back to HTML5 `<video>`. Still to add: scrobble/auto-track + resume persistence, subtitle UI.
+- [ ] **M7 — Auth + Settings/Streams config** (the `AppState.StreamConfig` source), notifications, PWA/offline parity on the Web head.
+
+### Playback wiring (per head)
+
+The shared **Watch** page calls `IMediaPlayer` only when `IAppEnvironment.SupportsNativePlayback` is true; otherwise it renders an HTML5 `<video>` itself. Drop-in head implementations live in `maui/heads/`:
+
+- **MAUI**: `MauiAppEnvironment`, `VlcMediaPlayer` (+ `VlcPlayerPage`). Register after `LibVLCSharp.Shared.Core.Initialize()`:
+  ```csharp
+  builder.Services.AddSingleton(_ => new LibVLC());
+  builder.Services.AddSingleton<IMediaPlayer, VlcMediaPlayer>();
+  ```
+- **Web**: `WebAppEnvironment`, `Html5MediaPlayer` (no-op — the page renders `<video>`).
+
+`AppState.StreamConfig` (the user's Stremio addon config string) gates source resolution; until M7 wires sign-in it stays null and the Watch page shows the "set up streaming" prompt, exactly like the web app.

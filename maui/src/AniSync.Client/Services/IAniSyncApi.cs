@@ -24,4 +24,11 @@ public interface IAniSyncApi
     Task<MetaDto?> AnimeAsync(string id, CancellationToken ct = default);
     Task<IReadOnlyList<StreamingLinkDto>> StreamsAsync(string id, CancellationToken ct = default);
     Task<IReadOnlyList<EpisodeInfoDto>> EpisodesAsync(string id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Playable sources from the Stremio addon endpoint
+    /// (GET /{config}/stream/{type}/{streamId}.json). <paramref name="config"/>
+    /// is the user's addon config string (held in secure storage on MAUI).
+    /// </summary>
+    Task<IReadOnlyList<StremioStream>> PlaybackSourcesAsync(string config, string type, string streamId, CancellationToken ct = default);
 }

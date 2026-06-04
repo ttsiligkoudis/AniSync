@@ -16,7 +16,10 @@ public sealed class MetaDto
     public string? Type { get; set; }
     public string? Format { get; set; }
     public int? Episodes { get; set; }
+    public int? AvgDuration { get; set; }
     public int? Year { get; set; }
+    public string? Source { get; set; }
+    public string? AirStatus { get; set; }
     public double? Score { get; set; }
     public int? Progress { get; set; }
     public string? EntryStatus { get; set; }
@@ -45,6 +48,24 @@ public sealed class EpisodeInfoDto
     public string? Thumbnail { get; set; }
     public string? Released { get; set; }
     public string? Overview { get; set; }
+}
+
+// ── Playback sources (Stremio addon: GET /{config}/stream/{type}/{id}.json) ──
+
+public sealed class StremioStreamsResponse { public List<StremioStream> Streams { get; set; } = new(); }
+
+/// <summary>One playable source. We only surface entries carrying a direct
+/// <see cref="Url"/> (debrid links) — torrent-only (infoHash) rows can't play
+/// in a thin client.</summary>
+public sealed class StremioStream
+{
+    public string? Name { get; set; }
+    public string? Title { get; set; }
+    public string? Url { get; set; }
+
+    /// <summary>Display label — Name is the addon/quality tag, Title the file line.</summary>
+    public string Label => string.Join(" · ",
+        new[] { Name, Title }.Where(s => !string.IsNullOrWhiteSpace(s)));
 }
 
 // ── Stats ({ success, stats } envelopes from /api/v1/me/stats + /Home/TraktStatsData) ──

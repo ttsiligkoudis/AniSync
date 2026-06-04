@@ -1,9 +1,224 @@
-@page "/detail/{Id}"
-<PageTitle>Details · AniSync</PageTitle>
-<section class="container">
-    <h1 class="dashboard-section-title">Details</h1>
-    <p class="hint-text">Detail + watch (LibVLCSharp player) land in the playback milestone. Id: <code>@Id</code></p>
-</section>
+@page "/meta/{Id}"
+@inject IAniSyncApi Api
+@inject NavigationManager Nav
+
+@* Anime/title detail — port of Views/Meta/Detail.cshtml. Hero (backdrop +
+   poster + score + title + info + status + genre chips), collapsible synopsis,
+   episodes list (rows navigate to /watch), streaming-service links. Reuses the
+   anime-detail-* classes from site.css. Tracking pill / manage-entry modal land
+   in a later milestone. *@
+
+<PageTitle>@(_meta?.Name ?? "Details") · AniSync</PageTitle>
+
+@if (_loading)
+{
+    <section class="anime-detail-hero anime-detail-hero-flat">
+        <div class="anime-detail-hero-body">
+            <p class="hint-text">Loading…</p>
+        </div>
+    </section>
+}
+else if (_meta is null)
+{
+    <section class="container"><p class="hint-text">Couldn't load this title.</p></section>
+}
+else
+{
+    var a = _meta;
+    <section class="anime-detail-hero @(string.IsNullOrEmpty(a.Background) ? "anime-detail-hero-flat" : "")">
+        @if (!string.IsNullOrEmpty(a.Background))
+        {
+            <div class="anime-detail-backdrop" style="background-image: url('@a.Background');"></div>
+            <div class="anime-detail-backdrop-shade"></div>
+        }
+        <div class="anime-detail-hero-body">
+            <div class="anime-detail-poster-wrap">
+                @if (!string.IsNullOrEmpty(a.Poster))
+                {
+                    <img class="anime-detail-poster" src="@a.Poster" alt="@a.Name" decoding="async" />
+                }
+                else
+                {
+                    <div class="anime-detail-poster anime-detail-poster-placeholder"></div>
+                }
+                @if (a.Score is > 0)
+                {
+                    <span class="anime-detail-score anime-detail-poster-score">★ @a.Score!.Value.ToString("0.0")</span>
+                }
+            </div>
+            <div class="anime-detail-meta">
+                <h1 class="anime-detail-title">@a.Name</h1>
+                @if (_infoLine is { Length: > 0 })
+                {
+                    <div class="anime-detail-info">@_infoLine</div>
+                }
+                <div class="anime-detail-badges">
+                    @if (!string.IsNullOrEmpty(a.AirStatus))
+                    {
+                        <span class="anime-detail-status anime-detail-status-@(a.AirStatus!.ToLowerInvariant().Replace(" ", "-"))">
+                            @if (a.AirStatus == "Airing")
+                            {
+                                <span class="anime-detail-status-dot" aria-hidden="true"></span>
+                            }
+                            @a.AirStatus
+                        </span>
+                    }
+                </div>
+                @if (a.Genres is { Count: > 0 })
+                {
+                    <ul class="anime-detail-link-list anime-detail-genre-list">
+                        @foreach (var g in a.Genres.Take(8))
+                        {
+                            <li><a class="anime-detail-link" href="@($"/discover?genre={Uri.EscapeDataString(g)}")">@g</a></li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </section>
+
+    @if (!string.IsNullOrEmpty(a.Description))
+    {
+        var isLong = a.Description!.Length > 180;
+        <section class="anime-detail-section">
+            <h2 class="anime-detail-section-title">Synopsis</h2>
+            <div class="anime-detail-synopsis-wrap" data-collapsed="@((isLong && !_synopsisExpanded).ToString().ToLowerInvariant())">
+                <p class="anime-detail-synopsis">@a.Description</p>
+                @if (isLong)
+                {
+                    <button type="button" class="anime-detail-synopsis-toggle"
+                            aria-expanded="@_synopsisExpanded"
+                            @onclick="() => _synopsisExpanded = !_synopsisExpanded">
+                        @(_synopsisExpanded ? "Show less" : "Show more")
+                    </button>
+                }
+            </div>
+        </section>
+    }
+
+    @if (_episodes.Count > 0)
+    {
+        <section class="anime-detail-section anime-detail-episodes-wrap">
+            <div class="anime-detail-episodes-header">
+                <h2 class="anime-detail-section-title">Episodes <span class="anime-detail-section-count">(@_episodes.Count)</span></h2>
+                @if (_episodes.Count > 1)
+                {
+                    <input type="search" class="anime-detail-episodes-filter"
+                           placeholder="Filter episodes…" value="@_filter" @oninput="OnFilter" />
+                }
+            </div>
+            <div class="anime-detail-episodes-body">
+                <ul class="anime-detail-episodes">
+                    @foreach (var ep in _filteredEpisodes)
+                    {
+                        var future = IsFuture(ep);
+                        <li class="anime-detail-episode @(future ? "anime-detail-episode-future" : "")"
+                            data-episode-num="@ep.Episode" data-season-num="@ep.Season">
+                            @if (future)
+                            {
+                                <span class="anime-detail-episode-title">@EpisodeLabel(ep)</span>
+                            }
+                            else
+                            {
+                                <a class="anime-detail-episode-title" href="@WatchHref(ep)">@EpisodeLabel(ep)</a>
+                            }
+                        </li>
+                    }
+                </ul>
+            </div>
+        </section>
+    }
+
+    @if (_streams.Count > 0)
+    {
+        <section class="anime-detail-section">
+            <h2 class="anime-detail-section-title">Watch on</h2>
+            <ul class="anime-detail-link-list">
+                @foreach (var s in _streams)
+                {
+                    <li><a class="anime-detail-link" href="@s.Url" target="_blank" rel="noopener">@s.Site</a></li>
+                }
+            </ul>
+        </section>
+    }
+}
+
 @code {
     [Parameter] public string Id { get; set; } = "";
+
+    private bool _loading = true;
+    private MetaDto? _meta;
+    private IReadOnlyList<EpisodeInfoDto> _episodes = Array.Empty<EpisodeInfoDto>();
+    private IReadOnlyList<StreamingLinkDto> _streams = Array.Empty<StreamingLinkDto>();
+    private bool _synopsisExpanded;
+    private string _filter = "";
+    private string? _infoLine;
+    private bool _multiSeason;
+    private string? _typeQuery;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _typeQuery = QueryValue("type");
+
+        var meta = Api.AnimeAsync(Id);
+        var eps = Api.EpisodesAsync(Id);
+        var streams = Api.StreamsAsync(Id);
+        await Task.WhenAll(meta, eps, streams);
+
+        _meta = meta.Result;
+        _episodes = eps.Result;
+        _streams = streams.Result;
+        _multiSeason = _episodes.Select(e => e.Season).Distinct().Count() > 1;
+        _infoLine = BuildInfoLine(_meta);
+        _loading = false;
+    }
+
+    private static string? BuildInfoLine(MetaDto? a)
+    {
+        if (a is null) return null;
+        var bits = new List<string>();
+        if (!string.IsNullOrEmpty(a.Format)) bits.Add(a.Format!);
+        if (a.Episodes is int eps && eps > 0) bits.Add($"{eps} ep{(eps > 1 ? "s" : "")}");
+        if (a.AvgDuration is int dur && dur > 0) bits.Add($"~{dur} min");
+        if (a.Year is int yr && yr > 0) bits.Add(yr.ToString());
+        if (!string.IsNullOrEmpty(a.Source)) bits.Add(a.Source!);
+        return bits.Count > 0 ? string.Join(" · ", bits) : null;
+    }
+
+    private IEnumerable<EpisodeInfoDto> _filteredEpisodes =>
+        string.IsNullOrWhiteSpace(_filter)
+            ? _episodes
+            : _episodes.Where(e =>
+                e.Episode.ToString() == _filter.Trim()
+                || (e.Title?.Contains(_filter.Trim(), StringComparison.OrdinalIgnoreCase) ?? false));
+
+    private void OnFilter(ChangeEventArgs e) => _filter = e.Value?.ToString() ?? "";
+
+    private static string EpisodeLabel(EpisodeInfoDto ep)
+        => string.IsNullOrEmpty(ep.Title) ? $"Episode {ep.Episode}" : $"{ep.Episode}. {ep.Title}";
+
+    private static bool IsFuture(EpisodeInfoDto ep)
+        => DateTime.TryParse(ep.Released, out var d) && d.ToUniversalTime() > DateTime.UtcNow;
+
+    private string WatchHref(EpisodeInfoDto ep)
+    {
+        var idSeg = Uri.EscapeDataString(Id);
+        var q = string.IsNullOrEmpty(_typeQuery) ? "" : $"?type={_typeQuery}";
+        return _multiSeason
+            ? $"/meta/{idSeg}/watch/{ep.Season}/{ep.Episode}{q}"
+            : $"/meta/{idSeg}/watch/{ep.Episode}{q}";
+    }
+
+    private string? QueryValue(string key)
+    {
+        var uri = new Uri(Nav.Uri);
+        foreach (var pair in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = pair.Split('=', 2);
+            if (Uri.UnescapeDataString(kv[0]) == key)
+                return kv.Length > 1 ? Uri.UnescapeDataString(kv[1]) : "";
+        }
+        return null;
+    }
 }
