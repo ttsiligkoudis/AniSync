@@ -1,0 +1,283 @@
+@page "/advanced"
+@inject IAniSyncApi Api
+@inject AppState State
+@inject ISecureStore Store
+@inject IAppEnvironment Env
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@* Advanced settings — Blazor port of Advanced.cshtml. Backfill linked accounts,
+   home-server scrobble webhook (+ rotate, + Plex username), config backups
+   (export/import), and the danger zone (reset · delete · regenerate UID · sign out
+   everywhere). UID-rotating actions return a fresh config segment that this page
+   re-stores as the device credential. *@
+
+<PageTitle>Advanced · AniSync</PageTitle>
+
+<section class="container config-page">
+    <header class="page-header">
+        <h1 class="page-title">Advanced</h1>
+        <p class="page-subtitle">Sync · home server sync · backups · destructive actions</p>
+    </header>
+
+    @if (_loading)
+    {
+        <p class="hint-text">Loading…</p>
+    }
+    else if (_config is null)
+    {
+        <section class="section-card">
+            <p class="hint-text">This device is connected with an inline (no-account) config — advanced actions need an account. <a href="/login">Sign in</a>.</p>
+        </section>
+    }
+    else
+    {
+        <!-- ─── SYNC ─── -->
+        @if (_config.Linked.Count > 0)
+        {
+            <section class="section-card">
+                <span class="section-title">Sync</span>
+                <div class="full-sync-row">
+                    <div class="full-sync-text">
+                        <strong>Backfill linked accounts</strong>
+                        <span>Push every entry from your @Pretty(_config.AnimeService) library to your linked accounts in one go. Useful right after first linking.</span>
+                    </div>
+                    <button type="button" class="btn-ghost btn-ghost-sm" disabled="@_syncing" @onclick="SyncAsync">
+                        @(_syncing ? "Syncing…" : "Sync from primary")
+                    </button>
+                </div>
+                @if (!string.IsNullOrEmpty(_syncStatus)) { <p class="option-name-sub">@_syncStatus</p> }
+            </section>
+        }
+
+        <!-- ─── HOME SERVER SYNC ─── -->
+        <section class="section-card">
+            <span class="section-title">Home Server Sync</span>
+            <p class="section-description">
+                Mirror your watch progress from Plex, Jellyfin, or Emby into your linked anime trackers.
+                Paste the URL below into your media server's webhook settings — same URL for any of the three.
+            </p>
+            <p class="manifest-url-label">Webhook URL</p>
+            <div class="manifest-url-row">
+                <input class="manifest-url-input" readonly type="text" value="@ScrobbleUrl" />
+                <button class="btn-icon-copy" type="button" title="Copy URL" @onclick="() => CopyAsync(ScrobbleUrl)">
+                    @(_copied ? "✓" : "⧉")
+                </button>
+            </div>
+            <div class="btn-action-row" style="margin-top:0.75rem;">
+                <button class="btn-ghost btn-ghost-sm" type="button" disabled="@_rotating" @onclick="RotateScrobbleAsync">
+                    @(_rotating ? "Rotating…" : "Rotate token")
+                </button>
+                <span class="option-name-sub" style="margin-left:0.5rem;">Anyone with this URL can scrobble onto your account. Rotating invalidates the old URL.</span>
+            </div>
+
+            <p class="manifest-url-label" style="margin-top:1.5rem;">Plex Home username (optional)</p>
+            <div class="manifest-url-row">
+                <input class="manifest-url-input" type="text" placeholder="(accept any Plex username)"
+                       value="@_plexUsername" @oninput="e => _plexUsername = e.Value?.ToString() ?? string.Empty" />
+                <button class="btn-ghost btn-ghost-sm" type="button" style="white-space:nowrap;" @onclick="SavePlexAsync">
+                    @(_plexSaved ? "Saved" : "Save")
+                </button>
+            </div>
+            <p class="option-name-sub" style="margin-top:0.5rem;">Set this only if you share your Plex server. Events from other usernames are ignored. Jellyfin / Emby don't need it.</p>
+        </section>
+
+        <!-- ─── BACKUPS ─── -->
+        <section class="section-card">
+            <span class="section-title">Backups</span>
+            <p class="section-description">Export your configuration to a file or restore from one.</p>
+            <div class="btn-action-row">
+                <button class="btn-ghost" type="button" disabled="@_exporting" @onclick="ExportAsync">@(_exporting ? "Exporting…" : "Export")</button>
+                <label class="btn-ghost" style="cursor:pointer;">
+                    Import
+                    <InputFile OnChange="ImportAsync" accept="application/json,.json" style="display:none;" />
+                </label>
+            </div>
+            @if (!string.IsNullOrEmpty(_backupStatus)) { <p class="option-name-sub">@_backupStatus</p> }
+        </section>
+
+        <!-- ─── DANGER ZONE ─── -->
+        <section class="section-card danger-zone-card">
+            <span class="section-title">Danger Zone</span>
+            <p class="section-description">Perform potentially destructive actions that cannot be undone.</p>
+            <div class="btn-action-row">
+                <button class="btn-danger-pill" type="button" @onclick="ResetAsync">Reset Configuration</button>
+                <button class="btn-danger-pill" type="button" @onclick="DeleteAsync">Delete Configuration</button>
+            </div>
+            <div class="btn-action-row" style="margin-top:0.75rem;">
+                <button class="btn-danger-pill" type="button" @onclick="RegenerateAsync">Regenerate install URL</button>
+                <button class="btn-danger-pill" type="button" @onclick="SignOutEverywhereAsync">Sign out everywhere</button>
+            </div>
+            <p class="option-name-sub" style="margin-top:0.5rem;">
+                <strong>Regenerate install URL</strong> issues a new UID — use it if your current install URL leaked.
+                Every existing Stremio install and API link using the old URL stops working. <strong>Sign out everywhere</strong>
+                does the same and signs you out on every device. Your library, linked accounts, and settings are kept either way.
+            </p>
+            @if (!string.IsNullOrEmpty(_dangerStatus)) { <p class="option-name-sub">@_dangerStatus</p> }
+        </section>
+    }
+</section>
+
+@code {
+    private bool _loading = true;
+    private ConfigStateDto? _config;
+    private string _plexUsername = "";
+    private bool _syncing, _rotating, _exporting, _plexSaved, _copied;
+    private string? _syncStatus, _backupStatus, _dangerStatus;
+    private IJSObjectReference? _js;
+
+    private string Origin => Env.ApiBaseUrl.TrimEnd('/');
+    private string ScrobbleUrl => string.IsNullOrEmpty(_config?.ScrobbleToken)
+        ? "" : $"{Origin}/api/v1/scrobble/{_config!.ScrobbleToken}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // localStorage (the credential) is unreadable during prerender — wait for
+        // interactive so a logged-in user isn't bounced to /login. Re-runs interactively.
+        if (!RendererInfo.IsInteractive) return;
+
+        if (string.IsNullOrEmpty(State.StreamConfig))
+        {
+            var saved = await Store.GetAsync(ISecureStore.ConfigKey);
+            if (!string.IsNullOrEmpty(saved)) State.SetStreamConfig(saved);
+        }
+        if (string.IsNullOrEmpty(State.StreamConfig)) { Nav.NavigateTo("/login"); return; }
+
+        await ReloadAsync();
+        _loading = false;
+    }
+
+    private async Task ReloadAsync()
+    {
+        _config = await Api.GetConfigAsync();
+        _plexUsername = _config?.PlexUsername ?? "";
+    }
+
+    private async Task SyncAsync()
+    {
+        _syncing = true; _syncStatus = null;
+        _syncStatus = await Api.SyncAsync() ? "Backfill complete." : "Sync failed — try again.";
+        _syncing = false;
+    }
+
+    private async Task RotateScrobbleAsync()
+    {
+        _rotating = true;
+        var result = await Api.RotateScrobbleAsync();
+        if (result?.Token is { Length: > 0 } t && _config is not null) _config.ScrobbleToken = t;
+        _rotating = false;
+    }
+
+    private async Task SavePlexAsync()
+    {
+        _plexSaved = await Api.SetPlexUsernameAsync(string.IsNullOrWhiteSpace(_plexUsername) ? null : _plexUsername.Trim());
+        StateHasChanged();
+    }
+
+    private async Task ExportAsync()
+    {
+        _exporting = true; _backupStatus = null;
+        var json = await Api.ExportConfigJsonAsync();
+        if (!string.IsNullOrEmpty(json))
+        {
+            var module = await Module();
+            await module.InvokeVoidAsync("downloadText", $"anisync-config-{_config?.AnimeService?.ToLowerInvariant()}.json", json, "application/json");
+        }
+        else _backupStatus = "Couldn't export right now.";
+        _exporting = false;
+    }
+
+    private async Task ImportAsync(InputFileChangeEventArgs e)
+    {
+        _backupStatus = null;
+        try
+        {
+            using var stream = e.File.OpenReadStream(maxAllowedSize: 2 * 1024 * 1024);
+            using var reader = new StreamReader(stream);
+            var json = await reader.ReadToEndAsync();
+            var result = await Api.ImportConfigJsonAsync(json);
+            if (result is { Config: { Length: > 0 } cfg })
+            {
+                await Store.SetAsync(ISecureStore.ConfigKey, cfg);
+                State.SetStreamConfig(cfg);
+                await ReloadAsync();
+                _backupStatus = "Configuration restored.";
+            }
+            else _backupStatus = "Import failed — is this a valid AniSync backup?";
+        }
+        catch { _backupStatus = "Couldn't read that file."; }
+    }
+
+    private async Task ResetAsync()
+    {
+        if (!await Confirm("Reset all toggles to defaults? Your account and library stay.")) return;
+        var result = await Api.ResetConfigAsync();
+        _dangerStatus = result is not null ? "Configuration reset." : "Reset failed.";
+        await ReloadAsync();
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (!await Confirm("Delete your configuration and sign out? Old install URLs stop working.")) return;
+        if (await Api.DeleteConfigAsync()) await SignOutLocalAsync();
+        else _dangerStatus = "Delete failed.";
+    }
+
+    private async Task RegenerateAsync()
+    {
+        if (!await Confirm("Issue a new install URL? Every existing install/API link using the old URL stops working immediately.")) return;
+        var result = await Api.RegenerateUidAsync();
+        if (result is { Config: { Length: > 0 } cfg })
+        {
+            await Store.SetAsync(ISecureStore.ConfigKey, cfg);
+            State.SetStreamConfig(cfg);
+            await ReloadAsync();
+            _dangerStatus = "New install URL issued — copy it from the Stremio addon page.";
+        }
+        else _dangerStatus = "Regenerate failed.";
+    }
+
+    private async Task SignOutEverywhereAsync()
+    {
+        if (!await Confirm("Sign out on every device? The old install URL stops working everywhere.")) return;
+        if (await Api.SignOutEverywhereAsync()) await SignOutLocalAsync();
+        else _dangerStatus = "Sign-out failed.";
+    }
+
+    private async Task SignOutLocalAsync()
+    {
+        await Store.SetAsync(ISecureStore.ConfigKey, null);
+        State.SetStreamConfig(null);
+        State.HydrateSession(false, "");
+        Nav.NavigateTo("/login");
+    }
+
+    private async Task<IJSObjectReference> Module()
+        => _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/configure.js");
+
+    private async Task CopyAsync(string text)
+    {
+        try { await (await Module()).InvokeAsync<bool>("copyText", text); _copied = true; StateHasChanged(); }
+        catch { }
+    }
+
+    private async Task<bool> Confirm(string message)
+    {
+        try { return await JS.InvokeAsync<bool>("confirm", message); }
+        catch { return true; } // prerender / no JS — don't block the action
+    }
+
+    private static string Pretty(string? service) => service switch
+    {
+        "Anilist" => "AniList",
+        "MyAnimeList" => "MyAnimeList",
+        null or "" => "your",
+        _ => service,
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_js is not null) { try { await _js.DisposeAsync(); } catch { } }
+    }
+}

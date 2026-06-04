@@ -1,21 +1,31 @@
 @page "/notifications"
 @inject IAniSyncApi Api
+@inject IAppEnvironment Env
+@inject NavigationManager Nav
+@inject IJSRuntime JS
 
 @* Notifications — full episode-release history. Port of the /notifications page
-   over /api/v1/notifications (list + read-all). Note: that API is session-
-   authenticated on the server today, so on the Web head it works as-is; the
-   MAUI head needs the controller to also accept the X-AniSync-Config header
-   (see README). Reuses the notif-page-* classes from site.css. *@
+   over /api/v1/notifications: list, mark-read-on-open, per-row delete, mark-all,
+   and (web head) a Web Push opt-in toggle backed by /api/v1/push. Reuses the
+   notif-page-* classes from site.css. *@
 
 <PageTitle>Notifications · AniSync</PageTitle>
 
 <section class="container">
     <div class="notif-page-toolbar">
         <h1 class="dashboard-section-title">Notifications</h1>
-        @if (_items.Count > 0)
-        {
-            <button type="button" class="notif-page-action" @onclick="MarkAllRead">Mark all read</button>
-        }
+        <span class="notif-page-toolbar-actions">
+            @if (_pushEnabled)
+            {
+                <button type="button" class="notif-page-action" disabled="@_pushBusy" @onclick="TogglePush">
+                    @(_pushBusy ? "…" : _pushSubscribed ? "Disable push" : "Enable push")
+                </button>
+            }
+            @if (_items.Count > 0)
+            {
+                <button type="button" class="notif-page-action" @onclick="MarkAllRead">Mark all read</button>
+            }
+        </span>
     </div>
 
     <div class="notif-page-body">
@@ -32,8 +42,8 @@
             <ul class="notif-page-list">
                 @foreach (var n in _items)
                 {
-                    <li class="notif-page-item @(n.IsRead ? "" : "notif-page-item-unread")">
-                        <a href="@(string.IsNullOrEmpty(n.LinkPath) ? "#" : n.LinkPath)" class="notif-page-item-link">
+                    <li class="notif-page-item @(IsRead(n) ? "" : "notif-page-item-unread")">
+                        <div class="notif-page-item-link" role="button" tabindex="0" @onclick="() => OpenAsync(n)">
                             @if (!string.IsNullOrEmpty(n.ThumbnailUrl))
                             {
                                 <img class="notif-page-thumb" src="@n.ThumbnailUrl" alt="" loading="lazy" onerror="this.remove()" />
@@ -44,7 +54,9 @@
                             }
                             <span class="notif-page-title">@n.AnimeTitle · Episode @n.EpisodeNumber</span>
                             <span class="notif-page-meta">@RelativeTime(n.CreatedAt)</span>
-                        </a>
+                        </div>
+                        <button type="button" class="notif-page-delete" aria-label="Delete notification"
+                                @onclick="() => DeleteAsync(n)" @onclick:stopPropagation>×</button>
                     </li>
                 }
             </ul>
@@ -54,18 +66,81 @@
 
 @code {
     private bool _loading = true;
-    private IReadOnlyList<NotificationDto> _items = Array.Empty<NotificationDto>();
+    private List<NotificationDto> _items = new();
+    private readonly HashSet<long> _readIds = new();
+
+    private bool _pushEnabled;
+    private bool _pushSubscribed;
+    private bool _pushBusy;
 
     protected override async Task OnInitializedAsync()
     {
-        _items = await Api.NotificationsAsync(limit: 50);
+        _items = (await Api.NotificationsAsync(limit: 50)).ToList();
         _loading = false;
+
+        // Web Push opt-in is web-head only; hidden when the deployment has no
+        // VAPID keys configured (status.Enabled == false) or the browser lacks
+        // the Push API.
+        if (!Env.IsNative)
+        {
+            var status = await Api.PushStatusAsync();
+            if (status is { Enabled: true })
+            {
+                var supported = await JS.InvokeAsync<bool>("anisyncPush.supported");
+                _pushEnabled = supported;
+                _pushSubscribed = status.Subscribed;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private bool IsRead(NotificationDto n) => n.IsRead || _readIds.Contains(n.Id);
+
+    private async Task OpenAsync(NotificationDto n)
+    {
+        if (!IsRead(n))
+        {
+            _readIds.Add(n.Id);
+            await Api.MarkNotificationReadAsync(n.Id);
+        }
+        if (!string.IsNullOrEmpty(n.LinkPath)) Nav.NavigateTo(n.LinkPath);
+    }
+
+    private async Task DeleteAsync(NotificationDto n)
+    {
+        await Api.DeleteNotificationAsync(n.Id);
+        _items.RemoveAll(x => x.Id == n.Id);
     }
 
     private async Task MarkAllRead()
     {
         await Api.MarkAllNotificationsReadAsync();
-        _items = await Api.NotificationsAsync(limit: 50);
+        foreach (var n in _items) _readIds.Add(n.Id);
+    }
+
+    private async Task TogglePush()
+    {
+        _pushBusy = true;
+        try
+        {
+            if (_pushSubscribed)
+            {
+                var endpoint = await JS.InvokeAsync<string?>("anisyncPush.unsubscribe");
+                if (!string.IsNullOrEmpty(endpoint)) await Api.PushUnsubscribeAsync(endpoint);
+                _pushSubscribed = false;
+            }
+            else
+            {
+                var key = await Api.PushVapidKeyAsync();
+                if (key is { Enabled: true, PublicKey: { Length: > 0 } pk })
+                {
+                    var sub = await JS.InvokeAsync<PushSubscribeRequestDto?>("anisyncPush.subscribe", pk);
+                    if (sub is not null && await Api.PushSubscribeAsync(sub))
+                        _pushSubscribed = true;
+                }
+            }
+        }
+        finally { _pushBusy = false; }
     }
 
     private static string RelativeTime(long unixSeconds)

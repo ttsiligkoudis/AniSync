@@ -1,0 +1,74 @@
+@page "/discover/tag/{Tag}"
+@inject IAniSyncApi Api
+
+@* Anime tagged with {Tag} — port of Views/Discover/TagDetail.cshtml. Poster grid
+   with skip-offset "Load more" (the server reports HasNextPage). *@
+
+<PageTitle>@Tag · AniSync</PageTitle>
+
+<section class="container">
+    <div class="discover-browse-header">
+        <a class="watch-back" href="/discover/tag">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
+            <span>All tags</span>
+        </a>
+        <h1 class="dashboard-section-title">@Tag</h1>
+    </div>
+
+    <div class="discover-results-pane">
+        @if (_loading && _items.Count == 0)
+        {
+            <div class="library-grid">
+                @for (var i = 0; i < 12; i++)
+                {
+                    <div class="library-card library-card-skeleton">
+                        <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
+                        <span class="library-card-skeleton-line"></span>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <PosterGrid Items="_items" Variant="grid" EmptyMessage="No anime found for this tag." />
+        }
+    </div>
+
+    @if (_canLoadMore)
+    {
+        <div class="discover-pagination">
+            <button type="button" class="discover-paginator" disabled="@_loading" @onclick="LoadMore">
+                @(_loading ? "Loading…" : "Load more")
+            </button>
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter] public string Tag { get; set; } = "";
+
+    private readonly List<MetaDto> _items = new();
+    private bool _loading;
+    private bool _canLoadMore;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _items.Clear();
+        _canLoadMore = false;
+        await Load();
+    }
+
+    private Task LoadMore() => Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        StateHasChanged();
+        var skip = _items.Count > 0 ? _items.Count.ToString() : null;
+        var resp = await Api.DiscoverByTagAsync(Tag, skip);
+        _items.AddRange(resp.Items);
+        _canLoadMore = resp.HasNextPage;
+        _loading = false;
+        StateHasChanged();
+    }
+}

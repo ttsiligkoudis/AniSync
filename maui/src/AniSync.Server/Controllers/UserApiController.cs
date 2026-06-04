@@ -1,6 +1,7 @@
 using AnimeList.Filters;
 using AnimeList.Models;
 using AnimeList.Models.Api;
+using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -1008,5 +1009,130 @@ namespace AnimeList.Controllers
                 return StatusCode(500, new ApiError("linked lookup failed"));
             }
         }
+
+        /// <summary>
+        /// The user's movies / series library from Trakt for the active tab — the
+        /// header-authed twin of LibraryController.VideoPaneAsync. <paramref name="type"/>
+        /// is <c>movie</c> or <c>series</c>; <paramref name="list"/> is
+        /// <c>current</c> (Continue Watching) / <c>completed</c> (Watched) /
+        /// <c>planning</c> (Watchlist). Returns hydrated, anime-excluded video Metas.
+        /// Empty when Trakt isn't configured or the config has no stored row.
+        /// </summary>
+        [HttpGet("video-list")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(MetaListResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> VideoList(string type = "movie", string list = "current")
+        {
+            var cfg = await Utils.ResolveConfigAsync(ResolvedConfig, _configStore);
+            var uid = cfg?.tokenUid;
+            if (string.IsNullOrEmpty(uid) || !_traktService.IsConfigured)
+                return Ok(new MetaListResponse([]));
+
+            var mediaType = string.Equals(type, "series", StringComparison.OrdinalIgnoreCase)
+                ? MetaType.series : MetaType.movie;
+            var listType = list?.ToLowerInvariant() switch
+            {
+                "completed" or "watched" => ListType.Completed,
+                "planning" or "watchlist" or "planned" => ListType.Planning,
+                _ => ListType.Current,
+            };
+
+            var items = await _traktService.GetListAsync(uid, listType, mediaType);
+            var metas = await items.ToVideoMetas().ExcludeAnimeAsync(_mappingService);
+            return Ok(new MetaListResponse(metas));
+        }
+
+        /// <summary>
+        /// Reads the user's named preferences (season grouping, hide-unaired,
+        /// adult content, auto-track). Header-authed twin of the config page's
+        /// toggle reads — decodes the stored flag bits server-side so the thin
+        /// client never has to know the bit layout. <c>Stored</c> is false for
+        /// inline (v3) configs that have no persisted row to edit.
+        /// </summary>
+        [HttpGet("preferences")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(PreferencesDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetPreferences()
+        {
+            try
+            {
+                var configuration = await ResolveConfigAsync(ResolvedConfig, _configStore);
+                var uid = configuration?.tokenUid;
+
+                var cfg = new Configuration();
+                if (!string.IsNullOrEmpty(uid))
+                {
+                    var (f1, f2, f3, _) = await _configStore.GetFlagsAsync(uid);
+                    Utils.ApplyBinaryFlags(cfg, f1, f2, f3);
+                }
+
+                return new JsonResult(new PreferencesDto
+                {
+                    GroupSeasons = cfg.enableSeasonGrouping,
+                    HideUnaired = cfg.hideUnreleasedFromWatching,
+                    ShowAdult = cfg.showAdultContent,
+                    DisableAutoTrack = cfg.disableAutoTrack,
+                    Stored = !string.IsNullOrEmpty(uid),
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API GetPreferences failed.");
+                return StatusCode(500, new ApiError("preferences lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// Persists the user's named preferences. Reads the current flag bits,
+        /// flips only the preference bits (leaving the Stremio catalog toggles
+        /// untouched), and re-packs them. Requires a stored (v5) config; inline
+        /// configs have nowhere to persist to.
+        /// </summary>
+        [HttpPost("preferences")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(PreferencesDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> SavePreferences([FromBody] PreferencesDto body)
+        {
+            if (body == null) return BadRequest(new ApiError("missing request body"));
+            try
+            {
+                var configuration = await ResolveConfigAsync(ResolvedConfig, _configStore);
+                var uid = configuration?.tokenUid;
+                if (string.IsNullOrEmpty(uid))
+                    return BadRequest(new ApiError("config is not stored — preferences need a v5 install URL"));
+
+                var cfg = new Configuration();
+                var (f1, f2, f3, _) = await _configStore.GetFlagsAsync(uid);
+                Utils.ApplyBinaryFlags(cfg, f1, f2, f3);
+
+                cfg.enableSeasonGrouping = body.GroupSeasons;
+                cfg.hideUnreleasedFromWatching = body.HideUnaired;
+                cfg.showAdultContent = body.ShowAdult;
+                cfg.disableAutoTrack = body.DisableAutoTrack;
+
+                var (n1, n2, n3) = Utils.PackBinaryFlags(cfg);
+                await _configStore.SetFlagsAsync(uid, n1, n2, n3);
+
+                body.Stored = true;
+                return new JsonResult(body);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API SavePreferences failed.");
+                return StatusCode(500, new ApiError("preferences save failed"));
+            }
+        }
+    }
+
+    /// <summary>Named user preferences exposed by GET/POST /api/v1/me/preferences.</summary>
+    public sealed class PreferencesDto
+    {
+        public bool GroupSeasons { get; set; }
+        public bool HideUnaired { get; set; }
+        public bool ShowAdult { get; set; }
+        public bool DisableAutoTrack { get; set; }
+        /// <summary>False for inline (v3) configs with no persisted row — read-only.</summary>
+        public bool Stored { get; set; }
     }
 }

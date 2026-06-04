@@ -1,12 +1,14 @@
 @page "/"
 @inject IAniSyncApi Api
+@inject AppState State
 
 @* Home dashboard — full port of Views/Home/Index.cshtml's section order: the
    "Your stats" strip, then the anime shelves (Continue watching / New episodes
-   today / Trending / Most popular). The fixed media-type switch lives in the
-   layout; each section carries data-media-type and hides itself when the
-   dashboard filter excludes it (handled inside StatsStrip / DashboardShelf).
-   Every shelf loads independently from the existing JSON API. *@
+   today / Trending / Most popular), then the movie / series (video) shelves for
+   the modes the user enabled. The fixed media-type switch lives in the layout;
+   each section carries data-media-type and hides itself when the dashboard filter
+   excludes it (handled inside StatsStrip / DashboardShelf). Every shelf loads
+   independently from the existing JSON API. *@
 
 <PageTitle>AniSync</PageTitle>
 
@@ -35,3 +37,31 @@
                 DashSection="anime-popular"
                 ViewAllHref="/discover?list=popular&type=anime"
                 Fetch='@(() => Api.DiscoverAsync("popular"))' />
+
+@* Movie / series (Trakt-backed) shelves — only rendered for the modes the user
+   enabled in the chooser, then shown/hidden by the dashboard media-type filter. *@
+@if (State.EnabledMediaTypes.Contains(MetaType.movie))
+{
+    <DashboardShelf Title="Trending Movies" MediaType="movie" DashSection="movie-trending" VideoLinks="true"
+                    ViewAllHref="/discover?list=trending&type=movie"
+                    Fetch='@(() => Api.DiscoverVideoAsync("movie", "trending"))' />
+    <DashboardShelf Title="Popular Movies" MediaType="movie" DashSection="movie-popular" VideoLinks="true"
+                    ViewAllHref="/discover?list=popular&type=movie"
+                    Fetch='@(() => Api.DiscoverVideoAsync("movie", "popular"))' />
+    <DashboardShelf Title="Most Anticipated Movies" MediaType="movie" DashSection="movie-anticipated" VideoLinks="true"
+                    ViewAllHref="/discover?list=anticipated&type=movie"
+                    Fetch='@(() => Api.DiscoverVideoAsync("movie", "anticipated"))' />
+}
+
+@if (State.EnabledMediaTypes.Contains(MetaType.series))
+{
+    <DashboardShelf Title="Trending Series" MediaType="series" DashSection="series-trending" VideoLinks="true"
+                    ViewAllHref="/discover?list=trending&type=series"
+                    Fetch='@(() => Api.DiscoverVideoAsync("series", "trending"))' />
+    <DashboardShelf Title="Popular Series" MediaType="series" DashSection="series-popular" VideoLinks="true"
+                    ViewAllHref="/discover?list=popular&type=series"
+                    Fetch='@(() => Api.DiscoverVideoAsync("series", "popular"))' />
+    <DashboardShelf Title="Most Anticipated Series" MediaType="series" DashSection="series-anticipated" VideoLinks="true"
+                    ViewAllHref="/discover?list=anticipated&type=series"
+                    Fetch='@(() => Api.DiscoverVideoAsync("series", "anticipated"))' />
+}

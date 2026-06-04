@@ -2,74 +2,137 @@
 @inject IAniSyncApi Api
 @inject AppState State
 
-@* Calendar — upcoming episodes for the user's tracked anime, grouped by day.
-   Sourced from /api/v1/me/upcoming (the same feed the notification bell uses).
-   Each day is a dashboard section; episodes reuse the PosterGrid card (cover +
-   "Ep N" airing badge) by projecting the upcoming rows onto MetaDto. *@
+@* Calendar — port of Views/Calendar/Index.cshtml. A Sunday-first week strip
+   (today highlighted, dots mark days with episodes) with prev/next/Today week
+   navigation, then the week's recent + upcoming episodes bucketed by day. Anime
+   come from the user's Watching list (AniList airing); series from Trakt
+   Watching/Planning. Each card deep-links to that episode's watch page. Backed by
+   /api/v1/me/calendar (the header-authed twin of the MVC view); reuses the cal-*
+   classes from site.css verbatim. *@
 
 <PageTitle>Calendar · AniSync</PageTitle>
 
-<section class="container">
-    <h1 class="dashboard-section-title">Calendar</h1>
+<div class="container cal-page">
+    <header class="cal-header">
+        <div class="cal-title-group">
+            <h1 class="cal-title">Calendar</h1>
+            <p class="cal-sub">Recent &amp; upcoming episodes from your anime Watching list and your Trakt series.</p>
+        </div>
+        <div class="cal-legend" aria-hidden="true">
+            <span class="cal-legend-item"><span class="cal-dot cal-dot-anime"></span> Anime</span>
+            <span class="cal-legend-item"><span class="cal-dot cal-dot-series"></span> Series</span>
+        </div>
+    </header>
 
     @if (string.IsNullOrEmpty(State.StreamConfig))
     {
-        <p class="hint-text"><a href="/settings">Sign in</a> to see upcoming episodes for your list.</p>
+        <p class="hint-text"><a href="/settings">Sign in</a> to see your week of episodes.</p>
     }
-    else if (_loading)
+    else if (_loading && _model is null)
     {
         <p class="hint-text">Loading…</p>
     }
-    else if (_days.Count == 0)
+    else if (_model is null)
     {
-        <p class="hint-text">No upcoming episodes for your Watching list.</p>
+        <p class="hint-text">Couldn't load your calendar right now.</p>
     }
     else
     {
-        @foreach (var day in _days)
+        <div class="cal-strip">
+            <div class="cal-strip-head">
+                <a class="cal-strip-nav" href="/calendar?d=@_model.PrevDate" aria-label="Previous week" rel="prev">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+                </a>
+                <a class="cal-strip-today@(_model.SelectedIsToday ? " is-today" : "")" href="/calendar">Today</a>
+                <a class="cal-strip-nav" href="/calendar?d=@_model.NextDate" aria-label="Next week" rel="next">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg>
+                </a>
+            </div>
+            <div class="cal-strip-days">
+                @foreach (var day in _model.Days)
+                {
+                    <div class="cal-dcell@(day.IsToday ? " today" : "")">
+                        <span class="cal-dcell-mon">@MonthLabel(day.DateIso)</span>
+                        <span class="cal-dcell-num">@DayNumber(day.DateIso)</span>
+                        <span class="cal-dcell-dow">@DowLabel(day.DateIso)</span>
+                        <span class="cal-dcell-dots" aria-hidden="true">
+                            @if (day.HasAnime) { <span class="cal-dot cal-dot-anime"></span> }
+                            @if (day.HasSeries) { <span class="cal-dot cal-dot-series"></span> }
+                        </span>
+                    </div>
+                }
+            </div>
+        </div>
+
+        @if (_model.TotalEpisodes == 0)
         {
-            <section class="dashboard-section">
-                <div class="dashboard-section-header">
-                    <h2 class="dashboard-section-title">@day.Label</h2>
-                </div>
-                <PosterGrid Items="day.Items" Variant="grid" />
-            </section>
+            <div class="cal-empty">
+                Nothing scheduled this week for the shows you're tracking. Episodes show up here once
+                they're on your anime <strong>Watching</strong> list or your Trakt <strong>Watching</strong> / <strong>Planning</strong> lists.
+            </div>
+        }
+        else
+        {
+            <div class="cal-week-data">
+                @foreach (var day in _model.Days.Where(d => d.Episodes.Count > 0))
+                {
+                    <section class="cal-day-section@(day.IsToday ? " is-today" : "")" id="day-@day.DateIso">
+                        <h2 class="cal-day-section-title">@day.Label</h2>
+                        <div class="cal-hscroll">
+                            @foreach (var ep in day.Episodes)
+                            {
+                                <a class="cal-card cal-card-@ep.Kind" href="@(string.IsNullOrEmpty(ep.LinkPath) ? "#" : ep.LinkPath)" title="@ep.Title">
+                                    <div class="cal-card-thumb">
+                                        @if (!string.IsNullOrEmpty(ep.CoverImage))
+                                        {
+                                            <img src="@ep.CoverImage" alt="" loading="lazy" decoding="async" onerror="this.remove()" />
+                                        }
+                                        else
+                                        {
+                                            <span class="cal-card-thumb-ph" aria-hidden="true"></span>
+                                        }
+                                        <span class="cal-card-time">@AirTime(ep.AiringAt)</span>
+                                    </div>
+                                    <div class="cal-card-info">
+                                        <div class="cal-card-title">@ep.Title</div>
+                                        <div class="cal-card-meta">@EpisodeMeta(ep)</div>
+                                    </div>
+                                </a>
+                            }
+                        </div>
+                    </section>
+                }
+            </div>
         }
     }
-</section>
+</div>
 
 @code {
+    [SupplyParameterFromQuery(Name = "d")] public string? D { get; set; }
+
     private bool _loading = true;
-    private readonly List<DayGroup> _days = new();
+    private CalendarResponse? _model;
 
-    private sealed record DayGroup(string Label, List<MetaDto> Items);
-
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnParametersSetAsync()
     {
         if (string.IsNullOrEmpty(State.StreamConfig)) { _loading = false; return; }
-
-        var upcoming = await Api.UpcomingAsync();
-        var today = DateTimeOffset.Now.Date;
-
-        foreach (var grp in upcoming
-            .OrderBy(e => e.AiringAt)
-            .GroupBy(e => DateTimeOffset.FromUnixTimeSeconds(e.AiringAt).LocalDateTime.Date))
-        {
-            var label = grp.Key == today ? "Today"
-                : grp.Key == today.AddDays(1) ? "Tomorrow"
-                : grp.Key.ToString("dddd, MMM d");
-            var items = grp.Select(e => new MetaDto
-            {
-                Id = e.AnimeId,
-                Name = e.Title,
-                Poster = e.CoverImage,
-                AiringEpisode = e.Episode,
-                AiringAt = e.AiringAt,
-                Type = "anime",
-            }).ToList();
-            _days.Add(new DayGroup(label, items));
-        }
-
+        _loading = true;
+        _model = await Api.CalendarAsync(D);
         _loading = false;
+    }
+
+    private static string MonthLabel(string? iso) => DateOnly.TryParse(iso, out var d) ? d.ToString("MMM") : "";
+    private static string DayNumber(string? iso) => DateOnly.TryParse(iso, out var d) ? d.Day.ToString() : "";
+    private static string DowLabel(string? iso) => DateOnly.TryParse(iso, out var d) ? d.ToString("ddd") : "";
+    private static string AirTime(long unix) => DateTimeOffset.FromUnixTimeSeconds(unix).LocalDateTime.ToString("h:mm tt");
+
+    private static string EpisodeMeta(CalendarEpisodeDto ep)
+    {
+        if (ep.Season is int s)
+        {
+            var meta = $"S{s} • E{ep.Episode}";
+            return string.IsNullOrEmpty(ep.EpisodeTitle) ? meta : $"{meta} - {ep.EpisodeTitle}";
+        }
+        return $"Episode {ep.Episode}";
     }
 }

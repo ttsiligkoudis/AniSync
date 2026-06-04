@@ -17,13 +17,13 @@
     {
         <h1 class="dashboard-section-title">Library</h1>
         <p class="hint-text">
-            <a href="/settings">Sign in</a> to see your tracked anime here.
+            <a href="/login">Sign in</a> to see your tracked library here.
         </p>
     }
     else
     {
         <nav class="library-tabs" role="tablist" aria-label="Library lists">
-            @foreach (var (status, label) in _tabs)
+            @foreach (var (status, label) in Tabs)
             {
                 <button type="button" role="tab"
                         class="library-tab @(_status == status ? "library-tab-active" : "")"
@@ -37,6 +37,21 @@
         <form class="filter-bar" role="search" @onsubmit:preventDefault>
             <input type="search" class="filter-bar-search" placeholder="Search your list…"
                    value="@_search" @oninput="OnSearch" autocomplete="off" />
+            @if (_genreOptions.Count > 0)
+            {
+                <select class="filter-bar-select" @bind="_genre">
+                    <option value="">All genres</option>
+                    @foreach (var g in _genreOptions)
+                    {
+                        <option value="@g">@g</option>
+                    }
+                </select>
+            }
+            <select class="filter-bar-select" @bind="_sort">
+                <option value="default">Default order</option>
+                <option value="az">A–Z</option>
+                <option value="za">Z–A</option>
+            </select>
         </form>
 
         <div class="library-results-pane">
@@ -55,7 +70,7 @@
             }
             else
             {
-                <PosterGrid Items="_filtered" Variant="grid"
+                <PosterGrid Items="_filtered" Variant="grid" VideoLinks="@(!IsAnime)"
                             EmptyMessage="@($"Nothing in your {_activeLabel} list.")" />
             }
         </div>
@@ -63,23 +78,58 @@
 </section>
 
 @code {
-    private readonly (string Status, string Label)[] _tabs =
+    // Anime tracks the merged tracker lists (six statuses); movies / series come from
+    // Trakt, which only maps onto Continue Watching / Watched / Watchlist.
+    private static readonly (string Status, string Label)[] AnimeTabs =
     {
         ("current", "Watching"), ("completed", "Completed"), ("planning", "Planning"),
         ("paused", "Paused"), ("dropped", "Dropped"), ("repeating", "Rewatching"),
     };
+    private static readonly (string Status, string Label)[] VideoTabs =
+    {
+        ("current", "Continue Watching"), ("completed", "Watched"), ("planning", "Watchlist"),
+    };
+
+    private bool IsAnime => State.MediaType == MetaType.anime;
+    private (string Status, string Label)[] Tabs => IsAnime ? AnimeTabs : VideoTabs;
 
     private string _status = "current";
     private string _search = "";
+    private string _genre = "";
+    private string _sort = "default";
     private bool _loading;
     private IReadOnlyList<MetaDto> _items = Array.Empty<MetaDto>();
 
-    private string _activeLabel => _tabs.FirstOrDefault(t => t.Status == _status).Label ?? "";
+    private string _activeLabel => Tabs.FirstOrDefault(t => t.Status == _status).Label ?? "";
 
-    private IReadOnlyList<MetaDto> _filtered =>
-        string.IsNullOrWhiteSpace(_search)
-            ? _items
-            : _items.Where(m => m.Name.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+    // Genre options are derived from the loaded list so they always match what's
+    // actually filterable (the list API doesn't take a genre parameter).
+    private IReadOnlyList<string> _genreOptions =>
+        _items.Where(m => m.Genres is { Count: > 0 })
+            .SelectMany(m => m.Genres!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g)
+            .ToList();
+
+    private IReadOnlyList<MetaDto> _filtered
+    {
+        get
+        {
+            IEnumerable<MetaDto> q = _items;
+            if (!string.IsNullOrWhiteSpace(_search))
+                q = q.Where(m => m.Name.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrEmpty(_genre))
+                q = q.Where(m => m.Genres is { Count: > 0 }
+                                 && m.Genres!.Contains(_genre, StringComparer.OrdinalIgnoreCase));
+            q = _sort switch
+            {
+                "az" => q.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase),
+                "za" => q.OrderByDescending(m => m.Name, StringComparer.OrdinalIgnoreCase),
+                _ => q,
+            };
+            return q.ToList();
+        }
+    }
 
     protected override void OnInitialized() => State.Changed += OnStateChanged;
 
@@ -88,9 +138,15 @@
     private async Task Load()
     {
         if (string.IsNullOrEmpty(State.StreamConfig)) return;
+        // The active tab may not exist for the current media type (e.g. switching to
+        // movies while on the anime-only "Rewatching" tab) — clamp to a valid one.
+        if (!Tabs.Any(t => t.Status == _status)) _status = "current";
+
         _loading = true;
         StateHasChanged();
-        _items = await Api.ListAsync(_status);
+        _items = IsAnime
+            ? await Api.ListAsync(_status)
+            : await Api.VideoListAsync(State.MediaType == MetaType.movie ? "movie" : "series", _status);
         _loading = false;
         StateHasChanged();
     }
@@ -100,6 +156,7 @@
         if (_status == status) return;
         _status = status;
         _search = "";
+        _genre = "";
         await Load();
     }
 

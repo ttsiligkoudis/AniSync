@@ -1,0 +1,68 @@
+@page "/discover/studio"
+@inject IAniSyncApi Api
+
+@* Browse by studio — port of Views/Discover/Studios.cshtml. Popularity-sorted
+   studio tiles (name + anime count) with page-based "Load more". Tapping a tile
+   opens /discover/studio/{id}. *@
+
+<PageTitle>Browse by studio · AniSync</PageTitle>
+
+<section class="container">
+    <div class="discover-browse-header">
+        <h1 class="dashboard-section-title">Browse by studio</h1>
+        <a class="discover-browse-link" href="/discover/tag">Tags →</a>
+    </div>
+
+    @if (_loading && _studios.Count == 0)
+    {
+        <p class="hint-text">Loading studios…</p>
+    }
+    else if (_studios.Count == 0)
+    {
+        <p class="hint-text">No studios to show.</p>
+    }
+    else
+    {
+        <div class="studio-tile-grid">
+            @foreach (var s in _studios)
+            {
+                <a class="studio-tile" href="@($"/discover/studio/{s.Id}")">
+                    <span class="studio-tile-name">@s.Name</span>
+                    <span class="studio-tile-count">@s.AnimeCount anime</span>
+                </a>
+            }
+        </div>
+    }
+
+    @if (_canLoadMore)
+    {
+        <div class="discover-pagination">
+            <button type="button" class="discover-paginator" disabled="@_loading" @onclick="LoadMore">
+                @(_loading ? "Loading…" : "Load more")
+            </button>
+        </div>
+    }
+</section>
+
+@code {
+    private readonly List<StudioSummaryDto> _studios = new();
+    private bool _loading;
+    private bool _canLoadMore;
+    private int _page = 1;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private Task LoadMore() => Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        StateHasChanged();
+        var resp = await Api.StudiosAsync(_page);
+        _studios.AddRange(resp.Studios);
+        _canLoadMore = resp.HasNextPage;
+        if (resp.Studios.Count > 0) _page++;
+        _loading = false;
+        StateHasChanged();
+    }
+}

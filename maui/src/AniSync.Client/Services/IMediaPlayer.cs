@@ -16,6 +16,10 @@ public interface IMediaPlayer
     /// </summary>
     Task PlayAsync(PlaybackRequest request, CancellationToken ct = default);
 
+    /// <summary>Seek the current playback to an absolute position in seconds.
+    /// Used by the watch page's AniSkip "Skip intro/outro" action and auto-skip.</summary>
+    Task SeekAsync(double seconds);
+
     /// <summary>Stop + tear down the current playback session.</summary>
     Task StopAsync();
 }

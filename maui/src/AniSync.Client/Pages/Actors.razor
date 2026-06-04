@@ -1,0 +1,92 @@
+@page "/discover/actors"
+@inject IAniSyncApi Api
+
+@* Browse by actor — port of Views/Discover/Actors.cshtml. TMDB popular people
+   (or a name search) as photo tiles with page-based "Load more"; each tile opens
+   the Trakt-backed filmography at /discover/actor/tmdb/{id}. *@
+
+<PageTitle>Browse by actor · AniSync</PageTitle>
+
+<section class="container">
+    <div class="discover-browse-header">
+        <h1 class="dashboard-section-title">Browse by actor</h1>
+        <a class="discover-browse-link" href="/discover/studio">Studios →</a>
+    </div>
+
+    <form class="filter-bar" role="search" @onsubmit="Reload" @onsubmit:preventDefault>
+        <input class="filter-bar-search" placeholder="Search people…" value="@_search"
+               @oninput="e => _search = e.Value?.ToString() ?? string.Empty" autocomplete="off" />
+        <button type="submit" class="site-header-cta">Search</button>
+    </form>
+
+    @if (_loading && _actors.Count == 0)
+    {
+        <p class="hint-text">Loading…</p>
+    }
+    else if (_actors.Count == 0)
+    {
+        <p class="hint-text">No people found.</p>
+    }
+    else
+    {
+        <div class="actor-tile-grid">
+            @foreach (var p in _actors)
+            {
+                <a class="actor-tile" href="@($"/discover/actor/tmdb/{p.TmdbId}")">
+                    <div class="actor-tile-photo-wrap">
+                        @if (!string.IsNullOrEmpty(p.Image))
+                        {
+                            <img class="actor-tile-photo" src="@p.Image" alt="@p.Name" loading="lazy" decoding="async" onerror="this.remove()" />
+                        }
+                        else
+                        {
+                            <div class="actor-tile-photo actor-tile-photo-placeholder" aria-hidden="true"></div>
+                        }
+                    </div>
+                    <span class="actor-tile-name">@p.Name</span>
+                </a>
+            }
+        </div>
+    }
+
+    @if (_canLoadMore)
+    {
+        <div class="discover-pagination">
+            <button type="button" class="discover-paginator" disabled="@_loading" @onclick="LoadMore">
+                @(_loading ? "Loading…" : "Load more")
+            </button>
+        </div>
+    }
+</section>
+
+@code {
+    private readonly List<ActorSummaryDto> _actors = new();
+    private string _search = "";
+    private bool _loading;
+    private bool _canLoadMore;
+    private int _page = 1;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Reload()
+    {
+        _actors.Clear();
+        _page = 1;
+        _canLoadMore = false;
+        await Load();
+    }
+
+    private Task LoadMore() => Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        StateHasChanged();
+        var resp = await Api.ActorsAsync(_page, string.IsNullOrWhiteSpace(_search) ? null : _search.Trim());
+        _actors.AddRange(resp.Actors);
+        _canLoadMore = resp.HasNextPage;
+        if (resp.Actors.Count > 0) _page++;
+        _loading = false;
+        StateHasChanged();
+    }
+}

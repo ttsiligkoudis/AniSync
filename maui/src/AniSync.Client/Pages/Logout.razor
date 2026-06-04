@@ -1,0 +1,35 @@
+@page "/logout"
+@inject ISecureStore Store
+@inject AppState State
+@inject IAppEnvironment Env
+@inject NavigationManager Nav
+
+@* Disconnect. On the Web head we hand off to the server's /Auth/Logout, which
+   clears the session + anisync_uid cookie and routes back through /auth/complete
+   to wipe the stored credential from localStorage. On native there's no server
+   session for this device — just clear the secure-stored config and reset state. *@
+
+<PageTitle>Signing out · AniSync</PageTitle>
+
+<section class="container">
+    <p class="hint-text">Signing out…</p>
+</section>
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        if (!Env.IsNative)
+        {
+            // Server owns the session + the credential-clearing bridge.
+            Nav.NavigateTo($"{Env.ApiBaseUrl.TrimEnd('/')}/Auth/Logout?returnUrl=/", forceLoad: true);
+            return;
+        }
+
+        await Store.SetAsync(ISecureStore.ConfigKey, null);
+        State.SetStreamConfig(null);
+        State.HydrateSession(false, "");
+        Nav.NavigateTo("/");
+    }
+}

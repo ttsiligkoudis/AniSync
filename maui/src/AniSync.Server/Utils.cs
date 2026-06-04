@@ -459,6 +459,53 @@ namespace AnimeList
         }
 
         /// <summary>
+        /// Builds the v5 (UID-only) config segment from a stored account UID — the
+        /// inverse of the v5 branch in <see cref="DecodeConfig"/>. The result is the
+        /// exact string the thin clients send as the <c>X-AniSync-Config</c> header
+        /// (and the addon-path segment, sans the optional 4-byte cache-busting
+        /// revision the install-URL builder appends — <see cref="DecodeConfig"/>
+        /// ignores trailing bytes after the 16-byte UID, so this resolves cleanly).
+        /// <para>Used to seed the credential into the Blazor client after an
+        /// OAuth / Kitsu login: the login flow yields a UID
+        /// (<see cref="IConfigStore.UpsertAsync"/> /
+        /// <see cref="IConfigStore.FindUidByIdentityAsync"/>), and this turns that
+        /// UID back into the header value the existing API client already sends.</para>
+        /// Returns null for a null/empty UID.
+        /// </summary>
+        public static string EncodeV5Config(string uid)
+        {
+            if (string.IsNullOrEmpty(uid)) return null;
+            var uidBytes = Base64UrlDecode(uid);
+            var data = new byte[1 + uidBytes.Length];
+            data[0] = 0x05;
+            Array.Copy(uidBytes, 0, data, 1, uidBytes.Length);
+            return Base64UrlEncode(data);
+        }
+
+        /// <summary>
+        /// The v5 install-URL config segment: <c>[0x05][16-byte UID][4-byte revision BE]</c>,
+        /// base64url. The revision is cache-busting only — Stremio refuses to refetch a
+        /// manifest URL it already has, so bumping it on every Save changes the URL and
+        /// forces a refetch. <see cref="DecodeConfig"/> ignores everything after the 16-byte
+        /// UID, so this resolves identically to <see cref="EncodeV5Config(string)"/> for the
+        /// <c>X-AniSync-Config</c> credential; the revision exists purely for the addon path.
+        /// </summary>
+        public static string EncodeV5Config(string uid, long revision)
+        {
+            if (string.IsNullOrEmpty(uid)) return null;
+            var uidBytes = Base64UrlDecode(uid);
+            var data = new byte[1 + uidBytes.Length + 4];
+            data[0] = 0x05;
+            Array.Copy(uidBytes, 0, data, 1, uidBytes.Length);
+            var rev = (uint)revision;
+            data[^4] = (byte)(rev >> 24);
+            data[^3] = (byte)(rev >> 16);
+            data[^2] = (byte)(rev >> 8);
+            data[^1] = (byte)rev;
+            return Base64UrlEncode(data);
+        }
+
+        /// <summary>
         /// Calls <see cref="DecodeConfig"/> and, for v5 URLs (anything with a stored
         /// <see cref="Configuration.tokenUid"/>), hydrates the toggle flags from the
         /// config store. v3 URLs carry their flags inline so this is a no-op for them.

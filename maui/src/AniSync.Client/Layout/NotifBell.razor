@@ -1,5 +1,6 @@
 @inject IAniSyncApi Api
 @inject NavigationManager Nav
+@implements IDisposable
 
 @* Episode-release notification bell — interactive C# port of the header bell
    (the web version was driven by notifications.js). Shows the unread badge from
@@ -63,9 +64,39 @@
     private bool _loading;
     private int _count;
     private IReadOnlyList<NotificationDto> _items = Array.Empty<NotificationDto>();
+    private System.Threading.Timer? _poll;
+    private bool _liveStarted;
 
     protected override async Task OnInitializedAsync()
-        => _count = (await Api.NotificationCountAsync()).Count;
+    {
+        await RefreshCountAsync();
+
+        // Live-refresh the unread badge once interactive (the credential lives in
+        // localStorage, unreadable during prerender; and OnInitializedAsync runs twice,
+        // so the flag stops a second timer/subscription on the interactive pass).
+        if (RendererInfo.IsInteractive && !_liveStarted)
+        {
+            _liveStarted = true;
+            Nav.LocationChanged += OnLocationChanged;
+            // Poll every 60s so freshly-aired episode notifications surface without a reload.
+            _poll = new System.Threading.Timer(
+                _ => _ = InvokeAsync(RefreshCountAsync), null,
+                TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
+        }
+    }
+
+    private async Task RefreshCountAsync()
+    {
+        var count = (await Api.NotificationCountAsync()).Count;
+        if (count != _count)
+        {
+            _count = count;
+            StateHasChanged();
+        }
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => _ = InvokeAsync(RefreshCountAsync);
 
     private async Task Toggle()
     {
@@ -75,6 +106,8 @@
             _loading = true;
             _items = await Api.NotificationsAsync(limit: 20);
             _loading = false;
+            // Opening the panel is a good moment to re-sync the badge too.
+            await RefreshCountAsync();
         }
     }
 
@@ -83,5 +116,11 @@
         await Api.MarkAllNotificationsReadAsync();
         _count = 0;
         _items = await Api.NotificationsAsync(limit: 20);
+    }
+
+    public void Dispose()
+    {
+        if (_liveStarted) Nav.LocationChanged -= OnLocationChanged;
+        _poll?.Dispose();
     }
 }

@@ -1,0 +1,72 @@
+@page "/discover/tag"
+@inject IAniSyncApi Api
+
+@* Browse by tag — port of Views/Discover/Tags.cshtml. The full AniList tag
+   catalogue (non-adult) comes back in one call; we group by category and filter
+   client-side (Esc / clearing the box restores the full list). Tapping a tag
+   opens /discover/tag/{name}. *@
+
+<PageTitle>Browse by tag · AniSync</PageTitle>
+
+<section class="container">
+    <div class="discover-browse-header">
+        <h1 class="dashboard-section-title">Browse by tag</h1>
+        <a class="discover-browse-link" href="/discover/studio">Studios →</a>
+    </div>
+
+    <form class="filter-bar" role="search" @onsubmit:preventDefault>
+        <input class="filter-bar-search" placeholder="Filter tags…" value="@_filter"
+               @oninput="e => _filter = e.Value?.ToString() ?? string.Empty"
+               @onkeydown="OnKeyDown" autocomplete="off" spellcheck="false" />
+    </form>
+
+    @if (_loading)
+    {
+        <p class="hint-text">Loading tags…</p>
+    }
+    else if (!Filtered.Any())
+    {
+        <p class="hint-text">No tags match “@_filter”.</p>
+    }
+    else
+    {
+        @foreach (var group in Filtered)
+        {
+            <section class="tag-category">
+                <h2 class="anime-detail-section-title">@group.Key</h2>
+                <div class="tag-chip-grid">
+                    @foreach (var t in group.OrderBy(t => t.Name))
+                    {
+                        <a class="tag-chip" href="@TagHref(t.Name)" title="@t.Description">@t.Name</a>
+                    }
+                </div>
+            </section>
+        }
+    }
+</section>
+
+@code {
+    private IReadOnlyList<TagSummaryDto> _tags = Array.Empty<TagSummaryDto>();
+    private bool _loading = true;
+    private string _filter = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _tags = await Api.TagsAsync();
+        _loading = false;
+    }
+
+    private IEnumerable<IGrouping<string, TagSummaryDto>> Filtered =>
+        _tags
+            .Where(t => string.IsNullOrWhiteSpace(_filter)
+                        || t.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(t => string.IsNullOrEmpty(t.Category) ? "Other" : t.Category!)
+            .OrderBy(g => g.Key);
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") _filter = "";
+    }
+
+    private static string TagHref(string name) => $"/discover/tag/{Uri.EscapeDataString(name)}";
+}

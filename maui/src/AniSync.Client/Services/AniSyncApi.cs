@@ -19,13 +19,26 @@ public sealed class AniSyncApi : IAniSyncApi
 
     private readonly HttpClient _http;
     private readonly AppState _state;
+    private readonly IAppEnvironment _env;
     private readonly ILogger<AniSyncApi> _logger;
 
-    public AniSyncApi(HttpClient http, AppState state, ILogger<AniSyncApi> logger)
+    public AniSyncApi(HttpClient http, AppState state, IAppEnvironment env, ILogger<AniSyncApi> logger)
     {
         _http = http;
         _state = state;
+        _env = env;
         _logger = logger;
+    }
+
+    // Resolve the backend base address on first use rather than in the constructor.
+    // On the Web head IAppEnvironment.ApiBaseUrl reads NavigationManager.BaseUri,
+    // which only works inside a live circuit/request — touching it in the ctor would
+    // throw during the container's build-time validation (the ctor runs then too).
+    // By the first API call we're always in an initialised context.
+    private void EnsureBaseAddress()
+    {
+        if (_http.BaseAddress is null && !string.IsNullOrWhiteSpace(_env.ApiBaseUrl))
+            _http.BaseAddress = new Uri(_env.ApiBaseUrl);
     }
 
     public async Task<IReadOnlyList<SuggestMatch>> SuggestAsync(string title, int limit = 8, CancellationToken ct = default)
@@ -85,6 +98,13 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Results ?? new();
     }
 
+    public async Task<IReadOnlyList<MetaDto>> VideoListAsync(string type, string list, CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<MetaListResponse>(
+            $"api/v1/me/video-list?type={Uri.EscapeDataString(type)}&list={Uri.EscapeDataString(list)}", ct);
+        return resp?.Results ?? new();
+    }
+
     public async Task<MetaDto?> AnimeAsync(string id, CancellationToken ct = default)
     {
         var resp = await GetOrDefault<AnimeResponse>($"api/v1/anime/{Uri.EscapeDataString(id)}", ct);
@@ -122,6 +142,81 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Streams.Where(s => !string.IsNullOrEmpty(s.Url)).ToList() ?? new();
     }
 
+    public async Task<AuthProvidersDto> AuthProvidersAsync(CancellationToken ct = default)
+        => await GetOrDefault<AuthProvidersDto>("api/v1/auth/providers", ct) ?? new();
+
+    // ── Configure / account / advanced ───────────────────────────────────────
+
+    public Task<ConfigStateDto?> GetConfigAsync(CancellationToken ct = default)
+        => GetOrDefault<ConfigStateDto>("api/v1/me/config", ct);
+
+    public Task<SaveFlagsResult?> SaveFlagsAsync(byte flags1, byte flags2, byte flags3, CancellationToken ct = default)
+        => PostJson<object, SaveFlagsResult>("api/v1/me/config/flags", new { flags1, flags2, flags3 }, ct);
+
+    public Task<SaveFlagsResult?> ResetConfigAsync(CancellationToken ct = default)
+        => PostJson<object, SaveFlagsResult>("api/v1/me/config/reset", new { }, ct);
+
+    public async Task<bool> DeleteConfigAsync(CancellationToken ct = default)
+        => (await SendJson<OkResult>(HttpMethod.Delete, "api/v1/me/config", null, ct))?.Ok ?? false;
+
+    public Task<RegenerateResult?> RegenerateUidAsync(CancellationToken ct = default)
+        => PostJson<object, RegenerateResult>("api/v1/me/config/regenerate", new { }, ct);
+
+    public Task<bool> SignOutEverywhereAsync(CancellationToken ct = default)
+        => PostForOk("api/v1/me/signout-everywhere", new { }, ct);
+
+    public Task<bool> UnlinkAsync(string service, CancellationToken ct = default)
+        => PostForOk($"api/v1/me/unlink/{Uri.EscapeDataString(service)}", new { }, ct);
+
+    public Task<ScrobbleTokenDto?> GetScrobbleAsync(CancellationToken ct = default)
+        => GetOrDefault<ScrobbleTokenDto>("api/v1/me/scrobble", ct);
+
+    public Task<ScrobbleTokenDto?> RotateScrobbleAsync(CancellationToken ct = default)
+        => PostJson<object, ScrobbleTokenDto>("api/v1/me/scrobble/rotate", new { }, ct);
+
+    public Task<bool> SetPlexUsernameAsync(string? username, CancellationToken ct = default)
+        => PostForOk("api/v1/me/plex-username", new { username }, ct);
+
+    public Task<AddAddonResult?> AddStreamAddonAsync(string manifestUrl, CancellationToken ct = default)
+        => PostJson<object, AddAddonResult>("api/v1/me/stream-addons", new { manifestUrl }, ct);
+
+    public async Task<bool> RemoveStreamAddonAsync(string manifestUrl, CancellationToken ct = default)
+        => (await SendJson<RemovedResult>(HttpMethod.Delete, "api/v1/me/stream-addons", new { manifestUrl }, ct))?.Removed ?? false;
+
+    public async Task<bool> ReorderStreamAddonsAsync(IReadOnlyList<string> urls, CancellationToken ct = default)
+        => (await PostJson<object, ChangedResult>("api/v1/me/stream-addons/reorder", new { urls }, ct))?.Changed ?? false;
+
+    public Task<DebridResult?> AddDebridAddonsAsync(DebridSetupRequest request, CancellationToken ct = default)
+        => PostJson<DebridSetupRequest, DebridResult>("api/v1/me/stream-addons/debrid", request, ct);
+
+    public async Task<StreamCatalogDto> StreamCatalogAsync(CancellationToken ct = default)
+        => await GetOrDefault<StreamCatalogDto>("api/v1/stream-catalog", ct) ?? new();
+
+    public async Task<bool> SyncAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            EnsureBaseAddress();
+            using var req = new HttpRequestMessage(HttpMethod.Post, "api/v1/me/sync");
+            if (!string.IsNullOrEmpty(_state.StreamConfig))
+                req.Headers.TryAddWithoutValidation(ConfigHeader, _state.StreamConfig);
+            using var resp = await _http.SendAsync(req, ct);
+            return resp.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { _logger.LogWarning(ex, "POST api/v1/me/sync failed."); return false; }
+    }
+
+    public Task<string?> ExportConfigJsonAsync(CancellationToken ct = default)
+        => GetRaw("api/v1/me/export", ct);
+
+    public Task<RegenerateResult?> ImportConfigJsonAsync(string backupJson, CancellationToken ct = default)
+        => PostRaw<RegenerateResult>("api/v1/me/import", backupJson, ct);
+
+    // Small private result shapes for the boolean-ish endpoints.
+    private sealed class RemovedResult { public bool Removed { get; set; } }
+    private sealed class ChangedResult { public bool Changed { get; set; } }
+
     public async Task<AnimeEntryDto?> GetEntryAsync(string id, int? season = null, CancellationToken ct = default)
     {
         var url = $"api/v1/me/entries/{Uri.EscapeDataString(id)}";
@@ -158,10 +253,179 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Items ?? new();
     }
 
+    public Task<CalendarResponse?> CalendarAsync(string? day = null, CancellationToken ct = default)
+    {
+        var url = "api/v1/me/calendar";
+        if (!string.IsNullOrWhiteSpace(day)) url += $"?d={Uri.EscapeDataString(day)}";
+        return GetOrDefault<CalendarResponse>(url, ct);
+    }
+
+    // ── Search (best-match resolver) ─────────────────────────────────────────
+
+    public async Task<IReadOnlyList<MatchResult>> MatchAsync(string title, int limit = 8, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return Array.Empty<MatchResult>();
+        var resp = await GetOrDefault<MatchResponse>(
+            $"api/v1/match?title={Uri.EscapeDataString(title)}&limit={limit}", ct);
+        return resp?.Matches ?? new();
+    }
+
+    // ── Discover browse-by ───────────────────────────────────────────────────
+
+    public async Task<TagMediaResponse> DiscoverByTagAsync(string tag, string? skip = null, CancellationToken ct = default)
+    {
+        var url = $"api/v1/discover/by-tag/{Uri.EscapeDataString(tag)}";
+        if (!string.IsNullOrWhiteSpace(skip)) url += $"?skip={Uri.EscapeDataString(skip)}";
+        return await GetOrDefault<TagMediaResponse>(url, ct) ?? new();
+    }
+
+    public async Task<IReadOnlyList<TagSummaryDto>> TagsAsync(CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<TagsListResponse>("api/v1/tags", ct);
+        return resp?.Tags ?? new();
+    }
+
+    public async Task<StudiosListResponse> StudiosAsync(int page = 1, CancellationToken ct = default)
+        => await GetOrDefault<StudiosListResponse>($"api/v1/studios?page={page}", ct) ?? new();
+
+    public async Task<StudioMediaResponse> StudioMediaAsync(int studioId, string? skip = null, CancellationToken ct = default)
+    {
+        var url = $"api/v1/studios/{studioId}/anime";
+        if (!string.IsNullOrWhiteSpace(skip)) url += $"?skip={Uri.EscapeDataString(skip)}";
+        return await GetOrDefault<StudioMediaResponse>(url, ct) ?? new();
+    }
+
+    public async Task<StaffMediaResponse> StaffMediaAsync(int staffId, string? skip = null, CancellationToken ct = default)
+    {
+        var url = $"api/v1/staff/{staffId}/anime";
+        if (!string.IsNullOrWhiteSpace(skip)) url += $"?skip={Uri.EscapeDataString(skip)}";
+        return await GetOrDefault<StaffMediaResponse>(url, ct) ?? new();
+    }
+
+    public async Task<ActorsListResponse> ActorsAsync(int page = 1, string? search = null, CancellationToken ct = default)
+    {
+        var url = $"api/v1/actors?page={page}";
+        if (!string.IsNullOrWhiteSpace(search)) url += $"&search={Uri.EscapeDataString(search)}";
+        return await GetOrDefault<ActorsListResponse>(url, ct) ?? new();
+    }
+
+    public Task<ActorCreditsResponse?> ActorCreditsAsync(int tmdbId, CancellationToken ct = default)
+        => GetOrDefault<ActorCreditsResponse>($"api/v1/actors/tmdb/{tmdbId}", ct);
+
+    public Task<SeasonStatsResponse?> SeasonStatsAsync(CancellationToken ct = default)
+        => GetOrDefault<SeasonStatsResponse>("api/v1/stats/season", ct);
+
+    // ── Library ──────────────────────────────────────────────────────────────
+
+    public Task<LibraryResponse?> LibraryAsync(string? status = null, CancellationToken ct = default)
+    {
+        var url = "api/v1/me/library";
+        if (!string.IsNullOrWhiteSpace(status)) url += $"?status={Uri.EscapeDataString(status)}";
+        return GetOrDefault<LibraryResponse>(url, ct);
+    }
+
+    // ── Detail-page extras ───────────────────────────────────────────────────
+
+    public async Task<IReadOnlyList<MetaDto>> RelatedAsync(string id, CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<MetaListResponse>($"api/v1/anime/{Uri.EscapeDataString(id)}/related", ct);
+        return resp?.Results ?? new();
+    }
+
+    public async Task<IReadOnlyList<MetaDto>> RecommendationsAsync(string id, CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<MetaListResponse>($"api/v1/anime/{Uri.EscapeDataString(id)}/recommendations", ct);
+        return resp?.Results ?? new();
+    }
+
+    public async Task<IReadOnlyList<LinkDto>> SimilarAsync(string id, CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<SimilarResponse>($"api/v1/anime/{Uri.EscapeDataString(id)}/similar", ct);
+        return resp?.Similar ?? new();
+    }
+
+    public async Task<IReadOnlyList<LinkDto>> SupplementaryAsync(string id, CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<SupplementaryResponse>($"api/v1/anime/{Uri.EscapeDataString(id)}/supplementary", ct);
+        return resp?.Links ?? new();
+    }
+
+    public async Task<string?> TrailerAsync(string id, CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<TrailerResponse>($"api/v1/anime/{Uri.EscapeDataString(id)}/trailer", ct);
+        return resp?.YoutubeId;
+    }
+
+    public async Task<AnimeSourceLinksDto?> SourceLinksAsync(string id, CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<SourceLinksResponse>($"api/v1/anime/{Uri.EscapeDataString(id)}/links", ct);
+        return resp?.Links;
+    }
+
+    public async Task<IReadOnlyList<SkipMarker>> SkipMarkersAsync(string id, int episode, CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<SkipResponse>($"api/v1/skip/{Uri.EscapeDataString(id)}/{episode}", ct);
+        return resp?.Markers ?? new();
+    }
+
+    public Task<FillerResponse?> FillerAsync(string titleOrId, CancellationToken ct = default)
+        => GetOrDefault<FillerResponse>($"api/v1/filler/{Uri.EscapeDataString(titleOrId)}", ct);
+
+    // ── Tracking writes (delete / linked / primary / sync diff) ──────────────
+
+    public async Task<SaveEntryResponse?> DeleteEntryAsync(string id, int? season = null, CancellationToken ct = default)
+    {
+        var url = $"api/v1/me/entries/{Uri.EscapeDataString(id)}";
+        if (season.HasValue) url += $"?season={season.Value}";
+        return await SendJson<SaveEntryResponse>(HttpMethod.Delete, url, null, ct);
+    }
+
+    public Task<LinkedResponse?> LinkedAsync(CancellationToken ct = default)
+        => GetOrDefault<LinkedResponse>("api/v1/me/linked", ct);
+
+    public Task<PromoteResponse?> PromotePrimaryAsync(string service, bool force = false, CancellationToken ct = default)
+        => PostJson<object, PromoteResponse>(
+            $"api/v1/me/primary/{Uri.EscapeDataString(service)}?force={(force ? "true" : "false")}", new { }, ct);
+
+    public Task<DiffResponse?> SyncDiffAsync(CancellationToken ct = default)
+        => GetOrDefault<DiffResponse>("api/v1/me/sync/diff", ct);
+
+    public Task<PreferencesDto?> GetPreferencesAsync(CancellationToken ct = default)
+        => GetOrDefault<PreferencesDto>("api/v1/me/preferences", ct);
+
+    public Task<bool> SavePreferencesAsync(PreferencesDto prefs, CancellationToken ct = default)
+        => PostForOk("api/v1/me/preferences", prefs, ct);
+
+    // ── Notifications (bulk + delete) ────────────────────────────────────────
+
+    public Task MarkNotificationsBulkReadAsync(IReadOnlyList<long> ids, CancellationToken ct = default)
+        => PostJson<object, object>("api/v1/notifications/bulk-read", new { ids }, ct);
+
+    public async Task DeleteNotificationAsync(long id, CancellationToken ct = default)
+        => await SendJson<object>(HttpMethod.Delete, $"api/v1/notifications/{id}", null, ct);
+
+    public Task DeleteNotificationsBulkAsync(IReadOnlyList<long> ids, CancellationToken ct = default)
+        => PostJson<object, object>("api/v1/notifications/bulk-delete", new { ids }, ct);
+
+    // ── Web push ─────────────────────────────────────────────────────────────
+
+    public Task<VapidKeyResponse?> PushVapidKeyAsync(CancellationToken ct = default)
+        => GetOrDefault<VapidKeyResponse>("api/v1/push/vapid-key", ct);
+
+    public Task<PushStatusResponse?> PushStatusAsync(CancellationToken ct = default)
+        => GetOrDefault<PushStatusResponse>("api/v1/push/status", ct);
+
+    public Task<bool> PushSubscribeAsync(PushSubscribeRequestDto request, CancellationToken ct = default)
+        => PostForOk("api/v1/push/subscribe", request, ct);
+
+    public Task<bool> PushUnsubscribeAsync(string endpoint, CancellationToken ct = default)
+        => PostForOk("api/v1/push/unsubscribe", new PushUnsubscribeRequestDto { Endpoint = endpoint }, ct);
+
     private async Task<TResp?> PostJson<TReq, TResp>(string url, TReq body, CancellationToken ct)
     {
         try
         {
+            EnsureBaseAddress();
             using var req = new HttpRequestMessage(HttpMethod.Post, url)
             {
                 Content = JsonContent.Create(body),
@@ -182,10 +446,95 @@ public sealed class AniSyncApi : IAniSyncApi
         }
     }
 
+    // Generic verb sender (used for DELETE, optionally with a body). Mirrors
+    // PostJson's degrade-to-default + config-header behaviour.
+    private async Task<TResp?> SendJson<TResp>(HttpMethod method, string url, object? body, CancellationToken ct)
+    {
+        try
+        {
+            EnsureBaseAddress();
+            using var req = new HttpRequestMessage(method, url);
+            if (body is not null) req.Content = JsonContent.Create(body);
+            if (!string.IsNullOrEmpty(_state.StreamConfig))
+                req.Headers.TryAddWithoutValidation(ConfigHeader, _state.StreamConfig);
+
+            using var resp = await _http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return default;
+            if (typeof(TResp) == typeof(object)) return default;
+            if (resp.Content.Headers.ContentLength == 0) return default;
+            return await resp.Content.ReadFromJsonAsync<TResp>(cancellationToken: ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "{Method} {Url} failed.", method, url);
+            return default;
+        }
+    }
+
+    // POST that only cares whether the call succeeded (push subscribe/unsubscribe).
+    private async Task<bool> PostForOk<TReq>(string url, TReq body, CancellationToken ct)
+    {
+        try
+        {
+            EnsureBaseAddress();
+            using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = JsonContent.Create(body) };
+            if (!string.IsNullOrEmpty(_state.StreamConfig))
+                req.Headers.TryAddWithoutValidation(ConfigHeader, _state.StreamConfig);
+            using var resp = await _http.SendAsync(req, ct);
+            return resp.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "POST {Url} failed.", url);
+            return false;
+        }
+    }
+
+    // Raw-JSON GET (config export: the body is downloaded as a file, so the client
+    // keeps it opaque rather than modelling the full TokenData round-trip).
+    private async Task<string?> GetRaw(string url, CancellationToken ct)
+    {
+        try
+        {
+            EnsureBaseAddress();
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            if (!string.IsNullOrEmpty(_state.StreamConfig))
+                req.Headers.TryAddWithoutValidation(ConfigHeader, _state.StreamConfig);
+            using var resp = await _http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return null;
+            return await resp.Content.ReadAsStringAsync(ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { _logger.LogWarning(ex, "GET(raw) {Url} failed.", url); return null; }
+    }
+
+    // Raw-JSON POST (config import: forwards the uploaded backup verbatim).
+    private async Task<TResp?> PostRaw<TResp>(string url, string json, CancellationToken ct)
+    {
+        try
+        {
+            EnsureBaseAddress();
+            using var req = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json"),
+            };
+            if (!string.IsNullOrEmpty(_state.StreamConfig))
+                req.Headers.TryAddWithoutValidation(ConfigHeader, _state.StreamConfig);
+            using var resp = await _http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return default;
+            return await resp.Content.ReadFromJsonAsync<TResp>(cancellationToken: ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { _logger.LogWarning(ex, "POST(raw) {Url} failed.", url); return default; }
+    }
+
     private async Task<T?> GetOrDefault<T>(string url, CancellationToken ct)
     {
         try
         {
+            EnsureBaseAddress();
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             // User-scoped endpoints need the config credential; harmless on public ones.
             if (!string.IsNullOrEmpty(_state.StreamConfig))

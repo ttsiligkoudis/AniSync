@@ -4,10 +4,11 @@
 @inject AppState State
 
 @* Anime/title detail — port of Views/Meta/Detail.cshtml. Hero (backdrop +
-   poster + score + title + info + status + genre chips), collapsible synopsis,
-   episodes list (rows navigate to /watch), streaming-service links. Reuses the
-   anime-detail-* classes from site.css. Tracking pill / manage-entry modal land
-   in a later milestone. *@
+   poster + score + title + info + status + user-state pill + genre + source
+   chips), collapsible synopsis, trailer, episodes list (rows navigate to
+   /watch), related + recommendations carousels, supplementary credit chips
+   (tag/studio/staff → Discover), and streaming-service links. Reuses the
+   anime-detail-* classes from site.css. *@
 
 <PageTitle>@(_meta?.Name ?? "Details") · AniSync</PageTitle>
 
@@ -66,13 +67,24 @@ else
                     }
                     @if (!string.IsNullOrEmpty(State.StreamConfig))
                     {
-                        <button type="button" class="anime-detail-user-state" @onclick="() => _modalOpen = true">
-                            <span>Manage Entry</span>
-                            <svg class="anime-detail-user-state-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
-                                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <path d="M12 20h9"></path>
-                                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-                            </svg>
+                        <button type="button" class="anime-detail-user-state @(HasEntry ? "anime-detail-user-state-active" : "")" @onclick="() => _modalOpen = true">
+                            <span>@EntryPillLabel()</span>
+                            @if (HasEntry)
+                            {
+                                <svg class="anime-detail-user-state-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
+                                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M12 20h9"></path>
+                                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                                </svg>
+                            }
+                            else
+                            {
+                                <svg class="anime-detail-user-state-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
+                                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                                </svg>
+                            }
                         </button>
                     }
                 </div>
@@ -82,6 +94,18 @@ else
                         @foreach (var g in a.Genres.Take(8))
                         {
                             <li><a class="anime-detail-link" href="@($"/discover?genre={Uri.EscapeDataString(g)}")">@g</a></li>
+                        }
+                    </ul>
+                }
+                @if (_sourceChips.Count > 0)
+                {
+                    <ul class="anime-detail-source-chips">
+                        @foreach (var c in _sourceChips)
+                        {
+                            <li>
+                                <a class="anime-detail-source-chip anime-detail-source-chip-@c.Brand"
+                                   href="@c.Url" target="_blank" rel="noopener">@c.Label</a>
+                            </li>
                         }
                     </ul>
                 }
@@ -104,6 +128,18 @@ else
                         @(_synopsisExpanded ? "Show less" : "Show more")
                     </button>
                 }
+            </div>
+        </section>
+    }
+
+    @if (!string.IsNullOrEmpty(_trailerId))
+    {
+        <section class="anime-detail-section">
+            <h2 class="anime-detail-section-title">Trailer</h2>
+            <div class="anime-detail-trailer">
+                <iframe src="https://www.youtube.com/embed/@_trailerId" title="Trailer" loading="lazy"
+                        frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowfullscreen></iframe>
             </div>
         </section>
     }
@@ -141,6 +177,47 @@ else
         </section>
     }
 
+    @if (_related.Count > 0)
+    {
+        <section class="anime-detail-section">
+            <h2 class="anime-detail-section-title">Related</h2>
+            <PosterGrid Items="_related" Variant="scroll" />
+        </section>
+    }
+
+    @if (_recommendations.Count > 0)
+    {
+        <section class="anime-detail-section">
+            <h2 class="anime-detail-section-title">You might also like</h2>
+            <PosterGrid Items="_recommendations" Variant="scroll" />
+        </section>
+    }
+
+    @if (_supplementary.Count > 0)
+    {
+        <section class="anime-detail-section">
+            @foreach (var group in _supplementary.GroupBy(l => string.IsNullOrEmpty(l.Category) ? "More" : l.Category!))
+            {
+                <h2 class="anime-detail-section-title">@group.Key</h2>
+                <ul class="anime-detail-link-list">
+                    @foreach (var l in group)
+                    {
+                        <li>
+                            @if (SuppInternal(l))
+                            {
+                                <a class="anime-detail-link" href="@SuppHref(l)">@l.Name</a>
+                            }
+                            else
+                            {
+                                <a class="anime-detail-link" href="@SuppHref(l)" target="_blank" rel="noopener">@l.Name</a>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+    }
+
     @if (_streams.Count > 0)
     {
         <section class="anime-detail-section">
@@ -168,28 +245,57 @@ else
     private MetaDto? _meta;
     private IReadOnlyList<EpisodeInfoDto> _episodes = Array.Empty<EpisodeInfoDto>();
     private IReadOnlyList<StreamingLinkDto> _streams = Array.Empty<StreamingLinkDto>();
+    private IReadOnlyList<MetaDto> _related = Array.Empty<MetaDto>();
+    private IReadOnlyList<MetaDto> _recommendations = Array.Empty<MetaDto>();
+    private IReadOnlyList<LinkDto> _supplementary = Array.Empty<LinkDto>();
+    private string? _trailerId;
+    private readonly List<SourceChip> _sourceChips = new();
     private bool _synopsisExpanded;
     private string _filter = "";
     private string? _infoLine;
     private bool _multiSeason;
     private string? _typeQuery;
 
+    private record SourceChip(string Label, string Url, string Brand);
+
     protected override async Task OnParametersSetAsync()
     {
         _loading = true;
         _typeQuery = QueryValue("type");
+        _sourceChips.Clear();
 
+        // Core content first (gates the page); extras are best-effort and never
+        // block render — each degrades to empty on failure.
         var meta = Api.AnimeAsync(Id);
         var eps = Api.EpisodesAsync(Id);
         var streams = Api.StreamsAsync(Id);
-        await Task.WhenAll(meta, eps, streams);
+        var related = Api.RelatedAsync(Id);
+        var recs = Api.RecommendationsAsync(Id);
+        var supp = Api.SupplementaryAsync(Id);
+        var trailer = Api.TrailerAsync(Id);
+        var links = Api.SourceLinksAsync(Id);
+        await Task.WhenAll(meta, eps, streams, related, recs, supp, trailer, links);
 
         _meta = meta.Result;
         _episodes = eps.Result;
         _streams = streams.Result;
+        _related = related.Result;
+        _recommendations = recs.Result;
+        _supplementary = supp.Result;
+        _trailerId = trailer.Result;
+        BuildSourceChips(links.Result);
         _multiSeason = _episodes.Select(e => e.Season).Distinct().Count() > 1;
         _infoLine = BuildInfoLine(_meta);
         _loading = false;
+    }
+
+    private void BuildSourceChips(AnimeSourceLinksDto? l)
+    {
+        if (l is null) return;
+        if (l.AnilistId is int al && al > 0) _sourceChips.Add(new("AniList", $"https://anilist.co/anime/{al}", "anilist"));
+        if (l.MalId is int mal && mal > 0) _sourceChips.Add(new("MAL", $"https://myanimelist.net/anime/{mal}", "mal"));
+        if (l.KitsuId is int ki && ki > 0) _sourceChips.Add(new("Kitsu", $"https://kitsu.io/anime/{ki}", "kitsu"));
+        if (!string.IsNullOrEmpty(l.ImdbId)) _sourceChips.Add(new("IMDb", $"https://www.imdb.com/title/{l.ImdbId}", "imdb"));
     }
 
     private static string? BuildInfoLine(MetaDto? a)
@@ -204,6 +310,45 @@ else
         return bits.Count > 0 ? string.Join(" · ", bits) : null;
     }
 
+    private bool HasEntry => !string.IsNullOrEmpty(_meta?.EntryStatus);
+
+    private string EntryPillLabel()
+    {
+        if (!HasEntry) return "Add to List";
+        var label = StatusLabel(_meta!.EntryStatus!);
+        var prog = _meta.Progress ?? 0;
+        if (prog > 0)
+            label += _meta.Episodes is int t && t > 0 ? $" · {prog}/{t}" : $" · Ep {prog}";
+        return label;
+    }
+
+    private static string StatusLabel(string s) => (s ?? "").ToLowerInvariant() switch
+    {
+        "current" or "watching" => "Watching",
+        "completed" => "Completed",
+        "planning" or "planned" or "plan_to_watch" => "Planning",
+        "paused" or "on_hold" => "On Hold",
+        "dropped" => "Dropped",
+        "repeating" or "rewatching" => "Rewatching",
+        _ => "In List",
+    };
+
+    // Supplementary credit chips route into Discover where we have an AniList id;
+    // tags route by name (TagDetail keys on the tag name), otherwise external.
+    private string SuppHref(LinkDto l)
+    {
+        var cat = (l.Category ?? "").ToLowerInvariant();
+        if (cat.Contains("studio") && l.AnilistId is long sid) return $"/discover/studio/{sid}";
+        if (cat.Contains("tag")) return $"/discover/tag/{Uri.EscapeDataString(l.Name ?? "")}";
+        if (l.AnilistId is long pid && (cat.Contains("staff") || cat.Contains("director")
+            || cat.Contains("composer") || cat.Contains("producer") || cat.Contains("music")
+            || cat.Contains("creator") || cat.Contains("author") || cat.Contains("voice")))
+            return $"/discover/staff/{pid}";
+        return string.IsNullOrEmpty(l.Url) ? "#" : l.Url!;
+    }
+
+    private bool SuppInternal(LinkDto l) => SuppHref(l).StartsWith('/');
+
     private IEnumerable<EpisodeInfoDto> _filteredEpisodes =>
         string.IsNullOrWhiteSpace(_filter)
             ? _episodes
@@ -213,9 +358,12 @@ else
 
     private void OnFilter(ChangeEventArgs e) => _filter = e.Value?.ToString() ?? "";
 
-    // After a successful save the modal closes itself; nothing else on the
-    // detail hero reflects entry state yet, so just trigger a re-render.
-    private Task OnEntrySaved() => Task.CompletedTask;
+    // Refresh the hero's user-state pill after a save/remove.
+    private async Task OnEntrySaved()
+    {
+        _meta = await Api.AnimeAsync(Id) ?? _meta;
+        StateHasChanged();
+    }
 
     private static string EpisodeLabel(EpisodeInfoDto ep)
         => string.IsNullOrEmpty(ep.Title) ? $"Episode {ep.Episode}" : $"{ep.Episode}. {ep.Title}";

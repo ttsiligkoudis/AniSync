@@ -1,10 +1,20 @@
 using AnimeList.Models;
+using AnimeList.Services;
+using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using System.Collections.Concurrent;
 
 namespace AnimeList.Controllers
 {
+    // The Blazor Web head runs app.UseAntiforgery() (required by Razor Components).
+    // In .NET 8+ that middleware auto-requires an antiforgery token for controller
+    // actions that bind [FromForm] (LoginKitsu / Register here), which both breaks
+    // form-field binding and would 400 the post. The maui head deliberately drops
+    // UI-CSRF (see Program.cs) and authenticates the same way UserApiController does
+    // — the OAuth `state` round-trip already guards the login flows against CSRF —
+    // so opt these actions out of antiforgery, mirroring UserApiController.
+    [IgnoreAntiforgeryToken]
     public class AuthController : Controller
     {
         private readonly ITokenService _tokenService;
@@ -17,6 +27,7 @@ namespace AnimeList.Controllers
         private readonly IMalService _malService;
         private readonly ITraktService _traktService;
         private readonly IAnimeMappingService _mappingService;
+        private readonly INativeAuthCodeStore _nativeCodes;
         private readonly ILogger<AuthController> _logger;
 
         // Keys we stash in the session while a callback-based OAuth flow is in flight.
@@ -38,6 +49,12 @@ namespace AnimeList.Controllers
         // wasn't initiated by this session (login-CSRF / account-fixation), so we refuse
         // to exchange the code. Both AniList and MAL support the standard `state` param.
         private const string OauthStateKey = "OauthState";
+        // Marks a login started from the native (MAUI) app via WebAuthenticator. On the
+        // callback we don't seed a browser localStorage credential (there's no app DOM to
+        // seed) — instead we mint a one-time code and redirect to the app's anisync:// deep
+        // link, which the app exchanges for its config segment. See INativeAuthCodeStore.
+        private const string OauthNativeKey = "OauthNative";
+        private const string NativeCallbackScheme = "anisync://auth";
 
         // Per-(IP, email) in-flight guard for the Kitsu signup. Two browser tabs
         // submitting the same form within a few ms could otherwise both pass Kitsu's
@@ -58,12 +75,21 @@ namespace AnimeList.Controllers
         /// </summary>
         private IActionResult RedirectToReturnUrlOrConfigure(string returnUrl)
         {
-            if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
-            {
-                return Redirect(returnUrl);
-            }
-            return RedirectToAction("Configure", "Home");
+            var dest = (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl)) ? returnUrl : "/configure";
+            return SeedConfigAndRedirect(dest);
         }
+
+        /// <summary>
+        /// Routes a terminal auth redirect through the Web head's <c>/auth/complete</c>
+        /// bridge so the Blazor thin client gets the <c>X-AniSync-Config</c> credential
+        /// seeded into localStorage from the freshly-established session before it
+        /// renders, then lands on <paramref name="localReturnUrl"/>. The web app kept
+        /// the UID in an HttpOnly cookie and server-rendered the install URL; this
+        /// replica holds the config segment client-side instead (see Program.cs).
+        /// <paramref name="localReturnUrl"/> is always an already-validated local URL.
+        /// </summary>
+        private IActionResult SeedConfigAndRedirect(string localReturnUrl)
+            => Redirect($"/auth/complete?returnUrl={Uri.EscapeDataString(localReturnUrl)}");
 
         /// <summary>
         /// Login / Register variant of <see cref="RedirectToReturnUrlOrConfigure"/> —
@@ -75,17 +101,15 @@ namespace AnimeList.Controllers
         /// </summary>
         private IActionResult RedirectToReturnUrlOrHome(string returnUrl)
         {
-            if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
-            {
-                return Redirect(returnUrl);
-            }
-            return RedirectToAction("Index", "Home");
+            var dest = (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl)) ? returnUrl : "/";
+            return SeedConfigAndRedirect(dest);
         }
 
         public AuthController(ITokenService tokenService, IHttpContextAccessor httpContextAccessor,
             IConfigStore configStore, IConfiguration configuration, ISyncService syncService,
             IAnilistService anilistService, IKitsuService kitsuService, IMalService malService,
-            ITraktService traktService, IAnimeMappingService mappingService, ILogger<AuthController> logger)
+            ITraktService traktService, IAnimeMappingService mappingService,
+            INativeAuthCodeStore nativeCodes, ILogger<AuthController> logger)
         {
             _tokenService = tokenService;
             _httpContextAccessor = httpContextAccessor;
@@ -97,11 +121,12 @@ namespace AnimeList.Controllers
             _malService = malService;
             _traktService = traktService;
             _mappingService = mappingService;
+            _nativeCodes = nativeCodes;
             _logger = logger;
         }
 
         [HttpGet]
-        public IActionResult Login(AnimeService? animeService = null, bool anonymous = false, string returnUrl = null)
+        public IActionResult Login(AnimeService? animeService = null, bool anonymous = false, string returnUrl = null, bool native = false)
         {
             // Already-authenticated short-circuit. Re-running the OAuth dance for a logged-in
             // user would either silently replace their primary (login flow with `state` round-
@@ -121,6 +146,14 @@ namespace AnimeList.Controllers
                 HttpContext.Session.SetString(OauthReturnUrlKey, returnUrl);
             else
                 HttpContext.Session.Remove(OauthReturnUrlKey);
+
+            // Native (MAUI) logins run this flow inside the app's system browser; the
+            // callback hands the result back via the anisync:// deep link instead of the
+            // web localStorage-seeding bridge. Stash the flag for Callback to read.
+            if (native)
+                HttpContext.Session.SetString(OauthNativeKey, "1");
+            else
+                HttpContext.Session.Remove(OauthNativeKey);
 
             if (anonymous)
             {
@@ -253,12 +286,14 @@ namespace AnimeList.Controllers
             // and clear in the same batch as the other OAuth-state keys.
             var oauthReturnUrl = HttpContext.Session.GetString(OauthReturnUrlKey);
             var expectedState = HttpContext.Session.GetString(OauthStateKey);
+            var oauthNative = HttpContext.Session.GetString(OauthNativeKey) == "1";
 
             HttpContext.Session.Remove(OauthServiceKey);
             HttpContext.Session.Remove(OauthFlowKey);
             HttpContext.Session.Remove(MalCodeVerifierKey);
             HttpContext.Session.Remove(OauthReturnUrlKey);
             HttpContext.Session.Remove(OauthStateKey);
+            HttpContext.Session.Remove(OauthNativeKey);
 
             // CSRF gate: the state we minted on the authorize redirect must round-trip
             // intact. A missing or mismatched value means this callback wasn't started by
@@ -278,8 +313,11 @@ namespace AnimeList.Controllers
                 _logger.LogWarning("OAuth callback rejected: state mismatch (service={Service}).", oauthService);
                 if (GetSessionPrimary() != null)
                     return RedirectToReturnUrlOrHome(oauthReturnUrl);
-                Response.StatusCode = StatusCodes.Status400BadRequest;
-                return View("OauthStateExpired");
+                // No MVC views on the Blazor Web head — hand the previously-anonymous
+                // user to the Blazor login page with a flag so it can show the
+                // "sign-in link expired, try again" messaging (the OauthStateExpired
+                // view's job in the old app).
+                return Redirect("/login?expired=1");
             }
 
             var isLink = oauthFlow == OauthFlowLink;
@@ -312,6 +350,20 @@ namespace AnimeList.Controllers
             // this is the freshly-exchanged primary; for the link flow it ensures the
             // already-logged-in primary has its cookie too (idempotent).
             await EnsurePrimaryPersistedAsync();
+
+            // Native (MAUI) login: hand the result back to the app via its deep link with a
+            // one-time code rather than the web localStorage bridge. The app exchanges the
+            // code at /api/v1/auth/native/exchange for its config segment.
+            if (oauthNative && !isLink)
+            {
+                var (_, nativeUid) = await _tokenService.ResolveCurrentAsync(_configStore);
+                if (!string.IsNullOrEmpty(nativeUid))
+                {
+                    var oneTime = _nativeCodes.Issue(nativeUid);
+                    return Redirect($"{NativeCallbackScheme}?code={Uri.EscapeDataString(oneTime)}");
+                }
+                return Redirect($"{NativeCallbackScheme}?error=login_failed");
+            }
 
             // Both flows honour the stashed return URL when set. Link flow falls
             // back to /configure when nothing was stashed (the link partial always
@@ -723,8 +775,27 @@ namespace AnimeList.Controllers
         public IActionResult Register(string returnUrl = null)
         {
             if (GetSessionPrimary() != null) return RedirectToReturnUrlOrHome(returnUrl);
-            ViewBag.ReturnUrl = returnUrl;
-            return View();
+            // The signup form is a Blazor page (/register) on this head — it POSTs
+            // back to this action. A bare GET just lands the user on it, preserving
+            // the post-signup destination.
+            var q = (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+                ? $"?returnUrl={Uri.EscapeDataString(returnUrl)}" : "";
+            return Redirect("/register" + q);
+        }
+
+        /// <summary>
+        /// Bounces a failed signup back to the Blazor <c>/register</c> page with the
+        /// error + prefilled fields in the query string (the old app re-rendered the
+        /// View with ViewBag; this head has no MVC views).
+        /// </summary>
+        private IActionResult RegisterErrorRedirect(string error, string name, string email, string returnUrl)
+        {
+            var q = new List<string> { $"error={Uri.EscapeDataString(error ?? "Signup failed.")}" };
+            if (!string.IsNullOrEmpty(name)) q.Add($"name={Uri.EscapeDataString(name)}");
+            if (!string.IsNullOrEmpty(email)) q.Add($"email={Uri.EscapeDataString(email)}");
+            if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+                q.Add($"returnUrl={Uri.EscapeDataString(returnUrl)}");
+            return Redirect("/register?" + string.Join("&", q));
         }
 
         [HttpPost]
@@ -746,13 +817,7 @@ namespace AnimeList.Controllers
             else if (password != confirmPassword) error = "Passwords don't match.";
 
             if (error != null)
-            {
-                ViewBag.Error = error;
-                ViewBag.Name = name;
-                ViewBag.Email = email;
-                ViewBag.ReturnUrl = returnUrl;
-                return View();
-            }
+                return RegisterErrorRedirect(error, name, email, returnUrl);
 
             // Atomic (IP, email) lock for the Kitsu signup -> password-grant pair. The
             // submit button has a JS disable too, but a second tab on the same page (or a
@@ -762,25 +827,15 @@ namespace AnimeList.Controllers
             // signup failure doesn't block the user's retry.
             var lockKey = RegisterLockKey(HttpContext, email);
             if (!_registerInFlight.TryAdd(lockKey, 0))
-            {
-                ViewBag.Error = "A signup is already in progress for this email. Wait a moment and try again.";
-                ViewBag.Name = name;
-                ViewBag.Email = email;
-                ViewBag.ReturnUrl = returnUrl;
-                return View();
-            }
+                return RegisterErrorRedirect(
+                    "A signup is already in progress for this email. Wait a moment and try again.",
+                    name, email, returnUrl);
 
             try
             {
                 var (ok, kitsuError) = await _kitsuService.RegisterAsync(name, email, password);
                 if (!ok)
-                {
-                    ViewBag.Error = kitsuError;
-                    ViewBag.Name = name;
-                    ViewBag.Email = email;
-                    ViewBag.ReturnUrl = returnUrl;
-                    return View();
-                }
+                    return RegisterErrorRedirect(kitsuError, name, email, returnUrl);
 
                 // Account exists — drop straight into the same password-grant flow Login uses
                 // so the user lands authenticated. Kitsu's OAuth password grant only resolves
@@ -827,7 +882,9 @@ namespace AnimeList.Controllers
             if (!string.IsNullOrEmpty(secPurpose) &&
                 secPurpose.Contains("prefetch", StringComparison.OrdinalIgnoreCase))
             {
-                return RedirectToAction("Index", "Home");
+                // Didn't clear the session — go straight home without the seeding
+                // bridge (no credential change to propagate to the client).
+                return Redirect("/");
             }
 
             // Pure disconnect: clears the session cookie + in-memory token cache so the
@@ -845,16 +902,19 @@ namespace AnimeList.Controllers
             // they've explicitly disconnected reads as confusing rather than
             // helpful. Url.IsLocalUrl already screens against external redirects;
             // the path-level whitelist enforces the user's intent on top of that.
+            // Route the post-logout landing through the seeding bridge so the thin
+            // client's stored X-AniSync-Config credential is cleared from localStorage
+            // (the session is gone, so the bridge resolves no UID and removes it).
             if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
             {
                 var path = returnUrl.Split('?', 2)[0].TrimEnd('/');
                 if (string.Equals(path, "/account", StringComparison.OrdinalIgnoreCase)
                  || string.Equals(path, "/configure", StringComparison.OrdinalIgnoreCase))
                 {
-                    return Redirect(returnUrl);
+                    return SeedConfigAndRedirect(returnUrl);
                 }
             }
-            return RedirectToAction("Index", "Home");
+            return SeedConfigAndRedirect("/");
         }
     }
 }

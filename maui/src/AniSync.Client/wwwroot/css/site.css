@@ -9346,3 +9346,254 @@ body.dash-page main {
     .cal-dcell { min-height: 3.8rem; padding: 0.4rem 0.1rem 0.35rem; }
     .cal-hscroll .cal-card { flex-basis: 78%; width: 78%; }
 }
+
+/* ── Discover: browse-by (studios / tags / staff) ────────────────────────────
+   Entry-point pills on the catalog page plus the directory tile/chip layouts
+   the dedicated browse pages render. */
+.discover-browse-by {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin: 0.25rem 0 1rem;
+}
+
+.discover-browse-by-label {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.discover-browse-by-link {
+    font-size: 0.88rem;
+    font-weight: 600;
+    padding: 0.3rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: inherit;
+    text-decoration: none;
+}
+
+.discover-browse-by-link:hover { background: rgba(255, 255, 255, 0.08); }
+
+.discover-browse-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+}
+
+.discover-browse-link {
+    align-self: flex-start;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: rgba(165, 180, 252, 0.95);
+    text-decoration: none;
+}
+
+.tag-category { margin-bottom: 1.4rem; }
+
+.tag-chip-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.tag-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.03);
+    color: inherit;
+    text-decoration: none;
+    font-size: 0.85rem;
+}
+
+.tag-chip:hover { background: rgba(255, 255, 255, 0.09); }
+
+.studio-tile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.75rem;
+}
+
+.studio-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.9rem 1rem;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    color: inherit;
+    text-decoration: none;
+}
+
+.studio-tile:hover { background: rgba(255, 255, 255, 0.07); }
+.studio-tile-name { font-weight: 600; }
+.studio-tile-count { font-size: 0.8rem; color: rgba(255, 255, 255, 0.55); }
+
+.actor-tile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 0.85rem;
+}
+
+.actor-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.45rem;
+    color: inherit;
+    text-decoration: none;
+}
+
+.actor-tile-photo-wrap {
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    border-radius: 12px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.actor-tile-photo { width: 100%; height: 100%; object-fit: cover; }
+.actor-tile-photo-placeholder { width: 100%; height: 100%; }
+.actor-tile-name { font-size: 0.85rem; text-align: center; font-weight: 600; }
+
+/* ── Detail page: source chips, trailer, manage-entry extras ─────────────────*/
+.anime-detail-source-chips {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0.6rem 0 0;
+    padding: 0;
+}
+
+.anime-detail-source-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #fff;
+    text-decoration: none;
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.anime-detail-source-chip-anilist { background: #2b2d42; }
+.anime-detail-source-chip-mal { background: #2e51a2; }
+.anime-detail-source-chip-kitsu { background: #f75239; }
+.anime-detail-source-chip-imdb { background: #f5c518; color: #111; }
+.anime-detail-source-chip:hover { filter: brightness(1.12); }
+
+.anime-detail-user-state-active { border-color: rgba(99, 102, 241, 0.55); }
+
+.anime-detail-trailer {
+    position: relative;
+    width: 100%;
+    max-width: 720px;
+    aspect-ratio: 16 / 9;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #000;
+}
+
+.anime-detail-trailer iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
+
+.entry-modal-textarea {
+    resize: vertical;
+    min-height: 3.5rem;
+    font: inherit;
+}
+
+.entry-modal-dates {
+    display: flex;
+    gap: 0.75rem;
+}
+
+.entry-modal-dates > div { flex: 1; }
+
+.entry-modal-delete {
+    border: 1px solid rgba(239, 68, 68, 0.5);
+    background: transparent;
+    color: #fca5a5;
+    border-radius: 8px;
+    padding: 0.4rem 0.8rem;
+    cursor: pointer;
+}
+
+.entry-modal-delete:hover:not(:disabled) { background: rgba(239, 68, 68, 0.12); }
+.entry-modal-delete:disabled { opacity: 0.55; cursor: default; }
+
+/* ── Watch: AniSkip button + subtitle selector ───────────────────────────────*/
+.watch-player { position: relative; }
+
+.watch-skip-btn {
+    position: absolute;
+    right: 1.2rem;
+    bottom: 4.2rem;
+    z-index: 5;
+    padding: 0.55rem 1.1rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    background: rgba(15, 17, 22, 0.82);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.9rem;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+}
+
+.watch-skip-btn:hover { background: rgba(15, 17, 22, 0.95); }
+
+.watch-sub-select-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.watch-sub-select {
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    padding: 0.3rem 0.5rem;
+    font: inherit;
+}
+
+/* ── Notifications: row actions + push toggle ────────────────────────────────*/
+.notif-page-toolbar-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.notif-page-item-link { cursor: pointer; }
+
+.notif-page-delete {
+    flex: 0 0 auto;
+    align-self: center;
+    width: 2rem;
+    height: 2rem;
+    border: 0;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 1.3rem;
+    line-height: 1;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.notif-page-delete:hover { background: rgba(255, 255, 255, 0.08); color: #fca5a5; }
