@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en" data-offline>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0A0A0A" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <title>Offline · AniSync</title>
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <!-- Fully self-contained: this page is the fallback the service worker
+         serves when a navigation request fails with no network, so it must
+         not depend on any other asset loading. Colors mirror the app's
+         design tokens (dark default, light via prefers-color-scheme). -->
+    <style>
+        :root {
+            --bg: #0A0A0A;
+            --surface: #141414;
+            --text: #e0e0e0;
+            --text-strong: #fff;
+            --text-dim: #999;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --border: rgba(255, 255, 255, 0.08);
+            color-scheme: dark;
+        }
+        @media (prefers-color-scheme: light) {
+            :root {
+                --bg: #ffffff;
+                --surface: #f4f4f6;
+                --text: #2b2b2b;
+                --text-strong: #0a0a0a;
+                --text-dim: #5f6368;
+                --accent: #2563eb;
+                --accent-hover: #1d4ed8;
+                --border: rgba(0, 0, 0, 0.09);
+                color-scheme: light;
+            }
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; }
+        body {
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem calc(1.5rem + env(safe-area-inset-right, 0px)) calc(2rem + env(safe-area-inset-bottom, 0px)) calc(1.5rem + env(safe-area-inset-left, 0px));
+            text-align: center;
+        }
+        .offline-card { max-width: 360px; }
+        .offline-logo { width: 96px; height: 96px; margin: 0 auto 1.5rem; display: block; }
+        .offline-glyph {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 1.25rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-dim);
+        }
+        h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: var(--text-strong);
+            margin: 0 0 0.5rem;
+            letter-spacing: -0.01em;
+            text-wrap: balance;
+        }
+        p {
+            font-size: 0.95rem;
+            line-height: 1.5;
+            color: var(--text-dim);
+            margin: 0 0 1.75rem;
+            text-wrap: pretty;
+        }
+        .offline-retry {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            min-height: 44px;
+            padding: 0 1.5rem;
+            border: none;
+            border-radius: 999px;
+            background: var(--accent);
+            color: #fff;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+            text-decoration: none;
+        }
+        .offline-retry:hover, .offline-retry:focus-visible { background: var(--accent-hover); outline: none; }
+    </style>
+</head>
+<body>
+    <main class="offline-card">
+        <img class="offline-logo" src="/logo.png" alt="AniSync" onerror="this.style.display='none'" />
+        <div class="offline-glyph" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 1l22 22"></path>
+                <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"></path>
+                <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"></path>
+                <path d="M10.71 5.05A16 16 0 0 1 22.58 9"></path>
+                <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"></path>
+                <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                <line x1="12" y1="20" x2="12.01" y2="20"></line>
+            </svg>
+        </div>
+        <h1>You're offline</h1>
+        <p>AniSync needs a connection to load your library and the latest airing data. Check your network and try again.</p>
+        <a class="offline-retry" href="/" onclick="location.reload(); return false;">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M23 4v6h-6"></path>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg>
+            Try again
+        </a>
+    </main>
+    <script>
+        // Auto-reload when connectivity returns so the user lands back on the
+        // app without having to tap "Try again".
+        window.addEventListener('online', function () { location.reload(); });
+    </script>
+</body>
+</html>
