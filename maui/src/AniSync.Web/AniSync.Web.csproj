@@ -9,6 +9,14 @@
   <ItemGroup>
     <!-- Shared client RCL (committed) replaces the template's generated shared project. -->
     <ProjectReference Include="..\AniSync.Client\AniSync.Client.csproj" />
+
+    <!-- Self-contained server library (copied from the ASP.NET app, no dependency
+         on it) so this Blazor Web head HOSTS the JSON API in the same Fly
+         deployment. Only the API controllers are exposed (see
+         ApiOnlyControllerProvider); the MVC UI controllers are filtered out so
+         they don't collide with the Blazor pages. The maui solution stays fully
+         standalone — nothing here breaks when the old ASP.NET app is removed. -->
+    <ProjectReference Include="..\AniSync.Server\AniSync.Server.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,1586 @@
+using AnimeList.Models;
+using AnimeList.Services.Extensions;
+using AnimeList.Services.Interfaces;
+using Microsoft.AspNetCore.Cors;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using Newtonsoft.Json.Linq;
+
+namespace AnimeList.Controllers
+{
+    // Split across two files (this + MetaController.Web.cs). This file holds the
+    // Stremio addon JSON surface ({config}/meta/...); the .Web.cs partial holds
+    // the session-based web pages (/meta/{id} detail + watch + streams / subs /
+    // mark-watched / trakt-watchlist). Both share this merged constructor + DI.
+    public partial class MetaController : Controller
+    {
+        private readonly ITokenService _tokenService;
+        private readonly IAnilistService _anilistService;
+        private readonly IKitsuService _kitsuService;
+        private readonly IMalService _malService;
+        private readonly ITmdbService _tmdbService;
+        private readonly IAnimeMappingService _mappingService;
+        private readonly ISyncService _syncService;
+        private readonly IConfigStore _configStore;
+        private readonly IUserListCache _listCache;
+        private readonly IAnilistFallback _anilistFallback;
+        private readonly IAnimeMetaLoader _animeMetaLoader;
+        private readonly IAddonStreamService _addonStreamService;
+        private readonly IAniSkipService _aniSkipService;
+        private readonly ISubtitleService _subtitleService;
+        private readonly IHttpClientFactory _httpClientFactory;
+        private readonly ITraktService _traktService;
+        private readonly ICinemetaService _cinemeta;
+        private readonly IHiddenEntryStore _hiddenStore;
+        private readonly ILogger<MetaController> _logger;
+
+        public MetaController(
+            ITokenService tokenService,
+            IAnilistService anilistService,
+            IKitsuService kitsuService,
+            IMalService malService,
+            ITmdbService tmdbService,
+            IAnimeMappingService mappingService,
+            ISyncService syncService,
+            IConfigStore configStore,
+            IUserListCache listCache,
+            IAnilistFallback anilistFallback,
+            IAnimeMetaLoader animeMetaLoader,
+            IAddonStreamService addonStreamService,
+            IAniSkipService aniSkipService,
+            ISubtitleService subtitleService,
+            IHttpClientFactory httpClientFactory,
+            ITraktService traktService,
+            ICinemetaService cinemeta,
+            IHiddenEntryStore hiddenStore,
+            ILogger<MetaController> logger)
+        {
+            _tokenService = tokenService;
+            _anilistService = anilistService;
+            _kitsuService = kitsuService;
+            _malService = malService;
+            _tmdbService = tmdbService;
+            _mappingService = mappingService;
+            _syncService = syncService;
+            _configStore = configStore;
+            _listCache = listCache;
+            _anilistFallback = anilistFallback;
+            _animeMetaLoader = animeMetaLoader;
+            _addonStreamService = addonStreamService;
+            _aniSkipService = aniSkipService;
+            _subtitleService = subtitleService;
+            _httpClientFactory = httpClientFactory;
+            _traktService = traktService;
+            _cinemeta = cinemeta;
+            _hiddenStore = hiddenStore;
+            _logger = logger;
+        }
+
+        /// <summary>
+        /// Loads + fully enriches a Meta for the Stremio addon's meta
+        /// endpoint. Pipeline:
+        ///   1. <see cref="IAnimeMetaLoader.LoadAsync"/> — shared with the
+        ///      web app's detail page (per-service dispatch, cross-service
+        ///      fallback, imdb-grouped Cinemeta synthesis, tmdb dispatch,
+        ///      adult gate, cour renumbering, filler labels, source-link
+        ///      map, AniList airing-schedule overlay).
+        ///   2. Synchronous extras enrichment — same Sidedata buckets the
+        ///      web app's /extras endpoint serves to the client async, but
+        ///      Stremio meta is one-shot so we merge them in here.
+        ///   3. Surface-specific decoration — supplementary-link URL
+        ///      rewrites to /discover routes + Manage Entry link for
+        ///      authenticated viewers.
+        /// </summary>
+        private async Task<Meta> GetByIDInternal(string config, string id)
+        {
+            var tokenData = await _tokenService.GetAccessTokenAsync(config);
+            // Mirror CatalogController so meta.id stays in the same id
+            // space the catalog emitted — clicking through to a card
+            // opens the matching detail.
+            var configuration = await ResolveConfigAsync(config, _configStore);
+            var groupSeasons = configuration?.enableSeasonGrouping == true;
+            var showAdultContent = configuration?.showAdultContent == true;
+
+            var loadResult = await _animeMetaLoader.LoadAsync(id, tokenData, groupSeasons, showAdultContent);
+            var anime = loadResult.Anime;
+            if (anime == null) return null;
+
+            // Restore the franchise-side season number for Stremio's UI
+            // on per-cour entries. The loader's NormaliseCourEpisodeNumbering
+            // collapses every video to season=1 so the web app's
+            // /watch/{ep} routing and single-tab episode UI work, but
+            // Stremio renders meta.videos[].season directly in its season
+            // selector — leaving it at 1 makes a Re:Zero S4 page show as
+            // "Season 1". NormaliseCour preserves the original season on
+            // v.imdbSeason, so each video knows its franchise season
+            // even when the cross-service mapping row's Season column
+            // happens to be missing (sourceLinks.ImdbSeason can be null
+            // for entries the mapping author didn't populate; v.imdbSeason
+            // is fed directly from Cinemeta's per-cour data). Falls back
+            // to sourceLinks.ImdbSeason for any video whose imdbSeason
+            // didn't land (streamingEpisodes-fallback path, where
+            // imdbEpisode was already non-null and NormaliseCour skipped
+            // the imdbSeason copy). Grouped-imdb renders are untouched —
+            // NormaliseCour skips them, so their original season numbers
+            // are still in v.season.
+            if (!loadResult.RenderedAsGrouped)
+            {
+                var franchiseSeasonFallback = loadResult.SourceLinks?.ImdbSeason;
+                foreach (var v in anime.videos ?? [])
+                {
+                    if (v == null) continue;
+                    var franchiseSeason = v.imdbSeason ?? franchiseSeasonFallback;
+                    if (franchiseSeason is int s && s > 0) v.season = s;
+                }
+            }
+
+            // Sync extras-equivalent: pull supplementary + related links
+            // + recommendation links from the same Sidedata cache the
+            // web app's /extras endpoint uses, merge into anime.links so
+            // Stremio's chip strip surfaces them. Stremio meta is one-
+            // shot (the client can't defer like the web app's JS does),
+            // so it has to happen here in the same request.
+            await EnrichWithExtrasAsync(
+                anime,
+                loadResult.SourceLinks,
+                tokenData?.anime_service ?? AnimeService.Anilist,
+                groupSeasons);
+
+            // Rewrite the AniList-sourced Tag / Studio / Staff URLs to
+            // point at AniSync's own /discover routes — same destination
+            // the web app's chip clicks land on via InternalHrefFor — so
+            // a tap in Stremio opens the franchise's tag / studio / staff
+            // catalog on this site instead of bouncing to anilist.co.
+            RewriteSupplementaryLinkUrls(anime);
+
+            // Manage Entry: authenticated viewers get a chip routed
+            // through the addon's path-config so list operations
+            // (status / progress / score) can be done from the Stremio
+            // detail page without leaving Stremio.
+            if (!string.IsNullOrWhiteSpace(tokenData?.access_token) && !tokenData.anonymousUser)
+            {
+                var manageUrl = $"{Request.Scheme}://{Request.Host}/{config}/Meta/ManageEntry/{anime.id}";
+                anime.links ??= [];
+                anime.links.Add(new Link { name = "Manage Entry", category = "Manage", url = manageUrl });
+            }
+
+            // Final tidy of the chip strip Stremio renders below the
+            // hero: drops noisy categories the user said to remove
+            // (Staff, Composer, Producer), merges Sequel + Prequel
+            // into a single "Related" bucket, renames Similar to
+            // Recommended, caps the long-tail categories to a
+            // sensible head, and orders the surviving categories in
+            // the explicit sequence Manage → Related → Recommended →
+            // Tag → Studio → director → writer → Artist. Stremio's
+            // section headers reflect the category names, so this
+            // also drives what the user sees as the row labels.
+            NormaliseAndOrderStremioLinks(anime);
+
+            return anime;
+        }
+
+        // Categories surfaced on the Stremio meta page, in the order
+        // they should render below the hero. Anything not in this
+        // list is dropped (Staff / Composer / Producer / etc.) to
+        // keep the page from sprawling — the chip strip used to run
+        // off the screen on detail pages of long-running shows where
+        // every category had dozens of entries.
+        private static readonly string[] StremioCategoryOrder =
+        {
+            "Manage",
+            "Related",       // Prequel + Sequel collapsed into one bucket
+            "Recommended",   // ex-"Similar"
+            "Tag",
+            "Studio",
+            "director",
+            "writer",
+            "Artist",
+        };
+
+        // Per-category head cap. Stremio renders chip rows with no
+        // horizontal-scroll affordance, so 30+ tag entries pushed the
+        // hero out of frame. 5 is a head sample that still gives the
+        // user the most relevant entries (AniList returns these
+        // ranked, so the head is meaningful).
+        private static readonly Dictionary<string, int> StremioCategoryCaps =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                { "Recommended", 5 },
+                { "Tag",         5 },
+                { "director",    5 },
+                { "writer",      5 },
+                { "Artist",      5 },
+            };
+
+        /// <summary>
+        /// Final pass on <see cref="Meta.links"/> for the Stremio meta
+        /// response: enforces the category allow-list / order /
+        /// per-category cap from <see cref="StremioCategoryOrder"/>
+        /// and <see cref="StremioCategoryCaps"/>, and merges Prequel +
+        /// Sequel entries into a single "Related" bucket with
+        /// prequels listed first (chronological story-order
+        /// approximation). Runs as the last step before returning the
+        /// Meta so it sees the union of every upstream that
+        /// contributed links (per-service inline + Sidedata extras +
+        /// Manage Entry append).
+        /// </summary>
+        private static void NormaliseAndOrderStremioLinks(Meta anime)
+        {
+            if (anime?.links == null || anime.links.Count == 0) return;
+
+            var prequels = new List<Link>();
+            var sequels = new List<Link>();
+            var byCategory = new Dictionary<string, List<Link>>(StringComparer.OrdinalIgnoreCase);
+            // Track whether a category appears in the explicit order
+            // list (case-insensitive). Anything not on the list is
+            // dropped silently.
+            var allowed = new HashSet<string>(StremioCategoryOrder, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var link in anime.links)
+            {
+                if (link == null || string.IsNullOrEmpty(link.category)) continue;
+
+                // Prequel + Sequel both belong to the merged
+                // "Related" bucket — collected separately so the
+                // final order is prequels-then-sequels regardless
+                // of how AniList interleaved them in the source.
+                if (string.Equals(link.category, "Prequel", StringComparison.OrdinalIgnoreCase))
+                {
+                    prequels.Add(link);
+                    continue;
+                }
+                if (string.Equals(link.category, "Sequel", StringComparison.OrdinalIgnoreCase))
+                {
+                    sequels.Add(link);
+                    continue;
+                }
+                // "Similar" was AniList's wording; Stremio surfaces
+                // this as a "RECOMMENDED" header in the UI which is
+                // the clearer label.
+                if (string.Equals(link.category, "Similar", StringComparison.OrdinalIgnoreCase))
+                {
+                    link.category = "Recommended";
+                }
+
+                if (!allowed.Contains(link.category)) continue;
+
+                if (!byCategory.TryGetValue(link.category, out var bucket))
+                {
+                    bucket = [];
+                    byCategory[link.category] = bucket;
+                }
+                bucket.Add(link);
+            }
+
+            if (prequels.Count > 0 || sequels.Count > 0)
+            {
+                var related = new List<Link>(prequels.Count + sequels.Count);
+                related.AddRange(prequels);
+                related.AddRange(sequels);
+                foreach (var l in related) l.category = "Related";
+                byCategory["Related"] = related;
+            }
+
+            foreach (var (category, cap) in StremioCategoryCaps)
+            {
+                if (byCategory.TryGetValue(category, out var bucket) && bucket.Count > cap)
+                {
+                    byCategory[category] = bucket.Take(cap).ToList();
+                }
+            }
+
+            var ordered = new List<Link>();
+            foreach (var category in StremioCategoryOrder)
+            {
+                if (byCategory.TryGetValue(category, out var bucket))
+                {
+                    ordered.AddRange(bucket);
+                }
+            }
+            anime.links = ordered;
+        }
+
+        /// <summary>
+        /// Stremio mirror of the web app's <c>/anime/{id}/extras</c>
+        /// endpoint — pulls the same Sidedata buckets
+        /// (<see cref="IAnilistFallback.GetSupplementaryLinksAsync"/>,
+        /// <see cref="IAnilistFallback.GetRelatedLinksAsync"/>,
+        /// <see cref="IAnilistFallback.GetRecommendationsAsync"/>) and
+        /// merges them into <c>anime.links</c>. The web app fires these
+        /// async after page render (separate JSON call to /extras and
+        /// the client renders carousels / chip rows); Stremio gets one
+        /// meta response so we have to inline it. Dedups by category +
+        /// anilistId so per-service builders that already added the
+        /// same chips (AnilistService inline emits the full strip
+        /// natively, KitsuService also fetches Similar) don't duplicate
+        /// after the merge.
+        /// </summary>
+        private async Task EnrichWithExtrasAsync(Meta anime, AnimeSourceLinks sourceLinks, AnimeService translateTo, bool groupSeasons)
+        {
+            if (anime == null || sourceLinks?.AnilistId is not int anilistId) return;
+
+            List<Link> supplementary = [];
+            List<Link> relatedLinks = [];
+            List<Link> recommendationLinks = [];
+
+            // Same skip-related-when-grouped rule the web app's /extras
+            // applies — a grouped franchise umbrella already collapses
+            // prequel / sequel cours, so the chip strip would just point
+            // back to cours included in the umbrella the user is
+            // already looking at.
+            var supplementaryTask = SafelyFetchAsync(
+                () => _anilistFallback.GetSupplementaryLinksAsync(anilistId),
+                "GetSupplementaryLinksAsync", anilistId);
+            var relatedTask = groupSeasons
+                ? Task.FromResult<List<Link>>([])
+                : SafelyFetchAsync(
+                    () => _anilistFallback.GetRelatedLinksAsync(anilistId, translateTo, groupSeasons),
+                    "GetRelatedLinksAsync", anilistId);
+            var recommendationsTask = SafelyFetchAsync(
+                () => _anilistFallback.GetRecommendationsAsync(anilistId, translateTo, groupSeasons),
+                "GetRecommendationsAsync", anilistId);
+
+            await Task.WhenAll(supplementaryTask, relatedTask, recommendationsTask);
+            supplementary = await supplementaryTask;
+            relatedLinks = await relatedTask;
+            recommendationLinks = await recommendationsTask;
+
+            anime.links ??= [];
+
+            // Supplementary categories (Tag / Studio / Staff /
+            // director / writer / Artist / Composer / Producer): drop
+            // any per-service entries in the same categories so
+            // AniList's richer chip strip wins. We only touch these
+            // categories — movie credits / recommendations / relations
+            // are handled below.
+            if (supplementary.Count > 0)
+            {
+                var ownedCategories = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "Tag", "Studio", "Staff", "director", "writer", "Artist", "Composer", "Producer",
+                };
+                anime.links = anime.links
+                    .Where(l => l != null && !(l.category != null && ownedCategories.Contains(l.category)))
+                    .ToList();
+                anime.links.AddRange(supplementary.Where(l => l != null));
+            }
+
+            // Sequel / Prequel / Similar: dedup by (category, anilistId)
+            // so the AnilistService / KitsuService inline paths' entries
+            // don't get duplicated when we refetch from the shared
+            // sidedata cache.
+            var existingRelKeys = new HashSet<string>(
+                anime.links
+                    .Where(l => l != null && IsRelationCategory(l.category))
+                    .Select(l => $"{l.category}:{l.anilistId}"));
+            foreach (var link in relatedLinks.Concat(recommendationLinks))
+            {
+                if (link == null) continue;
+                var key = $"{link.category}:{link.anilistId}";
+                if (existingRelKeys.Add(key)) anime.links.Add(link);
+            }
+        }
+
+        private async Task<List<Link>> SafelyFetchAsync(Func<Task<List<Link>>> fetch, string label, int anilistId)
+        {
+            try
+            {
+                return await fetch() ?? [];
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "MetaController {Label} failed for anilist {Id}", label, anilistId);
+                return [];
+            }
+        }
+
+        private static bool IsRelationCategory(string category) =>
+            string.Equals(category, "Sequel", StringComparison.Ordinal)
+            || string.Equals(category, "Prequel", StringComparison.Ordinal)
+            || string.Equals(category, "Similar", StringComparison.Ordinal);
+
+        /// <summary>
+        /// Rewrites the URL on every supplementary Link (Tag / Studio /
+        /// Staff / director / writer / Artist / Composer / Producer) to
+        /// point at AniSync's own /discover/{tag|studio|staff} pages
+        /// instead of the upstream anilist.co URLs. Same browse routes
+        /// the web app's chip clicks resolve to via InternalHrefFor so
+        /// a tap in Stremio opens the franchise's tag / studio / staff
+        /// catalog on this site rather than bouncing to anilist.co.
+        /// Entries that don't carry an AniList id (e.g. a Studio link
+        /// from KitsuService that predates the AniList enrichment, or a
+        /// Tag whose mapping lookup failed) keep their stored URL so the
+        /// chip still has somewhere to go.
+        /// </summary>
+        private void RewriteSupplementaryLinkUrls(Meta meta)
+        {
+            if (meta?.links == null || meta.links.Count == 0) return;
+
+            var origin = $"{Request.Scheme}://{Request.Host}";
+            foreach (var link in meta.links)
+            {
+                if (link == null || string.IsNullOrEmpty(link.category)) continue;
+                var rewritten = BuildDiscoverUrlForCategory(origin, link);
+                if (!string.IsNullOrEmpty(rewritten)) link.url = rewritten;
+            }
+        }
+
+        private static string BuildDiscoverUrlForCategory(string origin, Link link)
+        {
+            if (link == null) return null;
+            switch (link.category)
+            {
+                case "Tag":
+                    if (string.IsNullOrEmpty(link.name)) return null;
+                    return $"{origin}/discover/tag/{Uri.EscapeDataString(link.name)}";
+                case "Studio":
+                    return link.anilistId.HasValue
+                        ? $"{origin}/discover/studio/{link.anilistId.Value}"
+                        : null;
+                case "Staff":
+                case "director":
+                case "writer":
+                case "Artist":
+                case "Composer":
+                case "Producer":
+                    return link.anilistId.HasValue
+                        ? $"{origin}/discover/staff/{link.anilistId.Value}"
+                        : null;
+                default:
+                    return null;
+            }
+        }
+
+        // Stremio addon protocol meta route. CORS + the per-UID addon rate limit are
+        // scoped to this action only — the controller's other endpoints
+        // (StremioGetEntry / StremioSaveEntry / ManageEntry) are same-origin web-app
+        // surfaces (or Stremio-loaded HTML pages) and must stay closed.
+        [HttpGet("{config}/[controller]/{metaType}/{id}.json")]
+        [EnableCors("AddonCors")]
+        [EnableRateLimiting("addon")]
+        public async Task<IActionResult> GetByID(string config, MetaType metaType, string id)
+        {
+            try
+            {
+                var anime = await GetByIDInternal(config, id);
+                if (anime != null)
+                    return new JsonResult(new { meta = anime });
+
+                // Not anime → serve Trakt-enriched video meta for movie / series
+                // ids (Cinemeta base + Trakt data / artwork / episodes + cast),
+                // mirroring the web detail page. Cinemeta-unresolvable ids fall
+                // through to {meta:null} so Stremio uses its own meta provider.
+                var video = await BuildAddonVideoMetaAsync(metaType, id);
+                return new JsonResult(new { meta = video });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Meta GetByID failed (id={Id}, type={MetaType}).", id, metaType);
+                // Stremio interprets {meta:null} as "no metadata"; the
+                // detail page falls back to the catalog entry's poster +
+                // title and stops asking on the same id.
+                return new JsonResult(new { meta = (object)null });
+            }
+        }
+
+        // Serves a (non-anime) movie / series meta for Stremio, mirroring the web
+        // detail page via the shared EnrichVideoMetaAsync: Cinemeta supplies the
+        // base (poster / background / episodes / genres / rating), Trakt overrides
+        // with its richer data + artwork + episode list (Cinemeta fills the
+        // per-episode thumbnails) + cast. Returns null when Cinemeta can't resolve
+        // the id, so Stremio falls back to its own meta provider (e.g. Cinemeta).
+        private async Task<Meta> BuildAddonVideoMetaAsync(MetaType metaType, string id)
+        {
+            if (metaType != MetaType.movie && metaType != MetaType.series) return null;
+            var cinemetaType = metaType == MetaType.movie ? "movie" : "series";
+            var meta = await _cinemeta.GetVideoMetaAsync(cinemetaType, id);
+            if (meta == null) return null;
+
+            var imdbId = meta.id != null && meta.id.StartsWith(imdbPrefix, StringComparison.Ordinal)
+                ? meta.id
+                : (id.StartsWith(imdbPrefix, StringComparison.Ordinal) ? id : null);
+
+            var (cast, _) = await EnrichVideoMetaAsync(meta, cinemetaType, imdbId);
+            // Stremio renders cast as a name list; Trakt names win over Cinemeta's
+            // when present (Cinemeta's stay as the fallback otherwise).
+            if (cast.Count > 0) meta.cast = cast.Select(c => c.Name).ToList();
+            return meta;
+        }
+
+        [HttpGet("{config}/[controller]/ManageEntry/{*id}")]
+        public async Task<IActionResult> ManageEntry(string config, string id, int? season = null, int? episode = null)
+        {
+            try
+            {
+                return await ManageEntryInternal(config, id, season, episode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ManageEntry render failed (id={Id}, season={Season}, episode={Episode}).", id, season, episode);
+                // Render the unauthenticated/empty view so the user gets a graceful
+                // "nothing to manage" page rather than a stack trace.
+                return View("ManageEntry", new ManageEntryViewModel { Id = id, Config = config });
+            }
+        }
+
+        private async Task<IActionResult> ManageEntryInternal(string config, string id, int? season, int? episode)
+        {
+            var tokenData = await _tokenService.GetAccessTokenAsync(config);
+
+            if (tokenData == null || string.IsNullOrWhiteSpace(tokenData.access_token))
+                return View("ManageEntry", new ManageEntryViewModel { Id = id, Config = config });
+
+            var animeService = tokenData.anime_service;
+
+            var anime = await GetByIDInternal(config, id);
+            var isSeries = anime?.type == MetaType.series.ToString();
+            object videosObj = anime?.videos;
+
+            // Build the per-entry season list. For anilist:/kitsu: ids the list is empty
+            // (no dropdown needed); for IMDb / TMDB ids it has one EntrySeason per mapping
+            // so franchises like Spy x Family that are split across multiple AniList anime
+            // surface each cour as its own selectable season with its real episode count.
+            (List<EntrySeason> seasons, string selectedEntryId, int? autoEpisode) =
+                await BuildSeasonsAsync(id, isSeries, animeService, videosObj, season, episode);
+
+            // Fetch the user's entry against the resolved per-mapping id rather than the
+            // original IMDb id — that's what makes the displayed status / progress / score
+            // reflect the cour the user picked, not "whichever cour FirstOrDefault picked".
+            var entry = animeService switch
+            {
+                AnimeService.Anilist => await _anilistService.GetAnimeEntryAsync(tokenData, selectedEntryId, null),
+                AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, selectedEntryId, null),
+                _ => await _kitsuService.GetAnimeEntryAsync(tokenData, selectedEntryId, null),
+            };
+
+            var totalEpisodes = entry?.TotalEpisodes
+                ?? seasons.FirstOrDefault(s => s.Id == selectedEntryId)?.TotalEpisodes;
+            if (!totalEpisodes.HasValue && videosObj is List<Video> vList)
+                totalEpisodes = vList.Count;
+            else if (!totalEpisodes.HasValue && videosObj is JArray vArr)
+                totalEpisodes = vArr.Count;
+
+            var model = new ManageEntryViewModel
+            {
+                Id = id,
+                Config = config,
+                Name = anime?.name ?? "Unknown",
+                Poster = anime?.poster,
+                Type = anime?.type ?? MetaType.series.ToString(),
+                Status = entry?.Status,
+                // Prefer the per-entry episode we computed from the IMDb-flat episode
+                // (autoEpisode) over the entry's saved progress, so opening Manage Entry at
+                // "S1 E39" lands on the right episode of the right cour rather than the
+                // user's previously-saved progress for that cour.
+                Progress = autoEpisode ?? entry?.Progress ?? episode ?? 0,
+                TotalEpisodes = totalEpisodes,
+                Score = entry?.Score,
+                Notes = entry?.Notes,
+                RewatchCount = entry?.RewatchCount ?? 0,
+                StartedAt = entry?.StartedAt,
+                FinishedAt = entry?.FinishedAt,
+                Seasons = seasons,
+                SelectedEntryId = selectedEntryId,
+                AnimeService = animeService,
+                Videos = anime?.videos
+            };
+
+            return View("ManageEntry", model);
+        }
+
+        /// <summary>
+        /// Builds the per-entry "Season" dropdown options. Returns:
+        ///   - <c>seasons</c>: empty for anilist:/kitsu: ids (no dropdown), or one option per
+        ///     mapping for IMDb / TMDB ids that have ≥ 2 mappings.
+        ///   - <c>selectedEntryId</c>: the service-prefixed id (anilist:N / kitsu:N) of the
+        ///     mapping auto-selected from the URL's season + episode, or the original id if
+        ///     no mapping resolution is needed.
+        ///   - <c>autoEpisode</c>: the episode number *within* the auto-selected cour (so
+        ///     "S1 E39" of the IMDb-flat series resolves to e.g. cour 4 episode 2).
+        /// </summary>
+        private async Task<(List<EntrySeason>, string selectedEntryId, int? autoEpisode)>
+            BuildSeasonsAsync(string id, bool isSeries, AnimeService animeService, object videos, int? season, int? episode)
+        {
+            // Single-anime ids: no dropdown, fetch/save against the original id.
+            if (!isSeries || (!id.StartsWith(imdbPrefix) && !id.StartsWith(tmdbPrefix)))
+                return ([], id, null);
+
+            var mappings = id.StartsWith(imdbPrefix)
+                ? await _mappingService.GetImdbMapping(id)
+                : await _mappingService.GetTmdbMapping(id);
+
+            // Filter to mappings that actually have an id for the user's service.
+            mappings = mappings
+                .Where(m => HasServiceId(m, animeService))
+                .OrderBy(m => m.Season ?? int.MaxValue)
+                .ThenBy(m => SortKey(m, animeService))
+                .ToList();
+
+            if (mappings.Count == 0) return ([], id, null);
+
+            // Single mapping: still resolve to the per-service id (so save flows go through
+            // the right anime), but skip the dropdown — there's nothing to pick.
+            if (mappings.Count == 1)
+                return ([], BuildEntryId(mappings[0], animeService) ?? id, null);
+
+            // Multi-mapping: fan out the anime fetches in parallel so the page doesn't pay
+            // for them serially. Each fetch is one GraphQL / REST call against the service.
+            var entrySeasons = (await Task.WhenAll(
+                mappings.Select(m => BuildEntrySeasonAsync(m, animeService))
+            )).Where(s => s != null).ToList();
+
+            // Every per-mapping fetch could have returned null (BuildEntrySeasonAsync swallows
+            // failures). Fall back to picking the first mapping's id directly so the page
+            // still renders without a dropdown rather than NRE'ing on entrySeasons[0].
+            if (entrySeasons.Count == 0)
+                return ([], BuildEntryId(mappings[0], animeService) ?? id, null);
+
+            var imdbAbsolute = ComputeAbsoluteEpisode(videos, season, episode);
+            var (autoId, autoEpisode) = AutoSelectSeason(entrySeasons, imdbAbsolute);
+
+            return (entrySeasons, autoId ?? entrySeasons[0].Id, autoEpisode);
+        }
+
+        private async Task<EntrySeason> BuildEntrySeasonAsync(AnimeIdMapping mapping, AnimeService service)
+        {
+            var entryId = BuildEntryId(mapping, service);
+            if (entryId == null) return null;
+
+            var mappings = string.IsNullOrEmpty(mapping.ImdbId) ? [] : await _mappingService.GetImdbMapping(mapping.ImdbId);
+
+            // Lightweight summary — title + episode count only. Avoids the heavy
+            // GetAnimeByIdAsync path (which pulls categories, episodes include, AniList
+            // recommendations, etc.) that would otherwise trigger rate limits when we
+            // fan out across every cour of a multi-mapping franchise.
+            string name = mapping.Name;
+            int? episodeCount = mapping.Episodes;
+            var updateMappings = false;
+            if (string.IsNullOrEmpty(name) || !episodeCount.HasValue)
+            {
+                try
+                {
+                    (name, episodeCount) = service switch
+                    {
+                        AnimeService.Anilist => await _anilistService.GetAnimeSummaryAsync(entryId),
+                        AnimeService.MyAnimeList => await _malService.GetAnimeSummaryAsync(entryId),
+                        _ => await _kitsuService.GetAnimeSummaryAsync(entryId),
+                    };
+                    updateMappings = true;
+                    mapping.Name = name;
+                    mapping.Episodes = episodeCount;
+                }
+                catch
+                {
+                    // Best-effort: a single failed summary still renders the rest of the
+                    // dropdown — the failed option just shows the raw id as its label.
+                }
+            }
+
+            if (updateMappings)
+            {
+                await _mappingService.EnrichImdbMappings([mapping]);
+            }
+
+            if (episodeCount is 0) episodeCount = null;
+
+            var label = string.IsNullOrEmpty(name)
+                ? entryId
+                : (episodeCount.HasValue ? $"{name} ({episodeCount} ep)" : name);
+
+            return new EntrySeason { Id = entryId, Label = label, TotalEpisodes = episodeCount };
+        }
+
+        private static string BuildEntryId(AnimeIdMapping mapping, AnimeService service) => service switch
+        {
+            AnimeService.Anilist => mapping.AnilistId.HasValue ? $"{anilistPrefix}{mapping.AnilistId}" : null,
+            AnimeService.MyAnimeList => mapping.MalId.HasValue ? $"{malPrefix}{mapping.MalId}" : null,
+            _ => mapping.KitsuId.HasValue ? $"{kitsuPrefix}{mapping.KitsuId}" : null,
+        };
+
+        private static bool HasServiceId(AnimeIdMapping mapping, AnimeService service) => service switch
+        {
+            AnimeService.Anilist => mapping.AnilistId.HasValue,
+            AnimeService.MyAnimeList => mapping.MalId.HasValue,
+            _ => mapping.KitsuId.HasValue,
+        };
+
+        private static int? SortKey(AnimeIdMapping mapping, AnimeService service) => service switch
+        {
+            AnimeService.Anilist => mapping.AnilistId,
+            AnimeService.MyAnimeList => mapping.MalId,
+            _ => mapping.KitsuId,
+        };
+
+        /// <summary>
+        /// Translates a (URL season, URL episode) pair on a Cinemeta-style flat-numbered
+        /// series into an absolute episode index across the whole series (1-based). For
+        /// "1 season, 48 episodes" series like Spy x Family this is just <paramref name="episode"/>;
+        /// for properly multi-season Cinemeta entries it sums episode counts of preceding
+        /// seasons. Returns null if either value is missing.
+        /// </summary>
+        private static int? ComputeAbsoluteEpisode(object videos, int? season, int? episode)
+        {
+            if (!season.HasValue || !episode.HasValue) return null;
+
+            switch (videos)
+            {
+                case List<Video> list:
+                    return list.Count(v => v.season < season.Value) + episode.Value;
+                case JArray arr:
+                    return arr.Count(v => (int?)v["season"] < season) + episode.Value;
+                default:
+                    return episode; // unknown shape — assume IMDb-flat numbering
+            }
+        }
+
+        /// <summary>
+        /// Walks the season buckets in order and finds the one whose cumulative range
+        /// contains the absolute IMDb episode. Returns the matching entry id and the
+        /// per-entry episode index. If the absolute episode is beyond all known buckets
+        /// (e.g. mapping data is stale) returns (null, null) so the caller can fall back.
+        /// </summary>
+        private static (string? entryId, int? episodeWithinEntry) AutoSelectSeason(List<EntrySeason> seasons, int? imdbAbsoluteEpisode)
+        {
+            if (!imdbAbsoluteEpisode.HasValue) return (null, null);
+
+            int cumulative = 0;
+            foreach (var s in seasons)
+            {
+                if (!s.TotalEpisodes.HasValue) continue;
+                if (imdbAbsoluteEpisode > cumulative && imdbAbsoluteEpisode <= cumulative + s.TotalEpisodes.Value)
+                    return (s.Id, imdbAbsoluteEpisode.Value - cumulative);
+                cumulative += s.TotalEpisodes.Value;
+            }
+            return (null, null);
+        }
+
+        // ── Stremio-loaded Manage Entry page endpoints ─────────────────────────
+        // These two endpoints back the standalone Manage Entry page rendered by
+        // ManageEntry above (Views/Meta/ManageEntry.cshtml). They authenticate by
+        // the same encoded config blob the Stremio addon uses everywhere —
+        // explicitly NOT a session cookie — because the page is reached via the
+        // Stremio meta detail "Manage Entry" chip and may load in a browser
+        // context that doesn't share a session with this origin (different
+        // profile, private window, mobile Stremio handing off to the system
+        // browser).
+        //
+        // For same-origin JS (the in-app Manage Entry modal, /library actions,
+        // anywhere a session cookie IS guaranteed) use GetEntryByApi /
+        // SaveEntryByApi below. Don't call these from same-origin JS — passing
+        // the config UID in the URL is the anti-pattern UserApiController.cs
+        // warns about: a leak gives full read+write on the user's tracker.
+        // The "Stremio" prefix on the route makes the intent surface in access
+        // logs so reviewers see at a glance which endpoints carry the UID.
+
+        [HttpGet("{config}/[controller]/StremioGetEntry")]
+        public async Task<JsonResult> StremioGetEntry(string config, string id, int? season)
+        {
+            try
+            {
+                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+
+                if (tokenData == null || string.IsNullOrWhiteSpace(tokenData.access_token))
+                    return new JsonResult(new { success = false });
+
+                var entry = tokenData.anime_service switch
+                {
+                    AnimeService.Anilist => await _anilistService.GetAnimeEntryAsync(tokenData, id, season),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, id, season),
+                    _ => await _kitsuService.GetAnimeEntryAsync(tokenData, id, season),
+                };
+
+                return new JsonResult(new
+                {
+                    success = true,
+                    status = entry?.Status,
+                    progress = entry?.Progress ?? 0,
+                    totalEpisodes = entry?.TotalEpisodes,
+                    score = entry?.Score,
+                    notes = entry?.Notes,
+                    rewatchCount = entry?.RewatchCount ?? 0,
+                    startedAt = entry?.StartedAt?.ToString("yyyy-MM-dd"),
+                    finishedAt = entry?.FinishedAt?.ToString("yyyy-MM-dd"),
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "StremioGetEntry failed (id={Id}, season={Season}).", id, season);
+                return new JsonResult(new { success = false });
+            }
+        }
+
+        [HttpPost("{config}/[controller]/StremioSaveEntry")]
+        public async Task<JsonResult> StremioSaveEntry(string config, [FromBody] SaveEntryRequest request)
+        {
+            try
+            {
+                var tokenData = await _tokenService.GetAccessTokenAsync(config);
+
+                if (tokenData == null || string.IsNullOrWhiteSpace(tokenData.access_token))
+                    return new JsonResult(new { success = false });
+
+                // Empty status = the "None" option in the UI = "remove from list".
+                if (string.IsNullOrEmpty(request.Status))
+                {
+                    switch (tokenData.anime_service)
+                    {
+                        case AnimeService.Anilist:
+                            await _anilistService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                            break;
+                        case AnimeService.MyAnimeList:
+                            await _malService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                            break;
+                        default:
+                            await _kitsuService.DeleteAnimeEntryAsync(tokenData, request.Id, request.Season);
+                            break;
+                    }
+                    // Mirror the delete to every linked secondary account. Best-effort: per-target
+                    // failures inside SyncService are swallowed so the primary delete still wins.
+                    await _syncService.FanOutDeleteAsync(tokenData, request.Id, request.Season);
+                    // Primary's cached lists are now stale — drop them so the next dashboard /
+                    // library render reflects the delete. Linked-secondary caches are flushed
+                    // inside SyncService.FanOutDeleteAsync as each target write succeeds.
+                    _listCache.Invalidate(tokenData);
+                    return new JsonResult(new { success = true });
+                }
+
+                DateTime? startedAt = ParseDate(request.StartedAt);
+                DateTime? finishedAt = ParseDate(request.FinishedAt);
+
+                switch (tokenData.anime_service)
+                {
+                    case AnimeService.Anilist:
+                        await _anilistService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                        break;
+                    case AnimeService.MyAnimeList:
+                        await _malService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                        break;
+                    default:
+                        await _kitsuService.SaveAnimeEntryAsync(tokenData, request.Id, request.Season, request.Progress,
+                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                        break;
+                }
+
+                // Sync the same change to linked secondary providers. SyncService normalises status
+                // and score, fans the writes out concurrently, and silently drops mapping gaps so
+                // a partial-coverage anime doesn't fail the user's save.
+                await _syncService.FanOutSaveAsync(tokenData, request.Id, request.Season, request.Progress,
+                    request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+
+                _listCache.Invalidate(tokenData);
+                return new JsonResult(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "StremioSaveEntry failed (id={Id}, season={Season}, status={Status}).",
+                    request?.Id, request?.Season, request?.Status);
+                return new JsonResult(new { success = false });
+            }
+        }
+
+        private static DateTime? ParseDate(string s) =>
+            DateTime.TryParse(s, out var dt) ? dt : null;
+
+        // Session-based variants of StremioGetEntry / StremioSaveEntry used by the
+        // web-app's inline Manage Entry modal. Identical body to the config-scoped
+        // routes above — just resolve the user from the session cookie instead of
+        // the path-segment config UID. The modal renders on /library / /discover /
+        // dashboard, none of which carry a config in their URL, so a session-auth
+        // variant is the natural fit. The Stremio*-prefixed config-scoped routes
+        // stay intact for the standalone Manage Entry page that Stremio's addon
+        // flow links to (different browser context, no shared session cookie).
+
+        [HttpGet("/api/library/entry")]
+        public async Task<JsonResult> GetEntryByApi(string id, int? season, int? service, string type = null)
+        {
+            try
+            {
+                var tokenData = await _tokenService.GetAccessTokenAsync();
+                if (tokenData == null || tokenData.anonymousUser ||
+                    string.IsNullOrWhiteSpace(tokenData.access_token))
+                    return new JsonResult(new { success = false, error = "not-authenticated" });
+
+                // type=movie|series → this is a Cinemeta video tracked on Trakt,
+                // not an anime-tracker entry. Read the aggregate Trakt state and
+                // project it onto the modal's status/progress/score shape.
+                if (type == "movie" || type == "series")
+                    return await GetTraktVideoEntryAsync(tokenData, type, id);
+
+                // Trakt primary: read the entry per-cour through the linked
+                // AniList (then MAL/Kitsu) token so the modal's Season dropdown +
+                // status come from the provider that actually tracks anime cours.
+                tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
+
+                // service: <int> override — the detail page stamps it on the
+                // Manage Entry button when the requested anime has no mapping
+                // to the user's primary but lives on a linked secondary
+                // (e.g. anilist:N viewed by an MAL-primary user with AniList
+                // linked). In that case the GET reads the entry through the
+                // linked token instead of the primary; everything else
+                // (status enum vocabulary returned, season picker behaviour)
+                // follows the override service.
+                var overrideToken = await ResolveServiceOverrideTokenAsync(tokenData, service);
+                var effectiveToken = overrideToken ?? tokenData;
+                var animeService = effectiveToken.anime_service;
+
+                // Resolve seasons + selected entry id when the click came from a card
+                // with a cross-service id (imdb:/tmdb:); for native ids (anilist: /
+                // kitsu: / mal:) BuildSeasonsAsync short-circuits with an empty
+                // seasons list and the original id. isSeries is passed true because
+                // the id-prefix check inside BuildSeasonsAsync is the real gate —
+                // movies with imdb/tmdb ids resolve to a single mapping and return
+                // empty seasons anyway. videos:null skips auto-episode-selection,
+                // which the modal doesn't need (user picks manually if at all).
+                var (seasons, selectedEntryId, _) =
+                    await BuildSeasonsAsync(id, isSeries: true, animeService, videos: null, season, episode: null);
+
+                var entry = animeService switch
+                {
+                    AnimeService.Anilist     => await _anilistService.GetAnimeEntryAsync(effectiveToken, selectedEntryId, null),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(effectiveToken, selectedEntryId, null),
+                    _                        => await _kitsuService.GetAnimeEntryAsync(effectiveToken, selectedEntryId, null),
+                };
+
+                // totalEpisodes comes from the entry itself when present; falls back
+                // to the matched season's count when the user has no entry yet (so
+                // the progress input still shows the right max).
+                var totalEpisodes = entry?.TotalEpisodes
+                    ?? seasons.FirstOrDefault(s => s.Id == selectedEntryId)?.TotalEpisodes;
+
+                return new JsonResult(new
+                {
+                    success = true,
+                    // Service is included so the modal's status dropdown can pick the
+                    // right per-provider option set (AniList/MAL/Kitsu use different
+                    // status enum values). Sent as the integer enum value so client-
+                    // side switch statements stay compact.
+                    service = (int)animeService,
+                    selectedEntryId,
+                    // Seasons array is empty for non-franchise entries; the modal
+                    // hides the dropdown when length < 2 (a single mapping isn't
+                    // worth a picker — there's nothing to pick).
+                    seasons = seasons.Select(s => new { id = s.Id, label = s.Label, totalEpisodes = s.TotalEpisodes }),
+                    status = entry?.Status,
+                    progress = entry?.Progress ?? 0,
+                    totalEpisodes,
+                    score = entry?.Score,
+                    notes = entry?.Notes,
+                    rewatchCount = entry?.RewatchCount ?? 0,
+                    // ISO-8601 yyyy-MM-dd strings so they slot directly into <input type="date">.
+                    startedAt = entry?.StartedAt?.ToString("yyyy-MM-dd"),
+                    finishedAt = entry?.FinishedAt?.ToString("yyyy-MM-dd"),
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetEntryByApi failed (id={Id}, season={Season}).", id, season);
+                return new JsonResult(new { success = false, error = "exception" });
+            }
+        }
+
+        /// <summary>
+        /// Manage-Entry GET for a Cinemeta video tracked on Trakt. Projects the
+        /// aggregate Trakt state (watchlist / watched / rating) onto the modal's
+        /// status / progress / score / totalEpisodes shape. service is reported
+        /// as <see cref="AnimeService.Trakt"/> so the modal picks the Trakt
+        /// status set; seasons is always empty (no cross-service franchise
+        /// picker for general video).
+        /// </summary>
+        private async Task<JsonResult> GetTraktVideoEntryAsync(TokenData tokenData, string type, string id)
+        {
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+            if (string.IsNullOrEmpty(uid))
+                return new JsonResult(new { success = false, error = "no-uid" });
+
+            // Series total comes from Cinemeta's episode list; a movie is one unit.
+            int? totalEpisodes = 1;
+            if (type == "series")
+            {
+                var meta = await _cinemeta.GetVideoMetaAsync(type, id);
+                totalEpisodes = meta?.videos?.Count;
+            }
+
+            var entry = await _traktService.GetVideoEntryAsync(uid, type, id);
+            var (status, progress) = DeriveTraktVideoStatus(type, entry, totalEpisodes);
+
+            return new JsonResult(new
+            {
+                success = true,
+                service = (int)AnimeService.Trakt,
+                // Echo the media type so the modal can tailor its status set
+                // (movies have no "Watching") and round-trip it to the save.
+                mediaType = type,
+                selectedEntryId = id,
+                seasons = Array.Empty<object>(),
+                status,
+                progress,
+                totalEpisodes,
+                score = entry.Rating,
+                notes = (string)null,
+                rewatchCount = 0,
+                startedAt = (string)null,
+                finishedAt = (string)null,
+            });
+        }
+
+        [HttpPost("/api/library/entry/save")]
+        public async Task<JsonResult> SaveEntryByApi([FromBody] SaveEntryRequest request)
+        {
+            try
+            {
+                var tokenData = await _tokenService.GetAccessTokenAsync();
+                if (tokenData == null || tokenData.anonymousUser ||
+                    string.IsNullOrWhiteSpace(tokenData.access_token))
+                    return new JsonResult(new { success = false, error = "not-authenticated" });
+
+                // type=movie|series → Cinemeta video tracked on Trakt; route to
+                // the Trakt save instead of the anime-tracker dispatch below.
+                if (request.Type == "movie" || request.Type == "series")
+                    return await SaveTraktVideoEntryAsync(tokenData, request);
+
+                // Trakt primary: write the selected cour through the linked
+                // AniList (then MAL/Kitsu) token; the fan-out below then mirrors
+                // it to the remaining linked anime providers, and pushToTrakt
+                // below also pushes the franchise back to Trakt itself. Browsing
+                // stays on Trakt/IMDb — only this per-entry write re-points. (The
+                // no-linked case never reaches here: the detail page stamps the
+                // media type so the Trakt video branch above handles it.)
+                var traktPrimaryToken = tokenData.anime_service == AnimeService.Trakt ? tokenData : null;
+                tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
+                var pushToTrakt = traktPrimaryToken != null && tokenData.anime_service != AnimeService.Trakt;
+
+                // service: <int> override — the modal sends it when the entry
+                // was loaded through a linked-secondary token (anime had no
+                // mapping to the user's primary, e.g. anilist:N for an
+                // MAL-primary user with AniList linked). Save then writes
+                // through the linked token instead of the primary, and we
+                // skip the fan-out — the primary can't accept this id, and
+                // fanning out to other linked providers would require an
+                // additional mapping translation that the override case
+                // doesn't currently support.
+                var overrideToken = await ResolveServiceOverrideTokenAsync(tokenData, request.Service);
+                var effectiveToken = overrideToken ?? tokenData;
+                var isOverride = overrideToken != null;
+
+                // Empty status = "remove from list" — same semantics as the page version.
+                if (string.IsNullOrEmpty(request.Status))
+                {
+                    switch (effectiveToken.anime_service)
+                    {
+                        case AnimeService.Anilist:
+                            await _anilistService.DeleteAnimeEntryAsync(effectiveToken, request.Id, request.Season);
+                            break;
+                        case AnimeService.MyAnimeList:
+                            await _malService.DeleteAnimeEntryAsync(effectiveToken, request.Id, request.Season);
+                            break;
+                        default:
+                            await _kitsuService.DeleteAnimeEntryAsync(effectiveToken, request.Id, request.Season);
+                            break;
+                    }
+                    if (!isOverride)
+                    {
+                        await _syncService.FanOutDeleteAsync(tokenData, request.Id, request.Season);
+                        _listCache.Invalidate(tokenData);
+                    }
+                    if (pushToTrakt) await PushAnimeToTraktAsync(traktPrimaryToken, request.Id, null, 0, null);
+                    return new JsonResult(new { success = true });
+                }
+
+                var startedAt = ParseDate(request.StartedAt);
+                var finishedAt = ParseDate(request.FinishedAt);
+
+                switch (effectiveToken.anime_service)
+                {
+                    case AnimeService.Anilist:
+                        await _anilistService.SaveAnimeEntryAsync(effectiveToken, request.Id, request.Season, request.Progress,
+                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                        break;
+                    case AnimeService.MyAnimeList:
+                        await _malService.SaveAnimeEntryAsync(effectiveToken, request.Id, request.Season, request.Progress,
+                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                        break;
+                    default:
+                        await _kitsuService.SaveAnimeEntryAsync(effectiveToken, request.Id, request.Season, request.Progress,
+                            request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+                        break;
+                }
+
+                FanOutSaveResult fanOut = FanOutSaveResult.Empty;
+                if (!isOverride)
+                {
+                    // Same fan-out to linked secondary providers as the config-scoped path.
+                    fanOut = await _syncService.FanOutSaveAsync(tokenData, request.Id, request.Season, request.Progress,
+                        request.Status, request.Score, request.Notes, request.RewatchCount, startedAt, finishedAt);
+
+                    _listCache.Invalidate(tokenData);
+                }
+                // Push the franchise to Trakt too (the primary) — map the saved
+                // cour to its imdb id and write it via the Trakt video path.
+                if (pushToTrakt)
+                    await PushAnimeToTraktAsync(traktPrimaryToken, request.Id, request.Status, request.Progress, request.Score);
+                // success = true even when a linked secondary failed — the primary save
+                // landed, which is what the user really cares about. `failedProviders`
+                // surfaces the partial-failure so the modal toast can say "Saved on AniList,
+                // MAL failed" rather than uniformly green and hiding the breakage.
+                return new JsonResult(new
+                {
+                    success = true,
+                    failedProviders = fanOut.HasFailures
+                        ? fanOut.Failed.Select(s => s.ToString()).ToList()
+                        : null,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "SaveEntryByApi failed (id={Id}, season={Season}, status={Status}).",
+                    request?.Id, request?.Season, request?.Status);
+                return new JsonResult(new { success = false, error = "exception" });
+            }
+        }
+
+        /// <summary>
+        /// One-click "heart" toggle for the Currently Watching list, backing the
+        /// outline / filled heart on the /meta/{id} detail page. Resolves the
+        /// entry's current list membership server-side before acting:
+        ///   - In a non-Watching list (Completed / Planning / Paused / Dropped /
+        ///     Rewatching): no-op, returns <c>hidden:true</c> so the client drops
+        ///     the heart — the user manages those via the Manage Entry modal.
+        ///   - Already Watching: removes the entry (delete + fan-out), returns
+        ///     <c>watching:false</c>.
+        ///   - Not on any list: adds it to Watching (preserving any progress the
+        ///     entry already carried), returns <c>watching:true</c>.
+        /// Reuses the exact same per-service save / delete + fan-out + cache-
+        /// invalidation path the Manage Entry modal save runs, just pinned to the
+        /// Watching status with no form. Session-authenticated like the other
+        /// /api/library/* endpoints (the detail page carries no config in its URL).
+        /// </summary>
+        [HttpPost("/api/library/watching/toggle")]
+        public async Task<JsonResult> ToggleWatchingByApi([FromBody] SaveEntryRequest request)
+        {
+            try
+            {
+                var tokenData = await _tokenService.GetAccessTokenAsync();
+                if (tokenData == null || tokenData.anonymousUser ||
+                    string.IsNullOrWhiteSpace(tokenData.access_token))
+                    return new JsonResult(new { success = false, error = "not-authenticated" });
+
+                if (string.IsNullOrEmpty(request?.Id))
+                    return new JsonResult(new { success = false, error = "missing-id" });
+
+                // Movie / series → the tracker is Trakt, not the anime providers.
+                // Route to the Trakt watching toggle, which mirrors this method's
+                // membership logic (in another list → hide; watching → remove;
+                // not tracked → add) on top of Trakt's vocabulary.
+                if (request.Type == "movie" || request.Type == "series")
+                    return await ToggleTraktWatchingAsync(tokenData, request);
+
+                // Trakt primary: toggle Watching through the linked AniList (then
+                // MAL/Kitsu) token; fan-out mirrors to the rest, and pushToTrakt
+                // mirrors the change back to Trakt itself. (The no-linked case
+                // sends a media type and is handled by the Trakt branch above.)
+                var traktPrimaryToken = tokenData.anime_service == AnimeService.Trakt ? tokenData : null;
+                tokenData = await _configStore.ResolveAnimeTokenAsync(tokenData);
+                var pushToTrakt = traktPrimaryToken != null && tokenData.anime_service != AnimeService.Trakt;
+
+                // Same linked-secondary override path the modal uses: an anime with
+                // no mapping to the user's primary but present on a linked provider
+                // is read / written through that token instead.
+                var overrideToken = await ResolveServiceOverrideTokenAsync(tokenData, request.Service);
+                var effectiveToken = overrideToken ?? tokenData;
+                var isOverride = overrideToken != null;
+                var animeService = effectiveToken.anime_service;
+
+                // Resolve the per-cour entry id (native anilist:/kitsu:/mal: ids
+                // short-circuit to themselves; cross-service ids resolve to the
+                // matching mapping). The heart is hidden in the view for multi-cour
+                // grouped renders, so this lands on a single concrete entry.
+                var (_, selectedEntryId, _) =
+                    await BuildSeasonsAsync(request.Id, isSeries: true, animeService, videos: null, request.Season, episode: null);
+
+                var entry = animeService switch
+                {
+                    AnimeService.Anilist     => await _anilistService.GetAnimeEntryAsync(effectiveToken, selectedEntryId, null),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(effectiveToken, selectedEntryId, null),
+                    _                        => await _kitsuService.GetAnimeEntryAsync(effectiveToken, selectedEntryId, null),
+                };
+
+                var norm = NormalizeListStatus(entry?.Status);
+
+                // Entry lives in some other list — the heart isn't the control for
+                // that (the modal is). Tell the client to hide it; change nothing.
+                if (norm != null && norm != "watching")
+                    return new JsonResult(new { success = false, hidden = true });
+
+                if (norm == "watching")
+                {
+                    // Currently Watching → remove from the list entirely.
+                    switch (animeService)
+                    {
+                        case AnimeService.Anilist:
+                            await _anilistService.DeleteAnimeEntryAsync(effectiveToken, selectedEntryId, null);
+                            break;
+                        case AnimeService.MyAnimeList:
+                            await _malService.DeleteAnimeEntryAsync(effectiveToken, selectedEntryId, null);
+                            break;
+                        default:
+                            await _kitsuService.DeleteAnimeEntryAsync(effectiveToken, selectedEntryId, null);
+                            break;
+                    }
+                    if (!isOverride)
+                    {
+                        await _syncService.FanOutDeleteAsync(tokenData, selectedEntryId, null);
+                        _listCache.Invalidate(tokenData);
+                    }
+                    if (pushToTrakt) await PushAnimeToTraktAsync(traktPrimaryToken, selectedEntryId, null, 0, null);
+                    return new JsonResult(new { success = true, watching = false });
+                }
+
+                // Not on any list → add to Watching, keeping any progress the entry
+                // already had (0 for a brand-new entry). Status is translated to the
+                // provider's native vocabulary just like the modal save does.
+                var watchingStatus = TranslateStatusForService("watching", effectiveToken);
+                var progress = entry?.Progress ?? 0;
+                switch (animeService)
+                {
+                    case AnimeService.Anilist:
+                        await _anilistService.SaveAnimeEntryAsync(effectiveToken, selectedEntryId, null, progress,
+                            watchingStatus, null, null, null, null, null);
+                        break;
+                    case AnimeService.MyAnimeList:
+                        await _malService.SaveAnimeEntryAsync(effectiveToken, selectedEntryId, null, progress,
+                            watchingStatus, null, null, null, null, null);
+                        break;
+                    default:
+                        await _kitsuService.SaveAnimeEntryAsync(effectiveToken, selectedEntryId, null, progress,
+                            watchingStatus, null, null, null, null, null);
+                        break;
+                }
+                if (!isOverride)
+                {
+                    await _syncService.FanOutSaveAsync(tokenData, selectedEntryId, null, progress,
+                        watchingStatus, null, null, null, null, null);
+                    _listCache.Invalidate(tokenData);
+                }
+                if (pushToTrakt) await PushAnimeToTraktAsync(traktPrimaryToken, selectedEntryId, "watching", progress, null);
+                return new JsonResult(new { success = true, watching = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ToggleWatchingByApi failed (id={Id}).", request?.Id);
+                return new JsonResult(new { success = false, error = "exception" });
+            }
+        }
+
+        /// <summary>
+        /// Trakt-backed half of the Currently Watching heart toggle, for movie /
+        /// series detail pages. Mirrors <see cref="ToggleWatchingByApi"/>'s
+        /// membership logic against Trakt's status vocabulary: an entry already in
+        /// some other list (Planning / Completed / On Hold / Dropped) returns
+        /// <c>hidden:true</c> so the client drops the heart; "watching" removes the
+        /// entry; not-tracked adds it as Watching. Reuses the same Trakt write the
+        /// Manage Entry modal runs (<see cref="ApplyTraktVideoSaveAsync"/>).
+        /// </summary>
+        private async Task<JsonResult> ToggleTraktWatchingAsync(TokenData tokenData, SaveEntryRequest request)
+        {
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+            if (string.IsNullOrEmpty(uid))
+                return new JsonResult(new { success = false, error = "no-uid" });
+
+            var entry = await _traktService.GetVideoEntryAsync(uid, request.Type, request.Id);
+            var (status, _) = DeriveTraktVideoStatus(request.Type, entry, null);
+            var norm = NormalizeListStatus(status);
+
+            // In some other list — the heart isn't the control for that.
+            if (norm != null && norm != "watching")
+                return new JsonResult(new { success = false, hidden = true });
+
+            // Watching → remove (status ""); not tracked → add as Watching.
+            var saveReq = new SaveEntryRequest
+            {
+                Id = request.Id,
+                Type = request.Type,
+                Status = norm == "watching" ? string.Empty : "watching",
+                Progress = 0,
+            };
+            var ok = await ApplyTraktVideoSaveAsync(uid, saveReq);
+            if (!ok) return new JsonResult(new { success = false, error = "trakt-not-connected" });
+            return new JsonResult(new { success = true, watching = norm != "watching" });
+        }
+
+        /// <summary>
+        /// Hide / unhide an entry from the user's Discover catalogs, backing the
+        /// Hide / Unhide button on the /meta/{id} detail page. Toggles a row in
+        /// the per-user <c>hidden_entries</c> table; the display fields
+        /// (title / poster / media type) are cached at write time so the Discover
+        /// "Hidden" section can render the card without re-fetching the provider.
+        /// Session-authenticated like the other /api/library/* endpoints.
+        /// </summary>
+        [HttpPost("/api/library/hidden/toggle")]
+        public async Task<JsonResult> ToggleHiddenByApi([FromBody] HideEntryRequest request)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(request?.Id))
+                    return new JsonResult(new { success = false, error = "missing-id" });
+
+                var tokenData = await _tokenService.GetAccessTokenAsync();
+                if (tokenData == null || tokenData.anonymousUser ||
+                    string.IsNullOrWhiteSpace(tokenData.access_token))
+                    return new JsonResult(new { success = false, error = "not-authenticated" });
+
+                var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                if (string.IsNullOrEmpty(uid))
+                    return new JsonResult(new { success = false, error = "no-uid" });
+
+                if (await _hiddenStore.IsHiddenAsync(uid, request.Id))
+                {
+                    await _hiddenStore.RemoveAsync(uid, request.Id);
+                    return new JsonResult(new { success = true, hidden = false });
+                }
+
+                await _hiddenStore.AddAsync(uid, new HiddenEntry
+                {
+                    Id = request.Id,
+                    Title = request.Title,
+                    ImageUrl = request.ImageUrl,
+                    MediaType = string.IsNullOrEmpty(request.MediaType) ? "anime" : request.MediaType,
+                });
+                return new JsonResult(new { success = true, hidden = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ToggleHiddenByApi failed (id={Id}).", request?.Id);
+                return new JsonResult(new { success = false, error = "exception" });
+            }
+        }
+
+        /// <summary>
+        /// Manage-Entry save for a Cinemeta video tracked on Trakt. Maps the
+        /// modal's status onto Trakt watchlist / history actions and the score
+        /// onto a Trakt rating. For a series, "watching" marks episodes 1..N and
+        /// "completed" marks them all watched — the (season, episode) coords come
+        /// from Cinemeta's ordered episode list (handles multi-season shows).
+        /// </summary>
+        private async Task<JsonResult> SaveTraktVideoEntryAsync(TokenData tokenData, SaveEntryRequest request)
+        {
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+            if (string.IsNullOrEmpty(uid))
+                return new JsonResult(new { success = false, error = "no-uid" });
+
+            var ok = await ApplyTraktVideoSaveAsync(uid, request);
+            return new JsonResult(new { success = ok, error = ok ? null : "trakt-not-connected" });
+        }
+
+        /// <summary>
+        /// Core Trakt movie/series write shared by the Manage Entry modal save and
+        /// the quick-add heart. Maps the request's status onto watchlist / history
+        /// / rating actions and returns whether the upstream write succeeded.
+        /// </summary>
+        private async Task<bool> ApplyTraktVideoSaveAsync(string uid, SaveEntryRequest request)
+        {
+            var status = (request.Status ?? string.Empty).ToLowerInvariant();
+
+            // Resolve the episode coords to mark watched (series only). Cinemeta's
+            // videos carry the real season/episode numbers; order them and take
+            // the watched prefix so "watched up to N" lands on the right episodes
+            // even across multiple seasons.
+            IReadOnlyList<(int Season, int Episode)> episodes = Array.Empty<(int, int)>();
+            // Series + "watching": the episode to leave in-progress so Trakt
+            // surfaces the show as continue-watching (not completed) — the next
+            // unwatched episode after the watched prefix.
+            (int Season, int Episode)? inProgress = null;
+            if (request.Type == "series" && (status == "watching" || status == "completed"))
+            {
+                var meta = await _cinemeta.GetVideoMetaAsync("series", request.Id);
+                var ordered = (meta?.videos ?? new List<Video>())
+                    .OrderBy(v => v.season > 0 ? v.season : 1)
+                    .ThenBy(v => v.episode)
+                    .Select(v => (Season: v.season > 0 ? v.season : 1, Episode: v.episode))
+                    .ToList();
+                var take = status == "completed" ? ordered.Count : Math.Clamp(request.Progress, 0, ordered.Count);
+                episodes = ordered.Take(take).ToList();
+                if (status == "watching" && ordered.Count > 0)
+                    inProgress = ordered[Math.Min(take, ordered.Count - 1)];
+            }
+
+            int? rating = request.Score.HasValue && request.Score.Value > 0
+                ? (int)Math.Round(request.Score.Value)
+                : null;
+
+            return await _traktService.SaveVideoEntryAsync(uid, request.Type, request.Id, status, episodes, rating, inProgress);
+        }
+
+        /// <summary>
+        /// Pushes a just-saved anime cour up to the user's Trakt primary so the
+        /// franchise is tracked there too — alongside the per-cour write to the
+        /// linked anime providers. Maps the cour id to its imdb id, derives the
+        /// movie/series type, translates the status into Trakt's vocabulary, and
+        /// writes via the Trakt video path. Best-effort: an unmappable id or a
+        /// Trakt hiccup is logged and swallowed so the linked save still wins.
+        /// An empty status removes the entry from Trakt.
+        /// </summary>
+        private async Task PushAnimeToTraktAsync(TokenData traktToken, string courId, string status, int progress, double? score)
+        {
+            try
+            {
+                var (uid, _) = await _configStore.FindUidByIdentityAsync(traktToken);
+                if (string.IsNullOrEmpty(uid) || string.IsNullOrEmpty(courId)) return;
+
+                // Resolve the cour's franchise imdb id AND its imdb season — the
+                // saved progress is an episode number *within that season*, not an
+                // absolute index across the whole franchise. (Marking it as
+                // absolute is what made a S4E7 save show up on Trakt as S1E5.)
+                var mapping = await ResolveCourMappingAsync(courId);
+                var imdb = mapping?.ImdbId;
+                if (string.IsNullOrEmpty(imdb)) return;
+                var courSeason = mapping.Season is int s && s > 0 ? s : 1;
+
+                var traktStatus = MapToTraktStatus(status);
+                var type = await DeriveImdbVideoTypeAsync(imdb);
+
+                IReadOnlyList<(int Season, int Episode)> episodes = Array.Empty<(int, int)>();
+                (int Season, int Episode)? inProgress = null;
+
+                if (type == "series" && (traktStatus == "watching" || traktStatus == "completed"))
+                {
+                    var meta = await _cinemeta.GetVideoMetaAsync("series", imdb);
+                    var ordered = (meta?.videos ?? new List<Video>())
+                        .OrderBy(v => v.season > 0 ? v.season : 1)
+                        .ThenBy(v => v.episode)
+                        .Select(v => (Season: v.season > 0 ? v.season : 1, Episode: v.episode))
+                        .ToList();
+
+                    if (traktStatus == "completed")
+                    {
+                        episodes = ordered;
+                    }
+                    else
+                    {
+                        // Watched everything up to (courSeason, progress) — earlier
+                        // seasons in full + this season through `progress`.
+                        episodes = ordered
+                            .Where(x => x.Season < courSeason || (x.Season == courSeason && x.Episode <= progress))
+                            .ToList();
+                        if (episodes.Count < ordered.Count)
+                            inProgress = ordered[episodes.Count]; // next unwatched → continue-watching
+                    }
+                }
+
+                int? rating = score is double r && r > 0 ? (int)Math.Round(r) : null;
+                await _traktService.SaveVideoEntryAsync(uid, type, imdb, traktStatus, episodes, rating, inProgress);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Trakt anime push failed for cour {Id}.", courId);
+            }
+        }
+
+        // Resolves a per-cour anime id to its cross-service mapping row (which
+        // carries the franchise imdb id + the cour's imdb season). Used by the
+        // Trakt push to place a per-cour save on the right franchise season.
+        private async Task<AnimeIdMapping> ResolveCourMappingAsync(string courId)
+        {
+            if (string.IsNullOrEmpty(courId)) return null;
+            if (courId.StartsWith(anilistPrefix, StringComparison.Ordinal)) return await _mappingService.GetAnilistMapping(courId);
+            if (courId.StartsWith(malPrefix, StringComparison.Ordinal)) return await _mappingService.GetMalMapping(courId);
+            if (courId.StartsWith(kitsuPrefix, StringComparison.Ordinal)) return await _mappingService.GetKitsuMapping(courId);
+            if (courId.StartsWith(imdbPrefix, StringComparison.Ordinal))
+                return (await _mappingService.GetImdbMapping(courId))?.FirstOrDefault();
+            return null;
+        }
+
+        // movie vs series for an imdb id, via Cinemeta (cached). Defaults to
+        // series — most anime are, and it's the only branch that marks episodes.
+        private async Task<string> DeriveImdbVideoTypeAsync(string imdbId)
+        {
+            try
+            {
+                var s = await _cinemeta.GetVideoMetaAsync("series", imdbId);
+                return (s?.videos?.Count ?? 0) > 0 ? "series" : "movie";
+            }
+            catch { return "series"; }
+        }
+
+        // Anime-provider status → Trakt's video status vocabulary. Empty/unknown
+        // maps to "" (remove from list / not tracked).
+        private static string MapToTraktStatus(string status) => NormalizeListStatus(status) switch
+        {
+            "watching" => "watching",
+            "completed" => "completed",
+            "planning" => "planning",
+            "paused" => "onhold",
+            "dropped" => "dropped",
+            "rewatching" => "rewatching",
+            _ => string.Empty,
+        };
+
+        /// <summary>
+        /// Resolves a service-override int (the integer value of
+        /// <see cref="AnimeService"/>) to the user's matching linked-secondary
+        /// token. Returns null when the override is missing, points at the
+        /// primary itself (no override needed), or names a service the user
+        /// hasn't linked (or has linked but flagged for reauth). The caller
+        /// falls back to the primary token in any of those cases.
+        /// </summary>
+        private async Task<TokenData> ResolveServiceOverrideTokenAsync(TokenData primary, int? service)
+        {
+            if (!service.HasValue) return null;
+            if (primary == null || primary.anonymousUser) return null;
+            if (!Enum.IsDefined(typeof(AnimeService), service.Value)) return null;
+            var target = (AnimeService)service.Value;
+            if (target == primary.anime_service) return null;
+
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(primary);
+            if (string.IsNullOrEmpty(uid)) return null;
+            var linked = await _configStore.GetLinkedTokensAsync(uid);
+            var match = linked.FirstOrDefault(l => l.Service == target && !l.NeedsReauth && l.TokenData != null);
+            return match?.TokenData;
+        }
+    }
+
+    public class SaveEntryRequest
+    {
+        // All reference-type fields nullable so ASP.NET's [ApiController] auto-validation
+        // doesn't treat them as required just because the project has Nullable=enable.
+        // Callers (Manage Entry form, /api/v1 entries POST, the browser extension) only
+        // send the fields the user actually edited; the rest stay null.
+        public string? Id { get; set; }
+        public int? Season { get; set; }
+        public string? Status { get; set; }
+        public int Progress { get; set; }
+        public double? Score { get; set; }
+        public string? Notes { get; set; }
+        public int? RewatchCount { get; set; }
+        public string? StartedAt { get; set; }
+        public string? FinishedAt { get; set; }
+        // Optional service-override (integer value of AnimeService) — when set
+        // and the user has a healthy linked token for that service, the save
+        // routes through it instead of the primary. Used by the detail page
+        // for anime that have no mapping to the user's primary but live on a
+        // linked secondary (anilist:N viewed by an MAL-primary user with
+        // AniList linked).
+        public int? Service { get; set; }
+
+        // "movie" / "series" when the Manage Entry modal was opened from a
+        // Cinemeta video detail page — routes the save to Trakt (watchlist /
+        // history / ratings) instead of the anime-tracker dispatch. Null/empty
+        // for anime entries.
+        public string? Type { get; set; }
+    }
+
+    /// <summary>
+    /// Body for the Hide / Unhide toggle. The detail page stamps the display
+    /// fields (title / poster / media type) so they can be cached at hide time
+    /// and the Discover Hidden section renders without re-fetching the provider.
+    /// </summary>
+    public class HideEntryRequest
+    {
+        public string? Id { get; set; }
+        public string? Title { get; set; }
+        public string? ImageUrl { get; set; }
+        public string? MediaType { get; set; }
+    }
+}
+

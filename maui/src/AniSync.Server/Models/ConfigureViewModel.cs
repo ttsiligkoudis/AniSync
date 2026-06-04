@@ -1,0 +1,109 @@
+namespace AnimeList.Models
+{
+    /// <summary>
+    /// Strongly-typed payload for the configure page (Views/Home/Configure.cshtml). Wraps the
+    /// persisted <see cref="Configuration"/> alongside the per-request identity bits the
+    /// view needs to render the correct UI mode (login vs. configure, primary vs. linked
+    /// pills, install URL bytes, etc.). Everything here used to live as ViewBag entries —
+    /// this type just gives them a contract.
+    /// </summary>
+    public class ConfigureViewModel
+    {
+        /// <summary>
+        /// base64url v3 inline token bytes for anonymous installs. Mutually exclusive with
+        /// <see cref="ConfigUid"/>: exactly one of the two is non-empty for a logged-in user.
+        /// </summary>
+        public string TokenData { get; init; }
+
+        /// <summary>22-char base64url UID pointing at a row in the config store.</summary>
+        public string ConfigUid { get; init; }
+
+        /// <summary>
+        /// Cache-busting counter appended to the v5 install URL. Bumped on every SaveConfig
+        /// so Stremio refetches the manifest after a flag change.
+        /// </summary>
+        public long ConfigRevision { get; init; }
+
+        /// <summary>The user's primary provider — drives the login button and active pill.</summary>
+        public AnimeService AnimeService { get; init; } = AnimeService.Kitsu;
+
+        /// <summary>True for "Continue without account" installs (v3 inline token).</summary>
+        public bool AnonymousUser { get; init; }
+
+        /// <summary>
+        /// The user's selected media-type set (anime / movies / series), resolved
+        /// from the account setting or cookie. Drives which settings render —
+        /// e.g. the Preferences card's anime-only toggles only show when anime
+        /// is selected, and the card hides entirely when none apply.
+        /// </summary>
+        public List<MetaType> EnabledMediaTypes { get; init; } = new();
+
+        /// <summary>Linked secondary providers (multi-provider sync targets).</summary>
+        public List<LinkedToken> LinkedTokens { get; init; } = new();
+
+        /// <summary>
+        /// Per-user webhook bearer for Plex/Jellyfin/Emby scrobble ingestion. Lazily generated
+        /// the first time the user opens the configure page — null only for not-logged-in /
+        /// anonymous installs (where home-server sync doesn't apply anyway).
+        /// </summary>
+        public string ScrobbleToken { get; init; }
+
+        /// <summary>
+        /// Optional Plex Home username. When set, scrobble events from Plex whose
+        /// <c>Account.title</c> doesn't match are silently dropped — handles the shared-server
+        /// case where roommates' viewing should not scrobble onto this user's trackers.
+        /// </summary>
+        public string PlexUsername { get; init; }
+
+        /// <summary>
+        /// The user's configured Stremio stream addons (Torrentio /
+        /// MediaFusion / Comet / Jackettio / AIOStreams / …). The
+        /// Configure page renders this as a list with an Add input
+        /// at the bottom and a Remove button per row. Always non-null
+        /// — the controller hands the view an empty list when nothing
+        /// is configured.
+        /// </summary>
+        public List<StreamAddon> StreamAddons { get; init; } = new();
+
+        /// <summary>
+        /// Persisted toggle flags. Always non-null — the controller hands the view a
+        /// default-initialised instance when nothing is loaded yet.
+        /// </summary>
+        public Configuration Configuration { get; init; } = new();
+
+        // Derived helpers — keep these here rather than recomputing in the .cshtml so the
+        // view stays declarative.
+
+        public bool IsLoggedIn => !string.IsNullOrEmpty(TokenData) || !string.IsNullOrEmpty(ConfigUid);
+        public bool IsAnilist => AnimeService == AnimeService.Anilist;
+        public bool IsMal => AnimeService == AnimeService.MyAnimeList;
+        public bool IsTrakt => AnimeService == AnimeService.Trakt;
+        // Explicit now that Trakt is a provider — the old "anything-not-AniList/MAL"
+        // definition would have mislabelled a Trakt primary as Kitsu.
+        public bool IsKitsu => AnimeService == AnimeService.Kitsu;
+
+        /// <summary>Numeric service id consumed by the JS picker (matches the AnimeService enum order).</summary>
+        public int ServiceIndex => IsAnilist ? 1 : IsMal ? 2 : IsTrakt ? 3 : 0;
+
+        public string ServiceDisplay => IsAnilist ? "AniList" : IsMal ? "MyAnimeList" : IsTrakt ? "Trakt" : "Kitsu";
+
+        /// <summary>The user's preferred media type — drives the account page's provider list.</summary>
+        public MetaType PreferredMediaType => Configuration.preferredMediaType;
+
+        // hideManageEntry / disableAutoTrack are inverse-sense — flip them so the
+        // configure UI can render positive toggles ("Manage Entry on" / "Auto-track on").
+        // enableSeasonGrouping is already positive-sense (default OFF for new users),
+        // so it passes through unchanged.
+        public bool ShowManageEntry => !Configuration.hideManageEntry;
+        public bool AutoTrackProgress => !Configuration.disableAutoTrack;
+        public bool GroupSeasons => Configuration.enableSeasonGrouping;
+        public bool HideUnreleasedWatching => Configuration.hideUnreleasedFromWatching;
+        public bool ShowAdultContent => Configuration.showAdultContent;
+
+        public Dictionary<AnimeService, LinkedToken> LinkedByService =>
+            LinkedTokens.ToDictionary(t => t.Service, t => t);
+
+        /// <summary>True when at least one linked account is healthy (not flagged for re-auth).</summary>
+        public bool HasSwappableLinks => LinkedTokens.Any(t => !t.NeedsReauth);
+    }
+}

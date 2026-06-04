@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- net10 to match the Blazor heads. The source originally targeted net8 in the
+         standalone ASP.NET app; if any of the pinned package versions below don't
+         restore cleanly on net10, bump them in the build container (Swashbuckle is
+         the likely candidate). -->
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AnimeList</RootNamespace>
+
+    <!-- ASP.NET Core types (controllers, MVC, rate limiting, antiforgery, …) without
+         being an app. The Blazor Web head supplies the actual host/Program. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591;CS8618;CS8602;CS8603;CS8600;CS8625;CS8604;CS8601;CS8619;CS8621;CS8629</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="HtmlAgilityPack" Version="1.11.71" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.0.2" />
+    <PackageReference Include="WebPush" Version="1.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Bundled Fribb anime-lists snapshot, read by AnimeMappingService as the
+         deepest fallback. Copied so the maui solution is fully self-contained once
+         the ASP.NET app is removed. Refresh occasionally with:
+           curl -o data/anime-mappings-bundled.json \
+             https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json -->
+    <Content Include="data\anime-mappings-bundled.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>
