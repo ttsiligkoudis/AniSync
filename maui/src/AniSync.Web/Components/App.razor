@@ -12,6 +12,9 @@
     <link rel="stylesheet" href="AniSync.Web.styles.css" />
     <ImportMap />
     <link rel="icon" href="_content/AniSync.Client/favicon.ico" />
+    <!-- PWA: installable Web head (manifest + icons + conservative service worker). -->
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
     <HeadOutlet @rendermode="InteractiveServer" />
 </head>
 
@@ -21,6 +24,14 @@
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <!-- Shared shell behaviour (theme toggle, back button, mobile "More" sheet). -->
     <script src="_content/AniSync.Client/js/chrome.js"></script>
+    <script>
+        // Register the PWA service worker (network-first; safe across deploys).
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function () {
+                navigator.serviceWorker.register('/service-worker.js').catch(function () { /* ignore */ });
+            });
+        }
+    </script>
 </body>
 
 </html>

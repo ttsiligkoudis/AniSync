@@ -36,6 +36,7 @@ namespace AnimeList.Controllers
         private readonly IMalService _malService;
         private readonly ITmdbService _tmdbService;
         private readonly ICinemetaService _cinemetaService;
+        private readonly ITraktService _trakt;
         private readonly IAnimeMappingService _mappingService;
         private readonly IAnilistFallback _anilistFallback;
         private readonly IAniSkipService _aniSkipService;
@@ -51,6 +52,7 @@ namespace AnimeList.Controllers
             IMalService malService,
             ITmdbService tmdbService,
             ICinemetaService cinemetaService,
+            ITraktService trakt,
             IAnimeMappingService mappingService,
             IAnilistFallback anilistFallback,
             IAniSkipService aniSkipService,
@@ -65,6 +67,7 @@ namespace AnimeList.Controllers
             _malService = malService;
             _tmdbService = tmdbService;
             _cinemetaService = cinemetaService;
+            _trakt = trakt;
             _mappingService = mappingService;
             _anilistFallback = anilistFallback;
             _aniSkipService = aniSkipService;
@@ -528,6 +531,49 @@ namespace AnimeList.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "API Discover failed (kind={Kind}, service={Service}).", kind, service);
+                return StatusCode(500, new ApiError("discover failed"));
+            }
+        }
+
+        /// <summary>
+        /// Video (movie / series) discovery, Trakt-backed and hydrated via Cinemeta —
+        /// the JSON surface behind the client's Movies/Series Discover tabs. <paramref
+        /// name="mode"/> is trending|popular|anticipated. Anime is filtered out (it's
+        /// tracked on the AniList side). Falls back to Cinemeta's own catalog when
+        /// Trakt isn't configured. Mirrors HomeController.VideoShelfData.
+        /// </summary>
+        [HttpGet("discover/video/{type}/{mode}")]
+        [ProducesResponseType(typeof(MetaListResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> DiscoverVideo(string type, string mode, string skip = null, int limit = 30)
+        {
+            if (type != "movie" && type != "series")
+                return BadRequest(new ApiError("type must be movie|series"));
+            if (mode is not ("trending" or "popular" or "anticipated"))
+                return BadRequest(new ApiError("mode must be trending|popular|anticipated"));
+
+            try
+            {
+                var page = int.TryParse(skip, out var s) && limit > 0 ? (s / limit) + 1 : 1;
+                List<Meta> metas;
+                if (_trakt.IsConfigured)
+                {
+                    var items = await _trakt.GetDiscoveryAsync(uid: null, type, mode, genre: null, page: page, limit: limit);
+                    metas = items.ToVideoMetas();
+                }
+                else
+                {
+                    // Trakt unavailable: serve Cinemeta's own catalog (mode-agnostic).
+                    metas = (await _cinemetaService.GetVideoCatalogAsync(type)).Take(limit).ToList();
+                }
+
+                // Keep anime out of the movie / series catalogs — it lives on the anime side.
+                metas = await metas.ExcludeAnimeAsync(_mappingService);
+                return new JsonResult(new MetaListResponse(metas));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API DiscoverVideo failed (type={Type}, mode={Mode}).", type, mode);
                 return StatusCode(500, new ApiError("discover failed"));
             }
         }
