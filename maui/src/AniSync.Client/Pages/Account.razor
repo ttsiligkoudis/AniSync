@@ -168,12 +168,28 @@ else
             _dirty = false;
             // Stream-addon reorder rides on the same Save (the original folds it into
             // saveFlags() via saveStreamAddonOrderIfChanged). Persist the dragged order,
-            // then reload so the rendered list matches the store.
+            // then reload so the rendered list matches the store. A null result means the
+            // POST itself failed — keep the dragged order + the dirty bar (so the user can
+            // retry) and tell them, rather than silently reloading the old order back
+            // (which looked exactly like "reorder doesn't save").
             if (_pendingAddonOrder is { Length: > 0 } order)
             {
-                await Api.ReorderStreamAddonsAsync(order);
-                await ReloadAsync();
+                var reordered = await Api.ReorderStreamAddonsAsync(order);
+                if (reordered is null)
+                {
+                    _dirty = true;
+                    try { await JS.InvokeVoidAsync("alert", "Couldn't save the new addon order — try again."); } catch { }
+                }
+                else
+                {
+                    await ReloadAsync();
+                }
             }
+        }
+        else
+        {
+            // SaveFlags failed — keep the page dirty so the user can retry.
+            _dirty = true;
         }
         _saving = false;
     }
