@@ -50,11 +50,13 @@
     <div class="watch-player">
         @if (_playingUrl is not null && !Env.SupportsNativePlayback)
         {
-            @* Web head: HTML5 fallback (browser codec limits apply). The
-               Html5MediaPlayer attaches to this element by id to wire resume,
-               progress (mark-watched at 70%) and ended via JS interop. *@
-            <video id="watch-video" class="watch-player-video" controls src="@_playingUrl"
-                   style="width:100%;height:100%;background:#000;"></video>
+            @* Web head: the ArtPlayer engine mounts INTO this container (it
+               replaces the children with its own <video> + chrome). The
+               Html5MediaPlayer drives it by this id — wiring resume, progress
+               (mark-watched at 70%), ended, the stream-error fallback, the
+               embedded-MKV subtitle pipeline, and the ±10s / settings / fullscreen
+               controls — exactly as the original Watch.cshtml's #watchPlayer host. *@
+            <div id="watch-video" class="watch-player-video" style="width:100%;height:100%;background:#000;"></div>
         }
         else
         {
@@ -83,13 +85,38 @@
                 </span>
             </div>
         }
+        @* AniSkip corner button — C#-driven (OnProgress computes _activeSkip), but
+           given the original's id so watch-player.js can relocate it into
+           ArtPlayer's $player after init (so it stays visible in fullscreen-web). *@
         @if (_activeSkip is not null && _playingUrl is not null && !Env.SupportsNativePlayback)
         {
-            <button type="button" class="watch-skip-btn" @onclick="SkipCurrentAsync">
+            <button type="button" id="watchSkipButton" class="watch-skip-btn" @onclick="SkipCurrentAsync">
                 @(_activeSkip.Label) →
             </button>
         }
     </div>
+    @* Player toolbar (web head). The auto-skip toggle persists across episodes
+       (matches the original's localStorage anisync.autoSkip → here pref:autoskip in
+       C#); it shows only when AniSkip returned markers. The mobile embedded-subs
+       opt-in + the embedded-status pill + the subtitle chip are driven by
+       watch-player.js (the embedded-MKV pipeline writes to them) — a faithful port
+       of the .watch-player-toolbar in Watch.cshtml. *@
+    @if (!Env.SupportsNativePlayback && _playingUrl is not null)
+    {
+        <div class="watch-player-toolbar">
+            <button id="watchSkipAuto" class="watch-toggle @(_autoSkip ? "is-active" : "")" type="button"
+                    aria-pressed="@(_autoSkip ? "true" : "false")" hidden="@(!_hasSkipMarkers)" @onclick="ToggleAutoSkipAsync">
+                <span class="watch-toggle-dot" aria-hidden="true"></span>
+                <span>Auto-skip intro / outro</span>
+            </button>
+            <button id="watchEmbedMobileOptIn" class="watch-toggle" type="button" aria-pressed="false" hidden>
+                <span class="watch-toggle-dot" aria-hidden="true"></span>
+                <span>Try embedded subs on mobile</span>
+            </button>
+            <span id="watchEmbeddedStatus" class="watch-embed-status" hidden></span>
+            <span id="watchSubsProvider" class="watch-embed-status" hidden></span>
+        </div>
+    }
     @* Stream fallback panel — rendered by JS-surfaced video error / watchdog
        timeout / iOS-container fast-fail (web head only; the native LibVLCSharp
        head decodes everything). Per-reason copy + Retry + Open-externally, a
@@ -157,23 +184,10 @@
             </button>
         }
     </div>
-    @* Subtitle selector (web head only) — surfaced once a source is playing and
-       OpenSubtitles tracks loaded. Native head feeds subtitles straight to
-       LibVLCSharp, so no in-page selector there. *@
-    @if (!Env.SupportsNativePlayback && _subtitles.Count > 0 && _playingUrl is not null)
-    {
-        <label class="watch-sub-select-label">
-            <span>Subtitles</span>
-            <select class="watch-sub-select" @onchange="OnSubtitleChange">
-                <option value="-1" selected="@(_subtitleIndex < 0)">Off</option>
-                @for (var i = 0; i < _subtitles.Count; i++)
-                {
-                    var idx = i;
-                    <option value="@idx" selected="@(idx == _subtitleIndex)">@_subtitles[idx].Label</option>
-                }
-            </select>
-        </label>
-    }
+    @* No standalone subtitle <select> on the web head — the ArtPlayer engine owns
+       the subtitle picker inside its settings menu (None → embedded SSA → OS VTT),
+       exactly as the original Watch.cshtml. watch-player.js builds + refreshes that
+       selector as the embedded-MKV extraction surfaces tracks. *@
     <div class="watch-sources-body" id="watchSourcesBody">
         @if (_loadingSources)
         {
@@ -507,6 +521,10 @@
 
     // Display helpers driven by the capped/sorted list.
     private bool _showDebridHeader => _debrid.Count > 0 || _pendingAddons;
+
+    // True when AniSkip returned at least one OP/ED marker — gates the auto-skip
+    // toggle's visibility (the original hides it when there's nothing to act on).
+    private bool _hasSkipMarkers => _skipTimes is not null && (_skipTimes.Intro is not null || _skipTimes.Outro is not null);
 
     protected override async Task OnParametersSetAsync()
     {
@@ -1107,6 +1125,17 @@
             _pendingWebPlay = null;
             await Player.PlayAsync(req);
         }
+
+        // Wire the player toolbar (web head): relocate the C#-rendered AniSkip button
+        // into ArtPlayer's $player so it survives fullscreen, and reveal/wire the
+        // mobile embedded-subs opt-in when the network is in a skip-prone state. Run
+        // on every render while playing — the skip button appears/disappears with
+        // _activeSkip, so a single firstRender wiring would miss it. Idempotent JS.
+        if (!Env.SupportsNativePlayback && _playingUrl is not null)
+        {
+            try { await JS.InvokeVoidAsync("anisyncWatch.wireToolbar"); }
+            catch { /* best-effort — the button still works in its C# position */ }
+        }
     }
 
     private sealed class ClientFlags { public bool HevcRisky { get; set; } public bool IosSafari { get; set; } }
@@ -1127,9 +1156,10 @@
         if (!ReferenceEquals(prevActive, _activeSkip)) await InvokeAsync(StateHasChanged);
 
         // Paint the OP/ED bands once the player reports a real duration (the first
-        // timeupdate is the earliest reliable point; paintSkipRanges itself also
-        // reads video.duration as a fallback). Web head only; retried until painted.
-        if (!_skipRangesPainted && !Env.SupportsNativePlayback) await PaintSkipRangesAsync();
+        // timeupdate with a known duration is the earliest reliable point). Web head
+        // only; retried each tick until painted. The duration is threaded through so
+        // launch.js can convert seconds→% against ArtPlayer's progress bar.
+        if (!_skipRangesPainted && !Env.SupportsNativePlayback) await PaintSkipRangesAsync(durationSec);
 
         // Mark-watched at 70% (duration ≥ 60s guards against RD DMCA placeholders).
         if (durationSec >= 60 && positionSec >= durationSec * 0.70)
@@ -1151,11 +1181,18 @@
         await Store.SetAsync(ResumeKey, null);
         _playingUrl = null;
         _skipRangesPainted = false;
-        // Tear down the OP/ED band overlay so it doesn't linger over the empty
-        // state (web head; the strip is appended to the persistent .watch-player).
-        if (!Env.SupportsNativePlayback && _launch is not null)
+        // Tear down the ArtPlayer instance + the embedded-subtitle pipeline so it
+        // doesn't linger over the unmounted container (web head). StopAsync routes
+        // to anisyncWatch.stop (art.destroy + extraction abort + pill clear).
+        if (!Env.SupportsNativePlayback)
         {
-            try { await _launch.InvokeVoidAsync("clearSkipRanges", "watch-video"); } catch { /* best-effort */ }
+            await Player.StopAsync();
+            // Tear down the OP/ED band overlay too (the strip is appended to the
+            // persistent .watch-player, so it survives the container unmount).
+            if (_launch is not null)
+            {
+                try { await _launch.InvokeVoidAsync("clearSkipRanges", "watch-video"); } catch { /* best-effort */ }
+            }
         }
         await InvokeAsync(StateHasChanged);
     }
@@ -1218,13 +1255,13 @@
         await Player.SeekAsync(end + 1);
     }
 
-    private async Task OnSubtitleChange(ChangeEventArgs e)
+    // Toggle the persisted auto-skip preference (same boundary as the original's
+    // localStorage anisync.autoSkip — here pref:autoskip via ISecureStore so it
+    // survives across episodes/launches). The next OnProgress tick acts on it.
+    private async Task ToggleAutoSkipAsync()
     {
-        if (int.TryParse(e.Value?.ToString(), out var idx))
-        {
-            _subtitleIndex = idx;
-            try { await JS.InvokeVoidAsync("anisyncWatch.setSubtitle", idx); } catch { /* best-effort */ }
-        }
+        _autoSkip = !_autoSkip;
+        await Store.SetAsync("pref:autoskip", _autoSkip ? "1" : "0");
     }
 
     // ── Provider filter + last-played + refresh ─────────────────────────────────
@@ -1328,16 +1365,20 @@
     // Repaint the AniSkip OP/ED bands over the player progress strip from the
     // bootstrap skipTimes. Port of paintSkipRanges (web head only — the native
     // player draws its own timeline). Retried from OnProgress until duration is
-    // known (the bands need seconds→% conversion).
-    private async Task PaintSkipRangesAsync()
+    // known (the bands need seconds→% conversion). The live duration is threaded
+    // through from OnProgress because #watch-video is ArtPlayer's container <div>
+    // (not a <video>), so watch-launch.js can't read .duration off it directly —
+    // launch.js retargets the band paint onto ArtPlayer's .art-control-progress.
+    private async Task PaintSkipRangesAsync(double durationSec = 0)
     {
         if (Env.SupportsNativePlayback || _playingUrl is null || _skipTimes is null) return;
         if (_skipTimes.Intro is null && _skipTimes.Outro is null) return;
+        if (!(durationSec > 0)) return; // wait for a real duration before converting seconds→%
         try
         {
             object? Band(EpisodeSkipMarkerDto? m) => m is null ? null : new { start = m.Start, end = m.End };
             var painted = await (await LaunchModuleAsync()).InvokeAsync<bool>(
-                "paintSkipRanges", "watch-video", Band(_skipTimes.Intro), Band(_skipTimes.Outro), 0d);
+                "paintSkipRanges", "watch-video", Band(_skipTimes.Intro), Band(_skipTimes.Outro), durationSec);
             if (painted) _skipRangesPainted = true;
         }
         catch { /* best-effort — the corner Skip button still works without the paint */ }

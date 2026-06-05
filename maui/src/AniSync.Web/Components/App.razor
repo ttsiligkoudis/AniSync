@@ -24,7 +24,15 @@
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <!-- Shared shell behaviour (theme toggle, back button, mobile "More" sheet). -->
     <script src="_content/AniSync.Client/js/chrome.js"></script>
-    <!-- Web-head HTML5 <video> driver (resume / progress / ended interop). -->
+    <!-- ArtPlayer engine (web head). `defer` keeps it off the render-blocking
+         path; `new Artplayer` only runs inside anisyncWatch.play on a source-row
+         click, long after a deferred script has executed, so window.Artplayer is
+         guaranteed defined by first interaction. ArtPlayer ships its CSS embedded
+         in the bundle, so there's no separate stylesheet to wire in. -->
+    <script src="https://unpkg.com/artplayer@5/dist/artplayer.js" defer></script>
+    <!-- Web-head player driver: ArtPlayer mount + embedded-MKV subtitle pipeline,
+         driving art.video behind the IMediaPlayer contract (resume / progress /
+         ended / stream-event interop). -->
     <script src="js/watch-player.js"></script>
     <!-- Web Push opt-in interop (subscribe / unsubscribe). -->
     <script src="js/push.js"></script>
