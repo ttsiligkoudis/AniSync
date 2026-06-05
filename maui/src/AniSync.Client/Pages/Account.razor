@@ -2,63 +2,99 @@
 @inject IAniSyncApi Api
 @inject AppState State
 @inject ISecureStore Store
+@inject IAppEnvironment Env
 @inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IAsyncDisposable
 
-@* Account-focused settings — Blazor port of Configure.cshtml (/account). Identity +
-   linked accounts (shared AccountSection component); catalogs, streams, preferences
-   and the install URL live on /configure, advanced actions on /advanced. *@
+@* Account — Blazor port of Configure.cshtml (page title "Account"). Identity
+   (provider picker + connected/disconnect), linked accounts, the Streams modal,
+   anime Preferences, and links out to the Stremio-addon and Advanced surfaces.
+   When no stored config is present the page shows the login surface (provider
+   picker + Kitsu form / OAuth dispatch) instead of bouncing away. The page owns
+   the three flag bytes (ConfigFlags), dirty tracking and Save (Api.SaveFlagsAsync),
+   mirroring Configure.razor.
+
+   Markup matches the original: the cards are top-level so they become direct flex
+   children of the layout's <main> (gap: var(--space-5)); the page sets
+   body.config-page (the original's ViewData["BodyClass"]) so the fixed save bar
+   clears the last card. No extra .container wrapper — the layout already provides
+   one. *@
 
 <PageTitle>Account · AniSync</PageTitle>
 
-<section class="config-page">
-    <header class="page-header">
-        <h1 class="page-title">Account</h1>
-        <p class="page-subtitle">Provider · linked accounts</p>
-    </header>
+<header class="page-header">
+    <h1 class="page-title">Account</h1>
+    <p class="page-subtitle">Provider · linked accounts</p>
+</header>
 
-    @if (_loading)
+@if (_loading)
+{
+    <p class="hint-text">Loading account…</p>
+}
+else
+{
+    <AccountSection Config="_config" OnReload="ReloadAsync"
+                    Available="_available" SelectedService="@_selectedService"
+                    SelectedServiceChanged="s => _selectedService = s" />
+
+    @if (_config is not null)
     {
-        <p class="hint-text">Loading account…</p>
-    }
-    else if (_config is null)
-    {
+        <LinkedAccountsSection Config="_config" OnReload="ReloadAsync" />
+
+        <StreamsModal Flags="_flags" Config="_config" OnDirty="MarkDirty" OnReload="ReloadAsync" />
+
+        <PreferencesSection Flags="_flags" AnimeEnabled="AnimeEnabled" OnDirty="MarkDirty" />
+
+        <!-- Quick links to the other config surfaces (mirrors /configure's footer row) -->
         <section class="section-card">
-            <p class="hint-text">This device is connected with an inline (no-account) config. <a href="/login">Sign in</a> with a tracker to manage your account.</p>
+            <div class="btn-action-row">
+                <a class="btn-ghost" href="/configure">Stremio addon &amp; install URL</a>
+                <a class="btn-ghost" href="/advanced">Advanced (sync · backups · danger zone)</a>
+            </div>
         </section>
     }
     else
     {
-        <AccountSection Config="_config" OnReload="ReloadAsync" />
-
-        <section class="section-card">
-            <span class="section-title">Stremio addon</span>
-            <p class="section-description">
-                Pick which catalogs and streams the AniSync addon exposes to Stremio,
-                grab the install URL — all on a dedicated page so this one stays focused
-                on your account.
-            </p>
-            <a class="btn-primary-action btn-login" href="/configure">Configure Stremio addon →</a>
-        </section>
-
-        <section class="section-card">
-            <span class="section-title">Advanced</span>
-            <p class="section-description">
-                Export or import a backup, configure Plex / Jellyfin / Emby scrobble,
-                or reset / delete your configuration.
-            </p>
-            <a class="btn-primary-action btn-login" href="/advanced">Open advanced settings →</a>
-        </section>
+        <LoginSection SelectedService="@_selectedService" ReturnUrl="/" AllowAnonymous="false" />
     }
-</section>
+}
+
+@if (_config is not null && !string.IsNullOrEmpty(_config.ApiConfig))
+{
+    <FloatingSaveBar Dirty="_dirty" Saving="_saving" OnSave="SaveAsync" />
+}
 
 @code {
     private bool _loading = true;
     private ConfigStateDto? _config;
+    private ConfigFlags _flags = new();
+    private byte _savedF1, _savedF2, _savedF3;
+    private bool _dirty;
+    private bool _saving;
+
+    // Pre-login provider picker. Mirrors _AccountSection: with anime enabled (the
+    // default until the chooser modal lands) the picker offers all three anime
+    // trackers plus Trakt — the original does NOT hide providers by host config.
+    private static readonly List<(string Key, string Display)> _available = new()
+    {
+        ("Kitsu", "Kitsu"),
+        ("Anilist", "AniList"),
+        ("MyAnimeList", "MyAnimeList"),
+        ("Trakt", "Trakt"),
+    };
+    private string _selectedService = "Kitsu";
+
+    private IJSObjectReference? _js;
+
+    private bool AnimeEnabled => _config?.EnabledMediaTypes.Count is null or 0
+        || _config!.EnabledMediaTypes.Contains("anime", StringComparer.OrdinalIgnoreCase);
 
     protected override async Task OnInitializedAsync()
     {
         // localStorage (the credential) is unreadable during prerender — wait for
-        // interactive so a logged-in user isn't bounced to /login. Re-runs interactively.
+        // interactive so a logged-in user isn't shown the logged-out surface.
+        // Re-runs interactively.
         if (!RendererInfo.IsInteractive) return;
 
         if (string.IsNullOrEmpty(State.StreamConfig))
@@ -66,11 +102,67 @@
             var saved = await Store.GetAsync(ISecureStore.ConfigKey);
             if (!string.IsNullOrEmpty(saved)) State.SetStreamConfig(saved);
         }
-        if (string.IsNullOrEmpty(State.StreamConfig)) { Nav.NavigateTo("/login"); return; }
 
-        await ReloadAsync();
+        if (!string.IsNullOrEmpty(State.StreamConfig))
+        {
+            await ReloadAsync();
+        }
+
         _loading = false;
     }
 
-    private async Task ReloadAsync() => _config = await Api.GetConfigAsync();
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // body.config-page (original's ViewData["BodyClass"]) → main padding clears
+        // the fixed save bar. OnAfterRenderAsync only runs interactively, so JS is live.
+        if (!firstRender) return;
+        try
+        {
+            _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/configure.js");
+            await _js.InvokeVoidAsync("setConfigPage", true);
+        }
+        catch { /* prerender / no JS */ }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _config = await Api.GetConfigAsync();
+        if (_config is not null)
+        {
+            _flags = ConfigFlags.Decode(_config.Flags1, _config.Flags2, _config.Flags3);
+            (_savedF1, _savedF2, _savedF3) = (_config.Flags1, _config.Flags2, _config.Flags3);
+            _dirty = false;
+        }
+    }
+
+    private void MarkDirty()
+    {
+        var (f1, f2, f3) = _flags.Encode();
+        _dirty = f1 != _savedF1 || f2 != _savedF2 || f3 != _savedF3;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_config is null) return;
+        _saving = true;
+        var (f1, f2, f3) = _flags.Encode();
+        var result = await Api.SaveFlagsAsync(f1, f2, f3);
+        if (result is not null)
+        {
+            (_savedF1, _savedF2, _savedF3) = (f1, f2, f3);
+            _config.Revision = result.Revision;
+            if (!string.IsNullOrEmpty(result.InstallConfig)) _config.InstallConfig = result.InstallConfig;
+            _dirty = false;
+        }
+        _saving = false;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_js is not null)
+        {
+            try { await _js.InvokeVoidAsync("setConfigPage", false); } catch { }
+            try { await _js.DisposeAsync(); } catch { }
+        }
+    }
 }

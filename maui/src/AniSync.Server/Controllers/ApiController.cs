@@ -4,6 +4,7 @@ using AnimeList.Services.Extensions;
 using AnimeList.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json.Linq;
 
 namespace AnimeList.Controllers
@@ -45,6 +46,16 @@ namespace AnimeList.Controllers
         private readonly ITokenService _tokenService;
         private readonly IConfigStore _configStore;
         private readonly ILogger<ApiController> _logger;
+
+        // Shared, short-TTL cache for the public (non-user-specific) discover lists —
+        // trending / popular / seasonal / airing (anime) and trending / popular /
+        // anticipated (movies / series). The thin-client dashboard fetches ~10 shelves
+        // per load and refreshes re-fire them all; without this, every refresh re-hit
+        // the upstream providers (AniList / Cinemeta / Trakt) and could empty the page.
+        private static readonly IMemoryCache _discoverCache = new MemoryCache(new MemoryCacheOptions());
+        // 1 day — these dashboard lists barely move. (The original used 6h for
+        // trending/popular and 24h for seasonal; a flat day was requested here.)
+        private static readonly TimeSpan _discoverTtl = TimeSpan.FromHours(24);
 
         public ApiController(
             IAnilistService anilistService,
@@ -505,7 +516,7 @@ namespace AnimeList.Controllers
         [ProducesResponseType(typeof(MetaListResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> Discover(string kind, AnimeService service = AnimeService.Anilist,
-            string skip = null, string genre = null, string sort = null)
+            string skip = null, string genre = null, string sort = null, string season = null, string search = null)
         {
             var hideAdult = await ResolveHideAdultAsync();
             try
@@ -520,12 +531,46 @@ namespace AnimeList.Controllers
                 };
                 if (!listType.HasValue) return BadRequest(new ApiError("kind must be trending|popular|seasonal|airing"));
 
+                // A search term is a global relevance query across the whole catalog — it
+                // ignores the tab's list type (mirrors the web Discover filter bar, which
+                // routes search through ListType.Search regardless of the active tab).
+                var hasSearch = !string.IsNullOrWhiteSpace(search);
+                var listForCall = hasSearch ? ListType.Search : listType.Value;
+
+                // Only the FIRST page feeds the dashboard tiles — cache that, keyed on the
+                // list type (NOT the page), and only when non-empty. Deep pagination (the
+                // Discover page's infinite scroll) is served live, never cached. Search is
+                // never cached (varied + relevance-ranked); season is folded into the key so
+                // two Seasonal windows ("Spring 2026" vs "Winter 2026") can't collide.
+                // Mirrors the original's dashboard-shelf cache.
+                var isFirstPage = string.IsNullOrEmpty(skip) || skip == "0";
+                var cacheKey = $"discover:{kind?.ToLowerInvariant()}:{service}:{genre}:{season}:{sort}:{hideAdult}";
+                if (!hasSearch && isFirstPage && _discoverCache.TryGetValue(cacheKey, out List<Meta> cached) && cached is { Count: > 0 })
+                    return new JsonResult(new MetaListResponse(cached));
+
                 var metas = service switch
                 {
-                    AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, listType.Value, skip, genre: genre, sort: sort, hideAdult: hideAdult),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, listType.Value, skip, genre: genre, sort: sort, hideAdult: hideAdult),
-                    _ => await _anilistService.GetAnimeListAsync(null, listType.Value, skip, genre: genre, sort: sort, hideAdult: hideAdult),
+                    AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, listForCall, skip, genre: genre, search: search, sort: sort, season: season, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, listForCall, skip, genre: genre, search: search, sort: sort, season: season, hideAdult: hideAdult),
+                    _ => await _anilistService.GetAnimeListAsync(null, listForCall, skip, genre: genre, search: search, sort: sort, season: season, hideAdult: hideAdult),
                 };
+
+                // Relevance re-rank for search — the same 0.4 Jaccard threshold the web
+                // Discover filter bar and the /match endpoint apply, so the grid leads with
+                // the best title matches and drops weak ones.
+                if (hasSearch && metas is { Count: > 0 })
+                {
+                    var normalised = NormalizeTitle(search);
+                    metas = metas
+                        .Select(m => (meta: m, score: ScoreMatch(normalised, m.name)))
+                        .Where(x => x.score >= 0.4)
+                        .OrderByDescending(x => x.score)
+                        .Select(x => x.meta)
+                        .ToList();
+                }
+
+                if (!hasSearch && isFirstPage && metas is { Count: > 0 })
+                    _discoverCache.Set(cacheKey, metas, _discoverTtl);
                 return new JsonResult(new MetaListResponse(metas));
             }
             catch (Exception ex)
@@ -545,30 +590,67 @@ namespace AnimeList.Controllers
         [HttpGet("discover/video/{type}/{mode}")]
         [ProducesResponseType(typeof(MetaListResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> DiscoverVideo(string type, string mode, string skip = null, int limit = 30)
+        public async Task<IActionResult> DiscoverVideo(string type, string mode, string skip = null, int limit = 30,
+            string genre = null, string search = null)
         {
             if (type != "movie" && type != "series")
                 return BadRequest(new ApiError("type must be movie|series"));
-            if (mode is not ("trending" or "popular" or "anticipated"))
-                return BadRequest(new ApiError("mode must be trending|popular|anticipated"));
+            // watched + recommended are the extra Trakt feeds the web Discover video strip
+            // exposes ("Most Watched" / "For You"); recommended is per-user (Trakt connected).
+            if (mode is not ("trending" or "popular" or "anticipated" or "watched" or "recommended"))
+                return BadRequest(new ApiError("mode must be trending|popular|anticipated|watched|recommended"));
 
             try
             {
-                var page = int.TryParse(skip, out var s) && limit > 0 ? (s / limit) + 1 : 1;
+                var hasSearch = !string.IsNullOrWhiteSpace(search);
+                var hasGenre = !string.IsNullOrWhiteSpace(genre);
+                // Only the bare mode browse feeds the dashboard tiles / caches; a genre or
+                // search filter is varied, so those bypass the first-page cache and serve live.
+                var cacheable = !hasSearch && !hasGenre;
+                var isFirstPage = string.IsNullOrEmpty(skip) || skip == "0";
+                var cacheKey = $"discvideo:{type}:{mode}:{limit}";
+                if (cacheable && isFirstPage && _discoverCache.TryGetValue(cacheKey, out List<Meta> cachedVideo) && cachedVideo is { Count: > 0 })
+                    return new JsonResult(new MetaListResponse(cachedVideo));
+
                 List<Meta> metas;
-                if (_trakt.IsConfigured)
+                if (hasSearch)
                 {
-                    var items = await _trakt.GetDiscoveryAsync(uid: null, type, mode, genre: null, page: page, limit: limit);
-                    metas = items.ToVideoMetas();
+                    // Cinemeta relevance search (genre-narrowed when set) — mirrors the web
+                    // Discover video filter bar.
+                    metas = (await _cinemetaService.GetVideoCatalogAsync(type, hasGenre ? genre : null, search.Trim())).Take(limit).ToList();
                 }
                 else
                 {
-                    // Trakt unavailable: serve Cinemeta's own catalog (mode-agnostic).
-                    metas = (await _cinemetaService.GetVideoCatalogAsync(type)).Take(limit).ToList();
+                    var page = int.TryParse(skip, out var s) && limit > 0 ? (s / limit) + 1 : 1;
+                    // "For You" is per-user — resolve the caller's uid from the config header;
+                    // the other Trakt feeds (trending / popular / anticipated / watched) are public.
+                    string uid = null;
+                    if (mode == "recommended")
+                    {
+                        var (_, resolvedUid) = await _tokenService.ResolveCurrentAsync(_configStore);
+                        uid = resolvedUid;
+                    }
+                    if (_trakt.IsConfigured && !(mode == "recommended" && string.IsNullOrEmpty(uid)))
+                    {
+                        var items = await _trakt.GetDiscoveryAsync(uid, type, mode, hasGenre ? genre : null, page, limit);
+                        metas = items.ToVideoMetas();
+                    }
+                    else if (_trakt.IsConfigured)
+                    {
+                        // recommended requested without a connected user → empty (the paginator stops).
+                        metas = new List<Meta>();
+                    }
+                    else
+                    {
+                        // Trakt unavailable: serve Cinemeta's own catalog (mode-agnostic), genre-narrowed.
+                        var skipN = int.TryParse(skip, out var sk) && sk > 0 ? sk : 0;
+                        metas = (await _cinemetaService.GetVideoCatalogAsync(type, hasGenre ? genre : null, search: null, skip: skipN)).Take(limit).ToList();
+                    }
                 }
-
                 // Keep anime out of the movie / series catalogs — it lives on the anime side.
                 metas = await metas.ExcludeAnimeAsync(_mappingService);
+                if (cacheable && isFirstPage && metas is { Count: > 0 })
+                    _discoverCache.Set(cacheKey, metas, _discoverTtl);
                 return new JsonResult(new MetaListResponse(metas));
             }
             catch (Exception ex)
@@ -576,6 +658,42 @@ namespace AnimeList.Controllers
                 _logger.LogError(ex, "API DiscoverVideo failed (type={Type}, mode={Mode}).", type, mode);
                 return StatusCode(500, new ApiError("discover failed"));
             }
+        }
+
+        /// <summary>
+        /// The movies / series Discover mode pills the thin client should render, computed
+        /// exactly like the MVC DiscoverController.VideoBrowseAsync: Popular always; the
+        /// Trakt feeds (Trending / Anticipated / Most Watched) only when Trakt is configured;
+        /// "For You" only when the caller's config has Trakt connected. Server-authoritative
+        /// so the client doesn't have to reconstruct the gating. Both the video Discover
+        /// surface and the Actors browse render this set.
+        /// </summary>
+        [HttpGet("discover/video-modes")]
+        [ProducesResponseType(typeof(VideoModesResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> VideoModes()
+        {
+            var connected = false;
+            try
+            {
+                var (_, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+                if (!string.IsNullOrEmpty(uid))
+                {
+                    var traktToken = await _configStore.GetTraktTokenAsync(uid);
+                    connected = traktToken?.Connected == true;
+                }
+            }
+            catch { /* anonymous / unresolved → not connected */ }
+
+            var modes = new List<VideoModeDto>();
+            if (_trakt.IsConfigured) modes.Add(new VideoModeDto("trending", "Trending"));
+            modes.Add(new VideoModeDto("popular", "Popular"));
+            if (_trakt.IsConfigured)
+            {
+                modes.Add(new VideoModeDto("anticipated", "Anticipated"));
+                modes.Add(new VideoModeDto("watched", "Most Watched"));
+                if (connected) modes.Add(new VideoModeDto("recommended", "For You"));
+            }
+            return new JsonResult(new VideoModesResponse(modes));
         }
 
         /// <summary>
@@ -989,17 +1107,20 @@ namespace AnimeList.Controllers
         /// </summary>
         [HttpGet("studios")]
         [ProducesResponseType(typeof(StudiosListResponse), StatusCodes.Status200OK)]
-        public async Task<IActionResult> Studios(int page = 1)
+        public async Task<IActionResult> Studios(int page = 1, string search = null)
         {
             if (page < 1) page = 1;
             try
             {
-                var (studios, hasNext) = await _anilistFallback.GetStudiosListAsync(page);
+                // search narrows the studio directory server-side (AniList has hundreds, so a
+                // client-side filter would only catch already-loaded tiles) — mirrors the web
+                // Studios browse search; the paginator forwards the term on later pages.
+                var (studios, hasNext) = await _anilistFallback.GetStudiosListAsync(page, search);
                 return new JsonResult(new StudiosListResponse(studios ?? [], hasNext));
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "API Studios failed (page={Page}).", page);
+                _logger.LogError(ex, "API Studios failed (page={Page}, search={Search}).", page, search);
                 return StatusCode(500, new ApiError("lookup failed"));
             }
         }

@@ -1,0 +1,64 @@
+@* Preferences card — Blazor port of _PreferencesSection.cshtml. Anime-only
+   toggles (Hide unaired / Group seasons / Show 18+); the whole card only renders
+   when anime is one of the user's enabled media types. hideUnreleasedWatching is
+   additionally hidden for anonymous users — but the account surface only renders
+   for a uid-backed (non-anonymous) config, so it always shows here. Toggle changes
+   mutate the shared ConfigFlags and mark the page dirty. *@
+
+@if (AnimeEnabled)
+{
+    <section class="section-card">
+        <span class="section-title">Preferences</span>
+        <p class="section-description">
+            General display preferences that apply across the site and the Stremio addon.
+        </p>
+
+        <div class="streams-grid">
+            <div class="stream-option">
+                <div class="option-name-wrap">
+                    <span class="option-name">Hide unaired anime from Watching</span>
+                    <span class="option-name-sub">When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="hideUnreleasedWatching" checked="@Flags.HideUnreleasedFromWatching"
+                           @onchange="e => Set(v => Flags.HideUnreleasedFromWatching = v, (bool)e.Value!)" />
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="stream-option">
+                <div class="option-name-wrap">
+                    <span class="option-name">Group anime seasons</span>
+                    <span class="option-name-sub">Collapse multi-cour franchises into a single card across the site and the Stremio addon. Off shows every cour separately.</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="groupSeasons" checked="@Flags.EnableSeasonGrouping"
+                           @onchange="e => Set(v => Flags.EnableSeasonGrouping = v, (bool)e.Value!)" />
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="stream-option">
+                <div class="option-name-wrap">
+                    <span class="option-name">Show 18+ anime content</span>
+                    <span class="option-name-sub">Off (default) hides hentai / R18 entries from Discover, Library, and the Stremio addon catalogs. Direct anime URLs still work either way — this only affects what shows up in the grid.</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="showAdultContent" checked="@Flags.ShowAdultContent"
+                           @onchange="e => Set(v => Flags.ShowAdultContent = v, (bool)e.Value!)" />
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public ConfigFlags Flags { get; set; } = new();
+    [Parameter] public bool AnimeEnabled { get; set; }
+    [Parameter] public EventCallback OnDirty { get; set; }
+
+    private async Task Set(Action<bool> apply, bool value)
+    {
+        apply(value);
+        await OnDirty.InvokeAsync();
+    }
+}

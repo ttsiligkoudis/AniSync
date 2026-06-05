@@ -16,11 +16,10 @@
 
 <PageTitle>Stremio addon · AniSync</PageTitle>
 
-<section class="config-page">
-    <header class="page-header">
-        <h1 class="page-title">Stremio addon</h1>
-        <p class="page-subtitle">Catalogs · streams · install URL</p>
-    </header>
+<header class="page-header">
+    <h1 class="page-title">Stremio addon</h1>
+    <p class="page-subtitle">Catalogs · streams · install URL</p>
+</header>
 
     @if (_loading)
     {
@@ -38,6 +37,7 @@
     else
     {
         <AccountSection Config="_config" OnReload="ReloadAsync" />
+        <LinkedAccountsSection Config="_config" OnReload="ReloadAsync" ReturnUrl="/configure" />
 
         <!-- ─── CATALOGS ─── -->
         <section class="section-card">
@@ -192,17 +192,6 @@
                 <button class="btn-ghost btn-ghost-sm" type="button" style="white-space:nowrap;"
                         disabled="@_addonBusy" @onclick="AddAddonAsync">@(_addonBusy ? "Adding…" : "Add")</button>
             </div>
-            <p class="option-name-sub" style="margin-top:0.5rem;">
-                Already have a configured manifest URL? Paste any Stremio
-                stream-addon manifest — Torrentio
-                (<a href="https://torrentio.strem.fun" target="_blank" rel="noopener">torrentio.strem.fun</a>),
-                MediaFusion (<a href="https://mediafusion.elfhosted.com" target="_blank" rel="noopener">mediafusion.elfhosted.com</a>),
-                Comet (<a href="https://comet.feels.legal/configure" target="_blank" rel="noopener">comet.feels.legal</a>),
-                Jackettio, or
-                <a href="https://aiostreams.elfhosted.com" target="_blank" rel="noopener">AIOStreams</a>
-                (one URL that bundles many addons). Episode lookups fan out across every entry in
-                this list, with duplicates merged by torrent hash.
-            </p>
             @if (!string.IsNullOrEmpty(_addonStatus))
             {
                 <p class="option-name-sub">@_addonStatus</p>
@@ -219,7 +208,7 @@
                     <div class="stream-option">
                         <div class="option-name-wrap">
                             <span class="option-name">Hide unaired anime from Watching</span>
-                            <span class="option-name-sub">When on, entries that haven't aired yet are filtered out of your Currently Watching list (site + Stremio). Off shows everything in the list as-is.</span>
+                            <span class="option-name-sub">Filter not-yet-aired entries out of your Currently Watching list.</span>
                         </div>
                         <label class="switch">
                             <input type="checkbox" checked="@_flags.HideUnreleasedFromWatching" @onchange="e => { _flags.HideUnreleasedFromWatching = (bool)e.Value!; MarkDirty(); }" />
@@ -229,7 +218,7 @@
                     <div class="stream-option">
                         <div class="option-name-wrap">
                             <span class="option-name">Group anime seasons</span>
-                            <span class="option-name-sub">Collapse multi-cour franchises into a single card across the site and the Stremio addon. Off shows every cour separately.</span>
+                            <span class="option-name-sub">Collapse multi-cour franchises into a single card.</span>
                         </div>
                         <label class="switch">
                             <input type="checkbox" checked="@_flags.EnableSeasonGrouping" @onchange="e => { _flags.EnableSeasonGrouping = (bool)e.Value!; MarkDirty(); }" />
@@ -239,7 +228,7 @@
                     <div class="stream-option">
                         <div class="option-name-wrap">
                             <span class="option-name">Show 18+ anime content</span>
-                            <span class="option-name-sub">Off (default) hides hentai / R18 entries from Discover, Library, and the Stremio addon catalogs. Direct anime URLs still work either way — this only affects what shows up in the grid.</span>
+                            <span class="option-name-sub">Off (default) hides hentai / R18 entries from Discover, Library, and the catalogs.</span>
                         </div>
                         <label class="switch">
                             <input type="checkbox" checked="@_flags.ShowAdultContent" @onchange="e => { _flags.ShowAdultContent = (bool)e.Value!; MarkDirty(); }" />
@@ -254,9 +243,8 @@
         <section class="section-card">
             <span class="section-title">Installation Options</span>
             <p class="section-description">
-                Install AniSync using your preferred method. The install URL updates automatically
-                when you change the toggles above — Stremio caches manifests, so a fresh install
-                is needed to pick up changes.
+                The install URL updates automatically when you change the toggles above — Stremio caches
+                manifests, so a fresh install is needed to pick up changes.
             </p>
             <div class="install-inner-card">
                 <div class="install-header">
@@ -287,15 +275,17 @@
             </div>
         </section>
 
+        <!-- Quick links to the other config surfaces -->
+        <section class="section-card">
+            <div class="btn-action-row">
+                <a class="btn-ghost" href="/account">Account &amp; linked accounts</a>
+                <a class="btn-ghost" href="/advanced">Advanced (sync · backups · danger zone)</a>
+            </div>
+        </section>
+
         <!-- ─── FLOATING SAVE BAR ─── -->
-        <div class="floating-save-bar" aria-live="polite" role="status">
-            <span class="floating-save-status">@(_dirty ? "Unsaved changes" : "All changes saved")</span>
-            <button class="floating-save-btn" type="button" disabled="@_saving" @onclick="SaveAsync">
-                @(_saving ? "Saving…" : "Save")
-            </button>
-        </div>
+        <FloatingSaveBar Dirty="_dirty" Saving="_saving" OnSave="SaveAsync" />
     }
-</section>
 
 @code {
     private bool _loading = true;
@@ -380,6 +370,19 @@
         _debridProvider = _catalog.Providers.FirstOrDefault()?.Id ?? "";
         foreach (var a in _catalog.Addons) _debridAddons.Add(a.Id!);
         _loading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // body.config-page (original's ViewData["BodyClass"]) → main padding clears
+        // the fixed save bar. OnAfterRenderAsync only runs interactively.
+        if (!firstRender) return;
+        try
+        {
+            _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/configure.js");
+            await _js.InvokeVoidAsync("setConfigPage", true);
+        }
+        catch { /* prerender / no JS */ }
     }
 
     private async Task ReloadAsync()
@@ -512,6 +515,10 @@
 
     public async ValueTask DisposeAsync()
     {
-        if (_js is not null) { try { await _js.DisposeAsync(); } catch { } }
+        if (_js is not null)
+        {
+            try { await _js.InvokeVoidAsync("setConfigPage", false); } catch { }
+            try { await _js.DisposeAsync(); } catch { }
+        }
     }
 }

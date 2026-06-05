@@ -1,0 +1,103 @@
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@* Streams entry point — Blazor port of _StreamsModal.cshtml. A compact card whose
+   button opens a modal holding the full shared StreamsSection (toggles + debrid /
+   stream-addon manager). Gated on a uid-backed install (the toggles + addon list
+   persist by uid). Open/close is Blazor state; the body-class + Escape key are
+   handled by the configure.js interop. The "#streams" hash deep-link auto-opens the
+   modal on first interactive render, matching the original inline script. *@
+
+@if (Config is not null && !string.IsNullOrEmpty(Config.ApiConfig))
+{
+    <section class="section-card">
+        <span class="section-title">Streams</span>
+        <p class="section-description">
+            Sources surfaced on the in-app episode picker — debrid keys, stream
+            addons and external services.
+        </p>
+        <div class="btn-action-row">
+            <button type="button" class="dash-customize-btn" data-streams-modal-open @onclick="OpenAsync">
+                <span>Manage stream sources</span>
+            </button>
+        </div>
+    </section>
+
+    <div class="streams-modal-backdrop" data-streams-modal-backdrop hidden="@(!_open)" @onclick="CloseAsync"></div>
+    <div class="streams-modal" data-streams-modal role="dialog" aria-modal="true" aria-label="Streams" hidden="@(!_open)">
+        <div class="streams-modal-card">
+            <button type="button" class="streams-modal-close" aria-label="Close" data-streams-modal-close @onclick="CloseAsync">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+            <div class="streams-modal-body">
+                <StreamsSection IsStremio="false" Flags="Flags" Config="Config" OnDirty="OnDirty" OnReload="OnReload" />
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public ConfigFlags Flags { get; set; } = new();
+    [Parameter] public ConfigStateDto? Config { get; set; }
+    [Parameter] public EventCallback OnDirty { get; set; }
+    [Parameter] public EventCallback OnReload { get; set; }
+
+    private bool _open;
+    private IJSObjectReference? _js;
+    private DotNetObjectReference<StreamsModal>? _selfRef;
+    private bool _hashChecked;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Deep link: the "Set up streaming" nudge points at /account#streams, so open
+        // the modal straight away when we land on that hash (original inline script).
+        if (_hashChecked || Config is null || string.IsNullOrEmpty(Config.ApiConfig)) return;
+        if (!RendererInfo.IsInteractive) return;
+        _hashChecked = true;
+        try
+        {
+            _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/configure.js");
+            if (await _js.InvokeAsync<bool>("hasStreamsHash")) await OpenAsync();
+        }
+        catch { /* prerender / no JS */ }
+    }
+
+    private async Task OpenAsync()
+    {
+        _open = true;
+        try
+        {
+            _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/configure.js");
+            _selfRef ??= DotNetObjectReference.Create(this);
+            await _js.InvokeVoidAsync("streamsModalOpen", _selfRef);
+        }
+        catch { }
+    }
+
+    private async Task CloseAsync()
+    {
+        _open = false;
+        try
+        {
+            _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/configure.js");
+            await _js.InvokeVoidAsync("streamsModalClose");
+        }
+        catch { }
+    }
+
+    [JSInvokable]
+    public Task CloseFromJs()
+    {
+        if (!_open) return Task.CompletedTask;
+        return InvokeAsync(async () => { await CloseAsync(); StateHasChanged(); });
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_js is not null) { try { await _js.DisposeAsync(); } catch { } }
+        _selfRef?.Dispose();
+    }
+}

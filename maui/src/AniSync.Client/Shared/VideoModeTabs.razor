@@ -1,0 +1,45 @@
+@* Shared movies/series Discover mode strip — port of the nav in Views/Video/Index.cshtml +
+   Views/Discover/Actors.cshtml. The mode pills (Popular + the Trakt-gated feeds) come from the
+   server-authoritative /api/v1/discover/video-modes set the parent passes in (so Discover-video
+   and Actors render the identical strip), plus an Actors pill. On the Actors page the pills carry
+   ?type= to keep the mode in movies/series; on the Discover surface they preserve genre/search. *@
+<nav class="library-tabs" role="tablist" aria-label="Discover modes">
+    @foreach (var m in Modes)
+    {
+        var active = !ActorsActive && ActiveMode == m.Slug;
+        <a class="library-tab @(active ? "library-tab-active" : "")"
+           href="@ModeHref(m.Slug)" role="tab" aria-selected="@(active ? "true" : "false")">@m.Label</a>
+    }
+    <a class="library-tab @(ActorsActive ? "library-tab-active" : "")"
+       href="@ActorsHref()" role="tab" aria-selected="@(ActorsActive ? "true" : "false")">Actors</a>
+</nav>
+
+@code {
+    /// <summary>The mode pills to render (fetched by the parent via IAniSyncApi.VideoModesAsync).</summary>
+    [Parameter] public IReadOnlyList<VideoModeDto> Modes { get; set; } = Array.Empty<VideoModeDto>();
+    /// <summary>Active mode slug on the Discover surface; ignored when ActorsActive.</summary>
+    [Parameter] public string? ActiveMode { get; set; }
+    /// <summary>True on the Actors browse page — lights the Actors pill, and mode pills carry ?type=.</summary>
+    [Parameter] public bool ActorsActive { get; set; }
+    /// <summary>movie|series — only used to build the ?type= on the Actors page.</summary>
+    [Parameter] public string Type { get; set; } = "movie";
+    [Parameter] public string? Genre { get; set; }
+    [Parameter] public string? Search { get; set; }
+
+    private string ModeHref(string slug)
+    {
+        var q = new List<string> { $"list={slug}" };
+        if (ActorsActive)
+        {
+            q.Add($"type={Type}");
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(Genre)) q.Add($"genre={Uri.EscapeDataString(Genre)}");
+            if (!string.IsNullOrWhiteSpace(Search)) q.Add($"search={Uri.EscapeDataString(Search)}");
+        }
+        return "/discover?" + string.Join("&", q);
+    }
+
+    private string ActorsHref() => ActorsActive ? $"/discover/actors?type={Type}" : "/discover/actors";
+}

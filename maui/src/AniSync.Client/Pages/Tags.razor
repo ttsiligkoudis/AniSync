@@ -1,53 +1,46 @@
 @page "/discover/tag"
+@implements IDisposable
 @inject IAniSyncApi Api
+@inject AppState State
+@inject NavigationManager Nav
 
-@* Browse by tag — port of Views/Discover/Tags.cshtml. The full AniList tag
-   catalogue (non-adult) comes back in one call; we group by category and filter
-   client-side (Esc / clearing the box restores the full list). Tapping a tag
-   opens /discover/tag/{name}. *@
+@* Browse by tag — 1:1 port of Views/Discover/Tags.cshtml. Shared Discover tab strip (Tags pill
+   active) + every AniList tag grouped by category, with a client-side name filter (Esc clears).
+   Tapping a tile opens /discover/tag/{name}. Anime-only surface — a switch to movies/series
+   bounces to /discover. *@
 
-<PageTitle>Tags · AniSync</PageTitle>
+<PageTitle>Tags</PageTitle>
 
-<section>
-    @* Shared Discover tab strip with the Tags pill active. The catalog mode
-       pills are server/session-driven and aren't exposed to the client, so only
-       the always-present Browse-by pills are rendered. *@
-    <nav class="library-tabs" role="tablist" aria-label="Discover lists">
-        <a class="library-tab" href="/discover/studio" role="tab" aria-selected="false">Studios</a>
-        <a class="library-tab library-tab-active" href="/discover/tag" role="tab" aria-selected="true">Tags</a>
-    </nav>
+<DiscoverTabs ActiveBrowse="tags" />
 
-    @if (_loading)
+@if (_loading)
+{
+    <p class="hint-text">Loading tags…</p>
+}
+else if (_tags.Count == 0)
+{
+    <p class="hint-text">No tags available right now. Try again in a moment.</p>
+}
+else
+{
+    <div class="filter-bar" role="search">
+        <input type="search" class="filter-bar-search" placeholder="Filter tags…" autocomplete="off"
+               spellcheck="false" aria-label="Filter tags"
+               @bind="_filter" @bind:event="oninput" @onkeydown="OnKeyDown" />
+    </div>
+
+    @if (!_grouped.Any())
     {
-        <p class="hint-text">Loading tags…</p>
-    }
-    else if (_tags.Count == 0)
-    {
-        <p class="hint-text">No tags available right now. Try again in a moment.</p>
+        <p class="hint-text">No tags match.</p>
     }
     else
     {
-        @* Filter input — AniList returns every tag in one call so the full set
-           is already on the page; the filter just shows/hides tiles. *@
-        <div class="filter-bar" role="search">
-            <input type="search"
-                   class="filter-bar-search"
-                   placeholder="Filter tags…"
-                   value="@_filter"
-                   @oninput="e => _filter = e.Value?.ToString() ?? string.Empty"
-                   @onkeydown="OnKeyDown"
-                   autocomplete="off"
-                   spellcheck="false"
-                   aria-label="Filter tags" />
-        </div>
-        <p class="hint-text" hidden="@HasMatches" data-tag-filter-empty>No tags match.</p>
-
-        @foreach (var group in Filtered)
+        @foreach (var group in _grouped)
         {
-            <section class="tag-group" data-tag-group>
+            <section class="tag-group">
                 <h2 class="tag-group-title">@group.Key</h2>
                 <div class="tag-grid">
-                    @foreach (var t in group.OrderBy(t => t.Name))
+                    @foreach (var t in group)
                     {
                         <a class="tag-tile" href="@TagHref(t.Name)" data-tag-name="@t.Name" title="@t.Description">
                             <span class="tag-tile-name">@t.Name</span>
@@ -57,32 +50,38 @@
             </section>
         }
     }
-</section>
+}
 
 @code {
     private IReadOnlyList<TagSummaryDto> _tags = Array.Empty<TagSummaryDto>();
     private bool _loading = true;
     private string _filter = "";
 
+    protected override void OnInitialized() => State.Changed += OnStateChanged;
+
     protected override async Task OnInitializedAsync()
     {
+        if (State.MediaTypesHydrated && State.MediaType != MetaType.anime) { Nav.NavigateTo("/discover"); return; }
         _tags = await Api.TagsAsync();
         _loading = false;
     }
 
-    private IEnumerable<IGrouping<string, TagSummaryDto>> Filtered =>
+    // Group by AniList category (uncategorised → "Other"), filtered by the live name query.
+    private IEnumerable<IGrouping<string, TagSummaryDto>> _grouped =>
         _tags
             .Where(t => string.IsNullOrWhiteSpace(_filter)
-                        || t.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase))
-            .GroupBy(t => string.IsNullOrEmpty(t.Category) ? "Other" : t.Category!)
+                        || (t.Name?.Contains(_filter.Trim(), StringComparison.OrdinalIgnoreCase) ?? false))
+            .GroupBy(t => string.IsNullOrWhiteSpace(t.Category) ? "Other" : t.Category!)
             .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
 
-    private bool HasMatches => Filtered.Any();
+    private void OnKeyDown(KeyboardEventArgs e) { if (e.Key == "Escape") _filter = ""; }
 
-    private void OnKeyDown(KeyboardEventArgs e)
+    private void OnStateChanged()
     {
-        if (e.Key == "Escape") _filter = "";
+        if (State.MediaType != MetaType.anime) Nav.NavigateTo("/discover");
     }
 
     private static string TagHref(string name) => $"/discover/tag/{Uri.EscapeDataString(name)}";
+
+    public void Dispose() => State.Changed -= OnStateChanged;
 }

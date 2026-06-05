@@ -1,42 +1,40 @@
 @inject IAniSyncApi Api
-@inject IAppEnvironment Env
+@inject NavigationManager Nav
 
-@* Account + Linked Accounts cards — Blazor port of _AccountSection.cshtml +
-   _LinkedAccountsSection.cshtml. Shared by /configure and /account. The primary
-   provider shows a "Primary" badge; healthy linked providers can be promoted to
-   primary (tap, header-authed /me/primary) or unlinked (/me/unlink). Linking a new
-   OAuth provider needs a browser redirect, so those are anchors into
-   /Auth/LinkProvider; Kitsu link/re-link uses its inline credentials form
-   (/Auth/LinkKitsu). All redirect flows return through /auth/complete. *@
+@* Account card — Blazor port of _AccountSection.cshtml (the "Account" card only;
+   linked accounts live in LinkedAccountsSection). Renders the service-toggle pills
+   and, when logged in, the connected / disconnect badge.
+
+   Pre-login the picker shows the available providers (selectable — clicking sets the
+   page's selected service, which drives the login form below). Post-login it shrinks
+   to "primary (active) + each healthy linked account"; clicking a non-active pill
+   promotes that account to primary via Api.PromotePrimaryAsync (the framework
+   adaptation of the original's POST /Auth/SetPrimary), then reloads. The service-
+   toggle-hint shows when there's at least one healthy linked account to swap to. *@
 
 <section class="section-card">
     <span class="section-title">Account</span>
-    @if (Config is null)
-    {
-        <p class="hint-text">Loading account…</p>
-    }
-    else
-    {
-        @* Provider picker — post-login it shows the primary plus every healthy
-           linked account; tapping a non-primary pill promotes it to primary (the
-           swap UI). Mirrors _AccountSection.cshtml's service-toggle. *@
-        @if (HasSwappableLinks)
-        {
-            <p class="service-toggle-hint">Tap another account below to make it your primary.</p>
-        }
-        <div class="service-toggle" id="serviceToggle">
-            @foreach (var pill in PickerPills)
-            {
-                var isActive = string.Equals(pill.Service, Config.AnimeService, StringComparison.OrdinalIgnoreCase);
-                <span class="label @(isActive ? "active" : "")" id="@pill.LabelId"
-                      data-service="@pill.Index" data-service-name="@pill.Service"
-                      @onclick="() => { if (!isActive) { _ = PromoteAsync(pill.Service); } }">@pill.DisplayName</span>
-            }
-        </div>
 
+    @if (HasSwappableLinks)
+    {
+        <p class="service-toggle-hint">Tap another account below to make it your primary.</p>
+    }
+
+    <div class="service-toggle" id="serviceToggle">
+        @foreach (var pill in Pills)
+        {
+            <span class="label @(pill.Active ? "active" : "")" id="@pill.Id" data-service="@pill.DataService" data-service-name="@pill.DataName"
+                  role="button" tabindex="0"
+                  @onclick="() => OnPillAsync(pill)"
+                  @onkeydown="@(e => { if (e.Key is "Enter" or " ") _ = OnPillAsync(pill); })">@pill.Display</span>
+        }
+    </div>
+
+    @if (Config is not null)
+    {
         <div class="account-status">
-            <span class="success-badge">✓ Connected to @RawName(Config.AnimeService)</span>
-            <a class="account-disconnect-btn" href="/logout" data-disconnect>Disconnect</a>
+            <span class="success-badge">✓ Connected to @Pretty(Config.AnimeService)</span>
+            <button id="disconnectBtn" type="button" class="account-disconnect-btn" data-disconnect @onclick="Disconnect">Disconnect</button>
         </div>
         @if (!string.IsNullOrEmpty(_message))
         {
@@ -45,108 +43,85 @@
     }
 </section>
 
-@if (Config is not null)
-{
-    <section class="section-card">
-        <span class="section-title">Linked Accounts</span>
-        <p class="section-description">
-            Optional sync targets. When you save or auto-track an entry, AniSync writes
-            to your primary account first and then mirrors the change to every linked
-            provider it can map the anime onto.
-        </p>
-        <div class="linked-accounts">
-            @foreach (var svc in AllServices)
-            {
-                var isPrimary = string.Equals(svc, Config.AnimeService, StringComparison.OrdinalIgnoreCase);
-                var linked = Config.Linked.FirstOrDefault(l => string.Equals(l.Service, svc, StringComparison.OrdinalIgnoreCase));
-                <div class="linked-account-row" data-service="@ServiceIndex(svc)" data-service-name="@svc">
-                    <div class="linked-account-name">@RawName(svc)</div>
-                    <div class="linked-account-actions">
-                        @if (isPrimary)
-                        {
-                            <span class="linked-account-badge linked-account-primary">Primary</span>
-                        }
-                        else if (linked is not null)
-                        {
-                            <span class="linked-account-badge @(linked.NeedsReauth ? "linked-account-warn" : "linked-account-connected")">
-                                @(linked.NeedsReauth ? "Needs re-auth" : "Linked")
-                            </span>
-                            @* Promotion to primary is driven by the service-picker pills at the *@
-                            @* top of the card; this row only handles re-link / unlink. *@
-                            @if (linked.NeedsReauth && svc != "Kitsu")
-                            {
-                                <a class="btn-ghost btn-ghost-sm" href="@LinkUrl(svc)">Re-link ↗</a>
-                            }
-                            else if (linked.NeedsReauth && svc == "Kitsu")
-                            {
-                                <button type="button" class="btn-ghost btn-ghost-sm linked-account-toggle" @onclick="() => _kitsuOpen = !_kitsuOpen">Re-link</button>
-                            }
-                            <button type="button" class="btn-ghost btn-ghost-sm"
-                                    disabled="@(_busy == svc)" @onclick="() => UnlinkAsync(svc)">Unlink</button>
-                        }
-                        else if (svc == "Kitsu")
-                        {
-                            <button type="button" class="btn-ghost btn-ghost-sm linked-account-toggle" @onclick="() => _kitsuOpen = !_kitsuOpen">Link</button>
-                        }
-                        else
-                        {
-                            <a class="btn-ghost btn-ghost-sm" href="@LinkUrl(svc)">Link ↗</a>
-                        }
-                    </div>
-                    @if (svc == "Kitsu" && !isPrimary && (linked is null || linked.NeedsReauth) && _kitsuOpen)
-                    {
-                        <form method="post" action="@AuthAction("LinkKitsu")" class="linked-account-creds linked-kitsu-form">
-                            <input type="text" name="username" placeholder="Kitsu username" required />
-                            <input type="password" name="password" placeholder="Kitsu password" required />
-                            <input type="hidden" name="returnUrl" value="/configure" />
-                            <button type="submit" class="btn-primary-action btn-login">Link Kitsu</button>
-                            <p class="option-name-sub" style="margin:0;">Used only to obtain an OAuth token from Kitsu — your password is not stored in the configuration.</p>
-                        </form>
-                    }
-                </div>
-            }
-        </div>
-    </section>
-}
-
 @code {
     [Parameter] public ConfigStateDto? Config { get; set; }
     [Parameter] public EventCallback OnReload { get; set; }
 
-    private static readonly string[] AllServices = { "Kitsu", "Anilist", "MyAnimeList", "Trakt" };
+    // Pre-login surface: the providers the backend can start sign-in for, and the
+    // currently selected one (two-way bound to the page so the login form follows).
+    [Parameter] public List<(string Key, string Display)> Available { get; set; } = new();
+    [Parameter] public string SelectedService { get; set; } = "Kitsu";
+    [Parameter] public EventCallback<string> SelectedServiceChanged { get; set; }
+
     private string? _busy;
     private string? _message;
-    private bool _kitsuOpen;
 
-    // Stable service → ordinal mapping matching the server's AnimeService enum
-    // (Kitsu=0, Anilist=1, MyAnimeList=2, Trakt=3) — drives the data-service attrs.
-    private static int ServiceIndex(string svc) => svc switch
-    {
-        "Kitsu" => 0, "Anilist" => 1, "MyAnimeList" => 2, "Trakt" => 3, _ => -1,
-    };
+    private bool LoggedIn => Config is not null;
 
-    private sealed record Pill(string Service, string DisplayName, string LabelId, int Index);
-
-    // The picker shows the primary plus every healthy (no-reauth) linked account.
-    private IEnumerable<Pill> PickerPills => AllServices
-        .Where(svc => string.Equals(svc, Config?.AnimeService, StringComparison.OrdinalIgnoreCase)
-            || (Config?.Linked.Any(l => string.Equals(l.Service, svc, StringComparison.OrdinalIgnoreCase) && !l.NeedsReauth) ?? false))
-        .Select(svc => new Pill(svc, Pretty(svc), LabelId(svc), ServiceIndex(svc)));
-
-    // Original element ids: labelKitsu / labelAnilist / labelMal / labelTrakt.
-    private static string LabelId(string svc) => svc switch
-    {
-        "MyAnimeList" => "labelMal", _ => $"label{svc}",
-    };
-
-    // Hint + swap UI only matter when there's at least one healthy linked account
-    // the user could promote (i.e. more than just the primary pill).
+    // Post-login: at least one healthy (not needs-reauth) linked account to swap to.
     private bool HasSwappableLinks =>
-        Config?.Linked.Any(l => !l.NeedsReauth
-            && !string.Equals(l.Service, Config.AnimeService, StringComparison.OrdinalIgnoreCase)) ?? false;
+        LoggedIn && Config!.Linked.Any(l => !l.NeedsReauth);
 
-    private string AuthAction(string action) => $"{Env.ApiBaseUrl.TrimEnd('/')}/Auth/{action}";
-    private string LinkUrl(string service) => $"{AuthAction("LinkProvider")}?service={Uri.EscapeDataString(service)}&returnUrl=/configure";
+    private sealed record Pill(string Id, int DataService, string DataName, string Display, bool Active);
+
+    private List<Pill> Pills
+    {
+        get
+        {
+            var list = new List<Pill>();
+            if (LoggedIn)
+            {
+                // Primary (active) + each healthy linked account.
+                AddPill(list, Config!.AnimeService, active: true);
+                foreach (var l in Config!.Linked.Where(l => !l.NeedsReauth))
+                {
+                    if (string.Equals(l.Service, Config!.AnimeService, StringComparison.OrdinalIgnoreCase)) continue;
+                    AddPill(list, l.Service, active: false);
+                }
+            }
+            else
+            {
+                foreach (var p in Available)
+                {
+                    AddPill(list, p.Key, active: string.Equals(p.Key, SelectedService, StringComparison.OrdinalIgnoreCase), p.Display);
+                }
+            }
+            return list;
+        }
+    }
+
+    private static void AddPill(List<Pill> list, string? service, bool active, string? display = null)
+    {
+        var (id, idx, name, def) = Meta(service);
+        if (id is null) return;
+        list.Add(new Pill(id, idx, name!, display ?? def!, active));
+    }
+
+    // Maps a service to the exact pill ids / data attributes the original renders.
+    private static (string? Id, int Index, string? DataName, string? Display) Meta(string? service) => service switch
+    {
+        "Kitsu" => ("labelKitsu", 0, "Kitsu", "Kitsu"),
+        "Anilist" => ("labelAnilist", 1, "Anilist", "AniList"),
+        "MyAnimeList" => ("labelMal", 2, "MyAnimeList", "MyAnimeList"),
+        "Trakt" => ("labelTrakt", 3, "Trakt", "Trakt"),
+        _ => (null, 0, null, null),
+    };
+
+    private async Task OnPillAsync(Pill pill)
+    {
+        if (LoggedIn)
+        {
+            // Active pill = current primary, no-op. Any other rendered pill is a
+            // healthy linked account — promote it to primary.
+            if (pill.Active) return;
+            await PromoteAsync(pill.DataName);
+        }
+        else
+        {
+            SelectedService = pill.DataName;
+            await SelectedServiceChanged.InvokeAsync(pill.DataName);
+        }
+    }
 
     private async Task PromoteAsync(string service, bool force = false)
     {
@@ -175,27 +150,14 @@
         _busy = null;
     }
 
-    private async Task UnlinkAsync(string service)
-    {
-        _busy = service; _message = null;
-        if (await Api.UnlinkAsync(service)) await OnReload.InvokeAsync();
-        else _message = "Couldn't unlink right now.";
-        _busy = null;
-    }
+    // Disconnect — the original's #disconnectBtn navigates to /Auth/Logout; the
+    // replica routes through /logout, which performs the disconnect on both heads.
+    private void Disconnect() => Nav.NavigateTo("/logout");
 
     private static string Pretty(string? service) => service switch
     {
         "Anilist" => "AniList",
         "MyAnimeList" => "MyAnimeList",
-        null or "" => "—",
-        _ => service,
-    };
-
-    // The original uses the raw AnimeService enum name for the connected-badge
-    // and the linked-account row name (MyAnimeList stays "MyAnimeList", others
-    // render their enum string, e.g. "Anilist"). The picker pills keep Pretty().
-    private static string RawName(string? service) => service switch
-    {
         null or "" => "—",
         _ => service,
     };

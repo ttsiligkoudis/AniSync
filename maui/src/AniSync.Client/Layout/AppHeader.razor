@@ -1,5 +1,6 @@
 @inject NavigationManager Nav
 @inject AppState State
+@implements IDisposable
 
 @* Site header — exact port of _Layout.cshtml's .site-header. Back button, logo,
    inline desktop nav (collapses to the hamburger under 992px via site.css), the
@@ -72,6 +73,7 @@
         }
 
         <button type="button" class="media-type-btn" data-media-type-open
+                @onclick="() => State.RequestMediaTypeModal()"
                 aria-label="Change mode (currently @_mtBtnLabel)" title="Change mode">
             <span class="media-type-btn-icon" aria-hidden="true">
                 @if (_mtMultiple)
@@ -125,7 +127,7 @@
         }
         else
         {
-            <a class="site-header-cta site-header-cta-primary" href="/login">Sign in</a>
+            <a class="site-header-cta site-header-cta-primary" href="/account">Sign in</a>
         }
 
         <button class="hamburger-btn" aria-label="Open menu"
@@ -140,11 +142,37 @@
     private bool _mtMultiple;
     private string _mtBtnLabel = "All";
 
-    protected override void OnParametersSet()
+    protected override void OnInitialized()
+    {
+        Recompute();
+        // Re-render on auth/state changes (Sign in → Disconnect + the logged-in nav
+        // links) and on navigation (active-nav highlight). The parent layout's
+        // re-render does NOT cascade to this parameterless child, so subscribe here.
+        State.Changed += OnChanged;
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    protected override void OnParametersSet() => Recompute();
+
+    private void Recompute()
     {
         _active = NavActive.From(Nav.ToBaseRelativePath(Nav.Uri));
         _mtMultiple = State.EnabledMediaTypes.Count > 1;
         _mtBtnLabel = _mtMultiple ? "All" : State.MediaTypeLabel;
+    }
+
+    private void OnChanged() { Recompute(); StateHasChanged(); }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        Recompute();
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        State.Changed -= OnChanged;
+        Nav.LocationChanged -= OnLocationChanged;
     }
 
     private string Cls(string section) => _active == section ? "active" : "";

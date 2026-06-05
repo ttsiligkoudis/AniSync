@@ -1,122 +1,167 @@
 @page "/discover/actors"
+@implements IAsyncDisposable
 @inject IAniSyncApi Api
+@inject AppState State
+@inject NavigationManager Nav
+@inject IJSRuntime JS
 
-@* Browse by actor — port of Views/Discover/Actors.cshtml. TMDB popular people
-   (or a name search) as photo tiles with page-based "Load more"; each tile opens
-   the Trakt-backed filmography at /discover/actor/tmdb/{id}. *@
+@* Browse by actor — 1:1 port of Views/Discover/Actors.cshtml. The video Discover mode strip
+   (Actors pill active) + a TMDB person search + a photo-tile grid with infinite scroll. Each tile
+   opens the Trakt-backed filmography at /discover/actor/tmdb/{id}. Movies/series surface — anime
+   defaults to movies (there's no anime actor directory), matching the controller. *@
 
-<PageTitle>Actors · AniSync</PageTitle>
+<PageTitle>Actors</PageTitle>
 
-<section>
-    @* Same Discover video nav as /discover with the Actors pill active, so this
-       stays inside the Discover surface. The catalog mode pills are server/
-       session-driven (Trakt config + login) and aren't exposed to the client,
-       so only the always-present active Actors pill is rendered here. *@
-    <nav class="library-tabs" role="tablist" aria-label="Discover modes">
-        <a class="library-tab library-tab-active" href="/discover/actors" role="tab" aria-selected="true">Actors</a>
-    </nav>
+<VideoModeTabs Modes="_modes" ActorsActive="true" Type="@_type" />
 
-    @* Search form — TMDB person search. Posts a full reload (the directory is
-       paginated, so a client-side filter would only catch loaded tiles). *@
-    <form method="get" action="/discover/actors" class="filter-bar" role="search"
-          @onsubmit="Reload" @onsubmit:preventDefault>
-        <input type="search"
-               name="search"
-               value="@_search"
-               @oninput="e => _search = e.Value?.ToString() ?? string.Empty"
-               placeholder="Search actors…"
-               class="filter-bar-search"
-               autocomplete="off" />
-        <button type="submit" class="filter-bar-submit">Search</button>
-        @if (HasSearch)
-        {
-            <a class="filter-bar-clear" href="/discover/actors" @onclick="Clear" @onclick:preventDefault>Clear</a>
-        }
-    </form>
-
-    @if (_actors.Count == 0)
+<form class="filter-bar" role="search" @onsubmit="ApplySearch">
+    <input type="search" @bind="_searchInput" @bind:event="oninput"
+           placeholder="Search actors…" class="filter-bar-search" autocomplete="off" />
+    <button type="submit" class="filter-bar-submit">Search</button>
+    @if (!string.IsNullOrWhiteSpace(Search))
     {
-        @if (HasSearch)
-        {
-            <p class="hint-text">No actors match "@_search".</p>
-        }
-        else
-        {
-            <p class="hint-text">No actors available right now. Try again in a moment.</p>
-        }
+        <a class="filter-bar-clear" href="/discover/actors">Clear</a>
     }
-    else
-    {
-        <div class="actor-paginator" data-page="1" data-has-next="@(_canLoadMore ? "true" : "false")" data-search="@_search">
-            <div class="actor-grid">
-                @foreach (var a in _actors)
-                {
-                    <a class="actor-tile" href="@($"/discover/actor/tmdb/{a.TmdbId}")" data-actor-id="@a.TmdbId">
-                        <span class="actor-tile-avatar">
-                            <span class="actor-tile-initial" aria-hidden="true">@(string.IsNullOrEmpty(a.Name) ? "?" : a.Name[..1])</span>
-                            @if (!string.IsNullOrEmpty(a.Image))
-                            {
-                                <img class="actor-tile-img" src="@a.Image" alt="" loading="lazy"
-                                     decoding="async" onerror="this.remove()" />
-                            }
-                        </span>
-                        <span class="actor-tile-name">@a.Name</span>
-                    </a>
-                }
-            </div>
-            <div class="paginator-loader" hidden="@(!_loading)" aria-hidden="true">
-                <div class="paginator-loader-spinner"></div>
-            </div>
-            <div class="actor-sentinel" aria-hidden="true"></div>
+</form>
+
+@if (_loading && _actors.Count == 0)
+{
+    <p class="hint-text">Loading…</p>
+}
+else if (_actors.Count == 0)
+{
+    <p class="hint-text">@(string.IsNullOrWhiteSpace(Search)
+        ? "No actors available right now. Try again in a moment."
+        : $"No actors match \"{Search}\".")</p>
+}
+else
+{
+    <div class="actor-paginator">
+        <div class="actor-grid">
+            @foreach (var a in _actors)
+            {
+                <a class="actor-tile" href="@($"/discover/actor/tmdb/{a.TmdbId}")" data-actor-id="@a.TmdbId">
+                    <span class="actor-tile-avatar">
+                        <span class="actor-tile-initial" aria-hidden="true">@(string.IsNullOrEmpty(a.Name) ? "?" : a.Name[..1])</span>
+                        @if (!string.IsNullOrEmpty(a.Image))
+                        {
+                            <img class="actor-tile-img" src="@a.Image" alt="" loading="lazy" decoding="async" onerror="this.remove()" />
+                        }
+                    </span>
+                    <span class="actor-tile-name">@a.Name</span>
+                </a>
+            }
         </div>
-
-        @if (_canLoadMore)
-        {
-            <div class="discover-pagination">
-                <button type="button" class="discover-paginator" disabled="@_loading" @onclick="LoadMore">
-                    @(_loading ? "Loading…" : "Load more")
-                </button>
-            </div>
-        }
-    }
-</section>
+        <div class="paginator-loader" hidden="@(!(_loading && _actors.Count > 0))" aria-hidden="true">
+            <div class="paginator-loader-spinner"></div>
+        </div>
+        <div class="actor-sentinel" @ref="_sentinel" aria-hidden="true"></div>
+    </div>
+}
 
 @code {
+    [SupplyParameterFromQuery] public string? Type { get; set; }
+    [SupplyParameterFromQuery] public string? Search { get; set; }
+
     private readonly List<ActorSummaryDto> _actors = new();
-    private string _search = "";
+    private IReadOnlyList<VideoModeDto> _modes = Array.Empty<VideoModeDto>();
+    private string _searchInput = "";
+    private string _type = "movie";
     private bool _loading;
-    private bool _canLoadMore;
+    private bool _done;
     private int _page = 1;
 
-    private bool HasSearch => !string.IsNullOrEmpty(_search);
+    private ElementReference _sentinel;
+    private IJSObjectReference? _scroll;
+    private DotNetObjectReference<Actors>? _selfRef;
+    private int _observerId;
 
-    protected override Task OnInitializedAsync() => Load();
+    protected override async Task OnInitializedAsync() => _modes = await Api.VideoModesAsync();
 
-    private async Task Reload()
+    protected override async Task OnParametersSetAsync()
     {
+        // Movies + series directory; honour ?type=, else the active video mode. Anime → movie
+        // (no anime actor directory), and reflect that in the layout switch so it isn't stranded.
+        _type = (Type is "movie" or "series") ? Type!
+            : State.MediaType == MetaType.series ? "series" : "movie";
+        if (State.MediaType == MetaType.anime)
+            State.SetMediaType(_type == "series" ? MetaType.series : MetaType.movie);
+
+        _searchInput = Search ?? "";
         _actors.Clear();
         _page = 1;
-        _canLoadMore = false;
-        await Load();
-    }
-
-    private async Task Clear()
-    {
-        _search = "";
-        await Reload();
-    }
-
-    private Task LoadMore() => Load();
-
-    private async Task Load()
-    {
+        _done = false;
         _loading = true;
         StateHasChanged();
-        var resp = await Api.ActorsAsync(_page, string.IsNullOrWhiteSpace(_search) ? null : _search.Trim());
+        await LoadPageAsync(initial: true);
+    }
+
+    [JSInvokable]
+    public async Task OnSentinelVisibleAsync()
+    {
+        if (_done || _loading) return;
+        await LoadPageAsync(initial: false);
+    }
+
+    private async Task LoadPageAsync(bool initial)
+    {
+        if (!initial && (_loading || _done)) return;
+        _loading = true;
+        if (!initial) StateHasChanged();
+
+        ActorsListResponse resp;
+        try { resp = await Api.ActorsAsync(_page, string.IsNullOrWhiteSpace(Search) ? null : Search); }
+        catch { resp = new(); }
+
         _actors.AddRange(resp.Actors);
-        _canLoadMore = resp.HasNextPage;
-        if (resp.Actors.Count > 0) _page++;
+        if (resp.Actors.Count == 0 || !resp.HasNextPage) _done = true;
+        else _page++;
+
         _loading = false;
         StateHasChanged();
+        if (_observerId != 0 && !_done && _scroll is not null)
+        {
+            try { await _scroll.InvokeVoidAsync("reobserve", _observerId); } catch { }
+        }
+    }
+
+    private void ApplySearch()
+    {
+        var s = _searchInput.Trim();
+        var q = new List<string> { $"type={_type}" };
+        if (!string.IsNullOrWhiteSpace(s)) q.Add($"search={Uri.EscapeDataString(s)}");
+        Nav.NavigateTo("/discover/actors?" + string.Join("&", q));
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            try { _scroll = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/discover-scroll.js"); }
+            catch { return; }
+        }
+        if (_scroll is null) return;
+
+        var paginatorRendered = _actors.Count > 0;
+        if (paginatorRendered && _observerId == 0)
+        {
+            try { _observerId = await _scroll.InvokeAsync<int>("observe", _sentinel, _selfRef); } catch { }
+        }
+        else if (!paginatorRendered && _observerId != 0)
+        {
+            try { await _scroll.InvokeVoidAsync("disconnect", _observerId); } catch { }
+            _observerId = 0;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_scroll is not null)
+        {
+            if (_observerId != 0) { try { await _scroll.InvokeVoidAsync("disconnect", _observerId); } catch { } }
+            try { await _scroll.DisposeAsync(); } catch { }
+        }
+        _selfRef?.Dispose();
     }
 }

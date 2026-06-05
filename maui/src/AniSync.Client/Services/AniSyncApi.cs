@@ -17,6 +17,12 @@ public sealed class AniSyncApi : IAniSyncApi
 {
     private const string ConfigHeader = "X-AniSync-Config";
 
+    // Marks first-party app traffic (the web head AND the MAUI native apps — Windows /
+    // Android / iOS) so the API's rate limiter can exempt our own apps. The 60/min cap
+    // is meant for third-party API consumers, not the UI's own dashboard fan-out.
+    public const string ClientHeaderName = "X-AniSync-Client";
+    public const string ClientHeaderValue = "anisync-app";
+
     private readonly HttpClient _http;
     private readonly AppState _state;
     private readonly IAppEnvironment _env;
@@ -28,6 +34,10 @@ public sealed class AniSyncApi : IAniSyncApi
         _state = state;
         _env = env;
         _logger = logger;
+        // Tag every request as first-party app traffic so the API rate limiter exempts it
+        // (covers all heads — web + MAUI — since they share this typed client).
+        if (!_http.DefaultRequestHeaders.Contains(ClientHeaderName))
+            _http.DefaultRequestHeaders.Add(ClientHeaderName, ClientHeaderValue);
     }
 
     // Resolve the backend base address on first use rather than in the constructor.
@@ -49,21 +59,27 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Matches ?? new();
     }
 
-    public async Task<IReadOnlyList<MetaDto>> DiscoverAsync(string kind, string? genre = null, string? skip = null, CancellationToken ct = default)
+    public async Task<IReadOnlyList<MetaDto>> DiscoverAsync(string kind, string? genre = null, string? skip = null, string? season = null, string? search = null, CancellationToken ct = default)
     {
         var url = $"api/v1/discover/{Uri.EscapeDataString(kind)}";
         var q = new List<string>();
         if (!string.IsNullOrWhiteSpace(genre)) q.Add($"genre={Uri.EscapeDataString(genre)}");
+        if (!string.IsNullOrWhiteSpace(season)) q.Add($"season={Uri.EscapeDataString(season)}");
+        if (!string.IsNullOrWhiteSpace(search)) q.Add($"search={Uri.EscapeDataString(search)}");
         if (!string.IsNullOrWhiteSpace(skip)) q.Add($"skip={Uri.EscapeDataString(skip)}");
         if (q.Count > 0) url += "?" + string.Join("&", q);
         var resp = await GetOrDefault<MetaListResponse>(url, ct);
         return resp?.Results ?? new();
     }
 
-    public async Task<IReadOnlyList<MetaDto>> DiscoverVideoAsync(string type, string mode, string? skip = null, CancellationToken ct = default)
+    public async Task<IReadOnlyList<MetaDto>> DiscoverVideoAsync(string type, string mode, string? skip = null, string? genre = null, string? search = null, CancellationToken ct = default)
     {
         var url = $"api/v1/discover/video/{Uri.EscapeDataString(type)}/{Uri.EscapeDataString(mode)}";
-        if (!string.IsNullOrWhiteSpace(skip)) url += $"?skip={Uri.EscapeDataString(skip)}";
+        var q = new List<string>();
+        if (!string.IsNullOrWhiteSpace(skip)) q.Add($"skip={Uri.EscapeDataString(skip)}");
+        if (!string.IsNullOrWhiteSpace(genre)) q.Add($"genre={Uri.EscapeDataString(genre)}");
+        if (!string.IsNullOrWhiteSpace(search)) q.Add($"search={Uri.EscapeDataString(search)}");
+        if (q.Count > 0) url += "?" + string.Join("&", q);
         var resp = await GetOrDefault<MetaListResponse>(url, ct);
         return resp?.Results ?? new();
     }
@@ -102,6 +118,14 @@ public sealed class AniSyncApi : IAniSyncApi
     {
         var resp = await GetOrDefault<MetaListResponse>(
             $"api/v1/me/video-list?type={Uri.EscapeDataString(type)}&list={Uri.EscapeDataString(list)}", ct);
+        return resp?.Results ?? new();
+    }
+
+    public async Task<IReadOnlyList<MetaDto>> HiddenAsync(string? skip = null, CancellationToken ct = default)
+    {
+        var url = "api/v1/me/hidden";
+        if (!string.IsNullOrWhiteSpace(skip)) url += $"?skip={Uri.EscapeDataString(skip)}";
+        var resp = await GetOrDefault<MetaListResponse>(url, ct);
         return resp?.Results ?? new();
     }
 
@@ -285,8 +309,12 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Tags ?? new();
     }
 
-    public async Task<StudiosListResponse> StudiosAsync(int page = 1, CancellationToken ct = default)
-        => await GetOrDefault<StudiosListResponse>($"api/v1/studios?page={page}", ct) ?? new();
+    public async Task<StudiosListResponse> StudiosAsync(int page = 1, string? search = null, CancellationToken ct = default)
+    {
+        var url = $"api/v1/studios?page={page}";
+        if (!string.IsNullOrWhiteSpace(search)) url += $"&search={Uri.EscapeDataString(search)}";
+        return await GetOrDefault<StudiosListResponse>(url, ct) ?? new();
+    }
 
     public async Task<StudioMediaResponse> StudioMediaAsync(int studioId, string? skip = null, CancellationToken ct = default)
     {
@@ -311,6 +339,12 @@ public sealed class AniSyncApi : IAniSyncApi
 
     public Task<ActorCreditsResponse?> ActorCreditsAsync(int tmdbId, CancellationToken ct = default)
         => GetOrDefault<ActorCreditsResponse>($"api/v1/actors/tmdb/{tmdbId}", ct);
+
+    public async Task<IReadOnlyList<VideoModeDto>> VideoModesAsync(CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<VideoModesResponse>("api/v1/discover/video-modes", ct);
+        return resp?.Modes ?? new();
+    }
 
     public Task<SeasonStatsResponse?> SeasonStatsAsync(CancellationToken ct = default)
         => GetOrDefault<SeasonStatsResponse>("api/v1/stats/season", ct);
