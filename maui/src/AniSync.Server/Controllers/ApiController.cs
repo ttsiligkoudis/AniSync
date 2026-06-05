@@ -187,6 +187,141 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
+        /// Movie / series detail — the Trakt-enriched twin of <see cref="Anime"/> for
+        /// Cinemeta-backed video ids. Cinemeta supplies the base (poster / background /
+        /// episodes / genres / rating); Trakt overrides with its richer data + artwork +
+        /// episode list (Cinemeta fills the per-episode thumbnails) + cast + related
+        /// titles (the "Recommended" row). Returns 404 when Cinemeta can't resolve the id.
+        /// Anonymous (public Trakt calls), mirroring the MVC MetaController.VideoDetail /
+        /// EnrichVideoMetaAsync the Blazor detail page renders for ?type=movie|series.
+        /// </summary>
+        [HttpGet("video/{type}/{id}")]
+        [ProducesResponseType(typeof(VideoMetaResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> Video(string type, string id)
+        {
+            if (type != "movie" && type != "series")
+                return BadRequest(new ApiError("type must be movie|series"));
+            try
+            {
+                var meta = await _cinemetaService.GetVideoMetaAsync(type, id);
+                if (meta == null) return NotFound(new ApiError("not found on cinemeta"));
+
+                var imdbId = meta.id != null && meta.id.StartsWith(imdbPrefix, StringComparison.Ordinal)
+                    ? meta.id
+                    : (id.StartsWith(imdbPrefix, StringComparison.Ordinal) ? id : null);
+
+                var (cast, certification) = await EnrichVideoMetaAsync(meta, type, imdbId);
+
+                // Project the merged episode list into the same EpisodeInfo shape the
+                // anime path uses (the page's episode rows bind to it identically); the
+                // recommended row rides Meta.recommendations (Trakt /related → posters).
+                var episodes = (meta.videos ?? new List<Video>())
+                    .Select(v => new EpisodeInfo(
+                        Season: v.season,
+                        Episode: v.episode,
+                        Title: v.title ?? v.name,
+                        Thumbnail: v.thumbnail,
+                        Released: v.released ?? v.firstAired,
+                        Overview: v.overview ?? v.description,
+                        AiringAt: v.airingAt))
+                    .ToList();
+
+                // Trailer rides Trakt's summary (Cinemeta has none) — surface the
+                // YouTube id the page's trailer card needs (the original reads
+                // a.trailerStreams[0].ytId on the shared detail view).
+                var trailerId = meta.trailerStreams?.FirstOrDefault()?.ytId;
+
+                return new JsonResult(new VideoMetaResponse(
+                    meta, cast, certification, episodes,
+                    meta.recommendations ?? new List<Meta>(),
+                    string.IsNullOrEmpty(trailerId) ? null : trailerId));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Video failed (type={Type}, id={Id}).", type, id);
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
+
+        // Trakt enrichment for a Cinemeta-backed video Meta. Trakt supplies the
+        // richer data: overview, runtime, certification, trailer, artwork (poster /
+        // background), the episode list (Cinemeta only fills the per-episode
+        // thumbnails by season+episode), cast, and related titles. Cinemeta stays
+        // the fallback for anything Trakt lacks. Mutates meta in place; returns cast
+        // + certification the caller surfaces on the hero. No-op without an imdb id.
+        // Public Trakt calls — works for anonymous viewers too. Ported from
+        // MetaController.Web.cs EnrichVideoMetaAsync (the shared web/Stremio helper).
+        private async Task<(List<VideoCastDto> Cast, string Certification)> EnrichVideoMetaAsync(
+            Meta meta, string cinemetaType, string imdbId)
+        {
+            if (meta == null || string.IsNullOrEmpty(imdbId))
+                return (new List<VideoCastDto>(), null);
+
+            var summaryTask = _trakt.GetSummaryAsync(cinemetaType, imdbId);
+            var castTask = _trakt.GetCastAsync(cinemetaType, imdbId, 20);
+            var relatedTask = _trakt.GetRelatedAsync(cinemetaType, imdbId, 12);
+            // Episodes come from Trakt for series; Cinemeta only supplies the
+            // thumbnails (merged below). Movies have no episode list.
+            var episodesTask = cinemetaType == "series"
+                ? _trakt.GetEpisodesAsync(imdbId)
+                : Task.FromResult(new List<Video>());
+            await Task.WhenAll(summaryTask, castTask, relatedTask, episodesTask);
+
+            var summary = summaryTask.Result;
+            string certification = null;
+
+            // Trakt is the episode source of truth; carry over Cinemeta's
+            // per-episode thumbnails (and overview as a fallback) by matching
+            // season+episode. Keep Cinemeta's list when Trakt has no episodes.
+            var traktEpisodes = episodesTask.Result;
+            if (traktEpisodes.Count > 0)
+            {
+                var cinemetaByKey = new Dictionary<(int, int), Video>();
+                foreach (var cv in meta.videos ?? Enumerable.Empty<Video>())
+                    cinemetaByKey[(cv.season, cv.episode)] = cv;
+
+                foreach (var ep in traktEpisodes)
+                {
+                    if (!cinemetaByKey.TryGetValue((ep.season, ep.episode), out var cv)) continue;
+                    if (string.IsNullOrEmpty(ep.thumbnail)) ep.thumbnail = cv.thumbnail;
+                    if (string.IsNullOrEmpty(ep.overview)) ep.overview = cv.overview ?? cv.description;
+                }
+                meta.videos = traktEpisodes;
+            }
+            if (summary != null)
+            {
+                if (!string.IsNullOrWhiteSpace(summary.Overview)) meta.description = summary.Overview;
+                if (summary.Runtime is int rt && rt > 0)
+                {
+                    meta.avgDuration = rt;
+                    meta.runtime = $"{rt} min";   // Stremio-native runtime string
+                }
+                certification = string.IsNullOrWhiteSpace(summary.Certification) ? null : summary.Certification;
+                // Full-Trakt artwork; Cinemeta's poster/background stays as the
+                // fallback (only overridden when Trakt actually has an image).
+                if (!string.IsNullOrEmpty(summary.Poster)) meta.poster = summary.Poster;
+                if (!string.IsNullOrEmpty(summary.Background)) meta.background = summary.Background;
+                if (!string.IsNullOrWhiteSpace(summary.Trailer))
+                {
+                    var ts = new TrailerStream(summary.Trailer, meta.name);
+                    if (!string.IsNullOrEmpty(ts.ytId))
+                    {
+                        meta.trailerStreams = new List<TrailerStream> { ts };
+                        meta.trailers = new List<Trailer> { new(ts.ytId) };   // Stremio trailers
+                    }
+                }
+            }
+            meta.recommendations = relatedTask.Result.Select(it => it.ToVideoMeta()).ToList();
+
+            var cast = castTask.Result
+                .Select(c => new VideoCastDto(c.Name, c.Character, c.Image, c.Slug))
+                .ToList();
+            return (cast, certification);
+        }
+
+        /// <summary>
         /// "Audience also liked" recommendations. Powered by AniList anonymously and
         /// translated back to the requested target service so the returned ids are
         /// usable by the caller. Defaults to AniList ids.

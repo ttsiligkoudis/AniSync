@@ -79,6 +79,9 @@ public sealed class DetailStateDto
     public int? TotalEpisodes { get; set; }
     public double? Score { get; set; }
     public bool IsHidden { get; set; }
+    /// <summary>Video (movie / series) only: whether the user has Trakt connected —
+    /// gates the video status pill + quick-add heart (false for anime).</summary>
+    public bool TraktConnected { get; set; }
 }
 
 /// <summary>Result of the quick-add heart toggle (POST /api/v1/me/watching/toggle).

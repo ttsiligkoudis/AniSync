@@ -44,6 +44,7 @@ namespace AnimeList.Controllers
         private readonly IKitsuService _kitsuService;
         private readonly IMalService _malService;
         private readonly ITraktService _traktService;
+        private readonly ICinemetaService _cinemeta;
         private readonly IConfigStore _configStore;
         private readonly ISyncService _syncService;
         private readonly IAnimeMappingService _mappingService;
@@ -64,6 +65,7 @@ namespace AnimeList.Controllers
             IKitsuService kitsuService,
             IMalService malService,
             ITraktService traktService,
+            ICinemetaService cinemeta,
             IConfigStore configStore,
             ISyncService syncService,
             IAnimeMappingService mappingService,
@@ -83,6 +85,7 @@ namespace AnimeList.Controllers
             _kitsuService = kitsuService;
             _malService = malService;
             _traktService = traktService;
+            _cinemeta = cinemeta;
             _configStore = configStore;
             _syncService = syncService;
             _mappingService = mappingService;
@@ -172,11 +175,15 @@ namespace AnimeList.Controllers
         /// <c>mal:N</c>) or a cross-service id (<c>tt…</c> / <c>tmdb:N</c>) for a franchise.</param>
         /// <param name="season">Optional cour / season number — forwarded to the provider's
         /// per-cour entry read for native ids.</param>
+        /// <param name="type">"movie" / "series" when the Manage Entry modal was opened from a
+        /// Cinemeta video detail page — reads the aggregate Trakt state (watchlist / watched /
+        /// rating) and projects it onto the entry shape instead of the anime-tracker read.
+        /// Null / empty for anime ids.</param>
         [HttpGet("entries/{id}")]
         [RequireConfig]
         [ProducesResponseType(typeof(EntryResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> Entry(string id, int? season = null)
+        public async Task<IActionResult> Entry(string id, int? season = null, string type = null)
         {
             try
             {
@@ -184,6 +191,34 @@ namespace AnimeList.Controllers
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new ApiError("config has no primary token"));
+
+                // type=movie|series → this is a Cinemeta video tracked on Trakt, not an
+                // anime-tracker entry. Read the aggregate Trakt state and project it onto
+                // the modal's status / progress / score shape. service is reported as Trakt
+                // so the modal picks the Trakt status set + score range; seasons is empty
+                // (no cross-service franchise picker for general video). Mirrors the MVC
+                // GetTraktVideoEntryAsync.
+                if (type == "movie" || type == "series")
+                {
+                    var (vUid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                    var (vStatus, vProgress, vTotal, vScore) =
+                        await GetTraktVideoStateAsync(vUid, type, id);
+                    var vEntry = string.IsNullOrEmpty(vStatus)
+                        ? null
+                        : new AnimeEntry
+                        {
+                            MediaId = id,
+                            Status = vStatus,
+                            Progress = vProgress,
+                            TotalEpisodes = vTotal > 0 ? vTotal : null,
+                            Score = vScore,
+                        };
+                    return new JsonResult(new EntryResponse(
+                        vEntry,
+                        Seasons: new List<EntrySeason>(),
+                        Service: (int)AnimeService.Trakt,
+                        SelectedEntryId: id));
+                }
 
                 var animeService = tokenData.anime_service;
 
@@ -254,12 +289,15 @@ namespace AnimeList.Controllers
         /// <param name="request">Body — status / progress / score / notes / dates.
         /// Status is the canonical <see cref="ListStatus"/> enum and is translated
         /// to the primary provider's vocabulary server-side.</param>
+        /// <param name="type">"movie" / "series" when saving a Cinemeta video entry —
+        /// routes the write to Trakt (watchlist / history / rating) instead of the
+        /// anime-tracker dispatch. Null / empty for anime ids.</param>
         [HttpPost("entries/{id}")]
         [RequireConfig]
         [ProducesResponseType(typeof(SaveEntryResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> SaveEntry(string id, [FromQuery] int? season,
-            [FromBody] ApiSaveEntryRequest request)
+            [FromBody] ApiSaveEntryRequest request, [FromQuery] string type = null)
         {
             try
             {
@@ -269,6 +307,23 @@ namespace AnimeList.Controllers
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new ApiError("config has no primary token"));
+
+                // type=movie|series → Cinemeta video tracked on Trakt; route to the Trakt
+                // save (watchlist / history / ratings) instead of the anime-tracker
+                // dispatch below. Mirrors the MVC SaveTraktVideoEntryAsync.
+                if (type == "movie" || type == "series")
+                {
+                    var (vUid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                    if (string.IsNullOrEmpty(vUid))
+                        return new JsonResult(new SaveEntryResponse(false, AnimeService.Trakt.ToString(), null));
+                    // null status = "leave untouched" on the anime path, but the modal's
+                    // Trakt save sends the explicit status (empty = remove), so map null → "".
+                    var traktStatus = MapToTraktStatus(request.Status?.ToString());
+                    var ok = await ApplyTraktVideoSaveAsync(vUid, type, id, traktStatus,
+                        request.Progress, request.Score);
+                    return new JsonResult(new SaveEntryResponse(ok, AnimeService.Trakt.ToString(),
+                        Removed: string.IsNullOrEmpty(traktStatus) ? true : (bool?)null));
+                }
 
                 var startedAt = ParseDate(request.StartedAt);
                 var finishedAt = ParseDate(request.FinishedAt);
@@ -1163,10 +1218,15 @@ namespace AnimeList.Controllers
         /// normalises it the same way the page's PrettyStatus does); fields are null
         /// / false when the anime isn't on the user's list or isn't hidden.
         /// </summary>
+        /// <param name="id">Service-prefixed anime id, or a Cinemeta video id (<c>tt…</c>) when <paramref name="type"/> is set.</param>
+        /// <param name="season">Optional cour / season number for multi-cour franchises.</param>
+        /// <param name="type">"movie" / "series" when the detail page is a Cinemeta
+        /// video (tracked on Trakt) rather than an anime — routes the entry read to
+        /// the user's Trakt state. Null / empty for anime ids.</param>
         [HttpGet("state/{id}")]
         [RequireConfig]
         [ProducesResponseType(typeof(DetailStateResponse), StatusCodes.Status200OK)]
-        public async Task<IActionResult> DetailState(string id, int? season = null)
+        public async Task<IActionResult> DetailState(string id, int? season = null, string type = null)
         {
             try
             {
@@ -1184,6 +1244,39 @@ namespace AnimeList.Controllers
                 {
                     try { isHidden = await _hiddenStore.IsHiddenAsync(uid, id); }
                     catch (Exception ex) { _logger.LogWarning(ex, "API DetailState hidden lookup failed (id={Id}).", id); }
+                }
+
+                // Movie / series → the tracker is Trakt, not the anime providers.
+                // Project the aggregate Trakt state (watchlist / watched / rating)
+                // onto the pill's status / progress / score shape, mirroring the MVC
+                // VideoDetail hero pill. TraktConnected gates the pill + heart the same
+                // way (traktToken.Connected). Anime falls through to the provider read.
+                if (type == "movie" || type == "series")
+                {
+                    var traktConnected = false;
+                    if (!string.IsNullOrEmpty(uid))
+                    {
+                        try
+                        {
+                            var traktToken = await _configStore.GetTraktTokenAsync(uid);
+                            traktConnected = traktToken?.Connected == true;
+                        }
+                        catch (Exception ex) { _logger.LogWarning(ex, "API DetailState trakt-token lookup failed (id={Id}).", id); }
+                    }
+
+                    // Only read the Trakt entry when actually connected — keeps the
+                    // status pill empty ("Add to List") for an unconnected viewer.
+                    var (vStatus, vProgress, vTotal, vScore) = traktConnected
+                        ? await GetTraktVideoStateAsync(uid, type, id)
+                        : ("", 0, type == "series" ? (int?)null : 1, (double?)null);
+                    return new JsonResult(new DetailStateResponse(
+                        OnList: !string.IsNullOrEmpty(vStatus),
+                        Status: string.IsNullOrEmpty(vStatus) ? null : vStatus,
+                        Progress: vProgress,
+                        TotalEpisodes: vTotal > 0 ? vTotal : null,
+                        Score: vScore,
+                        IsHidden: isHidden,
+                        TraktConnected: traktConnected));
                 }
 
                 // The user's list entry against the primary's id-space. Anonymous
@@ -1257,6 +1350,16 @@ namespace AnimeList.Controllers
                 var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
                 if (string.IsNullOrEmpty(tokenData?.access_token) || tokenData.anonymousUser)
                     return Unauthorized(new ApiError("config has no primary token"));
+
+                // Movie / series → the tracker is Trakt, not the anime providers.
+                // Route to the Trakt watching toggle, which mirrors this method's
+                // membership logic (in another list → hide; watching → remove;
+                // not tracked → add) on top of Trakt's vocabulary.
+                if (request.Type == "movie" || request.Type == "series")
+                {
+                    var (vUid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                    return await ToggleTraktWatchingAsync(vUid, request);
+                }
 
                 var animeService = tokenData.anime_service;
                 // Trakt primary's per-anime read-back isn't wired up yet (same gap the
@@ -1386,6 +1489,146 @@ namespace AnimeList.Controllers
                 return StatusCode(500, new ApiError("hide toggle failed"));
             }
         }
+
+        // ── Trakt video (movie / series) tracking helpers ───────────────────────
+        // Port of the MVC MetaController's Trakt video branch — the tracker behind
+        // the video detail page's status pill, quick-add heart, and Manage Entry
+        // modal. Shared by the DetailState / Entry / SaveEntry / ToggleWatching
+        // type=movie|series branches above.
+
+        /// <summary>
+        /// Reads the aggregate Trakt state for one movie / series and projects it onto
+        /// the (status, progress, totalEpisodes, score) shape the detail page renders.
+        /// Series total comes from Cinemeta's episode list; a movie is one unit. Empty
+        /// status + 0 progress when there's no uid or the title isn't tracked. Mirrors
+        /// the MVC GetTraktVideoEntryAsync / VideoDetail pill derivation.
+        /// </summary>
+        private async Task<(string Status, int Progress, int? TotalEpisodes, double? Score)>
+            GetTraktVideoStateAsync(string uid, string type, string id)
+        {
+            if (string.IsNullOrEmpty(uid)) return ("", 0, null, null);
+
+            int? totalEpisodes = 1;
+            if (type == "series")
+            {
+                var meta = await _cinemeta.GetVideoMetaAsync(type, id);
+                totalEpisodes = meta?.videos?.Count;
+            }
+
+            var entry = await _traktService.GetVideoEntryAsync(uid, type, id);
+            var (status, progress) = DeriveTraktVideoStatus(type, entry, totalEpisodes);
+            return (status, progress, totalEpisodes, entry.Rating);
+        }
+
+        // Projects a TraktVideoEntry onto the pill/modal's (status, progress) shape.
+        // Status vocabulary matches the modal's Trakt option set: planning / watching /
+        // completed (or "" = not tracked), with the custom-status personal lists
+        // (onhold / dropped / rewatching) taking precedence. Ported verbatim from
+        // MetaController.Web.cs DeriveTraktVideoStatus.
+        private static (string Status, int Progress) DeriveTraktVideoStatus(string type, TraktVideoEntry e, int? total)
+        {
+            // Custom-status personal lists (On Hold / Dropped / Rewatching) win
+            // over the native surfaces — that's the explicit status the user set.
+            if (!string.IsNullOrEmpty(e.CustomStatus))
+                return (e.CustomStatus, e.WatchedEpisodes);
+
+            if (type == "movie")
+                return (e.Watched ? "completed"
+                    : e.InPlayback ? "watching"   // left part-watched (paused playback)
+                    : e.InWatchlist ? "planning"
+                    : "", e.Watched ? 1 : 0);
+
+            // An active episode playback means "watching" (continue-watching);
+            // watched history without one means "completed". Mirrors movies and
+            // avoids comparing Trakt's watched count to Cinemeta's episode total.
+            var progress = e.WatchedEpisodes;
+            var status = e.InPlayback ? "watching"
+                : progress > 0 ? "completed"
+                : e.InWatchlist ? "planning"
+                : "";
+            return (status, progress);
+        }
+
+        /// <summary>
+        /// Trakt-backed half of the Currently Watching heart toggle, for movie / series
+        /// detail pages. Mirrors <see cref="ToggleWatching"/>'s membership logic against
+        /// Trakt's status vocabulary: an entry already in some other list (Planning /
+        /// Completed / On Hold / Dropped) returns <c>hidden:true</c> so the client drops
+        /// the heart; "watching" removes the entry; not-tracked adds it as Watching.
+        /// Ported from MetaController.ToggleTraktWatchingAsync.
+        /// </summary>
+        private async Task<IActionResult> ToggleTraktWatchingAsync(string uid, ToggleEntryRequest request)
+        {
+            if (string.IsNullOrEmpty(uid))
+                return new JsonResult(new ToggleWatchingResponse(Ok: false, Watching: false, Hidden: false));
+
+            var entry = await _traktService.GetVideoEntryAsync(uid, request.Type, request.Id);
+            var (status, _) = DeriveTraktVideoStatus(request.Type, entry, null);
+            var norm = NormalizeListStatus(status);
+
+            // In some other list — the heart isn't the control for that.
+            if (norm != null && norm != "watching")
+                return new JsonResult(new ToggleWatchingResponse(Ok: false, Watching: false, Hidden: true));
+
+            // Watching → remove (status ""); not tracked → add as Watching.
+            var newStatus = norm == "watching" ? string.Empty : "watching";
+            var ok = await ApplyTraktVideoSaveAsync(uid, request.Type, request.Id, newStatus, progress: 0, score: null);
+            if (!ok) return new JsonResult(new ToggleWatchingResponse(Ok: false, Watching: false, Hidden: false));
+            return new JsonResult(new ToggleWatchingResponse(Ok: true, Watching: norm != "watching", Hidden: false));
+        }
+
+        /// <summary>
+        /// Core Trakt movie/series write shared by the Manage Entry modal save and the
+        /// quick-add heart. Maps the status onto watchlist / history / rating actions
+        /// and returns whether the upstream write succeeded. For a series, "watching"
+        /// marks episodes 1..progress and "completed" marks them all watched — the
+        /// (season, episode) coords come from Cinemeta's ordered episode list. Ported
+        /// from MetaController.ApplyTraktVideoSaveAsync.
+        /// </summary>
+        private async Task<bool> ApplyTraktVideoSaveAsync(string uid, string type, string id, string status, int progress, double? score)
+        {
+            status = (status ?? string.Empty).ToLowerInvariant();
+
+            // Resolve the episode coords to mark watched (series only). Cinemeta's
+            // videos carry the real season/episode numbers; order them and take the
+            // watched prefix so "watched up to N" lands on the right episodes even
+            // across multiple seasons.
+            IReadOnlyList<(int Season, int Episode)> episodes = Array.Empty<(int, int)>();
+            // Series + "watching": the episode to leave in-progress so Trakt surfaces
+            // the show as continue-watching (not completed) — the next unwatched
+            // episode after the watched prefix.
+            (int Season, int Episode)? inProgress = null;
+            if (type == "series" && (status == "watching" || status == "completed"))
+            {
+                var meta = await _cinemeta.GetVideoMetaAsync("series", id);
+                var ordered = (meta?.videos ?? new List<Video>())
+                    .OrderBy(v => v.season > 0 ? v.season : 1)
+                    .ThenBy(v => v.episode)
+                    .Select(v => (Season: v.season > 0 ? v.season : 1, Episode: v.episode))
+                    .ToList();
+                var take = status == "completed" ? ordered.Count : Math.Clamp(progress, 0, ordered.Count);
+                episodes = ordered.Take(take).ToList();
+                if (status == "watching" && ordered.Count > 0)
+                    inProgress = ordered[Math.Min(take, ordered.Count - 1)];
+            }
+
+            int? rating = score.HasValue && score.Value > 0 ? (int)Math.Round(score.Value) : null;
+            return await _traktService.SaveVideoEntryAsync(uid, type, id, status, episodes, rating, inProgress);
+        }
+
+        // Canonical / per-service status → Trakt's video status vocabulary. Empty /
+        // unknown maps to "" (remove from list / not tracked). Mirrors
+        // MetaController.MapToTraktStatus.
+        private static string MapToTraktStatus(string status) => NormalizeListStatus(status) switch
+        {
+            "watching" => "watching",
+            "completed" => "completed",
+            "planning" => "planning",
+            "paused" => "onhold",
+            "dropped" => "dropped",
+            "rewatching" => "rewatching",
+            _ => string.Empty,
+        };
 
         /// <summary>
         /// Resolves a detail-page anime id into the primary provider's id-space so
@@ -2239,12 +2482,15 @@ namespace AnimeList.Controllers
     /// <summary>Per-user detail-page state — GET /api/v1/me/state/{id}. Drives the
     /// hero's user-state pill, the quick-add heart, and the Hide / Unhide button.
     /// <c>Status</c> is the raw provider value (client normalises); null / 0 / false
-    /// when the anime isn't on the user's list or isn't hidden.</summary>
-    public record DetailStateResponse(bool OnList, string? Status, int Progress, int? TotalEpisodes, double? Score, bool IsHidden);
+    /// when the anime isn't on the user's list or isn't hidden. <c>TraktConnected</c>
+    /// is only meaningful for the video (movie / series) branch — it gates the video
+    /// status pill + heart the same way the MVC VideoDetail does (false for anime).</summary>
+    public record DetailStateResponse(bool OnList, string? Status, int Progress, int? TotalEpisodes, double? Score, bool IsHidden, bool TraktConnected = false);
 
     /// <summary>Body for POST /api/v1/me/watching/toggle (quick-add heart). Season
-    /// is the optional cour for franchise ids.</summary>
-    public record ToggleEntryRequest(string? Id, int? Season);
+    /// is the optional cour for franchise ids; Type ("movie" / "series") routes the
+    /// toggle to Trakt for a Cinemeta video (null / empty for anime).</summary>
+    public record ToggleEntryRequest(string? Id, int? Season, string? Type = null);
 
     /// <summary>Result of the quick-add heart toggle. <c>Watching</c> is the new
     /// heart state; <c>Hidden</c> is true when the entry is in another list and the

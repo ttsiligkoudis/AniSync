@@ -58,6 +58,28 @@ namespace AnimeList.Models.Api
     /// <summary>Cross-service id bundle (AniList/MAL/Kitsu/IMDb/TMDB/TVDB/AniDB) for an anime, used by detail-page "open on X" buttons.</summary>
     public record SourceLinksResponse(AnimeSourceLinks Links);
 
+    /// <summary>One cast member for the video (movie / series) detail hero. Sourced
+    /// from Trakt — <c>Image</c> is the headshot (null when Trakt has none, the card
+    /// falls back to the name initial); <c>Slug</c> links the card to the actor's
+    /// filmography at /discover/actor/{slug} (null when absent).</summary>
+    public record VideoCastDto(string Name, string? Character, string? Image, string? Slug);
+
+    /// <summary>Movie / series detail — the Trakt-enriched twin of <see cref="AnimeResponse"/>
+    /// for Cinemeta-backed video ids. <c>Meta</c> carries the Cinemeta base overridden by
+    /// Trakt's richer data (overview / runtime / artwork / trailer); <c>Episodes</c> is the
+    /// merged Trakt-episodes-plus-Cinemeta-thumbnails list (empty for movies);
+    /// <c>Recommended</c> is the Trakt /related row hydrated to posters; <c>Cast</c> feeds
+    /// the video-cast-scroll; <c>Certification</c> rides the hero info line. One enriched
+    /// response so the video detail page renders off a single call, mirroring
+    /// MetaController.VideoDetail / EnrichVideoMetaAsync.</summary>
+    public record VideoMetaResponse(
+        Meta Meta,
+        List<VideoCastDto> Cast,
+        string? Certification,
+        List<EpisodeInfo> Episodes,
+        List<Meta> Recommended,
+        string? TrailerYoutubeId);
+
     /// <summary>Current-season aggregate counts from AniList.</summary>
     public record SeasonStatsResponse(int CurrentlyAiring, int NewThisSeason, int TotalThisSeason);
 

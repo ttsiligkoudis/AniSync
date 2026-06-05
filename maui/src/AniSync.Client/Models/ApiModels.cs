@@ -157,6 +157,36 @@ public sealed class AnimeSourceLinksDto
 
 public sealed class SourceLinksResponse { public AnimeSourceLinksDto? Links { get; set; } }
 
+// ── Video (movie / series) detail (/api/v1/video/{type}/{id}) ─────────────────
+
+/// <summary>One cast member for the video detail hero (video-cast-scroll). From
+/// Trakt — <c>Image</c> is the headshot (null → the card shows the name initial);
+/// <c>Slug</c> links to /discover/actor/{slug} (null → inert card).</summary>
+public sealed class VideoCastDto
+{
+    public string? Name { get; set; }
+    public string? Character { get; set; }
+    public string? Image { get; set; }
+    public string? Slug { get; set; }
+}
+
+/// <summary>Movie / series detail — the Trakt-enriched twin of <see cref="AnimeResponse"/>.
+/// <c>Meta</c> carries the Cinemeta base overridden by Trakt (overview / runtime /
+/// artwork / trailer); <c>Episodes</c> is the merged episode list (empty for movies);
+/// <c>Recommended</c> is the Trakt /related poster row; <c>Cast</c> feeds the
+/// video-cast-scroll; <c>Certification</c> rides the hero info line.</summary>
+public sealed class VideoMetaResponse
+{
+    public MetaDto? Meta { get; set; }
+    public List<VideoCastDto> Cast { get; set; } = new();
+    public string? Certification { get; set; }
+    public List<EpisodeInfoDto> Episodes { get; set; } = new();
+    public List<MetaDto> Recommended { get; set; } = new();
+    /// <summary>YouTube trailer id from Trakt's summary (null when none) — the
+    /// video detail trailer card source.</summary>
+    public string? TrailerYoutubeId { get; set; }
+}
+
 // ── AniSkip / filler (watch page) ────────────────────────────────────────────
 
 /// <summary>One OP/ED/recap/preview marker. Times are seconds from file start.</summary>

@@ -52,6 +52,10 @@ public interface IAniSyncApi
 
     // Detail + watch
     Task<MetaDto?> AnimeAsync(string id, CancellationToken ct = default);
+    /// <summary>Movie / series detail (Trakt-enriched, Cinemeta-backed) — /api/v1/video/{type}/{id}.
+    /// Returns the meta + Trakt cast + certification + merged episode list + recommended row in one
+    /// call. <paramref name="type"/> = "movie"/"series". The video-shaped twin of <see cref="AnimeAsync"/>.</summary>
+    Task<VideoMetaResponse?> VideoAsync(string type, string id, CancellationToken ct = default);
     Task<IReadOnlyList<StreamingLinkDto>> StreamsAsync(string id, CancellationToken ct = default);
     Task<IReadOnlyList<EpisodeInfoDto>> EpisodesAsync(string id, CancellationToken ct = default);
     Task<IReadOnlyList<MetaDto>> RelatedAsync(string id, CancellationToken ct = default);
@@ -124,15 +128,18 @@ public interface IAniSyncApi
     /// <summary>One library entry by media id (Manage Entry modal). For a cross-service
     /// franchise the response also carries the per-cour Season dropdown options, the
     /// resolved cour id, and the primary service (for the per-service score range). Refetch
-    /// a specific cour by calling again with that cour's id.</summary>
-    Task<EntryResponse?> GetEntryAsync(string id, int? season = null, CancellationToken ct = default);
-    Task<SaveEntryResponse?> SaveEntryAsync(string id, EntrySaveRequest request, int? season = null, CancellationToken ct = default);
+    /// a specific cour by calling again with that cour's id. <paramref name="type"/> =
+    /// "movie"/"series" reads the Trakt video state instead (Cinemeta video detail).</summary>
+    Task<EntryResponse?> GetEntryAsync(string id, int? season = null, string? type = null, CancellationToken ct = default);
+    Task<SaveEntryResponse?> SaveEntryAsync(string id, EntrySaveRequest request, int? season = null, string? type = null, CancellationToken ct = default);
     Task<SaveEntryResponse?> DeleteEntryAsync(string id, int? season = null, CancellationToken ct = default);
     /// <summary>Per-user detail-page state (list entry + hidden flag) in one call —
-    /// /api/v1/me/state/{id}. Drives the hero pill, quick-add heart, and Hide button.</summary>
-    Task<DetailStateDto?> DetailStateAsync(string id, int? season = null, CancellationToken ct = default);
-    /// <summary>Quick-add heart toggle for the Currently Watching list — POST /api/v1/me/watching/toggle.</summary>
-    Task<ToggleWatchingResult?> ToggleWatchingAsync(string id, int? season = null, CancellationToken ct = default);
+    /// /api/v1/me/state/{id}. Drives the hero pill, quick-add heart, and Hide button.
+    /// <paramref name="type"/> = "movie"/"series" reads the Trakt video state.</summary>
+    Task<DetailStateDto?> DetailStateAsync(string id, int? season = null, string? type = null, CancellationToken ct = default);
+    /// <summary>Quick-add heart toggle for the Currently Watching list — POST /api/v1/me/watching/toggle.
+    /// <paramref name="type"/> = "movie"/"series" routes the toggle to Trakt (Cinemeta video).</summary>
+    Task<ToggleWatchingResult?> ToggleWatchingAsync(string id, int? season = null, string? type = null, CancellationToken ct = default);
     /// <summary>Hide / unhide an anime from Discover — POST /api/v1/me/hidden/toggle.</summary>
     Task<ToggleHiddenResult?> ToggleHiddenAsync(string id, string? title = null, string? imageUrl = null, string? mediaType = null, CancellationToken ct = default);
     Task<LinkedResponse?> LinkedAsync(CancellationToken ct = default);

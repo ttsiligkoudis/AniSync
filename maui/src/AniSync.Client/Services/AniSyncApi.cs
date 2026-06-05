@@ -141,6 +141,10 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Meta;
     }
 
+    public Task<VideoMetaResponse?> VideoAsync(string type, string id, CancellationToken ct = default)
+        => GetOrDefault<VideoMetaResponse>(
+            $"api/v1/video/{Uri.EscapeDataString(type)}/{Uri.EscapeDataString(id)}", ct);
+
     public async Task<IReadOnlyList<StreamingLinkDto>> StreamsAsync(string id, CancellationToken ct = default)
     {
         var resp = await GetOrDefault<StreamsResponse>($"api/v1/anime/{Uri.EscapeDataString(id)}/streams", ct);
@@ -310,29 +314,38 @@ public sealed class AniSyncApi : IAniSyncApi
     private sealed class RemovedResult { public bool Removed { get; set; } }
     private sealed class ChangedResult { public bool Changed { get; set; } }
 
-    public async Task<EntryResponse?> GetEntryAsync(string id, int? season = null, CancellationToken ct = default)
+    public async Task<EntryResponse?> GetEntryAsync(string id, int? season = null, string? type = null, CancellationToken ct = default)
     {
         var url = $"api/v1/me/entries/{Uri.EscapeDataString(id)}";
-        if (season.HasValue) url += $"?season={season.Value}";
+        var q = new List<string>();
+        if (season.HasValue) q.Add($"season={season.Value}");
+        if (!string.IsNullOrWhiteSpace(type)) q.Add($"type={Uri.EscapeDataString(type)}");
+        if (q.Count > 0) url += "?" + string.Join("&", q);
         return await GetOrDefault<EntryResponse>(url, ct);
     }
 
-    public async Task<SaveEntryResponse?> SaveEntryAsync(string id, EntrySaveRequest request, int? season = null, CancellationToken ct = default)
+    public async Task<SaveEntryResponse?> SaveEntryAsync(string id, EntrySaveRequest request, int? season = null, string? type = null, CancellationToken ct = default)
     {
         var url = $"api/v1/me/entries/{Uri.EscapeDataString(id)}";
-        if (season.HasValue) url += $"?season={season.Value}";
+        var q = new List<string>();
+        if (season.HasValue) q.Add($"season={season.Value}");
+        if (!string.IsNullOrWhiteSpace(type)) q.Add($"type={Uri.EscapeDataString(type)}");
+        if (q.Count > 0) url += "?" + string.Join("&", q);
         return await PostJson<EntrySaveRequest, SaveEntryResponse>(url, request, ct);
     }
 
-    public async Task<DetailStateDto?> DetailStateAsync(string id, int? season = null, CancellationToken ct = default)
+    public async Task<DetailStateDto?> DetailStateAsync(string id, int? season = null, string? type = null, CancellationToken ct = default)
     {
         var url = $"api/v1/me/state/{Uri.EscapeDataString(id)}";
-        if (season.HasValue) url += $"?season={season.Value}";
+        var q = new List<string>();
+        if (season.HasValue) q.Add($"season={season.Value}");
+        if (!string.IsNullOrWhiteSpace(type)) q.Add($"type={Uri.EscapeDataString(type)}");
+        if (q.Count > 0) url += "?" + string.Join("&", q);
         return await GetOrDefault<DetailStateDto>(url, ct);
     }
 
-    public Task<ToggleWatchingResult?> ToggleWatchingAsync(string id, int? season = null, CancellationToken ct = default)
-        => PostJson<object, ToggleWatchingResult>("api/v1/me/watching/toggle", new { id, season }, ct);
+    public Task<ToggleWatchingResult?> ToggleWatchingAsync(string id, int? season = null, string? type = null, CancellationToken ct = default)
+        => PostJson<object, ToggleWatchingResult>("api/v1/me/watching/toggle", new { id, season, type }, ct);
 
     public Task<ToggleHiddenResult?> ToggleHiddenAsync(string id, string? title = null, string? imageUrl = null, string? mediaType = null, CancellationToken ct = default)
         => PostJson<object, ToggleHiddenResult>("api/v1/me/hidden/toggle",

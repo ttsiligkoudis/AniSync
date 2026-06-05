@@ -69,10 +69,14 @@ else
                         </span>
                     }
                     @* User-state pill — cobalt "{Status} · Ep N / T" + pencil when the
-                       anime is on the user's list, "Add to List" + plus otherwise.
+                       title is on the user's list, "Add to List" + plus otherwise.
                        Omitted entirely for anonymous viewers (no "you" to talk about);
-                       clicking opens the Manage Entry modal either way. *@
-                    @if (LoggedIn)
+                       clicking opens the Manage Entry modal either way. The anime path
+                       gates on LoggedIn; the video (movie / series) path gates on Trakt
+                       being connected — the tracker behind video state (the original's
+                       (isVideo || traktAnime) && TraktConnected). The pill's modal stamps
+                       the media type so its GET / save route through Trakt. *@
+                    @if ((IsVideo && _traktConnected) || (!IsVideo && LoggedIn))
                     {
                         <button type="button" class="anime-detail-user-state" @onclick="OpenModal">
                             <span>@EntryPillLabel()</span>
@@ -97,9 +101,10 @@ else
                     @* Quick-add heart — one-click Currently Watching toggle. Shown only
                        when the entry is NOT on any list (outline → adds) or already
                        Watching (filled → removes); hidden when it's in some other list
-                       (managed via the modal), for anonymous viewers, movies, and
+                       (managed via the modal), for anonymous viewers, anime movies, and
                        multi-cour franchise umbrellas (one ep number can't speak for the
-                       franchise). *@
+                       franchise). For video it shows on movies too (Trakt tracks them),
+                       gated on Trakt being connected. *@
                     @if (ShowHeart)
                     {
                         <button type="button"
@@ -353,16 +358,48 @@ else
     else if (IsMovie)
     {
         @* Movie meta has no per-episode list, so the user has no click target to
-           reach the watch page — surface a single CTA pointed at /meta/{id}/watch/1
-           (the watch route treats episode 1 as the movie body). *@
+           reach the watch page — surface a single CTA. Anime movies route to
+           /meta/{id}/watch/1 (the watch route treats episode 1 as the movie body);
+           video movies use /meta/{id}/watch?type=movie (no episode segment), matching
+           Detail.cshtml's movie CTA href. *@
         <section class="anime-detail-section anime-detail-movie-cta-wrap">
-            <a class="anime-detail-movie-cta" href="@($"/meta/{Uri.EscapeDataString(Id)}/watch/1")">
+            <a class="anime-detail-movie-cta" href="@MovieCtaHref">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <polygon points="6 4 20 12 6 20 6 4"></polygon>
                 </svg>
                 <span>Watch movie</span>
             </a>
+        </section>
+    }
+
+    @* Video (Trakt-enriched) cast — rendered from the single video meta call. Cast
+       names come from Trakt (no headshots in its API → the initial shows through);
+       clicking an actor opens their filmography. Mirrors Detail.cshtml's
+       video-cast-scroll / video-cast-card. Anime uses its own (deferred) path. *@
+    @if (IsVideo && _videoCast.Count > 0)
+    {
+        <section class="anime-detail-section">
+            <h2 class="anime-detail-section-title">Cast</h2>
+            <div class="video-cast-scroll">
+                @foreach (var c in _videoCast)
+                {
+                    <a class="video-cast-card" href="@(string.IsNullOrEmpty(c.Slug) ? null : $"/discover/actor/{c.Slug}")">
+                        <span class="video-cast-avatar">
+                            <span class="video-cast-avatar-initial" aria-hidden="true">@(string.IsNullOrEmpty(c.Name) ? "?" : c.Name![..1])</span>
+                            @if (!string.IsNullOrEmpty(c.Image))
+                            {
+                                <img class="video-cast-avatar-img" src="@c.Image" alt="" loading="lazy" decoding="async" onerror="this.remove()" />
+                            }
+                        </span>
+                        <span class="video-cast-name">@c.Name</span>
+                        @if (!string.IsNullOrEmpty(c.Character))
+                        {
+                            <span class="video-cast-char">@c.Character</span>
+                        }
+                    </a>
+                }
+            </div>
         </section>
     }
 
@@ -378,7 +415,9 @@ else
     {
         <section class="anime-detail-section">
             <h2 class="anime-detail-section-title">Recommended</h2>
-            <PosterGrid Items="_recommendations" Variant="scroll" />
+            @* Video recommended cards are movies / series (tt ids) → VideoLinks routes
+               each to /meta/{id}?type=…, matching the original's _PosterGrid VideoLinks. *@
+            <PosterGrid Items="_recommendations" Variant="scroll" VideoLinks="IsVideo" />
         </section>
     }
 
@@ -422,6 +461,7 @@ else
 }
 
 <ManageEntryModal Id="@Id" Name="@(_meta?.Name ?? string.Empty)"
+                  MediaType="@(IsVideo ? VideoMediaType : null)"
                   Visible="_modalOpen"
                   OnClose="() => _modalOpen = false"
                   OnSaved="OnEntrySaved" />
@@ -449,6 +489,21 @@ else
     private bool _multiSeason;
     private string? _typeQuery;
 
+    // ── Video (movie / series) detail state ──────────────────────────────────
+    // Populated only when the id is a Cinemeta video (?type=movie|series) — the
+    // Trakt-enriched path that renders the video-cast-scroll, certification on the
+    // info line, and the Trakt-backed status pill / heart. Anime leaves these empty.
+    private IReadOnlyList<VideoCastDto> _videoCast = Array.Empty<VideoCastDto>();
+    private string? _certification;
+    private bool _traktConnected;
+
+    // The id is a movie / series (the ?type= query was present). Drives the whole
+    // video-detail rendering branch; mirrors the original's isVideo.
+    private bool IsVideo => _typeQuery == "movie" || _typeQuery == "series";
+    // The Trakt media type stamped on the pill / heart / hide triggers (the original's
+    // traktPillType / heartMediaType / hideMediaType for video).
+    private string VideoMediaType => _typeQuery == "movie" ? "movie" : "series";
+
     // Heart / hide local UI state (mirrors the server-computed initial state, then
     // flips optimistically on toggle).
     private bool _heartFilled;
@@ -462,7 +517,10 @@ else
     private record SourceChip(string Label, string Url, string Brand, string Mark, string? AppUrl = null);
 
     private bool LoggedIn => !string.IsNullOrEmpty(State.StreamConfig);
-    private bool IsMovie => string.Equals(_meta?.Type, "movie", StringComparison.OrdinalIgnoreCase);
+    // Movie when the meta type says so, or the ?type=movie query is set (a Cinemeta
+    // video movie — the query is authoritative for the video path).
+    private bool IsMovie => _typeQuery == "movie"
+        || string.Equals(_meta?.Type, "movie", StringComparison.OrdinalIgnoreCase);
 
     protected override async Task OnParametersSetAsync()
     {
@@ -471,8 +529,38 @@ else
         _typeQuery = QueryValue("type");
         _sourceChips.Clear();
         _state = null;
-        _heartFilled = _heartHidden = _isHidden = false;
+        _heartFilled = _heartHidden = _isHidden = _traktConnected = false;
+        _videoCast = Array.Empty<VideoCastDto>();
+        _certification = null;
+        _related = Array.Empty<MetaDto>();
+        _supplementary = Array.Empty<LinkDto>();
+        _streams = Array.Empty<StreamingLinkDto>();
+        _recommendations = Array.Empty<MetaDto>();
+        _trailerId = null;
 
+        if (IsVideo)
+        {
+            await LoadVideoAsync();
+        }
+        else
+        {
+            await LoadAnimeAsync();
+        }
+
+        _seasons = _episodes.Select(e => e.Season > 0 ? e.Season : 1).Distinct().OrderBy(s => s).ToList();
+        if (_seasons.Count == 0) _seasons.Add(1);
+        _multiSeason = _seasons.Count > 1;
+        _activeSeason = PickDefaultSeason();
+        ApplyUserState();
+        ComputeWatchCta();
+        _loading = false;
+    }
+
+    // Anime path — the token-less /api/v1/anime/{id} + the per-anime extras
+    // endpoints, plus the logged-in per-user state. Unchanged from the original
+    // single-shape load.
+    private async Task LoadAnimeAsync()
+    {
         // Core content first (gates the page); extras are best-effort and never
         // block render — each degrades to empty on failure.
         var meta = Api.AnimeAsync(Id);
@@ -498,15 +586,32 @@ else
         _trailerId = trailer.Result;
         _state = stateTask.Result;
         BuildSourceChips(links.Result);
+        _infoLine = BuildInfoLine(_meta, null);
+    }
 
-        _seasons = _episodes.Select(e => e.Season > 0 ? e.Season : 1).Distinct().OrderBy(s => s).ToList();
-        if (_seasons.Count == 0) _seasons.Add(1);
-        _multiSeason = _seasons.Count > 1;
-        _activeSeason = PickDefaultSeason();
-        _infoLine = BuildInfoLine(_meta);
-        ApplyUserState();
-        ComputeWatchCta();
-        _loading = false;
+    // Video (movie / series) path — the single Trakt-enriched /api/v1/video/{type}/{id}
+    // (meta + cast + certification + merged episodes + recommended + trailer), plus the
+    // Trakt-backed per-user state. Mirrors the MVC VideoDetail action. The anime-only
+    // extras (related / supplementary / external streams) are skipped — their sources
+    // are AniList-only.
+    private async Task LoadVideoAsync()
+    {
+        var videoTask = Api.VideoAsync(VideoMediaType, Id);
+        // Trakt state (pill + heart + hide) only when logged in.
+        var stateTask = LoggedIn ? Api.DetailStateAsync(Id, type: VideoMediaType) : Task.FromResult<DetailStateDto?>(null);
+        await Task.WhenAll(videoTask, stateTask);
+
+        var video = videoTask.Result;
+        _meta = video?.Meta;
+        _episodes = video?.Episodes ?? new List<EpisodeInfoDto>();
+        _recommendations = video?.Recommended ?? new List<MetaDto>();
+        _videoCast = video?.Cast ?? new List<VideoCastDto>();
+        _certification = video?.Certification;
+        _trailerId = video?.TrailerYoutubeId;
+        _state = stateTask.Result;
+        _traktConnected = _state?.TraktConnected ?? false;
+        BuildVideoSourceChips();
+        _infoLine = BuildInfoLine(_meta, _certification);
     }
 
     // After (re)render, bind the Stremio chip deep-link probe + trailer lazy-embed
@@ -558,7 +663,10 @@ else
         }
     }
 
-    private static string? BuildInfoLine(MetaDto? a)
+    // Hero info line — format · eps · ~min · year · [certification] · source.
+    // Certification slots in after year for video (the original inserts
+    // Model.VideoCertification there); null for anime.
+    private static string? BuildInfoLine(MetaDto? a, string? certification)
     {
         if (a is null) return null;
         var bits = new List<string>();
@@ -566,8 +674,30 @@ else
         if (a.Episodes is int eps && eps > 0) bits.Add($"{eps} ep{(eps > 1 ? "s" : "")}");
         if (a.AvgDuration is int dur && dur > 0) bits.Add($"~{dur} min");
         if (a.Year is int yr && yr > 0) bits.Add(yr.ToString());
+        if (!string.IsNullOrEmpty(certification)) bits.Add(certification!);
         if (!string.IsNullOrEmpty(a.Source)) bits.Add(a.Source!);
         return bits.Count > 0 ? string.Join(" · ", bits) : null;
+    }
+
+    // Video source chips — the original's VideoDetail carries SourceLinks { ImdbId },
+    // so only the IMDb + Stremio chips light up. The IMDb id is the meta id (a tt…
+    // catalog id) for a Cinemeta video.
+    private void BuildVideoSourceChips()
+    {
+        var id = _meta?.Id;
+        if (string.IsNullOrEmpty(id)) return;
+        if (id!.StartsWith("tt"))
+            _sourceChips.Add(new("IMDb", $"https://www.imdb.com/title/{id}/", "imdb", "IMDb"));
+
+        // Stremio web deep-link — the prefixed catalog id (tt…) is exactly what
+        // Stremio expects, so a plain url-encode is all we need.
+        var supported = !string.IsNullOrEmpty(id) && id.StartsWith("tt");
+        if (supported)
+        {
+            var sType = _typeQuery == "movie" ? "movie" : "series";
+            var path = $"detail/{sType}/{Uri.EscapeDataString(id!)}";
+            _sourceChips.Add(new("Stremio", $"https://web.stremio.com/#/{path}", "stremio", "S", $"stremio:///{path}"));
+        }
     }
 
     // ── User-state pill ──────────────────────────────────────────────────────
@@ -576,6 +706,9 @@ else
     private string EntryPillLabel()
     {
         if (!HasEntry) return "Add to List";
+        // Video pill mirrors Detail.cshtml's vLabel: the Trakt status vocabulary, with
+        // "Watching · Ep N/T" for a series only (a movie is a single unit).
+        if (IsVideo) return VideoPillLabel(_state!.Status!);
         // Mirror Detail.cshtml's userBits: [PrettyStatus, "Ep N / T"] joined by " · ".
         var bits = new List<string>();
         var label = StatusLabel(_state!.Status!);
@@ -586,6 +719,21 @@ else
         return bits.Count > 0 ? string.Join(" · ", bits) : "Add to List";
     }
 
+    // Trakt video status → pill label. Mirrors Detail.cshtml's vLabel switch
+    // (planning / completed / onhold / dropped / rewatching, else "watching" →
+    // "Watching · Ep N/T" for a series with a known total, else "Watching").
+    private string VideoPillLabel(string status) => status.ToLowerInvariant() switch
+    {
+        "planning" => "Planning",
+        "completed" => "Completed",
+        "onhold" => "On Hold",
+        "dropped" => "Dropped",
+        "rewatching" => "Rewatching",
+        _ => VideoMediaType == "series" && _state?.TotalEpisodes is int vt && vt > 0
+            ? $"Watching · Ep {_state.Progress}/{vt}"
+            : "Watching",
+    };
+
     private async Task OpenModal()
     {
         _modalOpen = true;
@@ -593,12 +741,14 @@ else
     }
 
     // ── Quick-add heart ────────────────────────────────────────────────────────
-    // Eligible for the anime path when logged in, it's not a movie, and it's not a
-    // multi-cour franchise umbrella (imdb tt-id with >1 season). Visible only when
-    // not-on-list or already Watching.
+    // Anime: logged in, not a movie, not a multi-cour franchise umbrella (imdb tt-id
+    // with >1 season). Video (movie / series): Trakt connected (the tracker), shown on
+    // movies too — Trakt tracks them — but still not on a multi-cour umbrella. Visible
+    // only when not-on-list or already Watching. Mirrors Detail.cshtml's heartEligible.
     private bool HeartEligible =>
-        LoggedIn && _meta is not null && !IsMovie
-        && !(_multiSeason && (_meta.Id?.StartsWith("tt") ?? false));
+        _meta is not null
+        && !(_multiSeason && (_meta.Id?.StartsWith("tt") ?? false))
+        && (IsVideo ? _traktConnected : (LoggedIn && !IsMovie));
 
     private bool ShowHeart => HeartEligible && !_heartHidden;
     private string HeartLabel => _heartFilled ? "Remove from Currently Watching" : "Add to Currently Watching";
@@ -607,7 +757,9 @@ else
     {
         if (_heartBusy) return;
         _heartBusy = true;
-        var result = await Api.ToggleWatchingAsync(Id);
+        // Video → the toggle routes to Trakt via the media type; anime omits it.
+        var type = IsVideo ? VideoMediaType : null;
+        var result = await Api.ToggleWatchingAsync(Id, type: type);
         _heartBusy = false;
         if (result is null) return;
         if (result.Hidden)
@@ -619,7 +771,7 @@ else
         {
             _heartFilled = result.Watching;
             // Reflect the change in the pill too (status / progress may have moved).
-            _state = await Api.DetailStateAsync(Id) ?? _state;
+            _state = await Api.DetailStateAsync(Id, type: type) ?? _state;
             ApplyUserState();
         }
         StateHasChanged();
@@ -632,7 +784,10 @@ else
     {
         if (_hideBusy) return;
         _hideBusy = true;
-        var result = await Api.ToggleHiddenAsync(Id, _meta?.Name, _meta?.Poster, "anime");
+        // Cache the right media type so the Discover Hidden section renders the card
+        // without a re-fetch — "movie"/"series" for video, "anime" otherwise.
+        var hideType = IsVideo ? VideoMediaType : "anime";
+        var result = await Api.ToggleHiddenAsync(Id, _meta?.Name, _meta?.Poster, hideType);
         _hideBusy = false;
         if (result is { Ok: true }) _isHidden = result.Hidden;
         StateHasChanged();
@@ -642,6 +797,13 @@ else
     private bool _showWatchCta;
     private string _watchCtaHref = "";
     private string _watchCtaLabel = "";
+
+    // Movie CTA target — anime movies: /meta/{id}/watch/1 (episode 1 = the movie
+    // body); video movies: /meta/{id}/watch?type=movie (no episode segment). Mirrors
+    // Detail.cshtml's movie CTA href.
+    private string MovieCtaHref => IsVideo
+        ? $"/meta/{Uri.EscapeDataString(Id)}/watch?type={VideoMediaType}"
+        : $"/meta/{Uri.EscapeDataString(Id)}/watch/1";
 
     // Next-unseen-episode CTA with future-aired gating + multi-season URL. Ports
     // the showWatchCta block from Detail.cshtml (anime path). Hidden for movies
@@ -659,7 +821,10 @@ else
         var completed = norm == "completed" || (entryTotal is int et && et > 0 && progress >= et);
         var nextEp = progress + 1;
         if (completed || nextEp > total) return;
-        if (_multiSeason && (_meta.Id?.StartsWith("tt") ?? false)) return; // franchise umbrella
+        // Anime franchise umbrella (imdb tt-id grouped into one entry across cours) →
+        // no single "next episode". Video series legitimately carry a tt id + multiple
+        // seasons and are NOT grouped umbrellas, so the guard is anime-only.
+        if (!IsVideo && _multiSeason && (_meta.Id?.StartsWith("tt") ?? false)) return;
 
         // Pick the target video — prefer the cour matching the tracked progress so a
         // multi-season franchise lands on the right season's episode.
@@ -769,7 +934,7 @@ else
     // Refresh the hero's user-state (pill + heart) after a save/remove in the modal.
     private async Task OnEntrySaved()
     {
-        _state = await Api.DetailStateAsync(Id) ?? _state;
+        _state = await Api.DetailStateAsync(Id, type: IsVideo ? VideoMediaType : null) ?? _state;
         ApplyUserState();
         ComputeWatchCta();
         StateHasChanged();
