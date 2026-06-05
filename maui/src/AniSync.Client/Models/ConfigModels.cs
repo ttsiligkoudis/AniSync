@@ -36,7 +36,15 @@ public sealed class ScrobbleTokenDto { public string? Token { get; set; } }
 public sealed class AddAddonResult { public bool Added { get; set; } public StreamAddonDto? Addon { get; set; } }
 public sealed class OkResult { public bool Ok { get; set; } }
 public sealed class DebridSkip { public string? Addon { get; set; } public string? Reason { get; set; } }
-public sealed class DebridResult { public List<StreamAddonDto> Added { get; set; } = new(); public List<DebridSkip> Skipped { get; set; } = new(); }
+public sealed class DebridResult
+{
+    public List<StreamAddonDto> Added { get; set; } = new();
+    public List<DebridSkip> Skipped { get; set; } = new();
+    // Set (client-side only) when the request itself failed — non-2xx / network /
+    // timeout — so the UI can show *why* instead of a generic "couldn't set up"
+    // message. Null when the call reached the server and returned a result.
+    public string? Error { get; set; }
+}
 
 public sealed class DebridProviderDto { public string? Id { get; set; } public string? Name { get; set; } public string? ApiKeyUrl { get; set; } public string? SignUpUrl { get; set; } }
 public sealed class CatalogAddonDto { public string? Id { get; set; } public string? Name { get; set; } }
