@@ -173,6 +173,10 @@
                    value="@_addonInput" @oninput="e => _addonInput = e.Value?.ToString() ?? string.Empty" />
             <button id="streamAddonAddBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;" disabled="@_addonBusy" @onclick="AddAddonAsync">Add</button>
         </div>
+        @if (!string.IsNullOrEmpty(_addonStatus))
+        {
+            <p class="debrid-setup-status @(_addonStatusError ? "is-error" : "is-ok")" role="status" aria-live="polite">@_addonStatus</p>
+        }
         <p class="option-name-sub" style="margin-top: 0.5rem;">
             Already have a configured manifest URL? Paste any Stremio
             stream-addon manifest — Torrentio
@@ -208,6 +212,8 @@
 
     private string _addonInput = "";
     private bool _addonBusy;
+    private string? _addonStatus;        // add/remove feedback — the original alerts on failure; we show it inline
+    private bool _addonStatusError;
     private string? _copiedUrl;   // the addon whose URL was just copied — flips its icon to a check briefly
 
     // Pending drag order, held locally so a re-render (e.g. when the page marks itself dirty)
@@ -342,26 +348,54 @@
 
     private async Task AddAddonAsync()
     {
+        _addonStatus = null;
         var url = _addonInput.Trim();
-        if (string.IsNullOrEmpty(url)) return;
+        if (string.IsNullOrEmpty(url))
+        {
+            _addonStatus = "Paste a Stremio addon manifest URL first."; _addonStatusError = true;
+            return;
+        }
         _addonBusy = true;
         var result = await Api.AddStreamAddonAsync(url);
-        if (result is { Added: true })
+        _addonBusy = false;
+        if (result is null)
+        {
+            // BadRequest — the server couldn't fetch a stream-addon manifest at that URL.
+            // The original surfaces the same failure via an alert; we show it inline.
+            _addonStatus = "Couldn't add that addon — check the URL is a reachable Stremio stream-addon manifest.";
+            _addonStatusError = true;
+        }
+        else if (result.Added)
         {
             _addonInput = "";
             _reorderBound = false;
             await OnReload.InvokeAsync();
         }
-        _addonBusy = false;
+        else
+        {
+            // Fetched fine but already in the list (server returned added:false) — not an error.
+            _addonStatus = "That addon is already in your list."; _addonStatusError = false;
+            _addonInput = "";
+        }
     }
 
     private async Task RemoveAddonAsync(string? url)
     {
         if (string.IsNullOrEmpty(url)) return;
+        _addonStatus = null;
+        // The original confirms before removing (episode pickers stop surfacing its streams).
+        bool ok;
+        try { ok = await JS.InvokeAsync<bool>("confirm", "Remove this stream addon? Episode pickers will stop surfacing its streams."); }
+        catch { ok = true; /* no JS available (shouldn't happen on the interactive pass) — proceed */ }
+        if (!ok) return;
         if (await Api.RemoveStreamAddonAsync(url))
         {
             _reorderBound = false;
             await OnReload.InvokeAsync();
+        }
+        else
+        {
+            _addonStatus = "Couldn't remove that addon — try again."; _addonStatusError = true;
         }
     }
 
