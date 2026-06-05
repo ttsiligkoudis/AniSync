@@ -280,11 +280,18 @@ public sealed class AniSyncApi : IAniSyncApi
     public async Task<bool> RemoveStreamAddonAsync(string manifestUrl, CancellationToken ct = default)
         => (await SendJson<RemovedResult>(HttpMethod.Delete, "api/v1/me/stream-addons", new { manifestUrl }, ct))?.Removed ?? false;
 
-    public async Task<bool> ReorderStreamAddonsAsync(IReadOnlyList<string> urls, CancellationToken ct = default)
-        => (await PostJson<object, ChangedResult>("api/v1/me/stream-addons/reorder", new { urls }, ct))?.Changed ?? false;
+    public async Task<bool?> ReorderStreamAddonsAsync(IReadOnlyList<string> urls, CancellationToken ct = default)
+    {
+        var (value, error) = await PostJsonDetailed<object, ChangedResult>("api/v1/me/stream-addons/reorder", new { urls }, ct);
+        // null distinguishes a failed request (caller surfaces it) from a server "no change".
+        return error is not null ? null : (value?.Changed ?? false);
+    }
 
-    public Task<DebridResult?> AddDebridAddonsAsync(DebridSetupRequest request, CancellationToken ct = default)
-        => PostJson<DebridSetupRequest, DebridResult>("api/v1/me/stream-addons/debrid", request, ct);
+    public async Task<DebridResult> AddDebridAddonsAsync(DebridSetupRequest request, CancellationToken ct = default)
+    {
+        var (value, error) = await PostJsonDetailed<DebridSetupRequest, DebridResult>("api/v1/me/stream-addons/debrid", request, ct);
+        return value ?? new DebridResult { Error = error ?? "couldn't set up addons right now" };
+    }
 
     public async Task<StreamCatalogDto> StreamCatalogAsync(CancellationToken ct = default)
         => await GetOrDefault<StreamCatalogDto>("api/v1/stream-catalog", ct) ?? new();
@@ -591,6 +598,75 @@ public sealed class AniSyncApi : IAniSyncApi
             _logger.LogWarning(ex, "POST {Url} failed.", url);
             return default;
         }
+    }
+
+    // Like PostJson, but reports *why* a write failed instead of collapsing every
+    // failure to null. Returns (value, error): error is null on success; otherwise a
+    // short, user-facing reason — the server's { error } / ProblemDetails message when
+    // there is one, else a status/network/timeout description. Lets the configure /
+    // account UI tell the user what actually went wrong (a vague "couldn't do that"
+    // is the difference between "paste your key" and "the upstream timed out").
+    private async Task<(TResp? Value, string? Error)> PostJsonDetailed<TReq, TResp>(string url, TReq body, CancellationToken ct)
+    {
+        try
+        {
+            EnsureBaseAddress();
+            using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = JsonContent.Create(body) };
+            if (!string.IsNullOrEmpty(_state.StreamConfig))
+                req.Headers.TryAddWithoutValidation(ConfigHeader, _state.StreamConfig);
+
+            using var resp = await _http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var error = await DescribeHttpErrorAsync(resp, ct);
+                _logger.LogWarning("POST {Url} failed: {Error}", url, error);
+                return (default, error);
+            }
+            if (typeof(TResp) == typeof(object)) return (default, null);
+            return (await resp.Content.ReadFromJsonAsync<TResp>(cancellationToken: ct), null);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "POST {Url} failed.", url);
+            return (default, "couldn't reach the server — check your connection and try again");
+        }
+    }
+
+    // Pull a human-readable reason from a failed response: the API's { error } body
+    // (or a ProblemDetails detail/title), falling back to a status-specific message.
+    private static async Task<string> DescribeHttpErrorAsync(HttpResponseMessage resp, CancellationToken ct)
+    {
+        try
+        {
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            if (!string.IsNullOrWhiteSpace(body))
+            {
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(body);
+                    if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object)
+                    {
+                        foreach (var name in new[] { "error", "detail", "title", "message" })
+                            if (doc.RootElement.TryGetProperty(name, out var p)
+                                && p.ValueKind == System.Text.Json.JsonValueKind.String
+                                && !string.IsNullOrWhiteSpace(p.GetString()))
+                                return p.GetString()!;
+                    }
+                }
+                catch { /* not JSON — fall through to the status-based message */ }
+            }
+        }
+        catch { /* body unreadable — fall through */ }
+
+        return resp.StatusCode switch
+        {
+            System.Net.HttpStatusCode.TooManyRequests => "too many requests — wait a moment and try again",
+            System.Net.HttpStatusCode.RequestTimeout or System.Net.HttpStatusCode.GatewayTimeout
+                => "the request timed out — the upstream addon may be slow, try again",
+            System.Net.HttpStatusCode.Unauthorized => "your session expired — reload the page and sign in again",
+            _ => $"server returned {(int)resp.StatusCode}",
+        };
     }
 
     // Generic verb sender (used for DELETE, optionally with a body). Mirrors

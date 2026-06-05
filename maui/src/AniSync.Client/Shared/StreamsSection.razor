@@ -319,7 +319,12 @@
             ApiKey = apiKey,
             Addons = _debridAddons.ToList(),
         });
-        if (result is not null)
+        if (!string.IsNullOrEmpty(result.Error))
+        {
+            // Request itself failed (non-2xx / network / timeout) — surface the real reason.
+            _debridStatus = "Couldn't set up addons: " + result.Error; _debridStatusClass = "is-error";
+        }
+        else
         {
             var added = result.Added.Select(a => a.Name ?? "addon").ToList();
             var parts = new List<string>();
@@ -338,10 +343,6 @@
                 _reorderBound = false; // list rows change → re-bind drag after reload
                 await OnReload.InvokeAsync();
             }
-        }
-        else
-        {
-            _debridStatus = "Could not set up addons right now."; _debridStatusClass = "is-error";
         }
         _debridBusy = false;
     }

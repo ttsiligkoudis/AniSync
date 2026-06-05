@@ -115,8 +115,14 @@ public interface IAniSyncApi
     Task<bool> SetPlexUsernameAsync(string? username, CancellationToken ct = default);
     Task<AddAddonResult?> AddStreamAddonAsync(string manifestUrl, CancellationToken ct = default);
     Task<bool> RemoveStreamAddonAsync(string manifestUrl, CancellationToken ct = default);
-    Task<bool> ReorderStreamAddonsAsync(IReadOnlyList<string> urls, CancellationToken ct = default);
-    Task<DebridResult?> AddDebridAddonsAsync(DebridSetupRequest request, CancellationToken ct = default);
+    /// <summary>Persists the new stream-addon order. Returns the server's <c>changed</c>
+    /// flag on success (true = order updated, false = already in that order), or
+    /// <c>null</c> when the request itself failed (non-2xx / network / timeout) so the
+    /// caller can tell a no-op apart from a failure it must surface.</summary>
+    Task<bool?> ReorderStreamAddonsAsync(IReadOnlyList<string> urls, CancellationToken ct = default);
+    /// <summary>One-click debrid setup. Never null: on a failed request the result carries
+    /// <see cref="DebridResult.Error"/> with the reason so the UI can show it.</summary>
+    Task<DebridResult> AddDebridAddonsAsync(DebridSetupRequest request, CancellationToken ct = default);
     Task<StreamCatalogDto> StreamCatalogAsync(CancellationToken ct = default);
     /// <summary>Backfill: push every primary-library entry to the linked accounts. Streams
     /// NDJSON progress server-side; the client just awaits completion (success = 2xx).</summary>

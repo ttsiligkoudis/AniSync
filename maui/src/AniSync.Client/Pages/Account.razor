@@ -91,8 +91,14 @@ else
 
     private IJSObjectReference? _js;
 
-    private bool AnimeEnabled => _config?.EnabledMediaTypes.Count is null or 0
-        || _config!.EnabledMediaTypes.Contains("anime", StringComparer.OrdinalIgnoreCase);
+    // Anime-only cards (Preferences toggles) gate on the user's real media-type pick.
+    // That choice lives client-side (AppState, hydrated from localStorage by MainLayout) —
+    // NOT in the server config: the Blazor-Server self-call to /api/v1/me/config can't see
+    // the browser's media-type cookie and the pick is never persisted to the DB, so the
+    // server defaults EnabledMediaTypes to anime and the toggles showed even when anime
+    // was deselected. Wait for hydration so we don't flash anime cards before we know.
+    private bool AnimeEnabled =>
+        State.MediaTypesHydrated && State.EnabledMediaTypes.Contains(MetaType.anime);
 
     protected override async Task OnInitializedAsync()
     {
@@ -100,6 +106,10 @@ else
         // interactive so a logged-in user isn't shown the logged-out surface.
         // Re-runs interactively.
         if (!RendererInfo.IsInteractive) return;
+
+        // Re-render when media types hydrate / change (the anime-only Preferences card
+        // gates on State.EnabledMediaTypes), e.g. the header chooser flips anime off.
+        State.Changed += OnStateChanged;
 
         if (string.IsNullOrEmpty(State.StreamConfig))
         {
@@ -168,18 +178,37 @@ else
             _dirty = false;
             // Stream-addon reorder rides on the same Save (the original folds it into
             // saveFlags() via saveStreamAddonOrderIfChanged). Persist the dragged order,
-            // then reload so the rendered list matches the store.
+            // then reload so the rendered list matches the store. A null result means the
+            // POST itself failed — keep the dragged order + the dirty bar (so the user can
+            // retry) and tell them, rather than silently reloading the old order back
+            // (which looked exactly like "reorder doesn't save").
             if (_pendingAddonOrder is { Length: > 0 } order)
             {
-                await Api.ReorderStreamAddonsAsync(order);
-                await ReloadAsync();
+                var reordered = await Api.ReorderStreamAddonsAsync(order);
+                if (reordered is null)
+                {
+                    _dirty = true;
+                    try { await JS.InvokeVoidAsync("alert", "Couldn't save the new addon order — try again."); } catch { }
+                }
+                else
+                {
+                    await ReloadAsync();
+                }
             }
+        }
+        else
+        {
+            // SaveFlags failed — keep the page dirty so the user can retry.
+            _dirty = true;
         }
         _saving = false;
     }
 
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
     public async ValueTask DisposeAsync()
     {
+        State.Changed -= OnStateChanged;
         if (_js is not null)
         {
             try { await _js.InvokeVoidAsync("setConfigPage", false); } catch { }

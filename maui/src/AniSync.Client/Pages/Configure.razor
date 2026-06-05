@@ -465,13 +465,16 @@
             ApiKey = _debridKey.Trim(),
             Addons = _debridAddons.ToList(),
         });
-        if (result is not null)
+        if (!string.IsNullOrEmpty(result.Error))
+        {
+            _debridStatus = "Couldn't set up debrid addons: " + result.Error;
+        }
+        else
         {
             _debridStatus = $"Added {result.Added.Count} addon(s)" + (result.Skipped.Count > 0 ? $", {result.Skipped.Count} skipped." : ".");
-            _debridKey = "";
+            if (result.Added.Count > 0) _debridKey = "";
             await ReloadAsync();
         }
-        else _debridStatus = "Couldn't set up debrid addons right now.";
         _debridBusy = false;
     }
 
@@ -498,7 +501,9 @@
         var target = index + delta;
         if (target < 0 || target >= urls.Count) return;
         (urls[index], urls[target]) = (urls[target], urls[index]);
-        if (await Api.ReorderStreamAddonsAsync(urls)) await ReloadAsync();
+        // Reload on any server result (true = changed, false = no-op); only a null
+        // (failed request) is left alone so the move isn't silently reverted unseen.
+        if (await Api.ReorderStreamAddonsAsync(urls) is not null) await ReloadAsync();
     }
 
     private async Task CopyManifestAsync()

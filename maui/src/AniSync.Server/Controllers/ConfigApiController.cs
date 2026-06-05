@@ -213,7 +213,9 @@ namespace AnimeList.Controllers
             return Ok(new { token });
         }
 
-        public sealed class PlexUsernameBody { public string username { get; set; } }
+        // Nullable: clearing the Plex username sends { "username": null }, which a
+        // non-nullable (implicitly [Required]) property would reject with a 400.
+        public sealed class PlexUsernameBody { public string? username { get; set; } }
 
         [HttpPost("plex-username")]
         public async Task<IActionResult> SetPlexUsername([FromBody] PlexUsernameBody body)
@@ -305,13 +307,44 @@ namespace AnimeList.Controllers
             var added = new List<object>();
             var skipped = new List<object>();
 
-            foreach (var addonId in addonIds)
+            // Phase 1 — resolve + validate every addon's manifest(s) CONCURRENTLY. This is
+            // all network-bound (MediaFusion's encrypt POST + each manifest fetch, up to a
+            // handful of 8s-timeout calls). Run sequentially they stacked into tens of
+            // seconds — long enough to trip a gateway timeout or stall the calling Blazor
+            // circuit, which surfaced to the user as a generic "couldn't set up addons".
+            // FetchManifestAsync / EncryptConfigAsync are stateless and use
+            // IHttpClientFactory, so they're safe to fan out.
+            var resolutions = await Task.WhenAll(addonIds.Select(ResolveAddonAsync));
+
+            // Phase 2 — persist sequentially in the requested order. AddStreamAddonAsync is
+            // a read-modify-write on the same row, so these must NOT interleave.
+            foreach (var (addonId, validated, skipReason) in resolutions)
             {
-                if (!StreamAddonCatalog.IsKnownAddon(addonId))
+                if (validated.Count == 0)
                 {
-                    skipped.Add(new { addon = addonId, reason = "unknown addon" });
+                    skipped.Add(new { addon = addonId, reason = skipReason });
                     continue;
                 }
+                foreach (var addon in validated)
+                {
+                    var wasAdded = await _configStore.AddStreamAddonAsync(uid, addon);
+                    if (wasAdded) added.Add(new { url = addon.Url, name = addon.Name });
+                    else skipped.Add(new { addon = addonId, reason = "already added" });
+                }
+            }
+
+            if (added.Count > 0 && !hadAddons)
+                await _configStore.ClearShowExternalStreamsAsync(uid);
+
+            return Ok(new { added, skipped });
+
+            // Builds an addon's manifest URL(s) and validates each by fetching it, exactly
+            // as the manual Add path does. Returns the validated addons (empty + a reason
+            // when nothing checks out) without touching the store.
+            async Task<(string AddonId, IReadOnlyList<StreamAddon> Validated, string? SkipReason)> ResolveAddonAsync(string addonId)
+            {
+                if (!StreamAddonCatalog.IsKnownAddon(addonId))
+                    return (addonId, Array.Empty<StreamAddon>(), "unknown addon");
 
                 IReadOnlyList<string> manifestUrls;
                 if (string.Equals(addonId, "mediafusion", StringComparison.OrdinalIgnoreCase))
@@ -330,29 +363,14 @@ namespace AnimeList.Controllers
                 }
 
                 if (manifestUrls.Count == 0)
-                {
-                    skipped.Add(new { addon = addonId, reason = "couldn't build a manifest URL" });
-                    continue;
-                }
+                    return (addonId, Array.Empty<StreamAddon>(), "couldn't build a manifest URL");
 
-                foreach (var manifestUrl in manifestUrls)
-                {
-                    var addon = await _addonStreamService.FetchManifestAsync(manifestUrl);
-                    if (addon == null)
-                    {
-                        skipped.Add(new { addon = addonId, reason = "couldn't validate — check your key, or add it manually" });
-                        continue;
-                    }
-                    var wasAdded = await _configStore.AddStreamAddonAsync(uid, addon);
-                    if (wasAdded) added.Add(new { url = addon.Url, name = addon.Name });
-                    else skipped.Add(new { addon = addonId, reason = "already added" });
-                }
+                var fetched = await Task.WhenAll(manifestUrls.Select(u => _addonStreamService.FetchManifestAsync(u)));
+                var valid = fetched.Where(a => a != null).Select(a => a!).ToList();
+                return valid.Count == 0
+                    ? (addonId, Array.Empty<StreamAddon>(), "couldn't validate — check your key, or add it manually")
+                    : (addonId, (IReadOnlyList<StreamAddon>)valid, null);
             }
-
-            if (added.Count > 0 && !hadAddons)
-                await _configStore.ClearShowExternalStreamsAsync(uid);
-
-            return Ok(new { added, skipped });
         }
 
         // ── Backups ───────────────────────────────────────────────────────────────
