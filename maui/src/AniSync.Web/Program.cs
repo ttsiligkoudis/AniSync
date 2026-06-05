@@ -34,6 +34,10 @@ builder.Services.AddRazorComponents()
 
 // ---- Shared client registrations (identical on both heads) ----
 builder.Services.AddScoped<AppState>();                 // session/nav/media-type/config state
+builder.Services.AddHttpContextAccessor();              // idempotent; WebPrerenderSession reads the anisync_uid cookie
+// Cookie-backed prerender: render signed-in chrome from the first byte when the anisync_uid cookie is
+// present, bridging the verdict to the interactive circuit via PersistentComponentState (no flash).
+builder.Services.AddScoped<IPrerenderSession, WebPrerenderSession>();
 builder.Services.AddScoped<IAniSyncApi, AniSyncApi>();
 // AniSyncApi sets HttpClient.BaseAddress from IAppEnvironment in its constructor
 // (the circuit scope), so the factory leaves it unset — the Web head's base URL is

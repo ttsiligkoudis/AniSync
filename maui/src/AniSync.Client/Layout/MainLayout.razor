@@ -5,6 +5,7 @@
 @inject ISecureStore Store
 @inject IAniSyncApi Api
 @inject IJSRuntime JS
+@inject IPrerenderSession PrerenderSession
 
 @* Shared chrome for every page — composed to match _Layout.cshtml's body
    order exactly: drawer (+ backdrop), site header, fixed media-type switch,
@@ -32,6 +33,11 @@
     {
         Nav.LocationChanged += OnLocationChanged;
         State.Changed += OnStateChanged;
+        // Cookie-backed prerender: when the server can see the anisync_uid session cookie, render the
+        // signed-in chrome from the first paint (and bridge that verdict to the interactive circuit via
+        // PersistentComponentState) so a signed-in user never sees the signed-out chrome flash. No-op on
+        // native and when no cookie is present (then the localStorage hydration below decides).
+        PrerenderSession.Bootstrap(State, RendererInfo.IsInteractive);
     }
 
     protected override async Task OnInitializedAsync()

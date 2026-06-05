@@ -38,6 +38,7 @@ public static class MauiProgram
 
         // ---- Shared client registrations (identical on both heads) ----
         builder.Services.AddScoped<AppState>();                 // session/nav/media-type/config state
+        builder.Services.AddScoped<IPrerenderSession, NoOpPrerenderSession>(); // native: no prerender/cookie, localStorage hydration drives it
         builder.Services.AddScoped<IAniSyncApi, AniSyncApi>();
         builder.Services.AddHttpClient<IAniSyncApi, AniSyncApi>((sp, http) =>
         {
