@@ -33,7 +33,7 @@
                 </svg>
             </button>
             <div class="streams-modal-body">
-                <StreamsSection IsStremio="false" Flags="Flags" Config="Config" OnDirty="OnDirty" OnReload="OnReload" />
+                <StreamsSection IsStremio="false" Flags="Flags" Config="Config" OnDirty="OnDirty" OnReload="OnReload" OnReorder="OnReorder" />
             </div>
         </div>
     </div>
@@ -44,6 +44,9 @@
     [Parameter] public ConfigStateDto? Config { get; set; }
     [Parameter] public EventCallback OnDirty { get; set; }
     [Parameter] public EventCallback OnReload { get; set; }
+    // Bubbles the dragged stream-addon order up to the page so its Save can fold in the
+    // ReorderStreamAddons POST (the original defers the reorder to the page's Save click).
+    [Parameter] public EventCallback<string[]> OnReorder { get; set; }
 
     private bool _open;
     private IJSObjectReference? _js;

@@ -78,9 +78,13 @@ export function hasStreamsHash() {
 // Pointer-event reorder on the drag handle — a faithful port of the
 // _ConfigurePageScript handler. Single code path for mouse + touch + pen
 // (setPointerCapture redirects move/up to the handle even when the pointer
-// drifts off it). On drop it reads the new row order and hands it back to .NET
-// via dotnet.invokeMethodAsync('OnAddonReorder', urls) so the component can
-// persist it through the same Api.ReorderStreamAddonsAsync call the page uses.
+// drifts off it). On drop it computes the intended new order from the drop
+// target — WITHOUT mutating the DOM — and hands it back to .NET via
+// dotnet.invokeMethodAsync('OnAddonReorder', urls). Blazor owns the list
+// rendering and re-renders from that order; mutating the DOM here would desync
+// Blazor's keyed diff and corrupt the order on its next render. Matching the
+// original, the reorder isn't persisted on drop — the component marks the page
+// dirty and the POST is folded into the page's Save.
 const _addonBindings = new WeakMap();
 
 export function bindAddonReorder(list, dotnet) {
@@ -147,20 +151,26 @@ export function bindAddonReorder(list, dotnet) {
         const row = drag.row;
         const handle = drag.handle;
         const before = currentOrder();
+        const draggedUrl = row.getAttribute('data-url') || '';
         const drop = (e && typeof e.clientY === 'number') ? findDropTarget(e.clientY) : null;
-        if (drop) {
-            if (drop.before) list.insertBefore(row, drop.row);
-            else list.insertBefore(row, drop.row.nextSibling);
-        }
+
         row.classList.remove('is-dragging');
         clearIndicators();
         try { handle.releasePointerCapture(drag.pointerId); } catch (_) {}
         drag = null;
 
-        // Only notify .NET when the order actually changed (a drag that drops
-        // back at the original spot is a no-op, mirroring the original's
-        // streamAddonOrderChanged() guard).
-        const after = currentOrder();
+        // Compute the intended order from the drop target WITHOUT moving the DOM —
+        // Blazor re-renders the list from the order we hand back (see the header note).
+        if (!drop || !draggedUrl) return;
+        const targetUrl = drop.row.getAttribute('data-url') || '';
+        if (!targetUrl || targetUrl === draggedUrl) return;
+        const after = before.filter(function (u) { return u !== draggedUrl; });
+        const idx = after.indexOf(targetUrl);
+        if (idx < 0) return;
+        after.splice(drop.before ? idx : idx + 1, 0, draggedUrl);
+
+        // No-op if nothing actually moved (dropped back at the same spot), mirroring
+        // the original's streamAddonOrderChanged() guard.
         let changed = before.length !== after.length;
         for (let i = 0; !changed && i < after.length; i++) {
             if (before[i] !== after[i]) changed = true;

@@ -42,7 +42,7 @@ else
     {
         <LinkedAccountsSection Config="_config" OnReload="ReloadAsync" />
 
-        <StreamsModal Flags="_flags" Config="_config" OnDirty="MarkDirty" OnReload="ReloadAsync" />
+        <StreamsModal Flags="_flags" Config="_config" OnDirty="MarkDirty" OnReload="ReloadAsync" OnReorder="OnAddonReorderPending" />
 
         <PreferencesSection Flags="_flags" AnimeEnabled="AnimeEnabled" OnDirty="MarkDirty" />
 
@@ -72,6 +72,10 @@ else
     private byte _savedF1, _savedF2, _savedF3;
     private bool _dirty;
     private bool _saving;
+    // Pending stream-addon order from a drag-reorder in the Streams modal. Like the original,
+    // the reorder isn't persisted on drop — it marks the page dirty and the ReorderStreamAddons
+    // POST is folded into Save (SaveAsync). Cleared on reload (add/remove/save invalidate it).
+    private string[]? _pendingAddonOrder;
 
     // Pre-login provider picker. Mirrors _AccountSection: with anime enabled (the
     // default until the chooser modal lands) the picker offers all three anime
@@ -127,6 +131,7 @@ else
     private async Task ReloadAsync()
     {
         _config = await Api.GetConfigAsync();
+        _pendingAddonOrder = null;
         if (_config is not null)
         {
             _flags = ConfigFlags.Decode(_config.Flags1, _config.Flags2, _config.Flags3);
@@ -138,7 +143,15 @@ else
     private void MarkDirty()
     {
         var (f1, f2, f3) = _flags.Encode();
-        _dirty = f1 != _savedF1 || f2 != _savedF2 || f3 != _savedF3;
+        _dirty = f1 != _savedF1 || f2 != _savedF2 || f3 != _savedF3 || _pendingAddonOrder is { Length: > 0 };
+    }
+
+    // A drag-reorder in the Streams modal — stash the new order and light up the Save bar.
+    // The POST is folded into SaveAsync (the original's saveStreamAddonOrderIfChanged).
+    private void OnAddonReorderPending(string[] urls)
+    {
+        _pendingAddonOrder = urls;
+        MarkDirty();
     }
 
     private async Task SaveAsync()
@@ -153,6 +166,14 @@ else
             _config.Revision = result.Revision;
             if (!string.IsNullOrEmpty(result.InstallConfig)) _config.InstallConfig = result.InstallConfig;
             _dirty = false;
+            // Stream-addon reorder rides on the same Save (the original folds it into
+            // saveFlags() via saveStreamAddonOrderIfChanged). Persist the dragged order,
+            // then reload so the rendered list matches the store.
+            if (_pendingAddonOrder is { Length: > 0 } order)
+            {
+                await Api.ReorderStreamAddonsAsync(order);
+                await ReloadAsync();
+            }
         }
         _saving = false;
     }

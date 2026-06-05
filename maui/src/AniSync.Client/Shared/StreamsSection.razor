@@ -114,10 +114,10 @@
         </div>
 
         <ul id="streamAddonList" class="stream-addon-list" @ref="_listRef">
-            @foreach (var addon in Config.StreamAddons)
+            @foreach (var addon in OrderedAddons)
             {
                 var configureUrl = addon.Url?.Replace("/manifest.json", "/configure") ?? addon.Url;
-                <li class="stream-addon-row" data-url="@addon.Url">
+                <li class="stream-addon-row" data-url="@addon.Url" @key="addon.Url">
                     <span class="stream-addon-drag-handle" aria-label="Drag to reorder" title="Drag to reorder">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <line x1="3" y1="8" x2="21" y2="8"/>
@@ -135,11 +135,24 @@
                                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
                             </svg>
                         </a>
-                        <button class="stream-addon-icon-btn stream-addon-copy" type="button" aria-label="Copy manifest URL" title="Copy manifest URL" @onclick="() => CopyAsync(addon.Url)">
-                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                            </svg>
+                        <button class="stream-addon-icon-btn stream-addon-copy @(_copiedUrl == addon.Url ? "is-copied" : "")" type="button"
+                                aria-label="@(_copiedUrl == addon.Url ? "Copied!" : "Copy manifest URL")"
+                                title="@(_copiedUrl == addon.Url ? "Copied!" : "Copy manifest URL")"
+                                style="@(_copiedUrl == addon.Url ? "color:var(--success,#3fb950)" : "")"
+                                @onclick="() => CopyAsync(addon.Url)">
+                            @if (_copiedUrl == addon.Url)
+                            {
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <polyline points="20 6 9 17 4 12"/>
+                                </svg>
+                            }
+                            else
+                            {
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                </svg>
+                            }
                         </button>
                         <button class="stream-addon-icon-btn stream-addon-remove" type="button" aria-label="Remove" title="Remove" @onclick="() => RemoveAddonAsync(addon.Url)">
                             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -180,6 +193,10 @@
     [Parameter] public ConfigStateDto? Config { get; set; }
     [Parameter] public EventCallback OnDirty { get; set; }
     [Parameter] public EventCallback OnReload { get; set; }
+    // Bubbles the dragged addon order up to the page. Mirroring the original, the reorder
+    // is NOT persisted on drop — the page marks itself dirty and folds the
+    // ReorderStreamAddons POST into its Save (see Account.SaveAsync).
+    [Parameter] public EventCallback<string[]> OnReorder { get; set; }
 
     private StreamCatalogDto _catalog = new();
     private string _debridProvider = "";
@@ -191,6 +208,26 @@
 
     private string _addonInput = "";
     private bool _addonBusy;
+    private string? _copiedUrl;   // the addon whose URL was just copied — flips its icon to a check briefly
+
+    // Pending drag order, held locally so a re-render (e.g. when the page marks itself dirty)
+    // keeps the just-dragged order instead of snapping back to Config's persisted order. Null
+    // when the list is at its saved order. Cleared in OnParametersSet whenever the actual addon
+    // set/order changes server-side (add / remove / save-reload).
+    private List<string>? _pendingOrder;
+    private string _addonKey = "";
+
+    private IReadOnlyList<StreamAddonDto> OrderedAddons
+    {
+        get
+        {
+            var addons = Config?.StreamAddons ?? new List<StreamAddonDto>();
+            if (_pendingOrder is null) return addons;
+            var rank = new Dictionary<string, int>();
+            for (var i = 0; i < _pendingOrder.Count; i++) rank[_pendingOrder[i]] = i;
+            return addons.OrderBy(a => rank.TryGetValue(a.Url ?? "", out var r) ? r : int.MaxValue).ToList();
+        }
+    }
 
     private ElementReference _listRef;
     private IJSObjectReference? _js;
@@ -212,6 +249,18 @@
             _catalog = await Api.StreamCatalogAsync();
             _debridProvider = _catalog.Providers.FirstOrDefault()?.Id ?? "";
             foreach (var a in _catalog.Addons) _debridAddons.Add(a.Id!);
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        // When the persisted addon set/order changes (add, remove, or a post-Save reload),
+        // drop any pending drag order so the list reflects the store again.
+        var key = Config?.StreamAddons is { } a ? string.Join("|", a.Select(x => x.Url)) : "";
+        if (key != _addonKey)
+        {
+            _addonKey = key;
+            _pendingOrder = null;
         }
     }
 
@@ -319,15 +368,14 @@
     [JSInvokable]
     public async Task OnAddonReorder(string[] urls)
     {
-        // Drag-by-handle drop → persist the new order via the same Api call the
-        // catalog page uses, then reload so the rendered list matches the store.
+        // Drag-by-handle drop. Mirroring the original (_ConfigurePageScript): the reorder is
+        // NOT persisted here. We hold the dragged order locally (so a re-render keeps it rather
+        // than snapping back to Config's order) and bubble it to the page, which marks itself
+        // dirty and folds the ReorderStreamAddons POST into its Save.
         if (urls is null || urls.Length == 0) return;
-        if (await Api.ReorderStreamAddonsAsync(urls))
-        {
-            _reorderBound = false;
-            await OnReload.InvokeAsync();
-            StateHasChanged();
-        }
+        _pendingOrder = urls.ToList();
+        StateHasChanged();
+        await OnReorder.InvokeAsync(urls);
     }
 
     private async Task CopyAsync(string? url)
@@ -337,6 +385,12 @@
         {
             _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/configure.js");
             await _js.InvokeAsync<bool>("copyText", url);
+            // Visual confirmation — swap the icon to a check for ~1.4s (the original flashed
+            // a "Copied" tooltip; this is the framework-equivalent feedback).
+            _copiedUrl = url;
+            StateHasChanged();
+            await Task.Delay(1400);
+            if (_copiedUrl == url) { _copiedUrl = null; StateHasChanged(); }
         }
         catch { /* clipboard blocked */ }
     }

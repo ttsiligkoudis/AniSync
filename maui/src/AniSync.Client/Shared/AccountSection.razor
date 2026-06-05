@@ -56,6 +56,10 @@
     private string? _busy;
     private string? _message;
 
+    // Canonical provider order — matches LinkedAccountsSection's AllServices so the post-login
+    // picker pills read in the same order as the Linked Accounts list.
+    private static readonly string[] AllServices = { "Kitsu", "Anilist", "MyAnimeList", "Trakt" };
+
     private bool LoggedIn => Config is not null;
 
     // Post-login: at least one healthy (not needs-reauth) linked account to swap to.
@@ -71,12 +75,15 @@
             var list = new List<Pill>();
             if (LoggedIn)
             {
-                // Primary (active) + each healthy linked account.
-                AddPill(list, Config!.AnimeService, active: true);
-                foreach (var l in Config!.Linked.Where(l => !l.NeedsReauth))
+                // Primary + each healthy linked account, in the canonical provider order
+                // (Kitsu · AniList · MyAnimeList · Trakt) so the picker matches the Linked
+                // Accounts list below rather than leading with the primary.
+                foreach (var svc in AllServices)
                 {
-                    if (string.Equals(l.Service, Config!.AnimeService, StringComparison.OrdinalIgnoreCase)) continue;
-                    AddPill(list, l.Service, active: false);
+                    var isPrimary = string.Equals(svc, Config!.AnimeService, StringComparison.OrdinalIgnoreCase);
+                    var linked = Config!.Linked.FirstOrDefault(l => string.Equals(l.Service, svc, StringComparison.OrdinalIgnoreCase));
+                    if (isPrimary || (linked is not null && !linked.NeedsReauth))
+                        AddPill(list, svc, active: isPrimary);
                 }
             }
             else
