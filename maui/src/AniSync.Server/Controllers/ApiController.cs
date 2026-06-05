@@ -885,7 +885,8 @@ namespace AnimeList.Controllers
                     Title: v.title ?? v.name,
                     Thumbnail: v.thumbnail,
                     Released: v.released ?? v.firstAired,
-                    Overview: v.overview ?? v.description)).ToList();
+                    Overview: v.overview ?? v.description,
+                    AiringAt: v.airingAt)).ToList();
                 return new JsonResult(new EpisodesResponse(meta.id ?? id, rows));
             }
             catch (Exception ex)

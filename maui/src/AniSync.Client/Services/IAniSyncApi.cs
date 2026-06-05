@@ -91,6 +91,13 @@ public interface IAniSyncApi
     Task<AnimeEntryDto?> GetEntryAsync(string id, int? season = null, CancellationToken ct = default);
     Task<SaveEntryResponse?> SaveEntryAsync(string id, EntrySaveRequest request, int? season = null, CancellationToken ct = default);
     Task<SaveEntryResponse?> DeleteEntryAsync(string id, int? season = null, CancellationToken ct = default);
+    /// <summary>Per-user detail-page state (list entry + hidden flag) in one call —
+    /// /api/v1/me/state/{id}. Drives the hero pill, quick-add heart, and Hide button.</summary>
+    Task<DetailStateDto?> DetailStateAsync(string id, int? season = null, CancellationToken ct = default);
+    /// <summary>Quick-add heart toggle for the Currently Watching list — POST /api/v1/me/watching/toggle.</summary>
+    Task<ToggleWatchingResult?> ToggleWatchingAsync(string id, int? season = null, CancellationToken ct = default);
+    /// <summary>Hide / unhide an anime from Discover — POST /api/v1/me/hidden/toggle.</summary>
+    Task<ToggleHiddenResult?> ToggleHiddenAsync(string id, string? title = null, string? imageUrl = null, string? mediaType = null, CancellationToken ct = default);
     Task<LinkedResponse?> LinkedAsync(CancellationToken ct = default);
     Task<PromoteResponse?> PromotePrimaryAsync(string service, bool force = false, CancellationToken ct = default);
     Task<DiffResponse?> SyncDiffAsync(CancellationToken ct = default);

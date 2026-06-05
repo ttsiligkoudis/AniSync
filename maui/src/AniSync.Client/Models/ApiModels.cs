@@ -48,6 +48,11 @@ public sealed class EpisodeInfoDto
     public string? Thumbnail { get; set; }
     public string? Released { get; set; }
     public string? Overview { get; set; }
+
+    /// <summary>AniList-overlaid airing timestamp (Unix seconds, UTC), when present.
+    /// The detail page prefers this over <see cref="Released"/> for the "has it aired
+    /// yet?" gate — matches the original Detail.cshtml's airingAt-first logic.</summary>
+    public long? AiringAt { get; set; }
 }
 
 // ── Playback sources (Stremio addon: GET /{config}/stream/{type}/{id}.json) ──

@@ -85,14 +85,20 @@ namespace AnimeList.Models.Api
     /// <summary>Episode list extracted from an anime's full meta — same data the detail page renders, without the show envelope.</summary>
     public record EpisodesResponse(string AnimeId, List<EpisodeInfo> Episodes);
 
-    /// <summary>One episode row in <see cref="EpisodesResponse"/>.</summary>
+    /// <summary>One episode row in <see cref="EpisodesResponse"/>. <c>AiringAt</c> is
+    /// the AniList-overlaid airing timestamp (Unix seconds, UTC) when present; the
+    /// detail page's "has this episode aired yet?" gate prefers it over the Cinemeta
+    /// <c>Released</c> string (AniList's community schedule leads Cinemeta's
+    /// <c>released</c> by 1–2 days for some shows). Null when the cross-service
+    /// mapping has no AniList schedule.</summary>
     public record EpisodeInfo(
         int Season,
         int Episode,
         string? Title,
         string? Thumbnail,
         string? Released,
-        string? Overview);
+        string? Overview,
+        long? AiringAt = null);
 
     // ── User-scoped endpoints ────────────────────────────────────────────────
 

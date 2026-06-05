@@ -256,6 +256,20 @@ public sealed class AniSyncApi : IAniSyncApi
         return await PostJson<EntrySaveRequest, SaveEntryResponse>(url, request, ct);
     }
 
+    public async Task<DetailStateDto?> DetailStateAsync(string id, int? season = null, CancellationToken ct = default)
+    {
+        var url = $"api/v1/me/state/{Uri.EscapeDataString(id)}";
+        if (season.HasValue) url += $"?season={season.Value}";
+        return await GetOrDefault<DetailStateDto>(url, ct);
+    }
+
+    public Task<ToggleWatchingResult?> ToggleWatchingAsync(string id, int? season = null, CancellationToken ct = default)
+        => PostJson<object, ToggleWatchingResult>("api/v1/me/watching/toggle", new { id, season }, ct);
+
+    public Task<ToggleHiddenResult?> ToggleHiddenAsync(string id, string? title = null, string? imageUrl = null, string? mediaType = null, CancellationToken ct = default)
+        => PostJson<object, ToggleHiddenResult>("api/v1/me/hidden/toggle",
+            new { id, title, imageUrl, mediaType }, ct);
+
     public async Task<IReadOnlyList<NotificationDto>> NotificationsAsync(int limit = 20, int skip = 0, CancellationToken ct = default)
     {
         var resp = await GetOrDefault<NotificationsResponse>($"api/v1/notifications?limit={limit}&skip={skip}", ct);

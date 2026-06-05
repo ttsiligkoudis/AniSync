@@ -2,13 +2,16 @@
 @inject IAniSyncApi Api
 @inject NavigationManager Nav
 @inject AppState State
+@inject IJSRuntime JS
 
-@* Anime/title detail — port of Views/Meta/Detail.cshtml. Hero (backdrop +
-   poster + score + title + info + status + user-state pill + genre + source
-   chips), collapsible synopsis, trailer, episodes list (rows navigate to
-   /watch), related + recommendations carousels, supplementary credit chips
-   (tag/studio/staff → Discover), and streaming-service links. Reuses the
-   anime-detail-* classes from site.css. *@
+@* Anime/title detail — port of Views/Meta/Detail.cshtml (anime path). Hero
+   (backdrop + poster + score + title + info + airing status + user-state pill +
+   quick-add heart + Hide/Unhide + watch-next CTA + genre + source chips incl.
+   Stremio), collapsible synopsis, lazy trailer, episodes list (season tabs for
+   multi-cour, rows navigate to /watch, airingAt-first future gating), related +
+   recommendations carousels, supplementary credit chips (tag/studio/staff →
+   Discover), and streaming-service links. Reuses the anime-detail-* classes from
+   site.css. The movie / series (Trakt) video-detail rendering path is deferred. *@
 
 <PageTitle>@(_meta?.Name ?? "Details") · AniSync</PageTitle>
 
@@ -65,9 +68,13 @@ else
                             @a.AirStatus
                         </span>
                     }
-                    @if (!string.IsNullOrEmpty(State.StreamConfig))
+                    @* User-state pill — cobalt "{Status} · Ep N / T" + pencil when the
+                       anime is on the user's list, "Add to List" + plus otherwise.
+                       Omitted entirely for anonymous viewers (no "you" to talk about);
+                       clicking opens the Manage Entry modal either way. *@
+                    @if (LoggedIn)
                     {
-                        <button type="button" class="anime-detail-user-state" @onclick="() => _modalOpen = true">
+                        <button type="button" class="anime-detail-user-state" @onclick="OpenModal">
                             <span>@EntryPillLabel()</span>
                             @if (HasEntry)
                             {
@@ -87,7 +94,63 @@ else
                             }
                         </button>
                     }
+                    @* Quick-add heart — one-click Currently Watching toggle. Shown only
+                       when the entry is NOT on any list (outline → adds) or already
+                       Watching (filled → removes); hidden when it's in some other list
+                       (managed via the modal), for anonymous viewers, movies, and
+                       multi-cour franchise umbrellas (one ep number can't speak for the
+                       franchise). *@
+                    @if (ShowHeart)
+                    {
+                        <button type="button"
+                                class="anime-detail-heart @(_heartFilled ? "anime-detail-heart-filled" : "")"
+                                aria-pressed="@(_heartFilled ? "true" : "false")"
+                                aria-label="@HeartLabel" title="@HeartLabel"
+                                disabled="@_heartBusy"
+                                @onclick="ToggleHeart">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+                                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+                            </svg>
+                        </button>
+                    }
+                    @* Hide / Unhide from Discover. Logged-in only; label + pressed
+                       state reflect the entry's current hidden status. *@
+                    @if (LoggedIn)
+                    {
+                        <button type="button"
+                                class="anime-detail-hide @(_isHidden ? "anime-detail-hide-on" : "")"
+                                aria-pressed="@(_isHidden ? "true" : "false")"
+                                aria-label="@HideLabel" title="@HideLabel"
+                                disabled="@_hideBusy"
+                                @onclick="ToggleHide">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none"
+                                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                                <line x1="1" y1="1" x2="23" y2="23"></line>
+                            </svg>
+                            <span class="anime-detail-hide-label">@(_isHidden ? "Unhide" : "Hide")</span>
+                        </button>
+                    }
                 </div>
+
+                @* Continue-watching CTA — its own centered row beneath the badges.
+                   Hidden when nothing's playable (movie has its own CTA below the
+                   synopsis), the show is completed, progress is past the last loaded
+                   episode, or the next unseen episode hasn't aired yet (same gate
+                   that makes the corresponding episode row inert). *@
+                @if (_showWatchCta)
+                {
+                    <div class="anime-detail-watch-next-wrap">
+                        <a class="anime-detail-watch-next" href="@_watchCtaHref" aria-label="@_watchCtaLabel">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+                                <polygon points="6 4 20 12 6 20 6 4"></polygon>
+                            </svg>
+                            <span>@_watchCtaLabel</span>
+                        </a>
+                    </div>
+                }
+
                 @if (a.Genres is { Count: > 0 })
                 {
                     <ul class="anime-detail-link-list anime-detail-genre-list">
@@ -102,15 +165,31 @@ else
                     <div class="anime-detail-sources" aria-label="Open on external sites">
                         @foreach (var c in _sourceChips)
                         {
-                            <a class="source-chip source-chip-@c.Brand"
-                               href="@c.Url" target="_blank" rel="noreferrer noopener"
-                               aria-label="Open on @c.Label">
-                                <span class="source-chip-mark" aria-hidden="true">@c.Mark</span>
-                                @if (c.Brand != "imdb")
-                                {
+                            @if (c.Brand == "stremio")
+                            {
+                                @* href is the web fallback (right-click / middle-click /
+                                   copy-link all work); data-stremio-app-url is the native
+                                   protocol the JS tries first. *@
+                                <a class="source-chip source-chip-stremio"
+                                   href="@c.Url" data-stremio-app-url="@c.AppUrl"
+                                   target="_blank" rel="noreferrer noopener"
+                                   aria-label="Open on Stremio">
+                                    <span class="source-chip-mark" aria-hidden="true">@c.Mark</span>
                                     <span class="source-chip-label">@c.Label</span>
-                                }
-                            </a>
+                                </a>
+                            }
+                            else
+                            {
+                                <a class="source-chip source-chip-@c.Brand"
+                                   href="@c.Url" target="_blank" rel="noreferrer noopener"
+                                   aria-label="Open on @c.Label">
+                                    <span class="source-chip-mark" aria-hidden="true">@c.Mark</span>
+                                    @if (c.Brand != "imdb")
+                                    {
+                                        <span class="source-chip-label">@c.Label</span>
+                                    }
+                                </a>
+                            }
                         }
                     </div>
                 }
@@ -187,18 +266,38 @@ else
                     </svg>
                 </button>
             </div>
+
+            @if (_seasons.Count > 1)
+            {
+                @* Horizontally-scrollable season tab strip — each tab filters the
+                   single shared list below to its cour. Rendered outside the
+                   scroll body so the switcher stays anchored above long lists. *@
+                <nav class="season-tabs" role="tablist" aria-label="Seasons">
+                    @foreach (var s in _seasons)
+                    {
+                        <button type="button"
+                                class="season-tab @(s == _activeSeason ? "season-tab-active" : "")"
+                                role="tab"
+                                aria-selected="@(s == _activeSeason ? "true" : "false")"
+                                @onclick="() => _activeSeason = s">
+                            Season @s
+                        </button>
+                    }
+                </nav>
+            }
+
             <div class="anime-detail-episodes-body" id="anime-detail-episodes-body">
-                <ol class="anime-detail-episodes" reversed="false">
+                <ol class="anime-detail-episodes" reversed="false" data-active-season="@_activeSeason">
                     @foreach (var ep in _filteredEpisodes)
                     {
                         var future = IsFuture(ep);
-                        var watched = (_meta?.Progress ?? 0) > 0 && ep.Episode <= (_meta!.Progress ?? 0);
-                        var displayDate = !string.IsNullOrEmpty(ep.Released) && ep.Released!.Length >= 10
-                            ? ep.Released![..10] : ep.Released;
+                        var watched = (_state?.Progress ?? 0) > 0 && ep.Episode <= (_state!.Progress);
+                        var displayDate = DisplayDate(ep);
                         var description = ep.Overview;
                         var classes = new List<string> { "anime-detail-episode" };
                         if (watched) classes.Add("anime-detail-episode-watched");
                         if (future) classes.Add("anime-detail-episode-future");
+                        if (_seasons.Count > 1 && ep.Season != _activeSeason) classes.Add("anime-detail-episode-hidden");
                         <li class="@string.Join(" ", classes)"
                             data-episode-num="@ep.Episode"
                             data-season-num="@ep.Season"
@@ -249,6 +348,21 @@ else
                     }
                 </ol>
             </div>
+        </section>
+    }
+    else if (IsMovie)
+    {
+        @* Movie meta has no per-episode list, so the user has no click target to
+           reach the watch page — surface a single CTA pointed at /meta/{id}/watch/1
+           (the watch route treats episode 1 as the movie body). *@
+        <section class="anime-detail-section anime-detail-movie-cta-wrap">
+            <a class="anime-detail-movie-cta" href="@($"/meta/{Uri.EscapeDataString(Id)}/watch/1")">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polygon points="6 4 20 12 6 20 6 4"></polygon>
+                </svg>
+                <span>Watch movie</span>
+            </a>
         </section>
     }
 
@@ -318,6 +432,7 @@ else
     private bool _modalOpen;
     private bool _loading = true;
     private MetaDto? _meta;
+    private DetailStateDto? _state;
     private IReadOnlyList<EpisodeInfoDto> _episodes = Array.Empty<EpisodeInfoDto>();
     private IReadOnlyList<StreamingLinkDto> _streams = Array.Empty<StreamingLinkDto>();
     private IReadOnlyList<MetaDto> _related = Array.Empty<MetaDto>();
@@ -329,16 +444,34 @@ else
     private bool _episodesCollapsed;
     private string _filter = "";
     private string? _infoLine;
+    private List<int> _seasons = new();
+    private int _activeSeason = 1;
     private bool _multiSeason;
     private string? _typeQuery;
 
-    private record SourceChip(string Label, string Url, string Brand, string Mark);
+    // Heart / hide local UI state (mirrors the server-computed initial state, then
+    // flips optimistically on toggle).
+    private bool _heartFilled;
+    private bool _heartHidden; // entry is in some other list → drop the heart
+    private bool _heartBusy;
+    private bool _isHidden;
+    private bool _hideBusy;
+    private IJSObjectReference? _module;
+    private bool _jsBound;
+
+    private record SourceChip(string Label, string Url, string Brand, string Mark, string? AppUrl = null);
+
+    private bool LoggedIn => !string.IsNullOrEmpty(State.StreamConfig);
+    private bool IsMovie => string.Equals(_meta?.Type, "movie", StringComparison.OrdinalIgnoreCase);
 
     protected override async Task OnParametersSetAsync()
     {
         _loading = true;
+        _jsBound = false;
         _typeQuery = QueryValue("type");
         _sourceChips.Clear();
+        _state = null;
+        _heartFilled = _heartHidden = _isHidden = false;
 
         // Core content first (gates the page); extras are best-effort and never
         // block render — each degrades to empty on failure.
@@ -350,7 +483,11 @@ else
         var supp = Api.SupplementaryAsync(Id);
         var trailer = Api.TrailerAsync(Id);
         var links = Api.SourceLinksAsync(Id);
-        await Task.WhenAll(meta, eps, streams, related, recs, supp, trailer, links);
+        // Per-user state (pill + heart + hide) only when logged in — the token-less
+        // /api/v1/anime/{id} can't carry it. Mirrors the MVC Detail action computing
+        // Model.Entry + Model.IsHidden server-side.
+        var stateTask = LoggedIn ? Api.DetailStateAsync(Id) : Task.FromResult<DetailStateDto?>(null);
+        await Task.WhenAll(meta, eps, streams, related, recs, supp, trailer, links, stateTask);
 
         _meta = meta.Result;
         _episodes = eps.Result;
@@ -359,10 +496,43 @@ else
         _recommendations = recs.Result;
         _supplementary = supp.Result;
         _trailerId = trailer.Result;
+        _state = stateTask.Result;
         BuildSourceChips(links.Result);
-        _multiSeason = _episodes.Select(e => e.Season).Distinct().Count() > 1;
+
+        _seasons = _episodes.Select(e => e.Season > 0 ? e.Season : 1).Distinct().OrderBy(s => s).ToList();
+        if (_seasons.Count == 0) _seasons.Add(1);
+        _multiSeason = _seasons.Count > 1;
+        _activeSeason = PickDefaultSeason();
         _infoLine = BuildInfoLine(_meta);
+        ApplyUserState();
+        ComputeWatchCta();
         _loading = false;
+    }
+
+    // After (re)render, bind the Stremio chip deep-link probe + trailer lazy-embed
+    // once the relevant DOM exists. Idempotent per element on the JS side.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_loading || _meta is null || _jsBound) return;
+        _jsBound = true;
+        try
+        {
+            _module ??= await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/AniSync.Client/js/detail.js");
+            await _module.InvokeVoidAsync("init");
+        }
+        catch (Exception) { /* interop best-effort — chips still link to the web fallback */ }
+    }
+
+    // Seed the heart / hide / pill state from the server-computed per-user state.
+    private void ApplyUserState()
+    {
+        _isHidden = _state?.IsHidden ?? false;
+        var norm = NormalizeStatus(_state?.Status);
+        // Heart shows only when not-on-list (add) or already Watching (remove);
+        // any other list status drops it (managed via the modal).
+        _heartHidden = norm != null && norm != "watching";
+        _heartFilled = norm == "watching";
     }
 
     private void BuildSourceChips(AnimeSourceLinksDto? l)
@@ -372,6 +542,20 @@ else
         if (l.MalId is int mal && mal > 0) _sourceChips.Add(new("MyAnimeList", $"https://myanimelist.net/anime/{mal}", "mal", "M"));
         if (l.KitsuId is int ki && ki > 0) _sourceChips.Add(new("Kitsu", $"https://kitsu.io/anime/{ki}", "kitsu", "K"));
         if (!string.IsNullOrEmpty(l.ImdbId)) _sourceChips.Add(new("IMDb", $"https://www.imdb.com/title/{l.ImdbId}/", "imdb", "IMDb"));
+
+        // Stremio web deep-link — the prefixed catalog id (kitsu:/mal:/anilist:/tt)
+        // is exactly what Stremio expects, so a plain url-encode is all we need.
+        // tmdb/anidb/tvdb are skipped (no public Stremio anime addon catalogs them).
+        var sid = _meta?.Id;
+        var supported = !string.IsNullOrEmpty(sid)
+            && (sid!.StartsWith("anilist:") || sid.StartsWith("mal:")
+                || sid.StartsWith("kitsu:") || sid.StartsWith("tt"));
+        if (supported)
+        {
+            var sType = IsMovie ? "movie" : "series";
+            var path = $"detail/{sType}/{Uri.EscapeDataString(sid!)}";
+            _sourceChips.Add(new("Stremio", $"https://web.stremio.com/#/{path}", "stremio", "S", $"stremio:///{path}"));
+        }
     }
 
     private static string? BuildInfoLine(MetaDto? a)
@@ -386,24 +570,172 @@ else
         return bits.Count > 0 ? string.Join(" · ", bits) : null;
     }
 
-    private bool HasEntry => !string.IsNullOrEmpty(_meta?.EntryStatus);
+    // ── User-state pill ──────────────────────────────────────────────────────
+    private bool HasEntry => _state?.OnList == true && !string.IsNullOrEmpty(_state?.Status);
 
     private string EntryPillLabel()
     {
         if (!HasEntry) return "Add to List";
-        var label = StatusLabel(_meta!.EntryStatus!);
-        var prog = _meta.Progress ?? 0;
+        // Mirror Detail.cshtml's userBits: [PrettyStatus, "Ep N / T"] joined by " · ".
+        var bits = new List<string>();
+        var label = StatusLabel(_state!.Status!);
+        if (!string.IsNullOrEmpty(label)) bits.Add(label);
+        var prog = _state.Progress;
         if (prog > 0)
-            label += _meta.Episodes is int t && t > 0 ? $" · {prog}/{t}" : $" · Ep {prog}";
-        return label;
+            bits.Add(_state.TotalEpisodes is int t && t > 0 ? $"Ep {prog} / {t}" : $"Ep {prog}");
+        return bits.Count > 0 ? string.Join(" · ", bits) : "Add to List";
     }
 
-    private static string StatusLabel(string s) => (s ?? "").ToLowerInvariant() switch
+    private async Task OpenModal()
+    {
+        _modalOpen = true;
+        await Task.CompletedTask;
+    }
+
+    // ── Quick-add heart ────────────────────────────────────────────────────────
+    // Eligible for the anime path when logged in, it's not a movie, and it's not a
+    // multi-cour franchise umbrella (imdb tt-id with >1 season). Visible only when
+    // not-on-list or already Watching.
+    private bool HeartEligible =>
+        LoggedIn && _meta is not null && !IsMovie
+        && !(_multiSeason && (_meta.Id?.StartsWith("tt") ?? false));
+
+    private bool ShowHeart => HeartEligible && !_heartHidden;
+    private string HeartLabel => _heartFilled ? "Remove from Currently Watching" : "Add to Currently Watching";
+
+    private async Task ToggleHeart()
+    {
+        if (_heartBusy) return;
+        _heartBusy = true;
+        var result = await Api.ToggleWatchingAsync(Id);
+        _heartBusy = false;
+        if (result is null) return;
+        if (result.Hidden)
+        {
+            // Raced a status change elsewhere — the entry's in another list now.
+            _heartHidden = true;
+        }
+        else if (result.Ok)
+        {
+            _heartFilled = result.Watching;
+            // Reflect the change in the pill too (status / progress may have moved).
+            _state = await Api.DetailStateAsync(Id) ?? _state;
+            ApplyUserState();
+        }
+        StateHasChanged();
+    }
+
+    // ── Hide / Unhide ────────────────────────────────────────────────────────
+    private string HideLabel => _isHidden ? "Unhide from Discover" : "Hide from Discover";
+
+    private async Task ToggleHide()
+    {
+        if (_hideBusy) return;
+        _hideBusy = true;
+        var result = await Api.ToggleHiddenAsync(Id, _meta?.Name, _meta?.Poster, "anime");
+        _hideBusy = false;
+        if (result is { Ok: true }) _isHidden = result.Hidden;
+        StateHasChanged();
+    }
+
+    // ── Watch CTAs ──────────────────────────────────────────────────────────
+    private bool _showWatchCta;
+    private string _watchCtaHref = "";
+    private string _watchCtaLabel = "";
+
+    // Next-unseen-episode CTA with future-aired gating + multi-season URL. Ports
+    // the showWatchCta block from Detail.cshtml (anime path). Hidden for movies
+    // (their own CTA), completed shows, progress past the last episode, future
+    // next-episode, and multi-cour franchise umbrellas.
+    private void ComputeWatchCta()
+    {
+        _showWatchCta = false;
+        if (_meta is null || IsMovie || _episodes.Count == 0) return;
+
+        var progress = _state?.Progress ?? 0;
+        var total = _episodes.Count;
+        var norm = NormalizeStatus(_state?.Status);
+        var entryTotal = _state?.TotalEpisodes;
+        var completed = norm == "completed" || (entryTotal is int et && et > 0 && progress >= et);
+        var nextEp = progress + 1;
+        if (completed || nextEp > total) return;
+        if (_multiSeason && (_meta.Id?.StartsWith("tt") ?? false)) return; // franchise umbrella
+
+        // Pick the target video — prefer the cour matching the tracked progress so a
+        // multi-season franchise lands on the right season's episode.
+        var entrySeason = _episodes
+            .Where(v => v.Episode == nextEp)
+            .Select(v => (int?)(v.Season > 0 ? v.Season : 1))
+            .LastOrDefault();
+        var target = _episodes.FirstOrDefault(v => v.Episode == nextEp
+            && (entrySeason == null || (v.Season > 0 ? v.Season : 1) == entrySeason.Value));
+        if (target is null) return;
+        if (IsFuture(target)) return; // can't promise a future-aired episode
+
+        var idSeg = Uri.EscapeDataString(Id);
+        var q = string.IsNullOrEmpty(_typeQuery) ? "" : $"?type={_typeQuery}";
+        var season = target.Season > 0 ? target.Season : 1;
+        _watchCtaHref = _multiSeason
+            ? $"/meta/{idSeg}/watch/{season}/{nextEp}{q}"
+            : $"/meta/{idSeg}/watch/{nextEp}{q}";
+        _watchCtaLabel = progress > 0 ? $"Continue · Ep {nextEp}" : $"Watch Ep {nextEp}";
+        _showWatchCta = true;
+    }
+
+    // ── Episodes: future detection + season default ─────────────────────────
+    // AniList airingAt (Unix) wins over the Cinemeta released string when present
+    // — matches the original's OverlayAniListAiringSchedule-first gate.
+    private static bool IsFuture(EpisodeInfoDto ep)
+    {
+        if (ep.AiringAt is long at && at > 0)
+            return at > DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        return !string.IsNullOrEmpty(ep.Released)
+            && DateTime.TryParse(ep.Released, out var d)
+            && d.ToUniversalTime().Date > DateTime.UtcNow.Date;
+    }
+
+    private static string? DisplayDate(EpisodeInfoDto ep)
+    {
+        if (ep.AiringAt is long at && at > 0)
+            return DateTimeOffset.FromUnixTimeSeconds(at).UtcDateTime.ToString("yyyy-MM-dd");
+        if (!string.IsNullOrEmpty(ep.Released) && ep.Released!.Length >= 10) return ep.Released![..10];
+        return ep.Released;
+    }
+
+    // Default visible season: the one containing current progress when known,
+    // otherwise the latest cour (Stremio's "land where you left off").
+    private int PickDefaultSeason()
+    {
+        var progress = _state?.Progress ?? 0;
+        if (progress > 0)
+        {
+            var match = _episodes.FirstOrDefault(v => v.Episode == progress);
+            if (match is not null) return match.Season > 0 ? match.Season : 1;
+        }
+        return _seasons.LastOrDefault(1);
+    }
+
+    // Status vocabulary helpers — collapse the per-provider spelling to a canonical
+    // name (mirrors Utils.NormalizeListStatus) and to the friendly label
+    // (mirrors Detail.cshtml's PrettyStatus for the AniList/MAL/Kitsu union).
+    private static string? NormalizeStatus(string? s) => (s ?? "").Trim().ToLowerInvariant() switch
+    {
+        "" => null,
+        "watching" or "current" => "watching",
+        "completed" => "completed",
+        "planning" or "planned" or "plan_to_watch" or "plantowatch" => "planning",
+        "paused" or "on_hold" or "onhold" => "paused",
+        "dropped" => "dropped",
+        "rewatching" or "repeating" => "rewatching",
+        _ => null,
+    };
+
+    private static string StatusLabel(string s) => (s ?? "").Trim().ToLowerInvariant() switch
     {
         "current" or "watching" => "Watching",
         "completed" => "Completed",
-        "planning" or "planned" or "plan_to_watch" => "Planning",
-        "paused" or "on_hold" => "On Hold",
+        "planning" or "planned" or "plan_to_watch" or "plantowatch" => "Planning",
+        "paused" or "on_hold" or "onhold" => "On Hold",
         "dropped" => "Dropped",
         "repeating" or "rewatching" => "Rewatching",
         _ => "In List",
@@ -434,32 +766,28 @@ else
 
     private void OnFilter(ChangeEventArgs e) => _filter = e.Value?.ToString() ?? "";
 
-    // Refresh the hero's user-state pill after a save/remove.
+    // Refresh the hero's user-state (pill + heart) after a save/remove in the modal.
     private async Task OnEntrySaved()
     {
-        _meta = await Api.AnimeAsync(Id) ?? _meta;
+        _state = await Api.DetailStateAsync(Id) ?? _state;
+        ApplyUserState();
+        ComputeWatchCta();
         StateHasChanged();
     }
 
-    // Episode rows navigate to the watch page (the original used a delegated
-    // JS click handler with role=button; here we do it through Blazor routing).
+    // Episode rows navigate to the watch page (the original used a delegated JS
+    // click handler with role=button; here we do it through Blazor routing).
     // Future episodes are inert, matching the original's click guard.
     private void OnEpisodeActivate(EpisodeInfoDto ep, bool future)
     {
         if (future) return;
-        Nav.NavigateTo(WatchHref(ep));
-    }
-
-    private static bool IsFuture(EpisodeInfoDto ep)
-        => DateTime.TryParse(ep.Released, out var d) && d.ToUniversalTime() > DateTime.UtcNow;
-
-    private string WatchHref(EpisodeInfoDto ep)
-    {
         var idSeg = Uri.EscapeDataString(Id);
         var q = string.IsNullOrEmpty(_typeQuery) ? "" : $"?type={_typeQuery}";
-        return _multiSeason
-            ? $"/meta/{idSeg}/watch/{ep.Season}/{ep.Episode}{q}"
+        var season = ep.Season > 0 ? ep.Season : 1;
+        var href = _multiSeason
+            ? $"/meta/{idSeg}/watch/{season}/{ep.Episode}{q}"
             : $"/meta/{idSeg}/watch/{ep.Episode}{q}";
+        Nav.NavigateTo(href);
     }
 
     private string? QueryValue(string key)

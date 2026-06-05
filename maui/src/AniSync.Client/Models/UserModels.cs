@@ -43,6 +43,31 @@ public sealed class EntrySaveRequest
 
 public sealed class SaveEntryResponse { public bool Ok { get; set; } public string? Primary { get; set; } public bool? Removed { get; set; } }
 
+// ── Detail-page per-user state + interactive toggles ─────────────────────────
+
+/// <summary>Per-user detail-page state — GET /api/v1/me/state/{id}. Drives the
+/// hero's user-state pill, the quick-add heart, and the Hide / Unhide button in a
+/// single round-trip. Status is the raw provider value (the page normalises it);
+/// fields are null/0/false when the anime isn't on the user's list or isn't hidden.</summary>
+public sealed class DetailStateDto
+{
+    public bool OnList { get; set; }
+    public string? Status { get; set; }
+    public int Progress { get; set; }
+    public int? TotalEpisodes { get; set; }
+    public double? Score { get; set; }
+    public bool IsHidden { get; set; }
+}
+
+/// <summary>Result of the quick-add heart toggle (POST /api/v1/me/watching/toggle).
+/// <c>Watching</c> is the new heart state; <c>Hidden</c> is true when the entry is in
+/// another list and the heart should be dropped (managed via the modal instead).</summary>
+public sealed class ToggleWatchingResult { public bool Ok { get; set; } public bool Watching { get; set; } public bool Hidden { get; set; } }
+
+/// <summary>Result of the Hide / Unhide toggle (POST /api/v1/me/hidden/toggle).
+/// <c>Hidden</c> is the new state.</summary>
+public sealed class ToggleHiddenResult { public bool Ok { get; set; } public bool Hidden { get; set; } }
+
 // ── Login providers (which sign-in options the backend can start) ─────────────
 
 /// <summary>GET /api/v1/auth/providers — Kitsu is always available (username/

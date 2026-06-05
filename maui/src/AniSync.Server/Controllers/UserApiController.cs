@@ -1091,6 +1091,273 @@ namespace AnimeList.Controllers
             type = string.IsNullOrEmpty(h.MediaType) ? MetaType.anime.ToString() : h.MediaType,
         };
 
+        // ── Detail-page per-user state + interactive toggles ────────────────────
+        // The header-authed twin of the MVC Detail page's server-computed
+        // Model.Entry / Model.IsHidden + the heart / hide toggles
+        // (MetaController.ToggleWatchingByApi / ToggleHiddenByApi). The Blazor
+        // Detail page calls these to drive the user-state pill, the quick-add
+        // heart, and the Hide / Unhide button — none of which the token-less
+        // /api/v1/anime/{id} can populate. Anime path only; the movie / series
+        // (Trakt) tracking branch is deferred (see VideoDetail follow-up).
+
+        /// <summary>
+        /// The logged-in user's state for one anime detail page, in a single call:
+        /// the primary provider's list entry (status / progress / total) plus the
+        /// Hide-from-Discover flag. Mirrors how the MVC Detail action computes
+        /// <c>Model.Entry</c> + <c>Model.IsHidden</c> server-side at once so the
+        /// hero's pill, heart, and hide button all render their initial state from
+        /// one round-trip. Status comes back as the raw provider value (the client
+        /// normalises it the same way the page's PrettyStatus does); fields are null
+        /// / false when the anime isn't on the user's list or isn't hidden.
+        /// </summary>
+        [HttpGet("state/{id}")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(DetailStateResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> DetailState(string id, int? season = null)
+        {
+            try
+            {
+                var resolvedConfig = ResolvedConfig;
+                var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
+                if (string.IsNullOrEmpty(tokenData?.access_token))
+                    return Unauthorized(new ApiError("config has no primary token"));
+
+                var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+
+                // Hidden-from-Discover state for the Hide / Unhide button. Only
+                // meaningful for stored (v5) configs with a uid; best-effort.
+                var isHidden = false;
+                if (!string.IsNullOrEmpty(uid) && !string.IsNullOrEmpty(id))
+                {
+                    try { isHidden = await _hiddenStore.IsHiddenAsync(uid, id); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "API DetailState hidden lookup failed (id={Id}).", id); }
+                }
+
+                // The user's list entry against the primary's id-space. Anonymous
+                // configs have no list to read; everyone else resolves the id into
+                // the primary service and fetches the entry (best-effort).
+                AnimeEntry entry = null;
+                if (!tokenData.anonymousUser)
+                {
+                    try
+                    {
+                        var entryId = await ResolvePrimaryEntryIdAsync(id, tokenData.anime_service, season);
+                        if (!string.IsNullOrEmpty(entryId))
+                        {
+                            entry = tokenData.anime_service switch
+                            {
+                                AnimeService.Anilist => await _anilistService.GetAnimeEntryAsync(tokenData, entryId, null),
+                                AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, entryId, null),
+                                AnimeService.Trakt => null,
+                                _ => await _kitsuService.GetAnimeEntryAsync(tokenData, entryId, null),
+                            };
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "API DetailState entry fetch failed (id={Id}).", id);
+                    }
+                }
+
+                var hasEntry = entry != null && !string.IsNullOrEmpty(entry.Status);
+                return new JsonResult(new DetailStateResponse(
+                    OnList: hasEntry,
+                    Status: hasEntry ? entry.Status : null,
+                    Progress: hasEntry ? entry.Progress : 0,
+                    TotalEpisodes: hasEntry ? entry.TotalEpisodes : null,
+                    Score: hasEntry ? entry.Score : null,
+                    IsHidden: isHidden));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API DetailState failed (id={Id}).", id);
+                return StatusCode(500, new ApiError("state lookup failed"));
+            }
+        }
+
+        /// <summary>
+        /// One-click "heart" toggle for the Currently Watching list, backing the
+        /// outline / filled heart on the anime detail page. Ports
+        /// <c>MetaController.ToggleWatchingByApi</c> (anime path): resolves the
+        /// entry's current membership server-side, then —
+        ///   - in a non-Watching list (Completed / Planning / Paused / Dropped /
+        ///     Rewatching): no-op, returns <c>hidden:true</c> so the client drops
+        ///     the heart (those are managed via the Manage Entry modal);
+        ///   - already Watching: removes the entry (delete + fan-out), returns
+        ///     <c>watching:false</c>;
+        ///   - not on any list: adds it to Watching, preserving any progress the
+        ///     entry already carried, returns <c>watching:true</c>.
+        /// Reuses the same per-service save / delete + fan-out + cache-invalidation
+        /// path the Manage Entry save runs, pinned to the Watching status.
+        /// </summary>
+        [HttpPost("watching/toggle")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(ToggleWatchingResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> ToggleWatching([FromBody] ToggleEntryRequest request)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(request?.Id))
+                    return BadRequest(new ApiError("missing id"));
+
+                var resolvedConfig = ResolvedConfig;
+                var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
+                if (string.IsNullOrEmpty(tokenData?.access_token) || tokenData.anonymousUser)
+                    return Unauthorized(new ApiError("config has no primary token"));
+
+                var animeService = tokenData.anime_service;
+                // Trakt primary's per-anime read-back isn't wired up yet (same gap the
+                // Entry endpoint notes), so treat it as "not on list" → add to Watching.
+                var entryId = await ResolvePrimaryEntryIdAsync(request.Id, animeService, request.Season);
+                if (string.IsNullOrEmpty(entryId))
+                    return BadRequest(new ApiError("anime not available on your primary"));
+
+                var entry = animeService switch
+                {
+                    AnimeService.Anilist => await _anilistService.GetAnimeEntryAsync(tokenData, entryId, null),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, entryId, null),
+                    AnimeService.Trakt => null,
+                    _ => await _kitsuService.GetAnimeEntryAsync(tokenData, entryId, null),
+                };
+
+                var norm = NormalizeListStatus(entry?.Status);
+
+                // Entry lives in some other list — the heart isn't the control for
+                // that (the modal is). Tell the client to hide it; change nothing.
+                if (norm != null && norm != "watching")
+                    return new JsonResult(new ToggleWatchingResponse(Ok: false, Watching: false, Hidden: true));
+
+                if (norm == "watching")
+                {
+                    // Currently Watching → remove from the list entirely.
+                    switch (animeService)
+                    {
+                        case AnimeService.Anilist:
+                            await _anilistService.DeleteAnimeEntryAsync(tokenData, entryId, null);
+                            break;
+                        case AnimeService.MyAnimeList:
+                            await _malService.DeleteAnimeEntryAsync(tokenData, entryId, null);
+                            break;
+                        default:
+                            await _kitsuService.DeleteAnimeEntryAsync(tokenData, entryId, null);
+                            break;
+                    }
+                    await _syncService.FanOutDeleteAsync(tokenData, entryId, null);
+                    _listCache.Invalidate(tokenData);
+                    return new JsonResult(new ToggleWatchingResponse(Ok: true, Watching: false, Hidden: false));
+                }
+
+                // Not on any list → add to Watching, keeping any progress the entry
+                // already had (0 for a brand-new entry). Status is translated to the
+                // provider's native vocabulary just like the modal save does.
+                var watchingStatus = TranslateStatusForService("watching", tokenData);
+                var progress = entry?.Progress ?? 0;
+                switch (animeService)
+                {
+                    case AnimeService.Anilist:
+                        await _anilistService.SaveAnimeEntryAsync(tokenData, entryId, null, progress,
+                            watchingStatus, null, null, null, null, null);
+                        break;
+                    case AnimeService.MyAnimeList:
+                        await _malService.SaveAnimeEntryAsync(tokenData, entryId, null, progress,
+                            watchingStatus, null, null, null, null, null);
+                        break;
+                    default:
+                        await _kitsuService.SaveAnimeEntryAsync(tokenData, entryId, null, progress,
+                            watchingStatus, null, null, null, null, null);
+                        break;
+                }
+                await _syncService.FanOutSaveAsync(tokenData, entryId, null, progress,
+                    watchingStatus, null, null, null, null, null);
+                _listCache.Invalidate(tokenData);
+                return new JsonResult(new ToggleWatchingResponse(Ok: true, Watching: true, Hidden: false));
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "API ToggleWatching primary 401 (id={Id}).", request?.Id);
+                return Unauthorized(new ApiError("primary token rejected by upstream"));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API ToggleWatching failed (id={Id}).", request?.Id);
+                return StatusCode(500, new ApiError("toggle failed"));
+            }
+        }
+
+        /// <summary>
+        /// Hide / unhide an anime from the user's Discover catalogs, backing the
+        /// Hide / Unhide button on the detail page. Ports
+        /// <c>MetaController.ToggleHiddenByApi</c>: toggles a row in the per-user
+        /// <c>hidden_entries</c> store; the display fields (title / poster / media
+        /// type) are cached at write time so the Discover "Hidden" section renders
+        /// the card without re-fetching the provider. Requires a stored (v5) config
+        /// with a uid (inline configs have nothing to hide against).
+        /// </summary>
+        [HttpPost("hidden/toggle")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(ToggleHiddenResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> ToggleHidden([FromBody] ToggleHideRequest request)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(request?.Id))
+                    return BadRequest(new ApiError("missing id"));
+
+                var resolvedConfig = ResolvedConfig;
+                var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
+                if (string.IsNullOrEmpty(tokenData?.access_token) || tokenData.anonymousUser)
+                    return Unauthorized(new ApiError("config has no primary token"));
+
+                var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                if (string.IsNullOrEmpty(uid))
+                    return BadRequest(new ApiError("config is not stored — hide requires a v5 install URL"));
+
+                if (await _hiddenStore.IsHiddenAsync(uid, request.Id))
+                {
+                    await _hiddenStore.RemoveAsync(uid, request.Id);
+                    return new JsonResult(new ToggleHiddenResponse(Ok: true, Hidden: false));
+                }
+
+                await _hiddenStore.AddAsync(uid, new HiddenEntry
+                {
+                    Id = request.Id,
+                    Title = request.Title,
+                    ImageUrl = request.ImageUrl,
+                    MediaType = string.IsNullOrEmpty(request.MediaType) ? "anime" : request.MediaType,
+                });
+                return new JsonResult(new ToggleHiddenResponse(Ok: true, Hidden: true));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API ToggleHidden failed (id={Id}).", request?.Id);
+                return StatusCode(500, new ApiError("hide toggle failed"));
+            }
+        }
+
+        /// <summary>
+        /// Resolves a detail-page anime id into the primary provider's id-space so
+        /// the entry can be read / written. Native ids already in the primary's
+        /// service (anilist:/mal:/kitsu:) pass through unchanged; cross-service ids
+        /// (imdb:/tmdb:/another provider) are translated through the shared mapping
+        /// table — same call the MVC AnimeDetail action uses for its user-state
+        /// panel. Returns null when the mapping has no entry for that pair (the
+        /// anime genuinely isn't on the user's primary catalog).
+        /// </summary>
+        private async Task<string> ResolvePrimaryEntryIdAsync(string id, AnimeService service, int? season)
+        {
+            if (string.IsNullOrEmpty(id)) return null;
+            var nativePrefix = service switch
+            {
+                AnimeService.Anilist => anilistPrefix,
+                AnimeService.MyAnimeList => malPrefix,
+                AnimeService.Kitsu => kitsuPrefix,
+                _ => null,
+            };
+            if (nativePrefix != null && id.StartsWith(nativePrefix, StringComparison.Ordinal))
+                return id;
+            return await _mappingService.GetIdWithPrefixAsync(id, service, season);
+        }
+
         /// <summary>
         /// The user's movies / series library from Trakt for the active tab — the
         /// header-authed twin of LibraryController.VideoPaneAsync. <paramref name="type"/>
@@ -1258,6 +1525,29 @@ namespace AnimeList.Controllers
     public record DashboardLayoutResponse(string? Layout);
     /// <summary>Body for POST /api/v1/me/dashboard-layout — the serialized [{key,visible}] array.</summary>
     public record DashboardLayoutSaveRequest(string? Layout);
+
+    /// <summary>Per-user detail-page state — GET /api/v1/me/state/{id}. Drives the
+    /// hero's user-state pill, the quick-add heart, and the Hide / Unhide button.
+    /// <c>Status</c> is the raw provider value (client normalises); null / 0 / false
+    /// when the anime isn't on the user's list or isn't hidden.</summary>
+    public record DetailStateResponse(bool OnList, string? Status, int Progress, int? TotalEpisodes, double? Score, bool IsHidden);
+
+    /// <summary>Body for POST /api/v1/me/watching/toggle (quick-add heart). Season
+    /// is the optional cour for franchise ids.</summary>
+    public record ToggleEntryRequest(string? Id, int? Season);
+
+    /// <summary>Result of the quick-add heart toggle. <c>Watching</c> is the new
+    /// heart state; <c>Hidden</c> is true when the entry is in another list and the
+    /// client should drop the heart entirely (managed via the modal instead).</summary>
+    public record ToggleWatchingResponse(bool Ok, bool Watching, bool Hidden);
+
+    /// <summary>Body for POST /api/v1/me/hidden/toggle. Title / ImageUrl / MediaType
+    /// are cached at hide time so the Discover Hidden section renders without a
+    /// re-fetch.</summary>
+    public record ToggleHideRequest(string? Id, string? Title, string? ImageUrl, string? MediaType);
+
+    /// <summary>Result of the Hide / Unhide toggle — <c>Hidden</c> is the new state.</summary>
+    public record ToggleHiddenResponse(bool Ok, bool Hidden);
 
     /// <summary>Named user preferences exposed by GET/POST /api/v1/me/preferences.</summary>
     public sealed class PreferencesDto
