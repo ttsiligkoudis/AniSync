@@ -147,7 +147,19 @@ namespace AnimeList.Controllers
         /// One list entry by media id. Returns status / progress / score / notes /
         /// rewatch count / start &amp; finish dates / total episodes for the primary
         /// provider's view of this anime.
+        ///
+        /// <para>For a franchise reached via a cross-service id (imdb:/tmdb:) split across
+        /// several provider anime, the response also carries the per-cour <c>Seasons</c>
+        /// list, the auto-resolved <c>SelectedEntryId</c> the entry was read against, and
+        /// the primary <c>Service</c> (so the Manage Entry modal can render the Season
+        /// dropdown and pick the right score range). The modal refetches a specific cour
+        /// by calling this endpoint again with that cour's id as <paramref name="id"/>.
+        /// Ports the MVC MetaController.GetEntryByApi shape.</para>
         /// </summary>
+        /// <param name="id">Service-prefixed media id (<c>anilist:N</c>, <c>kitsu:N</c>,
+        /// <c>mal:N</c>) or a cross-service id (<c>tt…</c> / <c>tmdb:N</c>) for a franchise.</param>
+        /// <param name="season">Optional cour / season number — forwarded to the provider's
+        /// per-cour entry read for native ids.</param>
         [HttpGet("entries/{id}")]
         [RequireConfig]
         [ProducesResponseType(typeof(EntryResponse), StatusCodes.Status200OK)]
@@ -161,19 +173,48 @@ namespace AnimeList.Controllers
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new ApiError("config has no primary token"));
 
-                var entry = tokenData.anime_service switch
+                var animeService = tokenData.anime_service;
+
+                // Resolve the per-cour seasons + selected entry id when the click came from a
+                // card with a cross-service id (imdb:/tmdb:); for native ids (anilist:/kitsu:/
+                // mal:) BuildSeasonsAsync short-circuits with an empty list and the original id.
+                // isSeries is passed true because the id-prefix check inside BuildSeasonsAsync is
+                // the real gate — movies with imdb/tmdb ids resolve to a single mapping and
+                // return empty seasons anyway. videos:null skips auto-episode selection, which
+                // the modal doesn't need (the user picks a cour manually).
+                var (seasons, selectedEntryId, _) =
+                    await BuildSeasonsAsync(id, isSeries: true, animeService, videos: null, season, episode: null);
+
+                // Fetch the entry against the resolved per-mapping id rather than the raw imdb
+                // id — that's what makes status / progress / score reflect the picked cour.
+                var entry = animeService switch
                 {
-                    AnimeService.Anilist => await _anilistService.GetAnimeEntryAsync(tokenData, id, season),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, id, season),
+                    AnimeService.Anilist => await _anilistService.GetAnimeEntryAsync(tokenData, selectedEntryId, null),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeEntryAsync(tokenData, selectedEntryId, null),
                     // Trakt: reading a single anime entry back as an AnimeEntry isn't wired up
                     // until the Trakt list integration lands (Phase 3), so report "not on list"
                     // rather than calling Kitsu with a Trakt token. The write path still works.
                     AnimeService.Trakt => null,
-                    _ => await _kitsuService.GetAnimeEntryAsync(tokenData, id, season),
+                    _ => await _kitsuService.GetAnimeEntryAsync(tokenData, selectedEntryId, null),
                 };
 
-                if (entry == null) return NotFound(new ApiError("entry not on user's list"));
-                return new JsonResult(new EntryResponse(entry));
+                // totalEpisodes comes from the entry when present; falls back to the matched
+                // season's count when the user has no entry yet (so the progress input still
+                // shows the right max). Stamp it onto the returned entry's TotalEpisodes.
+                var totalEpisodes = entry?.TotalEpisodes
+                    ?? seasons.FirstOrDefault(s => s.Id == selectedEntryId)?.TotalEpisodes;
+                if (entry != null && !entry.TotalEpisodes.HasValue)
+                    entry.TotalEpisodes = totalEpisodes;
+
+                // Unlike the rest of the API, this endpoint returns 200 even when the entry is
+                // null: a multi-cour franchise still needs its Seasons list so the modal can
+                // render the dropdown and land on the "None" status for the unpicked cour.
+                // (When there's no franchise either, the modal just shows an empty form.)
+                return new JsonResult(new EntryResponse(
+                    entry,
+                    Seasons: seasons,
+                    Service: (int)animeService,
+                    SelectedEntryId: selectedEntryId));
             }
             catch (Exception ex)
             {
@@ -1356,6 +1397,170 @@ namespace AnimeList.Controllers
             if (nativePrefix != null && id.StartsWith(nativePrefix, StringComparison.Ordinal))
                 return id;
             return await _mappingService.GetIdWithPrefixAsync(id, service, season);
+        }
+
+        // ── Manage Entry season resolution ──────────────────────────────────────
+        // Ported from MVC MetaController.BuildSeasonsAsync (+ its helpers) so the
+        // Entry endpoint can surface the per-cour Season dropdown for franchises
+        // reached via a cross-service id. The Entry path always passes videos:null /
+        // episode:null (the modal picks a cour manually), so the auto-episode-select
+        // branch is dormant here; it's kept for parity with the source method.
+
+        /// <summary>
+        /// Builds the per-entry "Season" dropdown options. Returns:
+        ///   - <c>seasons</c>: empty for anilist:/kitsu: ids (no dropdown), or one option per
+        ///     mapping for IMDb / TMDB ids that have ≥ 2 mappings.
+        ///   - <c>selectedEntryId</c>: the service-prefixed id (anilist:N / kitsu:N) of the
+        ///     mapping auto-selected from the URL's season + episode, or the original id if
+        ///     no mapping resolution is needed.
+        ///   - <c>autoEpisode</c>: the episode number *within* the auto-selected cour.
+        /// </summary>
+        private async Task<(List<EntrySeason>, string selectedEntryId, int? autoEpisode)>
+            BuildSeasonsAsync(string id, bool isSeries, AnimeService animeService, object videos, int? season, int? episode)
+        {
+            // Single-anime ids: no dropdown, fetch/save against the original id.
+            if (!isSeries || (!id.StartsWith(imdbPrefix) && !id.StartsWith(tmdbPrefix)))
+                return ([], id, null);
+
+            var mappings = id.StartsWith(imdbPrefix)
+                ? await _mappingService.GetImdbMapping(id)
+                : await _mappingService.GetTmdbMapping(id);
+
+            // Filter to mappings that actually have an id for the user's service.
+            mappings = mappings
+                .Where(m => HasServiceId(m, animeService))
+                .OrderBy(m => m.Season ?? int.MaxValue)
+                .ThenBy(m => SortKey(m, animeService))
+                .ToList();
+
+            if (mappings.Count == 0) return ([], id, null);
+
+            // Single mapping: still resolve to the per-service id (so save flows go through
+            // the right anime), but skip the dropdown — there's nothing to pick.
+            if (mappings.Count == 1)
+                return ([], BuildEntryId(mappings[0], animeService) ?? id, null);
+
+            // Multi-mapping: fan out the anime fetches in parallel so the page doesn't pay
+            // for them serially. Each fetch is one GraphQL / REST call against the service.
+            var entrySeasons = (await Task.WhenAll(
+                mappings.Select(m => BuildEntrySeasonAsync(m, animeService))
+            )).Where(s => s != null).ToList();
+
+            // Every per-mapping fetch could have returned null (BuildEntrySeasonAsync swallows
+            // failures). Fall back to picking the first mapping's id directly so the page
+            // still renders without a dropdown rather than NRE'ing on entrySeasons[0].
+            if (entrySeasons.Count == 0)
+                return ([], BuildEntryId(mappings[0], animeService) ?? id, null);
+
+            var imdbAbsolute = ComputeAbsoluteEpisode(videos, season, episode);
+            var (autoId, autoEpisode) = AutoSelectSeason(entrySeasons, imdbAbsolute);
+
+            return (entrySeasons, autoId ?? entrySeasons[0].Id, autoEpisode);
+        }
+
+        private async Task<EntrySeason> BuildEntrySeasonAsync(AnimeIdMapping mapping, AnimeService service)
+        {
+            var entryId = BuildEntryId(mapping, service);
+            if (entryId == null) return null;
+
+            // Lightweight summary — title + episode count only. Avoids the heavy
+            // GetAnimeByIdAsync path that would otherwise trigger rate limits when we fan
+            // out across every cour of a multi-mapping franchise.
+            string name = mapping.Name;
+            int? episodeCount = mapping.Episodes;
+            var updateMappings = false;
+            if (string.IsNullOrEmpty(name) || !episodeCount.HasValue)
+            {
+                try
+                {
+                    (name, episodeCount) = service switch
+                    {
+                        AnimeService.Anilist => await _anilistService.GetAnimeSummaryAsync(entryId),
+                        AnimeService.MyAnimeList => await _malService.GetAnimeSummaryAsync(entryId),
+                        _ => await _kitsuService.GetAnimeSummaryAsync(entryId),
+                    };
+                    updateMappings = true;
+                    mapping.Name = name;
+                    mapping.Episodes = episodeCount;
+                }
+                catch
+                {
+                    // Best-effort: a single failed summary still renders the rest of the
+                    // dropdown — the failed option just shows the raw id as its label.
+                }
+            }
+
+            if (updateMappings)
+            {
+                await _mappingService.EnrichImdbMappings([mapping]);
+            }
+
+            if (episodeCount is 0) episodeCount = null;
+
+            var label = string.IsNullOrEmpty(name)
+                ? entryId
+                : (episodeCount.HasValue ? $"{name} ({episodeCount} ep)" : name);
+
+            return new EntrySeason { Id = entryId, Label = label, TotalEpisodes = episodeCount };
+        }
+
+        private static string BuildEntryId(AnimeIdMapping mapping, AnimeService service) => service switch
+        {
+            AnimeService.Anilist => mapping.AnilistId.HasValue ? $"{anilistPrefix}{mapping.AnilistId}" : null,
+            AnimeService.MyAnimeList => mapping.MalId.HasValue ? $"{malPrefix}{mapping.MalId}" : null,
+            _ => mapping.KitsuId.HasValue ? $"{kitsuPrefix}{mapping.KitsuId}" : null,
+        };
+
+        private static bool HasServiceId(AnimeIdMapping mapping, AnimeService service) => service switch
+        {
+            AnimeService.Anilist => mapping.AnilistId.HasValue,
+            AnimeService.MyAnimeList => mapping.MalId.HasValue,
+            _ => mapping.KitsuId.HasValue,
+        };
+
+        private static int? SortKey(AnimeIdMapping mapping, AnimeService service) => service switch
+        {
+            AnimeService.Anilist => mapping.AnilistId,
+            AnimeService.MyAnimeList => mapping.MalId,
+            _ => mapping.KitsuId,
+        };
+
+        /// <summary>
+        /// Translates a (URL season, URL episode) pair on a Cinemeta-style flat-numbered
+        /// series into an absolute episode index across the whole series (1-based).
+        /// Returns null if either value is missing. The Entry endpoint always passes
+        /// videos:null, so the unknown-shape branch (return episode) is the live path.
+        /// </summary>
+        private static int? ComputeAbsoluteEpisode(object videos, int? season, int? episode)
+        {
+            if (!season.HasValue || !episode.HasValue) return null;
+
+            return videos switch
+            {
+                List<Video> list => list.Count(v => v.season < season.Value) + episode.Value,
+                _ => episode, // unknown / null shape — assume IMDb-flat numbering
+            };
+        }
+
+        /// <summary>
+        /// Walks the season buckets in order and finds the one whose cumulative range
+        /// contains the absolute IMDb episode. Returns the matching entry id and the
+        /// per-entry episode index, or (null, null) when the absolute episode is beyond
+        /// all known buckets so the caller can fall back to the first cour.
+        /// </summary>
+        private static (string entryId, int? episodeWithinEntry) AutoSelectSeason(List<EntrySeason> seasons, int? imdbAbsoluteEpisode)
+        {
+            if (!imdbAbsoluteEpisode.HasValue) return (null, null);
+
+            int cumulative = 0;
+            foreach (var s in seasons)
+            {
+                if (!s.TotalEpisodes.HasValue) continue;
+                if (imdbAbsoluteEpisode > cumulative && imdbAbsoluteEpisode <= cumulative + s.TotalEpisodes.Value)
+                    return (s.Id, imdbAbsoluteEpisode.Value - cumulative);
+                cumulative += s.TotalEpisodes.Value;
+            }
+            return (null, null);
         }
 
         /// <summary>

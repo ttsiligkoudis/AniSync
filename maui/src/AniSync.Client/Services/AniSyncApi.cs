@@ -241,12 +241,11 @@ public sealed class AniSyncApi : IAniSyncApi
     private sealed class RemovedResult { public bool Removed { get; set; } }
     private sealed class ChangedResult { public bool Changed { get; set; } }
 
-    public async Task<AnimeEntryDto?> GetEntryAsync(string id, int? season = null, CancellationToken ct = default)
+    public async Task<EntryResponse?> GetEntryAsync(string id, int? season = null, CancellationToken ct = default)
     {
         var url = $"api/v1/me/entries/{Uri.EscapeDataString(id)}";
         if (season.HasValue) url += $"?season={season.Value}";
-        var resp = await GetOrDefault<EntryResponse>(url, ct);
-        return resp?.Entry;
+        return await GetOrDefault<EntryResponse>(url, ct);
     }
 
     public async Task<SaveEntryResponse?> SaveEntryAsync(string id, EntrySaveRequest request, int? season = null, CancellationToken ct = default)

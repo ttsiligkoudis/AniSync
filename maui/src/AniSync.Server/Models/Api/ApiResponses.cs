@@ -105,8 +105,22 @@ namespace AnimeList.Models.Api
     /// <summary>Library export from the primary provider, optionally filtered by status.</summary>
     public record LibraryResponse(string Primary, string? Status, List<AnimeEntry> Entries);
 
-    /// <summary>One library entry's full state.</summary>
-    public record EntryResponse(AnimeEntry Entry);
+    /// <summary>One library entry's full state.
+    /// <para>For multi-cour franchises reached via a cross-service id (imdb:/tmdb:),
+    /// <c>Seasons</c> carries one option per mapped cour, <c>SelectedEntryId</c> is the
+    /// auto-resolved per-cour id the <c>Entry</c> was read against, and <c>Service</c> is
+    /// the primary provider's <see cref="AnimeService"/> as an int (so the modal can pick
+    /// the right score range + status vocabulary). All three are null/empty for native ids
+    /// (anilist:/kitsu:/mal:) that don't need a season picker. Mirrors the MVC
+    /// MetaController.GetEntryByApi shape.</para>
+    /// <para><c>Entry</c> is null when the resolved cour isn't on the user's list yet —
+    /// the response still carries <c>Seasons</c> so the modal can render the dropdown and
+    /// land on the "None" status.</para></summary>
+    public record EntryResponse(
+        AnimeEntry Entry,
+        List<EntrySeason> Seasons = null,
+        int? Service = null,
+        string SelectedEntryId = null);
 
     /// <summary>User's AniList statistics — counts, mean score, total hours watched. Requires an AniList token (primary or linked).</summary>
     public record UserStatsResponse(AnilistUserStats Stats);

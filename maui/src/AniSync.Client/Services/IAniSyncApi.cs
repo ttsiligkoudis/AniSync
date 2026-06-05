@@ -88,7 +88,11 @@ public interface IAniSyncApi
     Task<RegenerateResult?> ImportConfigJsonAsync(string backupJson, CancellationToken ct = default);
 
     // Tracking (manage-entry modal + sync)
-    Task<AnimeEntryDto?> GetEntryAsync(string id, int? season = null, CancellationToken ct = default);
+    /// <summary>One library entry by media id (Manage Entry modal). For a cross-service
+    /// franchise the response also carries the per-cour Season dropdown options, the
+    /// resolved cour id, and the primary service (for the per-service score range). Refetch
+    /// a specific cour by calling again with that cour's id.</summary>
+    Task<EntryResponse?> GetEntryAsync(string id, int? season = null, CancellationToken ct = default);
     Task<SaveEntryResponse?> SaveEntryAsync(string id, EntrySaveRequest request, int? season = null, CancellationToken ct = default);
     Task<SaveEntryResponse?> DeleteEntryAsync(string id, int? season = null, CancellationToken ct = default);
     /// <summary>Per-user detail-page state (list entry + hidden flag) in one call —

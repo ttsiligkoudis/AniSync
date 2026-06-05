@@ -22,7 +22,29 @@ public sealed class AnimeEntryDto
     public DateTime? FinishedAt { get; set; }
 }
 
-public sealed class EntryResponse { public AnimeEntryDto? Entry { get; set; } }
+/// <summary>One option in the Manage Entry "Season" dropdown — a single mapped cour
+/// of a cross-service franchise. <see cref="Id"/> is the service-prefixed per-cour id
+/// (anilist:N / kitsu:N / mal:N) the modal refetches and saves against.</summary>
+public sealed class EntrySeasonDto
+{
+    public string? Id { get; set; }
+    public string? Label { get; set; }
+    public int? TotalEpisodes { get; set; }
+}
+
+/// <summary>GET /api/v1/me/entries/{id}. <see cref="Entry"/> is the resolved cour's list
+/// entry (null when that cour isn't on the user's list). <see cref="Seasons"/> carries the
+/// per-cour dropdown options for a cross-service franchise (empty/null otherwise),
+/// <see cref="SelectedEntryId"/> is the cour the entry was read against, and
+/// <see cref="Service"/> is the primary provider's AnimeService int (0 Kitsu, 1 AniList,
+/// 2 MyAnimeList, 3 Trakt) so the modal picks the right score range.</summary>
+public sealed class EntryResponse
+{
+    public AnimeEntryDto? Entry { get; set; }
+    public List<EntrySeasonDto>? Seasons { get; set; }
+    public int? Service { get; set; }
+    public string? SelectedEntryId { get; set; }
+}
 
 /// <summary>POST body for /api/v1/me/entries/{id}. Status is the canonical
 /// ListStatus name (Watching/Completed/Planning/Paused/Dropped/Rewatching);
