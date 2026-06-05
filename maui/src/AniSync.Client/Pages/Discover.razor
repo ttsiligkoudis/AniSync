@@ -12,8 +12,8 @@
 
 <PageTitle>Discover · AniSync</PageTitle>
 
-<section class="container">
-    <nav class="library-tabs" role="tablist" aria-label="Discover catalogs">
+<section>
+    <nav class="library-tabs" role="tablist" aria-label="Discover lists">
         @foreach (var (kind, label) in Kinds)
         {
             <button type="button" role="tab"
@@ -23,46 +23,74 @@
                 @label
             </button>
         }
+        @* Browse-by pills share the Discover tab strip with the catalog tabs so the
+           nav reads as one continuous surface across /discover, /discover/studio and
+           /discover/tag. Anime-only (the video surface has no studio/tag browse). *@
+        @if (IsAnime)
+        {
+            <a class="library-tab" href="/discover/studio" role="tab" aria-selected="false">
+                Studios
+            </a>
+            <a class="library-tab" href="/discover/tag" role="tab" aria-selected="false">
+                Tags
+            </a>
+        }
     </nav>
 
     @if (IsAnime)
     {
+        @* Combined filter form — search input + genre dropdown + an explicit Search
+           button, matching the original Discover/Index.cshtml. The catalog API has no
+           search parameter, so the query filters the loaded grid in-memory (same as
+           the Library page); the genre dropdown re-fetches the catalog. *@
         <form class="filter-bar" role="search" @onsubmit="Reload" @onsubmit:preventDefault>
-            <select class="filter-bar-select" @bind="_genre" @bind:after="Reload">
+            <input type="search" class="filter-bar-search" placeholder="Search anime…"
+                   value="@_search" @oninput="OnSearch" autocomplete="off" />
+            <select class="filter-bar-select" aria-label="Genre" @bind="_genre" @bind:after="Reload">
                 <option value="">All genres</option>
                 @foreach (var g in _genres)
                 {
                     <option value="@g">@g</option>
                 }
             </select>
+            <button type="submit" class="filter-bar-submit">Search</button>
+            @if (!string.IsNullOrEmpty(_search) || !string.IsNullOrEmpty(_genre))
+            {
+                <a class="filter-bar-clear" href="javascript:void(0)" @onclick="ClearFilters" @onclick:preventDefault>Clear</a>
+            }
         </form>
-
-        <nav class="discover-browse-by" aria-label="Browse by">
-            <span class="discover-browse-by-label">Browse by</span>
-            <a class="discover-browse-by-link" href="/discover/studio">Studios</a>
-            <a class="discover-browse-by-link" href="/discover/tag">Tags</a>
-            <a class="discover-browse-by-link" href="/discover/actors">Actors</a>
-        </nav>
     }
 
-    <div class="discover-results-pane">
-        @if (_loading && _items.Count == 0)
-        {
-            <div class="library-grid">
-                @for (var i = 0; i < 12; i++)
-                {
-                    <div class="library-card library-card-skeleton">
-                        <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
-                        <span class="library-card-skeleton-line"></span>
-                        <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
-                    </div>
-                }
+    @* #discover-results-pane mirrors the original Discover/Index.cshtml swap
+       target. The .discover-paginator wrapper holds the grid plus the
+       paginator-loader and sentinel scaffolding the original server-renders;
+       here the Blazor "Load more" button drives the next-page fetch in place
+       of the server-side infinite-scroll JS (which can't bind to the client
+       API), so the loader is shown while a chunk is in flight. *@
+    <div id="discover-results-pane">
+        <div class="discover-paginator">
+            @if (_loading && _items.Count == 0)
+            {
+                <div class="library-grid">
+                    @for (var i = 0; i < 12; i++)
+                    {
+                        <div class="library-card library-card-skeleton">
+                            <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
+                            <span class="library-card-skeleton-line"></span>
+                            <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <PosterGrid Items="_filtered" Variant="grid" VideoLinks="!IsAnime" EmptyMessage="@EmptyMessage" />
+            }
+            <div class="paginator-loader" hidden="@(!(_loading && _items.Count > 0))" aria-hidden="true">
+                <div class="paginator-loader-spinner"></div>
             </div>
-        }
-        else
-        {
-            <PosterGrid Items="_items" Variant="grid" VideoLinks="!IsAnime" EmptyMessage="Nothing to show here." />
-        }
+            <div class="discover-sentinel" aria-hidden="true"></div>
+        </div>
     </div>
 
     @if (_canLoadMore)
@@ -80,11 +108,11 @@
     // (Trakt) has trending / popular / anticipated.
     private static readonly (string, string)[] AnimeKinds =
     {
-        ("trending", "Trending"), ("popular", "Most Popular"), ("seasonal", "Seasonal"), ("airing", "Airing"),
+        ("trending", "Trending"), ("popular", "Popular"), ("seasonal", "Seasonal"), ("airing", "Airing"),
     };
     private static readonly (string, string)[] VideoKinds =
     {
-        ("trending", "Trending"), ("popular", "Most Popular"), ("anticipated", "Anticipated"),
+        ("trending", "Trending"), ("popular", "Popular"), ("anticipated", "Anticipated"),
     };
 
     private readonly string[] _genres =
@@ -96,12 +124,35 @@
 
     private string _kind = "trending";
     private string _genre = "";
+    private string _search = "";
     private bool _loading;
     private bool _canLoadMore;
     private readonly List<MetaDto> _items = new();
 
     private bool IsAnime => State.MediaType == MetaType.anime;
     private (string Kind, string Label)[] Kinds => IsAnime ? AnimeKinds : VideoKinds;
+
+    // Empty-state copy mirrors Discover/Index.cshtml: a search miss, a genre
+    // miss within the active list, or a generic catalog-load failure.
+    private string EmptyMessage
+    {
+        get
+        {
+            var label = (Kinds.FirstOrDefault(k => k.Kind == _kind).Label ?? _kind).ToLower();
+            if (!string.IsNullOrWhiteSpace(_search)) return $"No matches for \"{_search.Trim()}\".";
+            if (!string.IsNullOrEmpty(_genre)) return $"No {_genre.ToLower()} anime in {label} right now.";
+            return IsAnime
+                ? $"Couldn't load {label} anime — try again later."
+                : $"Couldn't load {label} titles — try again later.";
+        }
+    }
+
+    // The catalog API has no search parameter, so the typed query narrows the
+    // already-loaded grid in-memory (matching the Library page's approach).
+    private IReadOnlyList<MetaDto> _filtered =>
+        string.IsNullOrWhiteSpace(_search)
+            ? _items
+            : _items.Where(m => m.Name.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
 
     protected override void OnInitialized() => State.Changed += OnStateChanged;
 
@@ -139,9 +190,20 @@
         StateHasChanged();
     }
 
+    private void OnSearch(ChangeEventArgs e) => _search = e.Value?.ToString() ?? "";
+
+    private async Task ClearFilters()
+    {
+        _search = "";
+        _genre = "";
+        await Reload();
+    }
+
     private async void SetKind(string kind)
     {
         if (_kind == kind) return;
+        _search = "";
+        _genre = "";
         _kind = kind;
         await Reload();
     }

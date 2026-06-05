@@ -5,57 +5,79 @@
    (or a name search) as photo tiles with page-based "Load more"; each tile opens
    the Trakt-backed filmography at /discover/actor/tmdb/{id}. *@
 
-<PageTitle>Browse by actor · AniSync</PageTitle>
+<PageTitle>Actors · AniSync</PageTitle>
 
-<section class="container">
-    <div class="discover-browse-header">
-        <h1 class="dashboard-section-title">Browse by actor</h1>
-        <a class="discover-browse-link" href="/discover/studio">Studios →</a>
-    </div>
+<section>
+    @* Same Discover video nav as /discover with the Actors pill active, so this
+       stays inside the Discover surface. The catalog mode pills are server/
+       session-driven (Trakt config + login) and aren't exposed to the client,
+       so only the always-present active Actors pill is rendered here. *@
+    <nav class="library-tabs" role="tablist" aria-label="Discover modes">
+        <a class="library-tab library-tab-active" href="/discover/actors" role="tab" aria-selected="true">Actors</a>
+    </nav>
 
-    <form class="filter-bar" role="search" @onsubmit="Reload" @onsubmit:preventDefault>
-        <input class="filter-bar-search" placeholder="Search people…" value="@_search"
-               @oninput="e => _search = e.Value?.ToString() ?? string.Empty" autocomplete="off" />
-        <button type="submit" class="site-header-cta">Search</button>
+    @* Search form — TMDB person search. Posts a full reload (the directory is
+       paginated, so a client-side filter would only catch loaded tiles). *@
+    <form method="get" action="/discover/actors" class="filter-bar" role="search"
+          @onsubmit="Reload" @onsubmit:preventDefault>
+        <input type="search"
+               name="search"
+               value="@_search"
+               @oninput="e => _search = e.Value?.ToString() ?? string.Empty"
+               placeholder="Search actors…"
+               class="filter-bar-search"
+               autocomplete="off" />
+        <button type="submit" class="filter-bar-submit">Search</button>
+        @if (HasSearch)
+        {
+            <a class="filter-bar-clear" href="/discover/actors" @onclick="Clear" @onclick:preventDefault>Clear</a>
+        }
     </form>
 
-    @if (_loading && _actors.Count == 0)
+    @if (_actors.Count == 0)
     {
-        <p class="hint-text">Loading…</p>
-    }
-    else if (_actors.Count == 0)
-    {
-        <p class="hint-text">No people found.</p>
+        @if (HasSearch)
+        {
+            <p class="hint-text">No actors match "@_search".</p>
+        }
+        else
+        {
+            <p class="hint-text">No actors available right now. Try again in a moment.</p>
+        }
     }
     else
     {
-        <div class="actor-tile-grid">
-            @foreach (var p in _actors)
-            {
-                <a class="actor-tile" href="@($"/discover/actor/tmdb/{p.TmdbId}")">
-                    <div class="actor-tile-photo-wrap">
-                        @if (!string.IsNullOrEmpty(p.Image))
-                        {
-                            <img class="actor-tile-photo" src="@p.Image" alt="@p.Name" loading="lazy" decoding="async" onerror="this.remove()" />
-                        }
-                        else
-                        {
-                            <div class="actor-tile-photo actor-tile-photo-placeholder" aria-hidden="true"></div>
-                        }
-                    </div>
-                    <span class="actor-tile-name">@p.Name</span>
-                </a>
-            }
+        <div class="actor-paginator" data-page="1" data-has-next="@(_canLoadMore ? "true" : "false")" data-search="@_search">
+            <div class="actor-grid">
+                @foreach (var a in _actors)
+                {
+                    <a class="actor-tile" href="@($"/discover/actor/tmdb/{a.TmdbId}")" data-actor-id="@a.TmdbId">
+                        <span class="actor-tile-avatar">
+                            <span class="actor-tile-initial" aria-hidden="true">@(string.IsNullOrEmpty(a.Name) ? "?" : a.Name[..1])</span>
+                            @if (!string.IsNullOrEmpty(a.Image))
+                            {
+                                <img class="actor-tile-img" src="@a.Image" alt="" loading="lazy"
+                                     decoding="async" onerror="this.remove()" />
+                            }
+                        </span>
+                        <span class="actor-tile-name">@a.Name</span>
+                    </a>
+                }
+            </div>
+            <div class="paginator-loader" hidden="@(!_loading)" aria-hidden="true">
+                <div class="paginator-loader-spinner"></div>
+            </div>
+            <div class="actor-sentinel" aria-hidden="true"></div>
         </div>
-    }
 
-    @if (_canLoadMore)
-    {
-        <div class="discover-pagination">
-            <button type="button" class="discover-paginator" disabled="@_loading" @onclick="LoadMore">
-                @(_loading ? "Loading…" : "Load more")
-            </button>
-        </div>
+        @if (_canLoadMore)
+        {
+            <div class="discover-pagination">
+                <button type="button" class="discover-paginator" disabled="@_loading" @onclick="LoadMore">
+                    @(_loading ? "Loading…" : "Load more")
+                </button>
+            </div>
+        }
     }
 </section>
 
@@ -66,6 +88,8 @@
     private bool _canLoadMore;
     private int _page = 1;
 
+    private bool HasSearch => !string.IsNullOrEmpty(_search);
+
     protected override Task OnInitializedAsync() => Load();
 
     private async Task Reload()
@@ -74,6 +98,12 @@
         _page = 1;
         _canLoadMore = false;
         await Load();
+    }
+
+    private async Task Clear()
+    {
+        _search = "";
+        await Reload();
     }
 
     private Task LoadMore() => Load();

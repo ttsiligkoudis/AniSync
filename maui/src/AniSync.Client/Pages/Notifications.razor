@@ -11,58 +11,85 @@
 
 <PageTitle>Notifications · AniSync</PageTitle>
 
-<section class="container">
-    <div class="notif-page-toolbar">
-        <h1 class="dashboard-section-title">Notifications</h1>
-        <span class="notif-page-toolbar-actions">
-            @if (_pushEnabled)
-            {
-                <button type="button" class="notif-page-action" disabled="@_pushBusy" @onclick="TogglePush">
-                    @(_pushBusy ? "…" : _pushSubscribed ? "Disable push" : "Enable push")
-                </button>
-            }
+<section>
+    <div class="page-header-row">
+        <div class="page-header-titles">
+            <h1 class="page-title">Notifications</h1>
+            <p class="page-subtitle" data-notif-page-subtitle>
+                @_items.Count notification@(_items.Count == 1 ? "" : "s")
+            </p>
+        </div>
+        <div class="notif-page-toolbar" data-notif-page-toolbar>
             @if (_items.Count > 0)
             {
-                <button type="button" class="notif-page-action" @onclick="MarkAllRead">Mark all read</button>
+                <button type="button" class="notif-page-action notif-page-action-quiet"
+                        data-notif-mark-all-read @onclick="MarkAllRead">Mark all read</button>
             }
-        </span>
+        </div>
     </div>
-
-    <div class="notif-page-body">
-        @if (_loading)
-        {
-            <div class="notif-page-loader">Loading…</div>
-        }
-        else if (_items.Count == 0)
-        {
-            <div class="notif-empty">You're all caught up.</div>
-        }
-        else
-        {
-            <ul class="notif-page-list">
-                @foreach (var n in _items)
-                {
-                    <li class="notif-page-item @(IsRead(n) ? "" : "notif-page-item-unread")">
-                        <div class="notif-page-item-link" role="button" tabindex="0" @onclick="() => OpenAsync(n)">
-                            @if (!string.IsNullOrEmpty(n.ThumbnailUrl))
-                            {
-                                <img class="notif-page-thumb" src="@n.ThumbnailUrl" alt="" loading="lazy" onerror="this.remove()" />
-                            }
-                            else
-                            {
-                                <span class="notif-page-thumb notif-page-thumb-placeholder" aria-hidden="true"></span>
-                            }
-                            <span class="notif-page-title">@n.AnimeTitle · Episode @n.EpisodeNumber</span>
-                            <span class="notif-page-meta">@RelativeTime(n.CreatedAt)</span>
-                        </div>
-                        <button type="button" class="notif-page-delete" aria-label="Delete notification"
-                                @onclick="() => DeleteAsync(n)" @onclick:stopPropagation>×</button>
-                    </li>
-                }
-            </ul>
-        }
-    </div>
+    @if (_pushEnabled)
+    {
+        <div class="notif-push-toggle" data-push-toggle>
+            <span class="notif-push-toggle-label" data-push-toggle-label>Get notified when episodes drop</span>
+            <button type="button" class="notif-push-toggle-btn" data-push-toggle-btn
+                    disabled="@_pushBusy" @onclick="TogglePush">
+                @(_pushBusy ? "…" : _pushSubscribed ? "Disable browser notifications" : "Enable browser notifications")
+            </button>
+        </div>
+    }
 </section>
+
+@if (_loading)
+{
+    <div class="notif-page-loader">Loading…</div>
+}
+else if (_items.Count == 0)
+{
+    <p class="library-empty">No notifications yet. New episode releases will land here.</p>
+}
+else
+{
+    <div class="notif-page-list">
+        @foreach (var n in _items)
+        {
+            <a class="notif-page-item @(IsRead(n) ? "" : "notif-page-item-unread")"
+               href="@(string.IsNullOrEmpty(n.LinkPath) ? "#" : n.LinkPath)"
+               data-notif-id="@n.Id"
+               @onclick="() => OpenAsync(n)" @onclick:preventDefault>
+                <span class="notif-page-checkbox" data-notif-page-checkbox>
+                    <input type="checkbox"
+                           class="notif-page-checkbox-input"
+                           aria-label="Select notification: @n.AnimeTitle @EpLabel(n)" />
+                </span>
+                @if (!string.IsNullOrEmpty(n.ThumbnailUrl))
+                {
+                    <img class="notif-page-thumb" src="@n.ThumbnailUrl" alt="" loading="lazy" decoding="async" />
+                }
+                else
+                {
+                    <div class="notif-page-thumb notif-page-thumb-placeholder" aria-hidden="true"></div>
+                }
+                <div class="notif-page-body">
+                    <div class="notif-page-title">@n.AnimeTitle</div>
+                    <div class="notif-page-meta">@EpLabel(n) &middot; @RelativeTime(n.CreatedAt)</div>
+                </div>
+                <button type="button"
+                        class="notif-page-delete"
+                        data-notif-page-delete
+                        aria-label="Delete notification: @n.AnimeTitle @EpLabel(n)"
+                        @onclick="() => DeleteAsync(n)" @onclick:stopPropagation @onclick:preventDefault>
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
+                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+                        <path d="M10 11v6"></path>
+                        <path d="M14 11v6"></path>
+                    </svg>
+                </button>
+            </a>
+        }
+    </div>
+}
 
 @code {
     private bool _loading = true;
@@ -143,14 +170,17 @@
         finally { _pushBusy = false; }
     }
 
+    // Series notifications carry a season (S1E5); single-cour anime don't (Episode 5).
+    private static string EpLabel(NotificationDto n)
+        => n.Season.HasValue ? $"S{n.Season}E{n.EpisodeNumber}" : $"Episode {n.EpisodeNumber}";
+
+    // Mirrors _NotificationRows' Relative(): just now / Nm / Nh / Nd ago.
     private static string RelativeTime(long unixSeconds)
     {
-        var then = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
-        var span = DateTimeOffset.UtcNow - then;
-        if (span.TotalMinutes < 1) return "just now";
-        if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m ago";
-        if (span.TotalHours < 24) return $"{(int)span.TotalHours}h ago";
-        if (span.TotalDays < 7) return $"{(int)span.TotalDays}d ago";
-        return then.LocalDateTime.ToString("MMM d");
+        var diff = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - unixSeconds;
+        if (diff < 60) return "just now";
+        if (diff < 3600) return $"{diff / 60}m ago";
+        if (diff < 86400) return $"{diff / 3600}h ago";
+        return $"{diff / 86400}d ago";
     }
 }

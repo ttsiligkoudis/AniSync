@@ -10,7 +10,7 @@
 
 @if (_anime is not null || _trakt is not null)
 {
-    <section class="dashboard-section stats-section" data-dash-section="stats" data-media-type="anime movie series">
+    <section class="dashboard-section stats-section" data-dash-section="stats" data-media-type="@_statsTypes">
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">Your stats</h2>
         </div>
@@ -25,6 +25,30 @@
                     }
                     <span class="dashboard-section-actions stats-group-actions">
                         <span class="dashboard-section-link-muted">via AniList</span>
+                        @* Info popover (click-driven in the web via inline JS; markup
+                           rendered here for parity — the toggle has no Blazor wiring). *@
+                        <span class="dashboard-stats-info">
+                            <button class="dashboard-stats-info-btn"
+                                    type="button"
+                                    aria-label="About these stats"
+                                    aria-expanded="false"
+                                    aria-controls="dashboardStatsInfoTooltip"
+                                    data-stats-info-toggle>
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                </svg>
+                            </button>
+                            <span id="dashboardStatsInfoTooltip" class="dashboard-stats-info-tooltip">
+                                AniList recomputes your stats on its own schedule
+                                (typically every 24-48 hours). To force an
+                                immediate refresh, click "Update Stats" on
+                                <a href="https://anilist.co/settings/lists" target="_blank" rel="noopener noreferrer">AniList's list settings</a>
+                                and then
+                                <a href="#" data-stats-refresh-link>refresh your stats</a>.
+                            </span>
+                        </span>
                     </span>
                 </div>
                 <div class="stats-strip">
@@ -144,6 +168,13 @@
     private AnilistUserStatsDto? _anime;
     private TraktUserStatsDto? _trakt;
     private bool _combined => _anime is not null && _trakt is not null;
+
+    // Union of the media types whose row is present — mirrors the web's
+    // statsTypes so the dashboard switch hides the whole panel only when
+    // neither row matches the active filter.
+    private string _statsTypes => string.Join(" ",
+        (_anime is not null ? new[] { "anime" } : Array.Empty<string>())
+        .Concat(_trakt is not null ? new[] { "movie", "series" } : Array.Empty<string>()));
 
     private bool ShowAnime => State.DashboardFilter is "all" or "anime";
     private bool ShowVideo => State.DashboardFilter is "all" or "movie" or "series";

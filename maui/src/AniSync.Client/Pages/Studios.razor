@@ -5,52 +5,99 @@
    studio tiles (name + anime count) with page-based "Load more". Tapping a tile
    opens /discover/studio/{id}. *@
 
-<PageTitle>Browse by studio · AniSync</PageTitle>
+<PageTitle>Studios · AniSync</PageTitle>
 
-<section class="container">
-    <div class="discover-browse-header">
-        <h1 class="dashboard-section-title">Browse by studio</h1>
-        <a class="discover-browse-link" href="/discover/tag">Tags →</a>
-    </div>
+<section>
+    @* Shared Discover tab strip with the Studios pill active. The catalog mode
+       pills are server/session-driven and aren't exposed to the client, so only
+       the always-present Browse-by pills are rendered. *@
+    <nav class="library-tabs" role="tablist" aria-label="Discover lists">
+        <a class="library-tab library-tab-active" href="/discover/studio" role="tab" aria-selected="true">Studios</a>
+        <a class="library-tab" href="/discover/tag" role="tab" aria-selected="false">Tags</a>
+    </nav>
 
-    @if (_loading && _studios.Count == 0)
+    @* Server-side search form. Studios are paginated, so a client-side filter
+       would only catch loaded entries. *@
+    <form method="get" action="/discover/studio" class="filter-bar" role="search"
+          @onsubmit="Reload" @onsubmit:preventDefault>
+        <input type="search"
+               name="search"
+               value="@_search"
+               @oninput="e => _search = e.Value?.ToString() ?? string.Empty"
+               placeholder="Search studios…"
+               class="filter-bar-search"
+               autocomplete="off" />
+        <button type="submit" class="filter-bar-submit">Search</button>
+        @if (HasSearch)
+        {
+            <a class="filter-bar-clear" href="/discover/studio" @onclick="Clear" @onclick:preventDefault>Clear</a>
+        }
+    </form>
+
+    @if (_studios.Count == 0)
     {
-        <p class="hint-text">Loading studios…</p>
-    }
-    else if (_studios.Count == 0)
-    {
-        <p class="hint-text">No studios to show.</p>
+        @if (HasSearch)
+        {
+            <p class="hint-text">No studios match "@_search".</p>
+        }
+        else
+        {
+            <p class="hint-text">No studios available right now. Try again in a moment.</p>
+        }
     }
     else
     {
-        <div class="studio-tile-grid">
-            @foreach (var s in _studios)
-            {
-                <a class="studio-tile" href="@($"/discover/studio/{s.Id}")">
-                    <span class="studio-tile-name">@s.Name</span>
-                    <span class="studio-tile-count">@s.AnimeCount anime</span>
-                </a>
-            }
+        <div class="studio-paginator" data-page="1">
+            <div class="studio-grid">
+                @foreach (var s in _studios)
+                {
+                    <a class="studio-tile" href="@($"/discover/studio/{s.Id}")" data-studio-id="@s.Id">
+                        <span class="studio-tile-name">@s.Name</span>
+                        <span class="studio-tile-count">@s.AnimeCount anime</span>
+                    </a>
+                }
+            </div>
+            <div class="paginator-loader" hidden="@(!_loading)" aria-hidden="true">
+                <div class="paginator-loader-spinner"></div>
+            </div>
+            <div class="studio-sentinel" aria-hidden="true"></div>
         </div>
-    }
 
-    @if (_canLoadMore)
-    {
-        <div class="discover-pagination">
-            <button type="button" class="discover-paginator" disabled="@_loading" @onclick="LoadMore">
-                @(_loading ? "Loading…" : "Load more")
-            </button>
-        </div>
+        @if (_canLoadMore)
+        {
+            <div class="discover-pagination">
+                <button type="button" class="discover-paginator" disabled="@_loading" @onclick="LoadMore">
+                    @(_loading ? "Loading…" : "Load more")
+                </button>
+            </div>
+        }
     }
 </section>
 
 @code {
     private readonly List<StudioSummaryDto> _studios = new();
+    private string _search = "";
     private bool _loading;
     private bool _canLoadMore;
     private int _page = 1;
 
+    private bool HasSearch => !string.IsNullOrEmpty(_search);
+
     protected override Task OnInitializedAsync() => Load();
+
+    private async Task Reload()
+    {
+        _studios.Clear();
+        _page = 1;
+        _canLoadMore = false;
+        await Load();
+    }
+
+    private async Task Clear()
+    {
+        _search = "";
+        await Reload();
+    }
 
     private Task LoadMore() => Load();
 

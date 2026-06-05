@@ -6,38 +6,52 @@
    client-side (Esc / clearing the box restores the full list). Tapping a tag
    opens /discover/tag/{name}. *@
 
-<PageTitle>Browse by tag · AniSync</PageTitle>
+<PageTitle>Tags · AniSync</PageTitle>
 
-<section class="container">
-    <div class="discover-browse-header">
-        <h1 class="dashboard-section-title">Browse by tag</h1>
-        <a class="discover-browse-link" href="/discover/studio">Studios →</a>
-    </div>
-
-    <form class="filter-bar" role="search" @onsubmit:preventDefault>
-        <input class="filter-bar-search" placeholder="Filter tags…" value="@_filter"
-               @oninput="e => _filter = e.Value?.ToString() ?? string.Empty"
-               @onkeydown="OnKeyDown" autocomplete="off" spellcheck="false" />
-    </form>
+<section>
+    @* Shared Discover tab strip with the Tags pill active. The catalog mode
+       pills are server/session-driven and aren't exposed to the client, so only
+       the always-present Browse-by pills are rendered. *@
+    <nav class="library-tabs" role="tablist" aria-label="Discover lists">
+        <a class="library-tab" href="/discover/studio" role="tab" aria-selected="false">Studios</a>
+        <a class="library-tab library-tab-active" href="/discover/tag" role="tab" aria-selected="true">Tags</a>
+    </nav>
 
     @if (_loading)
     {
         <p class="hint-text">Loading tags…</p>
     }
-    else if (!Filtered.Any())
+    else if (_tags.Count == 0)
     {
-        <p class="hint-text">No tags match “@_filter”.</p>
+        <p class="hint-text">No tags available right now. Try again in a moment.</p>
     }
     else
     {
+        @* Filter input — AniList returns every tag in one call so the full set
+           is already on the page; the filter just shows/hides tiles. *@
+        <div class="filter-bar" role="search">
+            <input type="search"
+                   class="filter-bar-search"
+                   placeholder="Filter tags…"
+                   value="@_filter"
+                   @oninput="e => _filter = e.Value?.ToString() ?? string.Empty"
+                   @onkeydown="OnKeyDown"
+                   autocomplete="off"
+                   spellcheck="false"
+                   aria-label="Filter tags" />
+        </div>
+        <p class="hint-text" hidden="@HasMatches" data-tag-filter-empty>No tags match.</p>
+
         @foreach (var group in Filtered)
         {
-            <section class="tag-category">
-                <h2 class="anime-detail-section-title">@group.Key</h2>
-                <div class="tag-chip-grid">
+            <section class="tag-group" data-tag-group>
+                <h2 class="tag-group-title">@group.Key</h2>
+                <div class="tag-grid">
                     @foreach (var t in group.OrderBy(t => t.Name))
                     {
-                        <a class="tag-chip" href="@TagHref(t.Name)" title="@t.Description">@t.Name</a>
+                        <a class="tag-tile" href="@TagHref(t.Name)" data-tag-name="@t.Name" title="@t.Description">
+                            <span class="tag-tile-name">@t.Name</span>
+                        </a>
                     }
                 </div>
             </section>
@@ -61,7 +75,9 @@
             .Where(t => string.IsNullOrWhiteSpace(_filter)
                         || t.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase))
             .GroupBy(t => string.IsNullOrEmpty(t.Category) ? "Other" : t.Category!)
-            .OrderBy(g => g.Key);
+            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+
+    private bool HasMatches => Filtered.Any();
 
     private void OnKeyDown(KeyboardEventArgs e)
     {
