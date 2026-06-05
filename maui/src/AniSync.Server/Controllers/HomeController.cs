@@ -1347,37 +1347,44 @@ public class PlexUsernameRequest
     public string username { get; set; }
 }
 
+// NOTE: every field is nullable on purpose. These bind from the request body of
+// [ApiController] endpoints, where a non-nullable reference-type property is treated
+// as implicitly [Required] — and the header-authed thin client never sends `uid`
+// (it's resolved from the X-AniSync-Config header), so a non-nullable `uid` made
+// ModelState invalid and rejected EVERY stream-addon write with a generic 400
+// "One or more validation errors occurred" before the action ran. The actions
+// null-guard each field and return specific, friendlier errors themselves.
 public class StreamAddonRequest
 {
-    public string uid { get; set; }
+    public string? uid { get; set; }
     // Full Stremio addon manifest URL ending in /manifest.json. For add,
     // the server fetches it once to validate and derive the display name;
     // for remove, it's the lookup key (string-compared, case-insensitive).
-    public string manifestUrl { get; set; }
+    public string? manifestUrl { get; set; }
 }
 
 public class ReorderStreamAddonsRequest
 {
-    public string uid { get; set; }
+    public string? uid { get; set; }
     // URL list in the new desired order. Match is case-insensitive
     // against StreamAddon.Url; unknown URLs are silently skipped and
     // any addon the list omits stays at its current relative position
     // (defensive against stale clients losing rows).
-    public List<string> urls { get; set; }
+    public List<string>? urls { get; set; }
 }
 
 public class DebridAddonsRequest
 {
-    public string uid { get; set; }
+    public string? uid { get; set; }
     // Catalog debrid provider id (StreamAddonCatalog.Providers), e.g.
     // "realdebrid". Resolved server-side; unknown ids are rejected.
-    public string provider { get; set; }
+    public string? provider { get; set; }
     // The user's debrid API key. Flows into each built manifest URL and is
     // never logged on its own.
-    public string apiKey { get; set; }
+    public string? apiKey { get; set; }
     // Catalog addon ids to set up (StreamAddonCatalog.Addons), e.g.
     // ["torrentio", "comet"]. Null / empty means "all catalog addons".
-    public List<string> addons { get; set; }
+    public List<string>? addons { get; set; }
 }
 
 public class ConfigBackup
