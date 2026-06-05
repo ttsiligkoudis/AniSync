@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     concurrency:
-      # Single deploy lane regardless of which ref triggered the run β
+      # Single deploy lane regardless of which ref triggered the run:
       # a claude/* push and a master push must not race each other into
       # Fly. cancel-in-progress=false makes later runs queue rather than
       # abort a deploy mid-flight.
@@ -47,13 +47,13 @@ jobs:
                           --json number --jq '.[0].number')
           if [ -z "$PR" ]; then
             # Re-pushing a claude/* branch after its PR was already merged
-            # would land here with no commits ahead of master β gh pr
+            # would land here with no commits ahead of master, and gh pr
             # create exits non-zero in that case. Treat it as "nothing to
             # do" rather than failing the job; we still re-deploy master
             # below, which is a cheap no-op if the image hasn't changed.
             if ! gh pr create --repo "$GITHUB_REPOSITORY" \
                               --base master --head "$BRANCH" \
-                              --title "Auto-merge: $BRANCH β master" \
+                              --title "Auto-merge: $BRANCH into master" \
                               --body "Automated PR from Claude on the web."; then
               echo "::warning::gh pr create failed (likely no commits ahead of master); skipping merge."
               exit 0
