@@ -213,7 +213,9 @@ namespace AnimeList.Controllers
             return Ok(new { token });
         }
 
-        public sealed class PlexUsernameBody { public string username { get; set; } }
+        // Nullable: clearing the Plex username sends { "username": null }, which a
+        // non-nullable (implicitly [Required]) property would reject with a 400.
+        public sealed class PlexUsernameBody { public string? username { get; set; } }
 
         [HttpPost("plex-username")]
         public async Task<IActionResult> SetPlexUsername([FromBody] PlexUsernameBody body)
