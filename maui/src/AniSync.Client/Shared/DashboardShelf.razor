@@ -9,7 +9,7 @@
 
 @if (_visible)
 {
-    <section class="dashboard-section" data-dash-section="@DashSection" data-media-type="@MediaType">
+    <section class="dashboard-section" data-dash-section="@DashSection" data-media-type="@MediaType" style="order:@Order">
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">@Title</h2>
             @if (!string.IsNullOrEmpty(ViewAllHref))
@@ -63,13 +63,20 @@
     // (12, matching _PosterScrollSkeleton); Continue watching uses 6 (matching
     // the inline skeletons in Index.cshtml).
     [Parameter] public int SkeletonCount { get; set; } = 12;
+    // CSS flex `order` + hidden state read from the saved layout (AppState.DashLayout), applied
+    // via style/visibility rather than DOM-moving JS so it doesn't fight Blazor's renderer.
+    private int Order
+    {
+        get { var l = State.DashLayout; for (var i = 0; i < l.Count; i++) if (l[i].Key == DashSection) return i; return 999; }
+    }
+    private bool LayoutHidden => State.DashLayout.FirstOrDefault(e => e.Key == DashSection) is { Visible: false };
 
     private bool _loading = true;
     private IReadOnlyList<MetaDto> _items = Array.Empty<MetaDto>();
 
     // Shown while loading (skeletons) and after load only if it returned items.
     // Always hidden when the dashboard filter excludes this shelf's media type.
-    private bool _visible => PassesFilter && (_loading || _items.Count > 0);
+    private bool _visible => PassesFilter && !LayoutHidden && (_loading || _items.Count > 0);
 
     private bool PassesFilter
         => State.DashboardFilter is "all" || State.DashboardFilter == MediaType

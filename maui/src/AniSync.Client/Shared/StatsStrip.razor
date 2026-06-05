@@ -8,9 +8,9 @@
    AniList, the movies/series row from Trakt; group labels show only when both
    are present ("combined"). Rows hide per the dashboard media-type filter. *@
 
-@if (_anime is not null || _trakt is not null)
+@if (!LayoutHidden && (_anime is not null || _trakt is not null))
 {
-    <section class="dashboard-section stats-section" data-dash-section="stats" data-media-type="@_statsTypes">
+    <section class="dashboard-section stats-section" data-dash-section="stats" data-media-type="@_statsTypes" style="order:@Order">
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">Your stats</h2>
         </div>
@@ -165,6 +165,10 @@
 }
 
 @code {
+    // CSS flex `order` + hidden state for the "stats" section, read from the saved layout.
+    private int Order { get { var l = State.DashLayout; for (var i = 0; i < l.Count; i++) if (l[i].Key == "stats") return i; return 0; } }
+    private bool LayoutHidden => State.DashLayout.FirstOrDefault(e => e.Key == "stats") is { Visible: false };
+
     private AnilistUserStatsDto? _anime;
     private TraktUserStatsDto? _trakt;
     private bool _combined => _anime is not null && _trakt is not null;

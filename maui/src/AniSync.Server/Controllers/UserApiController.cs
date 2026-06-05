@@ -1165,7 +1165,60 @@ namespace AnimeList.Controllers
                 return StatusCode(500, new ApiError("preferences save failed"));
             }
         }
+
+        /// <summary>
+        /// The user's saved dashboard layout (section order + visibility JSON), or null if they
+        /// haven't customised it. The thin client merges this with the default layout. Same JSON
+        /// shape (<c>[{key,visible}]</c>) the web's /Home/SetDashboardLayout persists, so a layout
+        /// carries across both apps.
+        /// </summary>
+        [HttpGet("dashboard-layout")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(DashboardLayoutResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetDashboardLayout()
+        {
+            try
+            {
+                var configuration = await ResolveConfigAsync(ResolvedConfig, _configStore);
+                var uid = configuration?.tokenUid;
+                if (string.IsNullOrEmpty(uid)) return new JsonResult(new DashboardLayoutResponse(null));
+                var ws = await _configStore.GetWebSettingsAsync(uid);
+                return new JsonResult(new DashboardLayoutResponse(ws?.DashboardLayout));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API GetDashboardLayout failed.");
+                return StatusCode(500, new ApiError("dashboard-layout lookup failed"));
+            }
+        }
+
+        /// <summary>Persists the dashboard layout JSON (section order + visibility). Requires a
+        /// stored (v5) config; inline configs have nowhere to persist to (no-op).</summary>
+        [HttpPost("dashboard-layout")]
+        [RequireConfig]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        public async Task<IActionResult> SetDashboardLayout([FromBody] DashboardLayoutSaveRequest body)
+        {
+            try
+            {
+                var configuration = await ResolveConfigAsync(ResolvedConfig, _configStore);
+                var uid = configuration?.tokenUid;
+                if (!string.IsNullOrEmpty(uid) && body is not null)
+                    await _configStore.SetDashboardLayoutAsync(uid, body.Layout);
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API SetDashboardLayout failed.");
+                return StatusCode(500, new ApiError("dashboard-layout save failed"));
+            }
+        }
     }
+
+    /// <summary>The saved dashboard layout JSON ([{key,visible}]) or null — GET /api/v1/me/dashboard-layout.</summary>
+    public record DashboardLayoutResponse(string? Layout);
+    /// <summary>Body for POST /api/v1/me/dashboard-layout — the serialized [{key,visible}] array.</summary>
+    public record DashboardLayoutSaveRequest(string? Layout);
 
     /// <summary>Named user preferences exposed by GET/POST /api/v1/me/preferences.</summary>
     public sealed class PreferencesDto

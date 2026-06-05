@@ -199,6 +199,7 @@ public sealed class ActorSummaryDto
 public sealed class ActorsListResponse { public List<ActorSummaryDto> Actors { get; set; } = new(); public bool HasNextPage { get; set; } }
 public sealed class VideoModeDto { public string Slug { get; set; } = ""; public string Label { get; set; } = ""; }
 public sealed class VideoModesResponse { public List<VideoModeDto> Modes { get; set; } = new(); }
+public sealed class DashboardLayoutResponse { public string? Layout { get; set; } }
 public sealed class ActorCreditsResponse
 {
     public string? Slug { get; set; }

@@ -50,6 +50,12 @@ public sealed class AppState
     /// </summary>
     public string DashboardFilter { get; private set; } = "all";
 
+    /// <summary>The dashboard section layout (order + visibility). Home loads it from
+    /// /api/v1/me/dashboard-layout; the Customize modal edits + persists it. StatsStrip /
+    /// DashboardShelf / the Browse section read their order + hidden state from here and
+    /// re-render on Changed. Reorder is applied via CSS flex `order`, not DOM-moving JS.</summary>
+    public IReadOnlyList<LayoutEntry> DashLayout { get; private set; } = DashboardLayout.Default();
+
     /// <summary>
     /// The user's Stremio addon config string, used to resolve playable sources
     /// (GET /{config}/stream/...). Held in secure storage on MAUI and supplied
@@ -83,6 +89,12 @@ public sealed class AppState
     {
         if (DashboardFilter == filter) return;
         DashboardFilter = filter;
+        Changed?.Invoke();
+    }
+
+    public void SetDashLayout(IReadOnlyList<LayoutEntry> layout)
+    {
+        DashLayout = layout;
         Changed?.Invoke();
     }
 

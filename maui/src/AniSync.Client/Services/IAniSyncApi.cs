@@ -94,6 +94,9 @@ public interface IAniSyncApi
     Task<DiffResponse?> SyncDiffAsync(CancellationToken ct = default);
     Task<PreferencesDto?> GetPreferencesAsync(CancellationToken ct = default);
     Task<bool> SavePreferencesAsync(PreferencesDto prefs, CancellationToken ct = default);
+    /// <summary>The user's saved dashboard layout JSON ([{key,visible}]) or null — /api/v1/me/dashboard-layout.</summary>
+    Task<string?> GetDashboardLayoutAsync(CancellationToken ct = default);
+    Task<bool> SaveDashboardLayoutAsync(string layoutJson, CancellationToken ct = default);
 
     // Notifications + calendar
     Task<IReadOnlyList<NotificationDto>> NotificationsAsync(int limit = 20, int skip = 0, CancellationToken ct = default);

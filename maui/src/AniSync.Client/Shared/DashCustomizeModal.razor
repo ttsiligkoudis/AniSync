@@ -1,0 +1,128 @@
+@inject AppState State
+@inject IAniSyncApi Api
+
+@* Customize dashboard modal — Blazor port of _DashCustomize.cshtml + dashboard-layout.js's modal.
+   Lists the sections present on this dashboard (gated by the enabled media types); each row
+   reorders (↑/↓) and toggles visibility. Edits a draft; Save lifts it into AppState.DashLayout
+   (which the sections read for their CSS order + hidden state) and persists it to the account
+   (/api/v1/me/dashboard-layout). Closing/cancelling discards the draft. *@
+@if (_open)
+{
+    <div class="dash-modal-backdrop" @onclick="Close"></div>
+    <div class="dash-modal" role="dialog" aria-modal="true" aria-labelledby="dash-modal-title">
+        <div class="dash-modal-card">
+            <button type="button" class="dash-modal-close" aria-label="Close" @onclick="Close">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+            <h2 class="dash-modal-title" id="dash-modal-title">Customize dashboard</h2>
+            <p class="dash-modal-subtitle">Reorder sections and choose what shows. Synced to your account.</p>
+            <ul class="dash-modal-list">
+                @{ var rows = _draft.Where(e => _present.Contains(e.Key)).ToList(); }
+                @foreach (var entry in rows)
+                {
+                    var key = entry.Key;
+                    var isFirst = rows[0].Key == key;
+                    var isLast = rows[^1].Key == key;
+                    <li class="dash-modal-row @(entry.Visible ? "" : "is-hidden")" data-key="@key">
+                        <span class="dash-row-handle" style="display:inline-flex;flex-direction:column;gap:1px">
+                            <button type="button" aria-label="Move up" disabled="@isFirst" @onclick="() => Move(key, -1)"
+                                    style="background:none;border:0;color:inherit;cursor:pointer;padding:0;line-height:0.7;opacity:@(isFirst ? "0.3" : "1")">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"></polyline></svg>
+                            </button>
+                            <button type="button" aria-label="Move down" disabled="@isLast" @onclick="() => Move(key, 1)"
+                                    style="background:none;border:0;color:inherit;cursor:pointer;padding:0;line-height:0.7;opacity:@(isLast ? "0.3" : "1")">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                            </button>
+                        </span>
+                        <span class="dash-row-label">@DashboardLayout.LabelFor(key)</span>
+                        <button type="button" class="dash-row-toggle" aria-pressed="@(entry.Visible ? "true" : "false")"
+                                aria-label="@(entry.Visible ? "Hide section" : "Show section")" @onclick="() => ToggleVisible(key)">
+                            @(entry.Visible ? "Shown" : "Hidden")
+                        </button>
+                    </li>
+                }
+            </ul>
+            <div class="dash-modal-footer">
+                <button type="button" class="dash-modal-reset" @onclick="Reset">Reset to default</button>
+                <button type="button" class="dash-modal-done" @onclick="Save">Save</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _open;
+    private List<LayoutEntry> _draft = new();
+    private HashSet<string> _present = new(StringComparer.Ordinal);
+
+    /// <summary>Open the chooser — snapshot the current layout into an editable draft.</summary>
+    public void Open()
+    {
+        _draft = State.DashLayout.Select(e => new LayoutEntry { Key = e.Key, Visible = e.Visible }).ToList();
+        _present = PresentKeys();
+        _open = true;
+        StateHasChanged();
+    }
+
+    private void Close() => _open = false;
+
+    private async Task Save()
+    {
+        _open = false;
+        State.SetDashLayout(_draft);
+        // Persist to the account so the layout follows the user across devices (best-effort).
+        if (State.LoggedIn) await Api.SaveDashboardLayoutAsync(DashboardLayout.ToJson(_draft));
+    }
+
+    private void Reset() => _draft = DashboardLayout.Default();
+
+    private void ToggleVisible(string key)
+    {
+        var e = _draft.FirstOrDefault(x => x.Key == key);
+        if (e is not null) e.Visible = !e.Visible;
+    }
+
+    // Swap the entry with the adjacent PRESENT entry (non-present keys keep their slots).
+    private void Move(string key, int dir)
+    {
+        var idx = _draft.FindIndex(e => e.Key == key);
+        if (idx < 0) return;
+        var target = -1;
+        for (var i = idx + dir; i >= 0 && i < _draft.Count; i += dir)
+        {
+            if (_present.Contains(_draft[i].Key)) { target = i; break; }
+        }
+        if (target < 0) return;
+        (_draft[idx], _draft[target]) = (_draft[target], _draft[idx]);
+    }
+
+    // The sections actually rendered on this dashboard, gated by the user's enabled media types
+    // (continue-watching + stats need a login). Mirrors what Home renders + the web's present().
+    private HashSet<string> PresentKeys()
+    {
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        var loggedIn = State.LoggedIn;
+        if (loggedIn) keys.Add("stats");
+        if (State.EnabledMediaTypes.Contains(MetaType.anime))
+        {
+            if (loggedIn) keys.Add("anime-continue");
+            keys.Add("anime-new-episodes");
+            keys.Add("anime-trending");
+            keys.Add("anime-popular");
+            keys.Add("anime-anticipated");
+        }
+        foreach (var vt in State.EnabledMediaTypes.Where(t => t != MetaType.anime))
+        {
+            var slug = vt == MetaType.movie ? "movie" : "series";
+            if (loggedIn) keys.Add($"video-continue-{slug}");
+            keys.Add($"video-trending-{slug}");
+            keys.Add($"video-popular-{slug}");
+            keys.Add($"video-anticipated-{slug}");
+        }
+        keys.Add("browse");
+        return keys;
+    }
+}

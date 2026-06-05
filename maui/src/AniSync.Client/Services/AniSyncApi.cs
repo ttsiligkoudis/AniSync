@@ -430,6 +430,15 @@ public sealed class AniSyncApi : IAniSyncApi
     public Task<bool> SavePreferencesAsync(PreferencesDto prefs, CancellationToken ct = default)
         => PostForOk("api/v1/me/preferences", prefs, ct);
 
+    public async Task<string?> GetDashboardLayoutAsync(CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<DashboardLayoutResponse>("api/v1/me/dashboard-layout", ct);
+        return resp?.Layout;
+    }
+
+    public Task<bool> SaveDashboardLayoutAsync(string layoutJson, CancellationToken ct = default)
+        => PostForOk("api/v1/me/dashboard-layout", new { layout = layoutJson }, ct);
+
     // ── Notifications (bulk + delete) ────────────────────────────────────────
 
     public Task MarkNotificationsBulkReadAsync(IReadOnlyList<long> ids, CancellationToken ct = default)
