@@ -18,6 +18,7 @@ public sealed class ApiOnlyControllerProvider : ControllerFeatureProvider
     {
         "ApiController",            // /api/v1/*
         "ApiActorsController",      // /api/v1/actors, /api/v1/actors/tmdb/{id} (Discover → Actors + ActorDetail)
+        "MetaProxyController",      // /api/v1/subtitle(.vtt), /api/v1/sub/{enc}/subtitle.vtt, /api/v1/resolve-stream (Watch proxies)
         "UserApiController",        // /api/v1/me/*
         "ConfigApiController",      // /api/v1/me/config, stream-addons, scrobble, export/import, danger zone
         "NotificationsController",  // /api/v1/notifications/*

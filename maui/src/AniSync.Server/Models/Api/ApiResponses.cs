@@ -182,4 +182,93 @@ namespace AnimeList.Models.Api
 
     /// <summary>Per-side snapshot fields surfaced by the diff.</summary>
     public record DiffEntrySnapshot(string MediaId, string? Status, int Progress);
+
+    // ── Watch: episode streams / subtitles / mark-watched / scrobble ──────────
+    // Ports the MVC MetaController.Web.cs /meta/* enrichment surface onto the
+    // header-authed /api/v1/me/* API. Wire shapes mirror the original's
+    // anonymous-object JSON exactly (camelCase via System.Text.Json defaults).
+
+    /// <summary>Bootstrap payload for the watch page's source picker —
+    /// GET /api/v1/me/episode-streams (no <c>addonIndex</c>). Hands the client the
+    /// list of configured stream addons (so it can fan out its own per-addon
+    /// fetches), the addon-independent external links, and the AniSkip markers.
+    /// Mirrors MetaController.EpisodeStreams' bootstrap branch.</summary>
+    public record EpisodeStreamsBootstrapResponse(
+        bool Anonymous,
+        bool AddonsConfigured,
+        List<EpisodeStreamAddonDto> Addons,
+        List<EpisodeExternalLinkDto> ExternalLinks,
+        EpisodeSkipTimesDto SkipTimes);
+
+    /// <summary>One configured stream addon slot — the client fans out a per-addon
+    /// fetch by re-calling episode-streams with <c>addonIndex</c>.</summary>
+    public record EpisodeStreamAddonDto(int Index, string Name);
+
+    /// <summary>An external streaming destination (Crunchyroll / Netflix / …) for
+    /// the source picker's "Other sites" bucket.</summary>
+    public record EpisodeExternalLinkDto(string Site, string Url);
+
+    /// <summary>AniSkip intro/outro markers for the episode, or null members when
+    /// AniSkip has no match. Seconds from file start.</summary>
+    public record EpisodeSkipTimesDto(EpisodeSkipMarkerDto? Intro, EpisodeSkipMarkerDto? Outro);
+
+    /// <summary>One AniSkip marker (start/end in seconds).</summary>
+    public record EpisodeSkipMarkerDto(double Start, double End);
+
+    /// <summary>Per-addon fan-out payload — GET /api/v1/me/episode-streams?addonIndex=N.
+    /// Carries the enriched debrid rows for that one addon. Mirrors
+    /// MetaController.EpisodeStreams' addonIndex branch.</summary>
+    public record EpisodeStreamsResponse(List<EpisodeStreamDto> DebridStreams);
+
+    /// <summary>One enriched debrid stream row. Quality / size / seeders / language /
+    /// provider / infoHash / isHevc / source / hdr / audio / audioUnsupported /
+    /// description are the same fields the MVC EpisodeStreams addonIndex branch
+    /// labelled onto each stream so the watch page can render the release line,
+    /// dedup by infoHash, apply the per-resolution cap, and warn on unplayable
+    /// codecs / audio.</summary>
+    public record EpisodeStreamDto(
+        string Name,
+        string Title,
+        string Url,
+        string Quality,
+        string Size,
+        bool Playable,
+        int Seeders,
+        string Language,
+        string Provider,
+        string InfoHash,
+        bool IsHevc,
+        string Source,
+        string Hdr,
+        string Audio,
+        bool AudioUnsupported,
+        string Description);
+
+    /// <summary>Subtitle lookup result for one episode — GET /api/v1/me/episode-subtitles.
+    /// Mirrors MetaController.EpisodeSubtitles' shape (subtitles[] + providerCounts).</summary>
+    public record EpisodeSubtitlesResponse(
+        List<EpisodeSubtitleDto> Subtitles,
+        EpisodeSubtitleProviderCounts ProviderCounts);
+
+    /// <summary>One subtitle track returned by the episode-subtitles lookup. <c>Url</c>
+    /// is the upstream OpenSubtitles URL; the client routes it through the subtitle
+    /// proxy (GET /api/v1/subtitle) for the same-origin SRT→VTT conversion.</summary>
+    public record EpisodeSubtitleDto(string Lang, string Label, string Url, string Source);
+
+    /// <summary>Per-provider subtitle counts alongside <see cref="EpisodeSubtitlesResponse"/>.</summary>
+    public record EpisodeSubtitleProviderCounts(int OpenSubtitles);
+
+    /// <summary>Result of POST /api/v1/me/mark-watched. <c>Reason</c> is a stable opt-out
+    /// / failure code (no-auth / anonymous / opted-out / placeholder / no-uid /
+    /// trakt-not-connected / save-failed / invalid-request) or null on success.</summary>
+    public record MarkWatchedResponse(bool Ok, string? Reason = null);
+
+    /// <summary>Result of POST /api/v1/me/scrobble-progress (Trakt Continue-Watching
+    /// pause-scrobble). <c>Reason</c> mirrors MarkWatched's reason-code vocabulary
+    /// (not-video / out-of-range / no-auth / no-uid / opted-out / trakt-not-connected).</summary>
+    public record ScrobbleProgressResponse(bool Ok, string? Reason = null);
+
+    /// <summary>Result of GET /api/v1/resolve-stream — the post-redirect debrid CDN
+    /// URL the supplied resolver URL's 302 points at (or the original on any failure).</summary>
+    public record ResolveStreamResponse(string ResolvedUrl);
 }

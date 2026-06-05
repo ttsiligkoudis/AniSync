@@ -65,6 +65,36 @@ public interface IAniSyncApi
     Task<IReadOnlyList<SkipMarker>> SkipMarkersAsync(string id, int episode, CancellationToken ct = default);
     Task<FillerResponse?> FillerAsync(string titleOrId, CancellationToken ct = default);
 
+    // ── Watch: episode streams / subtitles / mark-watched / scrobble (header-authed) ──
+    /// <summary>Bootstrap the watch page's source picker — GET /api/v1/me/episode-streams
+    /// (no addonIndex): configured stream addons (for per-addon fan-out), external links,
+    /// and AniSkip markers. <paramref name="type"/> = "movie"/"series" for Cinemeta video.</summary>
+    Task<EpisodeStreamsBootstrap?> EpisodeStreamsBootstrapAsync(string id, int? season, int episode, string? type = null, CancellationToken ct = default);
+    /// <summary>Fan out one configured stream addon's debrid rows — GET
+    /// /api/v1/me/episode-streams?addonIndex=N. Returns the enriched rows (quality / size /
+    /// seeders / language / provider / infoHash / isHevc / source / hdr / audio /
+    /// audioUnsupported / description) for the client to merge + cap + warn on.</summary>
+    Task<IReadOnlyList<EpisodeStreamDto>> EpisodeStreamsAsync(string id, int addonIndex, int? season, int episode, string? type = null, CancellationToken ct = default);
+    /// <summary>Release-matched subtitle lookup for the picked source — GET
+    /// /api/v1/me/episode-subtitles. <paramref name="filename"/> is the chosen source's
+    /// file name (the OpenSubtitles timing-match signal).</summary>
+    Task<EpisodeSubtitlesResponse?> EpisodeSubtitlesAsync(string id, int? season, int episode, string? filename = null, string? type = null, CancellationToken ct = default);
+    /// <summary>Mark an episode watched (70 % / external hand-off) — POST /api/v1/me/mark-watched.
+    /// Anime → primary tracker + fan-out; movie / series → Trakt history. <paramref name="sourceUrl"/>,
+    /// when set, triggers the debrid-placeholder probe before persisting.</summary>
+    Task<MarkWatchedResult?> MarkWatchedAsync(string id, int episode, int? season = null, string? type = null, string? sourceUrl = null, CancellationToken ct = default);
+    /// <summary>Park a movie / series playback position in Trakt's Continue Watching — POST
+    /// /api/v1/me/scrobble-progress. <paramref name="progress"/> is 0-100 (the &lt;1 % and 95 %+
+    /// tail are filtered client-side).</summary>
+    Task<ScrobbleProgressResult?> ScrobbleProgressAsync(string id, string type, double progress, int? season = null, int episode = 0, CancellationToken ct = default);
+    /// <summary>Follow a resolver URL's 302 to the debrid CDN URL — GET /api/v1/resolve-stream.
+    /// Host-allow-listed server-side; returns the resolved URL or null on failure.</summary>
+    Task<string?> ResolveStreamAsync(string url, CancellationToken ct = default);
+    /// <summary>Builds the same-origin subtitle-proxy URL (GET /api/v1/subtitle?url=…) for a
+    /// &lt;track src&gt; — the server fetches the upstream URL and converts SRT→VTT with CORS
+    /// so the player's track load needs no cross-origin opt-in. Synchronous (no network).</summary>
+    string SubtitleProxyUrl(string upstreamUrl);
+
     // Auth (which sign-in providers the backend can start)
     Task<AuthProvidersDto> AuthProvidersAsync(CancellationToken ct = default);
 

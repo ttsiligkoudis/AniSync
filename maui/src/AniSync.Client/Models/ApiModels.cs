@@ -217,3 +217,85 @@ public sealed class ActorCreditsResponse
 // ── Season / catalog metadata ─────────────────────────────────────────────────
 
 public sealed class SeasonStatsResponse { public int CurrentlyAiring { get; set; } public int NewThisSeason { get; set; } public int TotalThisSeason { get; set; } }
+
+// ── Watch: episode streams / subtitles / mark-watched / scrobble ──────────────
+// Mirror the server's EpisodeStreams* / EpisodeSubtitles* / MarkWatched /
+// ScrobbleProgress / ResolveStream records (Models/Api/ApiResponses.cs). The
+// /api/v1/me/episode-streams endpoint has two response shapes keyed on whether
+// addonIndex was sent: the bootstrap (addons + external links + skip times) and
+// the per-addon fan-out (enriched debrid rows).
+
+/// <summary>Bootstrap response from GET /api/v1/me/episode-streams (no addonIndex):
+/// the configured stream addons (for per-addon fan-out), external links, and
+/// AniSkip markers.</summary>
+public sealed class EpisodeStreamsBootstrap
+{
+    public bool Anonymous { get; set; }
+    public bool AddonsConfigured { get; set; }
+    public List<EpisodeStreamAddonDto> Addons { get; set; } = new();
+    public List<EpisodeExternalLinkDto> ExternalLinks { get; set; } = new();
+    public EpisodeSkipTimesDto? SkipTimes { get; set; }
+}
+
+public sealed class EpisodeStreamAddonDto { public int Index { get; set; } public string Name { get; set; } = ""; }
+public sealed class EpisodeExternalLinkDto { public string? Site { get; set; } public string? Url { get; set; } }
+public sealed class EpisodeSkipTimesDto { public EpisodeSkipMarkerDto? Intro { get; set; } public EpisodeSkipMarkerDto? Outro { get; set; } }
+public sealed class EpisodeSkipMarkerDto { public double Start { get; set; } public double End { get; set; } }
+
+/// <summary>Per-addon fan-out response from GET /api/v1/me/episode-streams?addonIndex=N.</summary>
+public sealed class EpisodeStreamsResponse { public List<EpisodeStreamDto> DebridStreams { get; set; } = new(); }
+
+/// <summary>One enriched debrid stream row. <see cref="Url"/> is the resolved direct
+/// file URL; <see cref="InfoHash"/> lets the client dedup identical releases across
+/// addons before the per-resolution cap; <see cref="AudioUnsupported"/> /
+/// <see cref="IsHevc"/> drive the watch page's "silent audio" / "may not play"
+/// warnings.</summary>
+public sealed class EpisodeStreamDto
+{
+    public string? Name { get; set; }
+    public string? Title { get; set; }
+    public string? Url { get; set; }
+    public string? Quality { get; set; }
+    public string? Size { get; set; }
+    public bool Playable { get; set; }
+    public int Seeders { get; set; }
+    public string? Language { get; set; }
+    public string? Provider { get; set; }
+    public string? InfoHash { get; set; }
+    public bool IsHevc { get; set; }
+    public string? Source { get; set; }
+    public string? Hdr { get; set; }
+    public string? Audio { get; set; }
+    public bool AudioUnsupported { get; set; }
+    public string? Description { get; set; }
+}
+
+/// <summary>Subtitle lookup result from GET /api/v1/me/episode-subtitles.</summary>
+public sealed class EpisodeSubtitlesResponse
+{
+    public List<EpisodeSubtitleDto> Subtitles { get; set; } = new();
+    public EpisodeSubtitleProviderCounts? ProviderCounts { get; set; }
+}
+
+/// <summary>One subtitle track. <see cref="Url"/> is the upstream OpenSubtitles URL —
+/// route it through <c>IAniSyncApi.SubtitleProxyUrl</c> for the same-origin SRT→VTT
+/// conversion before handing it to a &lt;track&gt;.</summary>
+public sealed class EpisodeSubtitleDto
+{
+    public string? Lang { get; set; }
+    public string? Label { get; set; }
+    public string? Url { get; set; }
+    public string? Source { get; set; }
+}
+
+public sealed class EpisodeSubtitleProviderCounts { public int OpenSubtitles { get; set; } }
+
+/// <summary>Result of POST /api/v1/me/mark-watched — <see cref="Reason"/> is a stable
+/// opt-out / failure code or null on success.</summary>
+public sealed class MarkWatchedResult { public bool Ok { get; set; } public string? Reason { get; set; } }
+
+/// <summary>Result of POST /api/v1/me/scrobble-progress.</summary>
+public sealed class ScrobbleProgressResult { public bool Ok { get; set; } public string? Reason { get; set; } }
+
+/// <summary>Result of GET /api/v1/resolve-stream — the post-redirect debrid CDN URL.</summary>
+public sealed class ResolveStreamResult { public string? ResolvedUrl { get; set; } }

@@ -172,6 +172,69 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Streams.Where(s => !string.IsNullOrEmpty(s.Url)).ToList() ?? new();
     }
 
+    // ── Watch: episode streams / subtitles / mark-watched / scrobble ──────────
+
+    public Task<EpisodeStreamsBootstrap?> EpisodeStreamsBootstrapAsync(string id, int? season, int episode, string? type = null, CancellationToken ct = default)
+        => GetOrDefault<EpisodeStreamsBootstrap>(EpisodeStreamsUrl(id, season, episode, type, addonIndex: null), ct);
+
+    public async Task<IReadOnlyList<EpisodeStreamDto>> EpisodeStreamsAsync(string id, int addonIndex, int? season, int episode, string? type = null, CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<EpisodeStreamsResponse>(EpisodeStreamsUrl(id, season, episode, type, addonIndex), ct);
+        return resp?.DebridStreams ?? new();
+    }
+
+    // Shared URL builder for the two episode-streams modes — bootstrap (addonIndex
+    // null) and per-addon fan-out. Movie-typed entries forward ?type=movie so the
+    // server drops season+episode from the addon id shape.
+    private static string EpisodeStreamsUrl(string id, int? season, int episode, string? type, int? addonIndex)
+    {
+        var url = $"api/v1/me/episode-streams?id={Uri.EscapeDataString(id)}&episode={episode}";
+        if (season.HasValue) url += $"&season={season.Value}";
+        if (!string.IsNullOrWhiteSpace(type)) url += $"&type={Uri.EscapeDataString(type)}";
+        if (addonIndex.HasValue) url += $"&addonIndex={addonIndex.Value}";
+        return url;
+    }
+
+    public async Task<EpisodeSubtitlesResponse?> EpisodeSubtitlesAsync(string id, int? season, int episode, string? filename = null, string? type = null, CancellationToken ct = default)
+    {
+        var url = $"api/v1/me/episode-subtitles?id={Uri.EscapeDataString(id)}&episode={episode}";
+        if (season.HasValue) url += $"&season={season.Value}";
+        if (!string.IsNullOrWhiteSpace(filename)) url += $"&filename={Uri.EscapeDataString(filename)}";
+        if (!string.IsNullOrWhiteSpace(type)) url += $"&type={Uri.EscapeDataString(type)}";
+        return await GetOrDefault<EpisodeSubtitlesResponse>(url, ct);
+    }
+
+    public Task<MarkWatchedResult?> MarkWatchedAsync(string id, int episode, int? season = null, string? type = null, string? sourceUrl = null, CancellationToken ct = default)
+        => PostJson<object, MarkWatchedResult>("api/v1/me/mark-watched",
+            new { id, season, episode, type, sourceUrl }, ct);
+
+    public Task<ScrobbleProgressResult?> ScrobbleProgressAsync(string id, string type, double progress, int? season = null, int episode = 0, CancellationToken ct = default)
+        => PostJson<object, ScrobbleProgressResult>("api/v1/me/scrobble-progress",
+            new { id, type, season, episode, progress }, ct);
+
+    public async Task<string?> ResolveStreamAsync(string url, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        var resp = await GetOrDefault<ResolveStreamResult>(
+            $"api/v1/resolve-stream?url={Uri.EscapeDataString(url)}", ct);
+        return resp?.ResolvedUrl;
+    }
+
+    public string SubtitleProxyUrl(string upstreamUrl)
+    {
+        if (string.IsNullOrWhiteSpace(upstreamUrl)) return upstreamUrl;
+        // Absolute so a <track src> resolves to the backend origin regardless of the
+        // head's own origin. The proxy (GET /api/v1/subtitle) does the same-origin
+        // SRT→VTT conversion + CORS headers so the player's track load doesn't need a
+        // cross-origin opt-in. Falls back to a relative path when ApiBaseUrl isn't
+        // resolvable yet (web head, build-time) — still correct same-origin on the web.
+        var query = $"api/v1/subtitle?url={Uri.EscapeDataString(upstreamUrl)}";
+        var baseUrl = _env.ApiBaseUrl;
+        return string.IsNullOrWhiteSpace(baseUrl)
+            ? "/" + query
+            : $"{baseUrl.TrimEnd('/')}/{query}";
+    }
+
     public async Task<AuthProvidersDto> AuthProvidersAsync(CancellationToken ct = default)
         => await GetOrDefault<AuthProvidersDto>("api/v1/auth/providers", ct) ?? new();
 

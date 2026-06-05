@@ -52,6 +52,10 @@ namespace AnimeList.Controllers
         private readonly IWatchingCacheStore _watchingCache;
         private readonly IHiddenEntryStore _hiddenStore;
         private readonly IMergedListService _mergedListService;
+        private readonly IAddonStreamService _addonStreamService;
+        private readonly IAniSkipService _aniSkipService;
+        private readonly ISubtitleService _subtitleService;
+        private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<UserApiController> _logger;
 
         public UserApiController(
@@ -68,6 +72,10 @@ namespace AnimeList.Controllers
             IWatchingCacheStore watchingCache,
             IHiddenEntryStore hiddenStore,
             IMergedListService mergedListService,
+            IAddonStreamService addonStreamService,
+            IAniSkipService aniSkipService,
+            ISubtitleService subtitleService,
+            IHttpClientFactory httpClientFactory,
             ILogger<UserApiController> logger)
         {
             _tokenService = tokenService;
@@ -83,6 +91,10 @@ namespace AnimeList.Controllers
             _watchingCache = watchingCache;
             _hiddenStore = hiddenStore;
             _mergedListService = mergedListService;
+            _addonStreamService = addonStreamService;
+            _aniSkipService = aniSkipService;
+            _subtitleService = subtitleService;
+            _httpClientFactory = httpClientFactory;
             _logger = logger;
         }
 
@@ -1746,6 +1758,475 @@ namespace AnimeList.Controllers
             {
                 _logger.LogError(ex, "API SetDashboardLayout failed.");
                 return StatusCode(500, new ApiError("dashboard-layout save failed"));
+            }
+        }
+
+        // ── Watch: episode streams / subtitles / mark-watched / scrobble ──────
+        // Header-authed (X-AniSync-Config) twin of the MVC MetaController.Web.cs
+        // /meta/* enrichment surface (which is session-authed and filtered out of
+        // the web head). The per-addon / bootstrap / AniSkip / mark-watched /
+        // scrobble logic is ported faithfully from MetaController; only the auth
+        // changes — the user resolves from the config header rather than a session
+        // cookie. The subtitle proxy + resolve-stream follower (no per-user auth)
+        // live on the public MetaProxyController.
+
+        /// <summary>
+        /// Episode source picker data — the header-authed twin of
+        /// <c>MetaController.EpisodeStreams</c>. Two modes:
+        /// <list type="bullet">
+        /// <item>Bootstrap (no <paramref name="addonIndex"/>): returns the list of
+        /// configured stream addons (so the client fans out its own per-addon
+        /// fetches), the user's external streaming links (gated on the
+        /// showExternalStreams toggle), and the episode's AniSkip markers.</item>
+        /// <item>Per-addon (<paramref name="addonIndex"/> set): returns the enriched
+        /// debrid rows for that one addon (quality / size / seeders / language /
+        /// provider / infoHash / isHevc / source / hdr / audio / audioUnsupported /
+        /// description).</item>
+        /// </list>
+        /// For movie-typed entries the season + episode are dropped from the addon
+        /// fan-out so the addon's "movie" id shape is used.
+        /// </summary>
+        [HttpGet("episode-streams")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(EpisodeStreamsBootstrapResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(EpisodeStreamsResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> EpisodeStreams(string id, int? season, int episode, string type = null, int? addonIndex = null)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new ApiError("id required"));
+
+            // For movie-typed entries we pass null episode + null season to the
+            // stream-addon fan-out so BuildStremioId emits the "movie" path shape
+            // (imdb / kitsu:N alone) instead of the "series" shape (imdb:S:E) — the
+            // latter doesn't match anything on the addon side for a feature film.
+            var isMovie = string.Equals(type, "movie", StringComparison.OrdinalIgnoreCase);
+            int? lookupEpisode = isMovie ? null : episode;
+            int? lookupSeason = isMovie ? null : season;
+
+            var resolvedConfig = ResolvedConfig;
+            var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
+            tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+
+            // Stream addons — one fan-out per configured manifest URL. Anonymous
+            // installs and users with no addons see no debrid sources; the source
+            // picker falls back to external links only (if those are enabled).
+            var addons = !string.IsNullOrEmpty(uid)
+                ? await _configStore.GetStreamAddonsAsync(uid)
+                : new List<StreamAddon>();
+
+            // Per-addon mode: the watch page fans out one request per configured
+            // addon so streams from the fastest source surface immediately instead
+            // of waiting on the slowest addon. This branch skips every bootstrap-only
+            // field (externalLinks, skipTimes, addon list) since the client already
+            // has them from its initial bootstrap call.
+            if (addonIndex.HasValue)
+            {
+                if (addonIndex.Value < 0 || addonIndex.Value >= addons.Count)
+                    return new JsonResult(new EpisodeStreamsResponse(new List<EpisodeStreamDto>()));
+
+                var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
+
+                // Same ImdbSeason override the legacy bundled path used — a multi-cour
+                // franchise's URL season is the AniSync cour-internal value (usually 1);
+                // the franchise-side season (>1) must override so the addon queries the
+                // right season of the IMDb listing.
+                if (!isMovie && lookupSeason.HasValue && lookupSeason.Value > 1)
+                    sourceLinks.ImdbSeason = lookupSeason.Value;
+
+                var clientIp = ResolveClientIp(HttpContext);
+                var addon = addons[addonIndex.Value];
+                var streams = await _addonStreamService.GetStreamsAsync(
+                    addon.Url, sourceLinks, lookupSeason, lookupEpisode,
+                    tokenData.anime_service, clientIp);
+
+                var labelled = streams.Select(s => new EpisodeStreamDto(
+                    Name: s.Name,
+                    Title: s.Title,
+                    Url: s.Url,
+                    Quality: s.Quality,
+                    Size: s.Size,
+                    Playable: s.Playable,
+                    Seeders: s.Seeders,
+                    Language: s.Language,
+                    Provider: addon.Name,
+                    // Torrent hash — the client merge dedups identical releases returned
+                    // by more than one addon before applying the 5-per-resolution cap.
+                    InfoHash: s.InfoHash,
+                    IsHevc: s.IsHevc,
+                    Source: s.Source,
+                    Hdr: s.Hdr,
+                    Audio: s.Audio,
+                    // Derived from the already-detected audio label (not in the stream
+                    // service, so the shared parse path stays untouched). Dolby/DTS/TrueHD
+                    // play as silent video in most browsers — the watch page warns + offers
+                    // an external player.
+                    AudioUnsupported: IsBrowserUnsupportedAudio(s.Audio),
+                    // Raw addon description — the client renders the release title from it
+                    // (Stremio's right column) instead of the short name.
+                    Description: s.Description)).ToList();
+
+                return new JsonResult(new EpisodeStreamsResponse(labelled));
+            }
+
+            // Bootstrap mode: hand the client the list of configured addons plus the
+            // addon-independent extras (external links, AniSkip markers).
+            var addonList = addons
+                .Select((a, i) => new EpisodeStreamAddonDto(i, a.Name))
+                .ToList();
+
+            // External streaming destinations — same per-service dispatch
+            // StreamController uses. Series-level (no episode deep-link). Gated on the
+            // user's showExternalStreams toggle so disabling it hides the Other sites
+            // block here too.
+            var externalEnabled = false;
+            if (!string.IsNullOrEmpty(uid))
+            {
+                var cfg = await GetConfigByUidAsync(uid, _configStore);
+                externalEnabled = cfg?.showExternalStreams == true;
+            }
+            List<StreamingLink> externalRaw = null;
+            if (externalEnabled && !string.IsNullOrEmpty(id))
+            {
+                externalRaw = tokenData.anime_service switch
+                {
+                    AnimeService.Anilist     => await _anilistService.GetExternalLinksAsync(id, tokenData),
+                    AnimeService.MyAnimeList => await _malService.GetExternalLinksAsync(id, tokenData),
+                    _                        => await _kitsuService.GetExternalLinksAsync(id, tokenData),
+                };
+            }
+
+            var externalLinks = (externalRaw ?? new List<StreamingLink>())
+                .Where(l => !string.IsNullOrEmpty(l.Url) && !string.IsNullOrEmpty(l.Site))
+                .Select(l => new EpisodeExternalLinkDto(l.Site, l.Url))
+                .ToList();
+
+            // AniSkip — same lookup chain StreamController.BuildSkipHintsAsync uses for
+            // the Stremio addon side. Returns the intro/outro markers for the resolved
+            // MAL id; surfaces silently as null when there's no MAL mapping or markers.
+            EpisodeSkipTimesDto skipTimes = null;
+            try
+            {
+                var malIdRaw = await _mappingService.GetIdByService(id, AnimeService.MyAnimeList, season);
+                if (int.TryParse(malIdRaw, out var malId) && malId > 0 && episode > 0)
+                {
+                    var markers = await _aniSkipService.GetSkipTimesAsync(malId, episode);
+                    if (markers != null && markers.Count > 0)
+                    {
+                        // Multiple "op" variants (op / mixed-op) can exist — last-wins
+                        // matches what BuildSkipHintsAsync does.
+                        SkipTime intro = null, outro = null;
+                        foreach (var m in markers)
+                        {
+                            switch (m.Type)
+                            {
+                                case "op": case "mixed-op": intro = m; break;
+                                case "ed": case "mixed-ed": outro = m; break;
+                            }
+                        }
+                        skipTimes = new EpisodeSkipTimesDto(
+                            intro == null ? null : new EpisodeSkipMarkerDto(intro.Start, intro.End),
+                            outro == null ? null : new EpisodeSkipMarkerDto(outro.Start, outro.End));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AniSkip lookup failed for {Id} ep {Ep}.", id, episode);
+            }
+
+            // Subtitles are fetched lazily by the watch page once the user picks a
+            // source — the source's filename is the signal OpenSubtitles needs to
+            // return release-matched tracks, and we don't know the pick yet. See
+            // EpisodeSubtitles below.
+            return new JsonResult(new EpisodeStreamsBootstrapResponse(
+                Anonymous: tokenData.anonymousUser,
+                AddonsConfigured: addons.Count > 0,
+                Addons: addonList,
+                ExternalLinks: externalLinks,
+                SkipTimes: skipTimes));
+        }
+
+        /// <summary>
+        /// Lazy subtitle lookup invoked by the watch page after the user picks a
+        /// source — the header-authed twin of <c>MetaController.EpisodeSubtitles</c>.
+        /// Passing the chosen source's <paramref name="filename"/> to OpenSubtitles is
+        /// the signal that selects release-matched subs whose timing matches the file.
+        /// Best-effort: any failure returns an empty list so the player initialises
+        /// without subs rather than 500ing.
+        /// </summary>
+        [HttpGet("episode-subtitles")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(EpisodeSubtitlesResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> EpisodeSubtitles(string id, int? season, int episode, string filename = null, string type = null)
+        {
+            if (string.IsNullOrWhiteSpace(id) || episode <= 0)
+                return new JsonResult(new EpisodeSubtitlesResponse(new List<EpisodeSubtitleDto>(), new EpisodeSubtitleProviderCounts(0)));
+
+            var sourceLinks = await _mappingService.BuildSourceLinksAsync(id);
+            if (string.IsNullOrEmpty(sourceLinks.ImdbId))
+                // OpenSubtitles is IMDb-keyed via the Stremio addon's series/tt:s:e
+                // shape. No IMDb mapping = nothing to ask.
+                return new JsonResult(new EpisodeSubtitlesResponse(new List<EpisodeSubtitleDto>(), new EpisodeSubtitleProviderCounts(0)));
+
+            // Movies are keyed by IMDb id alone (movie/tt), not season+episode. The
+            // watch page synthesises "episode 1" for the single movie video, so
+            // season/episode 0 makes the search take the movie path.
+            var isMovie = string.Equals(type, "movie", StringComparison.OrdinalIgnoreCase);
+
+            // ImdbSeason on the mapping is the franchise-side season — same fix as
+            // Torrentio. URL season is the AniSync cour-internal value (usually 1).
+            var effectiveSeason = isMovie ? null : (sourceLinks.ImdbSeason ?? season);
+            var effectiveEpisode = isMovie ? 0 : episode;
+
+            var tracks = await SafeOpenSubtitlesSearch(sourceLinks.ImdbId, effectiveSeason, effectiveEpisode, filename, id);
+
+            return new JsonResult(new EpisodeSubtitlesResponse(
+                tracks.Select(t => new EpisodeSubtitleDto(t.Lang, t.Label, t.Url, t.Source)).ToList(),
+                // Per-provider counts so the UI can surface a "Subs · OS: X" status chip.
+                new EpisodeSubtitleProviderCounts(tracks.Count)));
+        }
+
+        private async Task<IReadOnlyList<SubtitleTrack>> SafeOpenSubtitlesSearch(
+            string imdbId, int? season, int episode, string filename, string id)
+        {
+            try { return await _subtitleService.SearchAsync(imdbId, season, episode, filename); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "OpenSubtitles search failed for {Id} ep {Ep}.", id, episode);
+                return Array.Empty<SubtitleTrack>();
+            }
+        }
+
+        /// <summary>
+        /// Marks an anime episode watched on the user's primary tracker + linked
+        /// secondaries (or routes a movie / series to the user's Trakt history). The
+        /// header-authed twin of <c>MetaController.MarkWatched</c>. Honours the
+        /// per-user disableAutoTrack opt-out (returns 200 + reason=opted-out), and
+        /// the optional source-URL placeholder probe used by the external-launch path.
+        /// Reason-coded 200s (no-auth / anonymous / …) rather than alarming 401s so a
+        /// no-account viewer's player doesn't surface an error.
+        /// </summary>
+        [HttpPost("mark-watched")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(MarkWatchedResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(MarkWatchedResponse), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> MarkWatched([FromBody] ApiMarkWatchedRequest req)
+        {
+            if (req is null || string.IsNullOrWhiteSpace(req.Id) || req.Episode <= 0)
+                return BadRequest(new MarkWatchedResponse(false, "invalid-request"));
+
+            var resolvedConfig = ResolvedConfig;
+            var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
+            if (tokenData is null || string.IsNullOrWhiteSpace(tokenData.access_token))
+                return new JsonResult(new MarkWatchedResponse(false, "no-auth"));
+            if (tokenData.anonymousUser)
+                return new JsonResult(new MarkWatchedResponse(false, "anonymous"));
+
+            // Honour the per-user "Auto-track progress" toggle (keyed by UID resolved
+            // from token identity).
+            try
+            {
+                var (optUid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                if (!string.IsNullOrEmpty(optUid))
+                {
+                    var cfg = await GetConfigByUidAsync(optUid, _configStore);
+                    if (cfg?.disableAutoTrack == true)
+                        return new JsonResult(new MarkWatchedResponse(false, "opted-out"));
+                }
+            }
+            catch { /* flag read failed — proceed; better to over-track than miss */ }
+
+            // Optional source verification. The external-launcher trigger sends the
+            // source URL it's about to hand off so we can probe it BEFORE persisting
+            // the mark — the in-app player has no cold-click duration check.
+            if (!string.IsNullOrEmpty(req.SourceUrl))
+            {
+                if (await LooksLikePlaceholderSourceAsync(req.SourceUrl, HttpContext.RequestAborted))
+                {
+                    _logger.LogInformation(
+                        "Refused mark-watched for {Id} S{Season}E{Episode}: source URL looks like a debrid placeholder.",
+                        req.Id, req.Season, req.Episode);
+                    return new JsonResult(new MarkWatchedResponse(false, "placeholder"));
+                }
+            }
+
+            try
+            {
+                // Video (movie / series) auto-track goes to Trakt: the id is an IMDb tt
+                // id, so it bypasses the anime-primary dispatch and lands in the user's
+                // Trakt history (primary or linked Trakt token, resolved by uid).
+                var isVideo = req.Type == "movie" || req.Type == "series";
+                if (isVideo)
+                {
+                    var (videoUid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                    if (string.IsNullOrEmpty(videoUid))
+                        return new JsonResult(new MarkWatchedResponse(false, "no-uid"));
+
+                    var season = req.Type == "series" ? req.Season : null;
+                    var episode = req.Type == "series" ? req.Episode : (int?)null;
+                    // /scrobble/stop at 100 % both adds to history AND clears the
+                    // in-progress playback entry, so a finished title leaves Continue
+                    // Watching instead of lingering there.
+                    var ok = await _traktService.StopScrobbleAsync(videoUid, req.Type, req.Id, season, episode, 100);
+                    return new JsonResult(new MarkWatchedResponse(ok, ok ? null : "trakt-not-connected"));
+                }
+
+                // Single call into the shared SyncService helper: dispatches to the
+                // right primary-tracker SaveAnimeEntry AND fans out to linked secondaries.
+                await _syncService.SaveProgressAndFanOutAsync(tokenData, req.Id, req.Season, req.Episode);
+                _logger.LogInformation(
+                    "Marked watched: {Id} S{Season}E{Episode} on {Service}.",
+                    req.Id, req.Season, req.Episode, tokenData.anime_service);
+                return new JsonResult(new MarkWatchedResponse(true));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "MarkWatched failed for {Id} S{Season}E{Episode}.",
+                    req.Id, req.Season, req.Episode);
+                return new JsonResult(new MarkWatchedResponse(false, "save-failed"));
+            }
+        }
+
+        /// <summary>
+        /// In-progress playback for movies / series → Trakt's /scrobble/pause, so the
+        /// title surfaces in Continue Watching. The header-authed twin of
+        /// <c>MetaController.ScrobbleProgress</c>. Fired by the watch player on
+        /// page-leave (beacon) with the current progress %; the &lt;1 % and 95 %+ tail
+        /// are filtered client-side (the latter is mark-watched territory). Video-only;
+        /// honours the auto-track opt-out.
+        /// </summary>
+        [HttpPost("scrobble-progress")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(ScrobbleProgressResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ScrobbleProgressResponse), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> ScrobbleProgress([FromBody] ApiScrobbleProgressRequest req)
+        {
+            if (req is null || string.IsNullOrWhiteSpace(req.Id))
+                return BadRequest(new ScrobbleProgressResponse(false, "invalid-request"));
+            if (req.Type != "movie" && req.Type != "series")
+                return new JsonResult(new ScrobbleProgressResponse(false, "not-video"));
+            // Trakt's playback progress is a 0-100 percentage; the client already skips
+            // <1 % and the 95 %+ tail (the latter is mark-watched territory).
+            if (req.Progress <= 0 || req.Progress >= 100)
+                return new JsonResult(new ScrobbleProgressResponse(false, "out-of-range"));
+
+            var resolvedConfig = ResolvedConfig;
+            var tokenData = await _tokenService.GetAccessTokenAsync(resolvedConfig);
+            if (tokenData is null || tokenData.anonymousUser || string.IsNullOrWhiteSpace(tokenData.access_token))
+                return new JsonResult(new ScrobbleProgressResponse(false, "no-auth"));
+
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+            if (string.IsNullOrEmpty(uid))
+                return new JsonResult(new ScrobbleProgressResponse(false, "no-uid"));
+
+            // Same opt-out the mark-watched hook honours — continue-watching is still
+            // tracking, so a user who turned auto-track off gets neither.
+            var cfg = await GetConfigByUidAsync(uid, _configStore);
+            if (cfg?.disableAutoTrack == true)
+                return new JsonResult(new ScrobbleProgressResponse(false, "opted-out"));
+
+            var season = req.Type == "series" ? req.Season : (int?)null;
+            var episode = req.Type == "series" ? req.Episode : (int?)null;
+            var ok = await _traktService.PauseScrobbleAsync(uid, req.Type, req.Id, season, episode, req.Progress);
+            return new JsonResult(new ScrobbleProgressResponse(ok, ok ? null : "trakt-not-connected"));
+        }
+
+        // True when the detected audio codec is one no mainstream browser <video> can
+        // decode in-page — Dolby Digital / Plus / Atmos, the DTS family, TrueHD. Such a
+        // release plays as video with NO sound, so the watch page surfaces a warning +
+        // external-player path. Plain string checks against the already-parsed audio
+        // label. AAC / MP3 / Opus / FLAC / Vorbis / PCM are not flagged. Ported verbatim
+        // from MetaController.IsBrowserUnsupportedAudio.
+        private static bool IsBrowserUnsupportedAudio(string audioLabel)
+        {
+            if (string.IsNullOrEmpty(audioLabel)) return false;
+            var a = audioLabel.ToUpperInvariant();
+            if (a.Contains("AC3") || a.Contains("AC-3")
+                || a.Contains("EAC3") || a.Contains("E-AC-3")
+                || a.Contains("DD+") || a.Contains("DDP") || a.Contains("DOLBY")
+                || a.Contains("ATMOS") || a.Contains("TRUEHD")
+                || a.Contains("DTS"))
+                return true;
+            // Channel-layout-only label (no codec named). A 6+ channel surround track at
+            // these tiers is overwhelmingly a Dolby/DTS stream the browser plays as silent
+            // video — flag it UNLESS a browser-safe codec is also named.
+            var hasSafeCodec = a.Contains("AAC") || a.Contains("MP3") || a.Contains("OPUS")
+                || a.Contains("VORBIS") || a.Contains("FLAC") || a.Contains("PCM");
+            if (!hasSafeCodec
+                && (a.Contains("8CH") || a.Contains("7CH") || a.Contains("6CH")
+                    || a.Contains("7.1") || a.Contains("6.1") || a.Contains("5.1")))
+                return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Resolves the user's real client IP for downstream addon requests (so
+        /// IP-bound debrid playback tokens sign to the user's IP, not AniSync's
+        /// backend). Consults CF / Fly / X-Forwarded-For headers then the connection
+        /// remote IP, unwrapping IPv4-mapped IPv6. Ported verbatim from
+        /// MetaController.ResolveClientIp.
+        /// </summary>
+        private static string ResolveClientIp(HttpContext ctx)
+        {
+            string headerIp = null;
+            if (ctx.Request.Headers.TryGetValue("CF-Connecting-IP", out var cf) && cf.Count > 0)
+                headerIp = cf[0]?.Trim();
+            if (string.IsNullOrEmpty(headerIp)
+                && ctx.Request.Headers.TryGetValue("Fly-Client-IP", out var fly) && fly.Count > 0)
+                headerIp = fly[0]?.Trim();
+            if (string.IsNullOrEmpty(headerIp)
+                && ctx.Request.Headers.TryGetValue("X-Forwarded-For", out var xff) && xff.Count > 0)
+                headerIp = xff[0]?.Split(',')[0]?.Trim();
+
+            if (!string.IsNullOrEmpty(headerIp)) return headerIp;
+
+            var addr = ctx.Connection.RemoteIpAddress;
+            if (addr == null) return null;
+            if (addr.IsIPv4MappedToIPv6) addr = addr.MapToIPv4();
+            return addr.ToString();
+        }
+
+        /// <summary>
+        /// Probes a source URL with a Range 0-0 request and reports whether the total
+        /// file size looks like RD's DMCA placeholder (≤50 MB). Used by MarkWatched's
+        /// external-launch path to refuse marking a known-bad source. Best-effort: any
+        /// HTTP / network failure returns false (don't block the mark). Ported verbatim
+        /// from MetaController.LooksLikePlaceholderSourceAsync.
+        /// </summary>
+        private async Task<bool> LooksLikePlaceholderSourceAsync(string url, CancellationToken ct)
+        {
+            const long SuspiciouslySmallBytes = 50 * 1024 * 1024;
+            try
+            {
+                using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                probeCts.CancelAfter(TimeSpan.FromSeconds(8));
+
+                var client = _httpClientFactory.CreateClient();
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
+                req.Headers.UserAgent.ParseAdd(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/120.0 Safari/537.36");
+                using var res = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, probeCts.Token);
+
+                long? totalSize = null;
+                if (res.Content.Headers.ContentRange?.HasLength == true)
+                {
+                    totalSize = res.Content.Headers.ContentRange.Length;
+                }
+                else if (res.StatusCode == System.Net.HttpStatusCode.OK
+                         && res.Content.Headers.ContentLength.HasValue)
+                {
+                    totalSize = res.Content.Headers.ContentLength.Value;
+                }
+                return totalSize.HasValue && totalSize.Value < SuspiciouslySmallBytes;
+            }
+            catch
+            {
+                return false; // probe failed — don't block mark on transient issues
             }
         }
     }
