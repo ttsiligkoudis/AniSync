@@ -90,7 +90,33 @@
             </button>
         }
     </div>
+    @* Stream fallback panel — rendered by JS-surfaced video error / watchdog
+       timeout / iOS-container fast-fail (web head only; the native LibVLCSharp
+       head decodes everything). Per-reason copy + Retry + Open-externally, a
+       faithful port of Watch.cshtml's #watchPlayerFallback / showFallback. *@
+    @if (!Env.SupportsNativePlayback && _fallbackReason is not null)
+    {
+        <div id="watchPlayerFallback" class="watch-player-fallback" data-fallback-reason="@_fallbackReason">
+            <p class="hint-text" style="margin: 0 0 0.75rem;">@FallbackMessage(_fallbackReason)</p>
+            <div class="watch-fallback-actions">
+                <button type="button" class="btn-ghost btn-ghost-sm" @onclick="RetryFallbackAsync">Retry</button>
+                <button type="button" class="btn-ghost btn-ghost-sm @(_fallbackOpening ? "is-loading" : "")"
+                        disabled="@_fallbackOpening" @onclick="OpenFallbackExternallyAsync">
+                    @(_fallbackOpening ? "Opening…" : "Open externally")
+                </button>
+            </div>
+        </div>
+    }
 </section>
+
+@* iOS Files hand-off toast — surfaced after an external .m3u download on iOS
+   Safari (the original gated this on window.AniSyncToast; the replica has no
+   global toast, so the launcher hands the message back here for a transient
+   inline notice). Auto-dismisses after ~9s. *@
+@if (!string.IsNullOrEmpty(_toast))
+{
+    <div class="watch-launch-toast" role="status">@_toast</div>
+}
 
 <nav class="watch-nav">
     @if (_prev is not null)
@@ -275,16 +301,30 @@
                                 </span>
                             </button>
                             @* Side action: open externally. Sits alongside the pick
-                               button so the click targets don't overlap. Placeholder
-                               launcher for now — the full intent:// / vlc:// / .m3u
-                               dispatcher is deferred (see Watch stage-3). *@
+                               button so the click targets don't overlap. Resolves the
+                               debrid CDN URL (Api.ResolveStreamAsync) + a sidecar VTT,
+                               then dispatches via watch-launch.js: Android intent://
+                               chooser · desktop vlc:// probe → .m3u · iOS Files toast.
+                               On the native head it plays inline through LibVLCSharp
+                               instead (VLC decodes everything; external launch is
+                               web-only). *@
                             <div class="episode-stream-actions">
-                                <button type="button" class="episode-stream-action episode-stream-action-external"
-                                        title="Open with another app" @onclick="() => OpenExternallyAsync(stream)">
-                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                                        <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
-                                    </svg>
+                                @{
+                                    var extLoading = _externalLoadingUrl is not null && stream.Url == _externalLoadingUrl;
+                                }
+                                <button type="button" class="episode-stream-action episode-stream-action-external @(extLoading ? "is-loading" : "")"
+                                        title="Open with another app" disabled="@extLoading" @onclick="() => OpenExternallyAsync(stream)">
+                                    @if (extLoading)
+                                    {
+                                        <span class="episode-stream-action-spinner" role="status" aria-label="Opening…"></span>
+                                    }
+                                    else
+                                    {
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                            <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+                                        </svg>
+                                    }
                                 </button>
                             </div>
                         </li>
@@ -434,7 +474,27 @@
     private string? _lastSourceUrl;
 
     private IJSObjectReference? _module;
+    private IJSObjectReference? _launch;       // watch-launch.js (web head only)
     private readonly string _nudgeDetailId = "streamNudgeDetail-" + Guid.NewGuid().ToString("N")[..8];
+
+    // Fallback panel (web head). Set by the JS-surfaced video error / watchdog
+    // timeout / iOS-container fast-fail (OnStreamEvent). Reason drives the copy +
+    // is exposed as data-fallback-reason for parity with the original.
+    private string? _fallbackReason;
+    private EpisodeStreamDto? _fallbackStream;   // the source the fallback offers Retry / Open-externally for
+    private bool _fallbackOpening;
+
+    // Transient iOS Files hand-off toast (auto-dismissing) + its cancellation.
+    private string? _toast;
+    private CancellationTokenSource? _toastCts;
+
+    // The stream URL whose per-row external button is mid-resolve (spinner +
+    // disabled), mirroring setExternalActionLoading. Null when none in flight.
+    private string? _externalLoadingUrl;
+
+    // True once the skip-range bands have been painted for the current source so
+    // the OnProgress tick doesn't repaint every frame (only retries until painted).
+    private bool _skipRangesPainted;
 
     // Per-resolution cap + ordering (mirror of capStreamsPerResolution).
     private const int StreamsPerResolution = 5;
@@ -457,6 +517,10 @@
         _lastSaved = 0;
         _activeSkip = null;
         _skippedBands.Clear();
+        _fallbackReason = null;
+        _fallbackStream = null;
+        _fallbackOpening = false;
+        _skipRangesPainted = false;
         _subtitleIndex = -1;
         _rawDebrid = new();
         _debrid = new();
@@ -784,6 +848,26 @@
     {
         if (string.IsNullOrEmpty(s.Url)) return;
         await MarkSourcePlayedAsync(s.Url!);
+
+        // Clear any prior fallback (a fresh pick gets a clean attempt) + remember
+        // this source so the fallback's Retry / Open-externally act on it.
+        _fallbackReason = null;
+        _fallbackStream = s;
+        _skipRangesPainted = false;
+
+        // iOS Safari can't demux MKV / AVI inline at all (any codec), so skip the
+        // doomed <video> attempt — which would just show black until the watchdog
+        // — and surface the ios-container guidance + Open-externally path now.
+        // Mirrors playStream's iosCannotPlayContainer fast-fail. Native head
+        // (LibVLCSharp) plays everything, so this only gates the web head.
+        if (!Env.SupportsNativePlayback && _isIosSafari && IosCannotPlay(s))
+        {
+            _playingUrl = null;
+            _fallbackReason = "ios-container";
+            StateHasChanged();
+            return;
+        }
+
         _playingUrl = s.Url;
 
         var resume = await ReadResumeAsync();
@@ -793,7 +877,8 @@
             ResumeSeconds: resume,
             Subtitles: _subtitles,
             OnProgress: OnProgress,
-            OnEnded: OnEnded);
+            OnEnded: OnEnded,
+            OnStreamEvent: OnStreamEvent);
 
         if (Env.SupportsNativePlayback)
         {
@@ -809,17 +894,168 @@
         }
     }
 
-    // Placeholder external-launch: resolve the post-redirect URL and mark watched
-    // (the user is committing to watch it elsewhere). The full intent:// / vlc:// /
-    // .m3u dispatcher + sidecar-subtitle wiring is deferred to Watch stage-3; for
-    // now we resolve + open in a new tab so the row's action isn't a dead button.
+    // ── Stream fallback panel (web head) ────────────────────────────────────────
+    // Surfaced by watch-player.js when the <video> errors, the 25s/8s watchdog
+    // fires, or 3+ buffer stalls cluster. Port of Watch.cshtml's video:error /
+    // startStreamWatchdog / recordBufferStall + showFallback wiring.
+    //   error   → 'network' (debrid link likely expired) or 'decode' (codec).
+    //   timeout → watchdog: nothing decoded yet.
+    //   stall   → buffer-underrun hint (routes to the external player).
+    //   playing → recovered: auto-dismiss whatever fallback is up.
+    private void OnStreamEvent(string kind, string? reason)
+    {
+        switch (kind)
+        {
+            case "playing":
+                if (_fallbackReason is not null) { _fallbackReason = null; InvokeAsync(StateHasChanged); }
+                break;
+            case "timeout":
+                if (_fallbackReason is null) { _fallbackReason = "timeout"; InvokeAsync(StateHasChanged); }
+                break;
+            case "stall":
+                // Buffer-underrun hint — the original showed this through
+                // ArtPlayer's transient notice overlay (video keeps playing). The
+                // replica has no such overlay, so surface the equivalent auto-
+                // dismissing toast instead of the persistent fallback panel.
+                _ = ShowToastAsync(
+                    "Playback laggy? Use the external-player button next to the source for a smoother stream.",
+                    6000);
+                break;
+            case "error":
+                _fallbackReason = reason == "network" ? "network" : "decode";
+                InvokeAsync(StateHasChanged);
+                break;
+        }
+    }
+
+    // Tailored copy per failure mode (verbatim from showFallback) so the user gets
+    // a diagnosis, not a generic wall.
+    private string FallbackMessage(string reason) => reason switch
+    {
+        "decode" => "Your browser can't decode this stream — the codec isn't supported. Open it in an external player, or try a different source below.",
+        "network" => "The stream couldn't be reached. The debrid link may have expired — pick the source again, or try a different one.",
+        "ios-container" => "Safari on iPhone / iPad can't play this file's container (MKV / AVI). Pick an MP4 source below if one's listed, or tap Open externally to watch in VLC, Infuse, or another video app.",
+        "timeout" => _isIosSafari
+            ? "Safari on iPad / iPhone can't play most MKV streams. Tap Open externally to launch it in VLC, Infuse, or another video app."
+            : "This source hasn't started playing yet. It might just be slow — wait a bit, retry, or try another source below.",
+        _ => "Couldn't play this stream. Try another source below, or open it externally.",
+    };
+
+    private async Task RetryFallbackAsync()
+    {
+        var s = _fallbackStream;
+        _fallbackReason = null;
+        if (s is not null) await PlayAsync(s);
+        else StateHasChanged();
+    }
+
+    private async Task OpenFallbackExternallyAsync()
+    {
+        var s = _fallbackStream;
+        if (s is null) return;
+        _fallbackOpening = true;
+        StateHasChanged();
+        try { await OpenExternallyAsync(s); }
+        finally { _fallbackOpening = false; StateHasChanged(); }
+    }
+
+    // External-player launch — port of openWithExternalPlayer + resolvePlaybackUrl
+    // + the sidecar-subtitle wiring. The user is committing to watch in an app we
+    // can't observe, so mark watched now (the server's Range 0-0 probe guards
+    // against marking an RD DMCA placeholder; we also skip the mark client-side
+    // when the loaded player is showing a < 60s clip). Then resolve the post-
+    // redirect debrid CDN URL and hand it to the platform launcher:
+    //   Android intent:// chooser · desktop vlc:// probe → .m3u · iOS Files toast.
+    // Web-only: the native LibVLCSharp head plays every codec/container inline, so
+    // there's no external launch there (and intent/vlc/blob are browser APIs).
     private async Task OpenExternallyAsync(EpisodeStreamDto s)
     {
         if (string.IsNullOrEmpty(s.Url)) return;
         await MarkSourcePlayedAsync(s.Url!);
+
+        // Skip the watched-mark only when the in-app player is loaded AND showing a
+        // < 60s clip (the RD DMCA placeholder). On the cold-click case (no player)
+        // we mark + let the server's sourceUrl probe do the placeholder check.
         MarkWatched("external-launch", s.Url);
-        var resolved = await Api.ResolveStreamAsync(s.Url!) ?? s.Url!;
-        try { await JS.InvokeVoidAsync("open", resolved, "_blank"); } catch { /* best-effort */ }
+
+        if (Env.SupportsNativePlayback)
+        {
+            // Native head: VLC plays everything inline — just play it (no external
+            // hand-off). Resolve first so MediaFusion IP-bound URLs work.
+            var nativeUrl = await Api.ResolveStreamAsync(s.Url!) ?? s.Url!;
+            var resume = await ReadResumeAsync();
+            await Player.PlayAsync(new PlaybackRequest(nativeUrl, _title, resume, _subtitles, OnProgress, OnEnded));
+            _playingUrl = s.Url;
+            StateHasChanged();
+            return;
+        }
+
+        // Spinner + disable on the row's button while resolve + dispatch is in
+        // flight (2–3s on a cold debrid cache). Mirrors setExternalActionLoading.
+        _externalLoadingUrl = s.Url;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            var resolved = await Api.ResolveStreamAsync(s.Url!) ?? s.Url!;
+            var displayName = (FirstReleaseLine(s.Description)
+                ?? (s.Title ?? s.Name ?? "").Split('\n').FirstOrDefault() ?? "").Trim();
+            var sidecar = ExternalSidecarUrl();
+            var toast = await (await LaunchModuleAsync())
+                .InvokeAsync<string?>("openExternally", resolved, displayName, sidecar);
+            if (!string.IsNullOrEmpty(toast)) await ShowToastAsync(toast!, 9000);
+        }
+        catch { /* best-effort — a failed dispatch leaves the row usable */ }
+        finally
+        {
+            _externalLoadingUrl = null;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // Picks the sidecar VTT to hand the external player, mirroring
+    // sidecarFromCurrentPick + fetchEnglishSidecarForStream: the currently-selected
+    // track when one's picked, else the first English track (same auto-preselect as
+    // the in-app player). Returns an absolute /api/v1/sub/{b64url}/subtitle.vtt URL
+    // (path-based so VLC's extension sniff registers it), or null.
+    private string? ExternalSidecarUrl()
+    {
+        if (_subtitles.Count == 0) return null;
+        var pick = _subtitleIndex >= 0 && _subtitleIndex < _subtitles.Count
+            ? _subtitles[_subtitleIndex]
+            : _subtitles.FirstOrDefault(t => (t.Language ?? "").StartsWith("en", StringComparison.OrdinalIgnoreCase));
+        if (pick is null || string.IsNullOrEmpty(pick.Url)) return null;
+        return BuildSidecarVttUrl(pick.Url!);
+    }
+
+    // Builds the path-based subtitle proxy URL the external launcher needs:
+    // {apiOrigin}/api/v1/sub/{base64url(upstream)}/subtitle.vtt. The final path
+    // segment is literally "subtitle.vtt" so VLC / Infuse identify it as a subtitle
+    // slave by file extension (a "?url=" query suffix doesn't register). Mirrors
+    // toExternalSidecarUrl; the server's MetaProxyController.SubtitleByPath decodes
+    // the segment and serves the same SRT→VTT body as /api/v1/subtitle.
+    private string BuildSidecarVttUrl(string upstreamUrl)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(upstreamUrl);
+        var b64 = Convert.ToBase64String(bytes)
+            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+        var path = $"api/v1/sub/{b64}/subtitle.vtt";
+        var baseUrl = Env.ApiBaseUrl;
+        return string.IsNullOrWhiteSpace(baseUrl) ? "/" + path : $"{baseUrl.TrimEnd('/')}/{path}";
+    }
+
+    private async Task ShowToastAsync(string message, int ms)
+    {
+        _toastCts?.Cancel();
+        var cts = _toastCts = new CancellationTokenSource();
+        _toast = message;
+        await InvokeAsync(StateHasChanged);
+        try { await Task.Delay(ms, cts.Token); }
+        catch (TaskCanceledException) { return; }
+        if (!cts.IsCancellationRequested)
+        {
+            _toast = null;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -841,6 +1077,20 @@
                 }
             }
             catch { /* interop best-effort — leave heuristics false */ }
+
+            // History-stack hygiene + horizontal-swipe nav (web head only). wireNav
+            // classifies the entry + binds back/prev/next (location.replace flattens
+            // the stack); wireSwipe arms left/right swipe → prev/next episode. Both
+            // are idempotent + read hrefs off the rendered <a>s, so firstRender is
+            // the right (single) wiring point even though Prev/Next re-enter the
+            // page via full reload.
+            try
+            {
+                var launch = await LaunchModuleAsync();
+                await launch.InvokeVoidAsync("wireNav");
+                await launch.InvokeVoidAsync("wireSwipe");
+            }
+            catch { /* best-effort — keyboard / link nav still works */ }
         }
 
         // Wire the shared nudge (reveal + "How it works" expander) after any render
@@ -876,6 +1126,11 @@
         }
         if (!ReferenceEquals(prevActive, _activeSkip)) await InvokeAsync(StateHasChanged);
 
+        // Paint the OP/ED bands once the player reports a real duration (the first
+        // timeupdate is the earliest reliable point; paintSkipRanges itself also
+        // reads video.duration as a fallback). Web head only; retried until painted.
+        if (!_skipRangesPainted && !Env.SupportsNativePlayback) await PaintSkipRangesAsync();
+
         // Mark-watched at 70% (duration ≥ 60s guards against RD DMCA placeholders).
         if (durationSec >= 60 && positionSec >= durationSec * 0.70)
             MarkWatched("progress-70", null);
@@ -895,6 +1150,13 @@
         MarkWatched("ended", null);
         await Store.SetAsync(ResumeKey, null);
         _playingUrl = null;
+        _skipRangesPainted = false;
+        // Tear down the OP/ED band overlay so it doesn't linger over the empty
+        // state (web head; the strip is appended to the persistent .watch-player).
+        if (!Env.SupportsNativePlayback && _launch is not null)
+        {
+            try { await _launch.InvokeVoidAsync("clearSkipRanges", "watch-video"); } catch { /* best-effort */ }
+        }
         await InvokeAsync(StateHasChanged);
     }
 
@@ -1056,6 +1318,31 @@
         => _module ??= await JS.InvokeAsync<IJSObjectReference>(
             "import", "./_content/AniSync.Client/js/watch-sources.js");
 
+    // Player-glue module (web head only): external launcher + skip-range paint +
+    // history/swipe nav. Guarded behind !SupportsNativePlayback at every call site
+    // (the intent/vlc/blob/DOM paths are browser-only; native uses LibVLCSharp).
+    private async Task<IJSObjectReference> LaunchModuleAsync()
+        => _launch ??= await JS.InvokeAsync<IJSObjectReference>(
+            "import", "./_content/AniSync.Client/js/watch-launch.js");
+
+    // Repaint the AniSkip OP/ED bands over the player progress strip from the
+    // bootstrap skipTimes. Port of paintSkipRanges (web head only — the native
+    // player draws its own timeline). Retried from OnProgress until duration is
+    // known (the bands need seconds→% conversion).
+    private async Task PaintSkipRangesAsync()
+    {
+        if (Env.SupportsNativePlayback || _playingUrl is null || _skipTimes is null) return;
+        if (_skipTimes.Intro is null && _skipTimes.Outro is null) return;
+        try
+        {
+            object? Band(EpisodeSkipMarkerDto? m) => m is null ? null : new { start = m.Start, end = m.End };
+            var painted = await (await LaunchModuleAsync()).InvokeAsync<bool>(
+                "paintSkipRanges", "watch-video", Band(_skipTimes.Intro), Band(_skipTimes.Outro), 0d);
+            if (painted) _skipRangesPainted = true;
+        }
+        catch { /* best-effort — the corner Skip button still works without the paint */ }
+    }
+
     // ── Nav helpers ─────────────────────────────────────────────────────────────
     private string BackHref
     {
@@ -1085,11 +1372,17 @@
         return null;
     }
 
-    // Tear down native playback + the JS module when leaving the page (web <video>
+    // Tear down native playback + the JS modules when leaving the page (web <video>
     // unmounts itself).
     public async ValueTask DisposeAsync()
     {
+        _toastCts?.Cancel();
         await Player.StopAsync();
+        if (_launch is not null)
+        {
+            try { await _launch.InvokeVoidAsync("unwireSwipe"); } catch { /* circuit gone */ }
+            try { await _launch.DisposeAsync(); } catch { /* circuit gone */ }
+        }
         if (_module is not null)
         {
             try { await _module.DisposeAsync(); } catch { /* circuit gone */ }

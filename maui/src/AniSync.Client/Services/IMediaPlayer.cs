@@ -33,12 +33,18 @@ public interface IMediaPlayer
 ///   resume position and scrobble — keeping that logic in the shared layer so
 ///   both the native (LibVLCSharp) and web (HTML5) hosts stay dumb.</param>
 /// <param name="OnEnded">Raised when playback reaches the end (drives auto-play-next).</param>
+/// <param name="OnStreamEvent">Web-head-only stream lifecycle signal driving the
+///   fallback panel (port of Watch.cshtml's video:error / watchdog / stall wiring).
+///   <c>kind</c> is "error" | "timeout" | "playing" | "stall"; <c>reason</c> (for
+///   "error") is "network" | "decode". The native LibVLCSharp head decodes
+///   everything and never raises this — its player has no fallback panel.</param>
 public record PlaybackRequest(
     string Url,
     string Title,
     double? ResumeSeconds = null,
     IReadOnlyList<SubtitleTrack>? Subtitles = null,
     Action<double, double>? OnProgress = null,
-    Action? OnEnded = null);
+    Action? OnEnded = null,
+    Action<string, string?>? OnStreamEvent = null);
 
 public record SubtitleTrack(string Url, string Label, string? Language = null);

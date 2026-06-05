@@ -25,7 +25,8 @@ public sealed class Html5MediaPlayer : IMediaPlayer, IAsyncDisposable
     public async Task PlayAsync(PlaybackRequest request, CancellationToken ct = default)
     {
         DisposeRef();
-        _ref = DotNetObjectReference.Create(new PlaybackCallbacks(request.OnProgress, request.OnEnded));
+        _ref = DotNetObjectReference.Create(
+            new PlaybackCallbacks(request.OnProgress, request.OnEnded, request.OnStreamEvent));
 
         var options = new
         {
@@ -74,14 +75,20 @@ public sealed class Html5MediaPlayer : IMediaPlayer, IAsyncDisposable
     {
         private readonly Action<double, double>? _onProgress;
         private readonly Action? _onEnded;
+        private readonly Action<string, string?>? _onStreamEvent;
 
-        public PlaybackCallbacks(Action<double, double>? onProgress, Action? onEnded)
+        public PlaybackCallbacks(
+            Action<double, double>? onProgress,
+            Action? onEnded,
+            Action<string, string?>? onStreamEvent)
         {
             _onProgress = onProgress;
             _onEnded = onEnded;
+            _onStreamEvent = onStreamEvent;
         }
 
         [JSInvokable] public void OnProgress(double position, double duration) => _onProgress?.Invoke(position, duration);
         [JSInvokable] public void OnEnded() => _onEnded?.Invoke();
+        [JSInvokable] public void OnStreamEvent(string kind, string? reason) => _onStreamEvent?.Invoke(kind, reason);
     }
 }

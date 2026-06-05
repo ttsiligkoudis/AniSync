@@ -137,8 +137,31 @@ export function initTrailer(root) {
     });
 }
 
-// Convenience: bind both on the detail page in one interop call.
+// ── Watch-entry marker ───────────────────────────────────────────────────────
+// Stash sessionStorage['aniSyncWatchEntry']='fromAnime' on the click that
+// navigates from the detail page to /watch, so the Watch page's smart back-link
+// knows the detail page is the previous history entry and can reuse it with a
+// plain history.back() (avoiding a duplicate detail entry on the stack). Ported
+// from the inline <script> in Views/Meta/Detail.cshtml. Needed because the
+// site's no-referrer policy strips document.referrer on same-origin navs, so the
+// explicit marker is the only reliable signal. Modifier / middle clicks (open in
+// new tab) are skipped. Bound once per document (delegated, idempotent).
+var _watchEntryBound = false;
+export function initWatchEntryMarker() {
+    if (_watchEntryBound) return;
+    _watchEntryBound = true;
+    document.addEventListener('click', function (e) {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        var a = e.target.closest && e.target.closest('a[href*="/watch/"]');
+        if (!a) return;
+        try { sessionStorage.setItem('aniSyncWatchEntry', 'fromAnime'); }
+        catch (_) { /* sessionStorage unavailable — best effort */ }
+    }, true);
+}
+
+// Convenience: bind everything on the detail page in one interop call.
 export function init(root) {
     initStremioChips(root);
     initTrailer(root);
+    initWatchEntryMarker();
 }

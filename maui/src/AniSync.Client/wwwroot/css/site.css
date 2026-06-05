@@ -3751,6 +3751,36 @@ body.modal-open {
     flex-wrap: wrap;
 }
 
+/* iOS Files hand-off toast for the external-launch flow. The original used the
+   shared window.AniSyncToast (9s); the replica has no global toast helper, so the
+   Watch page renders this fixed, bottom-centred pill (matching #toast-container /
+   .toast) and dismisses it from C# after ~9s. Slide-in only — no auto fade-out,
+   the C# timer owns the lifetime. */
+.watch-launch-toast {
+    position: fixed;
+    bottom: calc(5rem + env(safe-area-inset-bottom, 0));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 300;
+    max-width: min(90vw, 32rem);
+    background: rgba(59, 130, 246, 0.95);
+    color: var(--on-accent);
+    padding: 0.6rem 1.1rem;
+    border-radius: 0.9rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.35;
+    text-align: center;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    animation: toast-in 0.2s ease-out;
+}
+
+@media (min-width: 768px) {
+    .watch-launch-toast {
+        bottom: 1.5rem;
+    }
+}
+
 /* ArtPlayer mounts its UI inside #watchPlayer as a .art-video-player
    div. We want it to fill the host so the 16:9 wrapper aspect-ratio
    applies, with the same rounded corners as the empty-state shell. */
