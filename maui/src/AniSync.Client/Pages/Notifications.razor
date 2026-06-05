@@ -1,40 +1,67 @@
 @page "/notifications"
+@implements IAsyncDisposable
 @inject IAniSyncApi Api
 @inject IAppEnvironment Env
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
 @* Notifications — full episode-release history. Port of the /notifications page
-   over /api/v1/notifications: list, mark-read-on-open, per-row delete, mark-all,
-   and (web head) a Web Push opt-in toggle backed by /api/v1/push. Reuses the
-   notif-page-* classes from site.css. *@
+   over /api/v1/notifications: paginated list (infinite scroll), mark-read-on-open,
+   per-row delete, multi-select + bulk actions, mark-all, and (web head) a Web Push
+   opt-in toggle backed by /api/v1/push. Reuses the notif-page-* classes from site.css. *@
 
 <PageTitle>Notifications · AniSync</PageTitle>
 
-<section>
+<section class="page-header">
     <div class="page-header-row">
         <div class="page-header-titles">
             <h1 class="page-title">Notifications</h1>
+            @* Subtitle swaps between "N notifications" and "N selected" so the
+               header keeps its information density in multi-select mode. *@
             <p class="page-subtitle" data-notif-page-subtitle>
-                @_items.Count notification@(_items.Count == 1 ? "" : "s")
+                @if (_selected.Count > 0)
+                {
+                    @($"{_selected.Count} selected")
+                }
+                else
+                {
+                    @($"{_items.Count} notification{(_items.Count == 1 ? "" : "s")}")
+                }
             </p>
         </div>
         <div class="notif-page-toolbar" data-notif-page-toolbar>
-            @if (_items.Count > 0)
+            @* Bulk-action buttons reveal once at least one row is selected;
+               "Mark all read" hides while a selection is active. *@
+            @if (_selected.Count == 0)
+            {
+                @if (_items.Count > 0)
+                {
+                    <button type="button" class="notif-page-action notif-page-action-quiet"
+                            data-notif-mark-all-read @onclick="MarkAllRead">Mark all read</button>
+                }
+            }
+            else
             {
                 <button type="button" class="notif-page-action notif-page-action-quiet"
-                        data-notif-mark-all-read @onclick="MarkAllRead">Mark all read</button>
+                        data-notif-bulk-read @onclick="BulkRead">Mark read</button>
+                <button type="button" class="notif-page-action notif-page-action-danger"
+                        data-notif-bulk-delete @onclick="BulkDelete">Delete</button>
+                <button type="button" class="notif-page-action notif-page-action-quiet"
+                        data-notif-bulk-cancel @onclick="CancelSelection">Cancel</button>
             }
         </div>
     </div>
-    @if (_pushEnabled)
+    @if (_pushState != PushState.Hidden)
     {
-        <div class="notif-push-toggle" data-push-toggle>
-            <span class="notif-push-toggle-label" data-push-toggle-label>Get notified when episodes drop</span>
-            <button type="button" class="notif-push-toggle-btn" data-push-toggle-btn
-                    disabled="@_pushBusy" @onclick="TogglePush">
-                @(_pushBusy ? "…" : _pushSubscribed ? "Disable browser notifications" : "Enable browser notifications")
-            </button>
+        <div class="notif-push-toggle @PushStateClass" data-push-toggle>
+            <span class="notif-push-toggle-label" data-push-toggle-label>@PushLabel</span>
+            @if (_pushState != PushState.Denied)
+            {
+                <button type="button" class="notif-push-toggle-btn" data-push-toggle-btn
+                        disabled="@_pushBusy" @onclick="TogglePush">
+                    @(_pushBusy ? "…" : _pushState == PushState.Disable ? "Disable" : "Enable browser notifications")
+                </button>
+            }
         </div>
     }
 </section>
@@ -52,13 +79,15 @@ else
     <div class="notif-page-list">
         @foreach (var n in _items)
         {
-            <a class="notif-page-item @(IsRead(n) ? "" : "notif-page-item-unread")"
+            <a class="notif-page-item @(IsRead(n) ? "" : "notif-page-item-unread") @(_selected.Contains(n.Id) ? "notif-page-item-selected" : "")"
                href="@(string.IsNullOrEmpty(n.LinkPath) ? "#" : n.LinkPath)"
                data-notif-id="@n.Id"
                @onclick="() => OpenAsync(n)" @onclick:preventDefault>
-                <span class="notif-page-checkbox" data-notif-page-checkbox>
+                <span class="notif-page-checkbox" data-notif-page-checkbox
+                      @onclick="() => ToggleSelected(n)" @onclick:stopPropagation @onclick:preventDefault>
                     <input type="checkbox"
                            class="notif-page-checkbox-input"
+                           checked="@_selected.Contains(n.Id)"
                            aria-label="Select notification: @n.AnimeTitle @EpLabel(n)" />
                 </span>
                 @if (!string.IsNullOrEmpty(n.ThumbnailUrl))
@@ -88,37 +117,109 @@ else
                 </button>
             </a>
         }
+
+        @* Sentinel + loader: an IntersectionObserver (discover-scroll.js) fetches
+           the next page when the sentinel scrolls into view. Both drop out of the
+           DOM once we've reached the last page. *@
+        @if (!_done)
+        {
+            <div class="notif-page-loader" hidden="@(!_paging)">Loading…</div>
+            <div class="notif-page-sentinel" @ref="_sentinel" aria-hidden="true"></div>
+        }
     </div>
 }
 
 @code {
-    private bool _loading = true;
-    private List<NotificationDto> _items = new();
-    private readonly HashSet<long> _readIds = new();
+    // Original paginates PageSize 20 via a sentinel + IntersectionObserver.
+    private const int PageSize = 20;
 
-    private bool _pushEnabled;
-    private bool _pushSubscribed;
+    private bool _loading = true;
+    private bool _paging;
+    private bool _done;
+    private int _skip;
+    private readonly List<NotificationDto> _items = new();
+    private readonly HashSet<long> _readIds = new();
+    private readonly HashSet<long> _selected = new();
+
+    private ElementReference _sentinel;
+    private IJSObjectReference? _scroll;
+    private DotNetObjectReference<Notifications>? _selfRef;
+    private int _observerId;
+
+    // Push toggle states mirror push-subscribe.js: enable / disable / denied / hidden.
+    private enum PushState { Hidden, Enable, Disable, Denied }
+    private PushState _pushState = PushState.Hidden;
     private bool _pushBusy;
+
+    private string PushStateClass => _pushState switch
+    {
+        PushState.Enable => "notif-push-toggle-enable",
+        PushState.Disable => "notif-push-toggle-disable",
+        PushState.Denied => "notif-push-toggle-denied",
+        _ => "",
+    };
+
+    private string PushLabel => _pushState switch
+    {
+        PushState.Disable => "✓ Browser notifications enabled",
+        PushState.Denied => "Notifications blocked in your browser settings.",
+        _ => "Get notified when episodes drop",
+    };
 
     protected override async Task OnInitializedAsync()
     {
-        _items = (await Api.NotificationsAsync(limit: 50)).ToList();
+        await LoadPageAsync(initial: true);
         _loading = false;
 
         // Web Push opt-in is web-head only; hidden when the deployment has no
-        // VAPID keys configured (status.Enabled == false) or the browser lacks
-        // the Push API.
+        // VAPID keys configured (status.Enabled == false), the browser lacks the
+        // Push API, or the user has blocked notifications at the browser level.
         if (!Env.IsNative)
         {
             var status = await Api.PushStatusAsync();
             if (status is { Enabled: true })
             {
-                var supported = await JS.InvokeAsync<bool>("anisyncPush.supported");
-                _pushEnabled = supported;
-                _pushSubscribed = status.Subscribed;
+                // push.js permission(): 'granted' | 'denied' | 'default' | 'unsupported'.
+                var permission = await JS.InvokeAsync<string>("anisyncPush.permission");
+                _pushState = permission switch
+                {
+                    "unsupported" => PushState.Hidden,
+                    "denied" => PushState.Denied,
+                    _ => status.Subscribed ? PushState.Disable : PushState.Enable,
+                };
                 StateHasChanged();
             }
         }
+    }
+
+    private async Task LoadPageAsync(bool initial)
+    {
+        if (!initial && (_paging || _done)) return;
+        _paging = true;
+        if (!initial) StateHasChanged();
+
+        IReadOnlyList<NotificationDto> page;
+        try { page = await Api.NotificationsAsync(limit: PageSize, skip: _skip); }
+        catch { page = Array.Empty<NotificationDto>(); }
+
+        _items.AddRange(page);
+        _skip += page.Count;
+        // Fewer than a full page back means we've reached the end.
+        if (page.Count < PageSize) _done = true;
+
+        _paging = false;
+        StateHasChanged();
+        if (_observerId != 0 && !_done && _scroll is not null)
+        {
+            try { await _scroll.InvokeVoidAsync("reobserve", _observerId); } catch { }
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnSentinelVisibleAsync()
+    {
+        if (_done || _paging) return;
+        await LoadPageAsync(initial: false);
     }
 
     private bool IsRead(NotificationDto n) => n.IsRead || _readIds.Contains(n.Id);
@@ -133,10 +234,19 @@ else
         if (!string.IsNullOrEmpty(n.LinkPath)) Nav.NavigateTo(n.LinkPath);
     }
 
+    private void ToggleSelected(NotificationDto n)
+    {
+        if (!_selected.Remove(n.Id)) _selected.Add(n.Id);
+    }
+
+    private void CancelSelection() => _selected.Clear();
+
     private async Task DeleteAsync(NotificationDto n)
     {
         await Api.DeleteNotificationAsync(n.Id);
         _items.RemoveAll(x => x.Id == n.Id);
+        _selected.Remove(n.Id);
+        if (_skip > 0) _skip--;
     }
 
     private async Task MarkAllRead()
@@ -145,16 +255,45 @@ else
         foreach (var n in _items) _readIds.Add(n.Id);
     }
 
+    private async Task BulkRead()
+    {
+        if (_selected.Count == 0) return;
+        var ids = _selected.ToList();
+        await Api.MarkNotificationsBulkReadAsync(ids);
+        foreach (var id in ids) _readIds.Add(id);
+        _selected.Clear();
+        await RefreshAsync();
+    }
+
+    private async Task BulkDelete()
+    {
+        if (_selected.Count == 0) return;
+        var ids = _selected.ToList();
+        await Api.DeleteNotificationsBulkAsync(ids);
+        _selected.Clear();
+        await RefreshAsync();
+    }
+
+    // After a bulk op, refetch from the top so the list + counts are authoritative.
+    private async Task RefreshAsync()
+    {
+        _items.Clear();
+        _readIds.Clear();
+        _skip = 0;
+        _done = false;
+        await LoadPageAsync(initial: true);
+    }
+
     private async Task TogglePush()
     {
         _pushBusy = true;
         try
         {
-            if (_pushSubscribed)
+            if (_pushState == PushState.Disable)
             {
                 var endpoint = await JS.InvokeAsync<string?>("anisyncPush.unsubscribe");
                 if (!string.IsNullOrEmpty(endpoint)) await Api.PushUnsubscribeAsync(endpoint);
-                _pushSubscribed = false;
+                _pushState = PushState.Enable;
             }
             else
             {
@@ -163,7 +302,9 @@ else
                 {
                     var sub = await JS.InvokeAsync<PushSubscribeRequestDto?>("anisyncPush.subscribe", pk);
                     if (sub is not null && await Api.PushSubscribeAsync(sub))
-                        _pushSubscribed = true;
+                        _pushState = PushState.Disable;
+                    else if (await JS.InvokeAsync<string>("anisyncPush.permission") == "denied")
+                        _pushState = PushState.Denied;
                 }
             }
         }
@@ -182,5 +323,37 @@ else
         if (diff < 3600) return $"{diff / 60}m ago";
         if (diff < 86400) return $"{diff / 3600}h ago";
         return $"{diff / 86400}d ago";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            try { _scroll = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/discover-scroll.js"); }
+            catch { return; }
+        }
+        if (_scroll is null) return;
+
+        var sentinelRendered = !_loading && _items.Count > 0 && !_done; // sentinel only renders with more pages
+        if (sentinelRendered && _observerId == 0)
+        {
+            try { _observerId = await _scroll.InvokeAsync<int>("observe", _sentinel, _selfRef); } catch { }
+        }
+        else if (!sentinelRendered && _observerId != 0)
+        {
+            try { await _scroll.InvokeVoidAsync("disconnect", _observerId); } catch { }
+            _observerId = 0;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_scroll is not null)
+        {
+            if (_observerId != 0) { try { await _scroll.InvokeVoidAsync("disconnect", _observerId); } catch { } }
+            try { await _scroll.DisposeAsync(); } catch { }
+        }
+        _selfRef?.Dispose();
     }
 }

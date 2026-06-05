@@ -21,7 +21,8 @@
             <div class="register-error" role="alert">@Error</div>
         }
 
-        <form method="post" action="@($"{Env.ApiBaseUrl.TrimEnd('/')}/Auth/Register")" autocomplete="on">
+        <form method="post" action="@($"{Env.ApiBaseUrl.TrimEnd('/')}/Auth/Register")" autocomplete="on"
+              onsubmit="(function (f) { var b = f.querySelector('button'); if (b) { b.disabled = true; b.textContent = 'Creating account…'; } })(this);">
             @if (!string.IsNullOrEmpty(ReturnUrl))
             {
                 <input type="hidden" name="returnUrl" value="@ReturnUrl" />
@@ -53,7 +54,7 @@
         </form>
 
         <p class="hint-text" style="margin-top: 0.75rem;">
-            Already have an account? <a href="/login">Back to login</a>.
+            Already have an account? <a href="/account">Back to login</a>.
         </p>
         <p class="hint-text" style="margin-top: 0.25rem;">
             Want AniList or MyAnimeList instead? Sign up on

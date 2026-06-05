@@ -51,6 +51,7 @@ namespace AnimeList.Controllers
         private readonly IAnimeScheduleService _scheduleService;
         private readonly IWatchingCacheStore _watchingCache;
         private readonly IHiddenEntryStore _hiddenStore;
+        private readonly IMergedListService _mergedListService;
         private readonly ILogger<UserApiController> _logger;
 
         public UserApiController(
@@ -66,6 +67,7 @@ namespace AnimeList.Controllers
             IAnimeScheduleService scheduleService,
             IWatchingCacheStore watchingCache,
             IHiddenEntryStore hiddenStore,
+            IMergedListService mergedListService,
             ILogger<UserApiController> logger)
         {
             _tokenService = tokenService;
@@ -80,6 +82,7 @@ namespace AnimeList.Controllers
             _scheduleService = scheduleService;
             _watchingCache = watchingCache;
             _hiddenStore = hiddenStore;
+            _mergedListService = mergedListService;
             _logger = logger;
         }
 
@@ -870,7 +873,7 @@ namespace AnimeList.Controllers
         [HttpGet("list")]
         [RequireConfig]
         [ProducesResponseType(typeof(MetaListResponse), StatusCodes.Status200OK)]
-        public async Task<IActionResult> List(string status = null)
+        public async Task<IActionResult> List(string status = null, string genre = null, string search = null)
         {
             try
             {
@@ -891,13 +894,49 @@ namespace AnimeList.Controllers
 
                 var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
                 var hideAdult = configuration?.showAdultContent != true;
-                var metas = tokenData.anime_service switch
+                var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
+                var groupSeasons = configuration?.enableSeasonGrouping == true;
+
+                // Fan out to the primary + every healthy linked secondary (deduped) so the library
+                // surfaces anime the user tracks on a linked AniList/MAL/Kitsu too — porting the MVC
+                // LibraryController.Page (MergedListService is shared with the dashboard shelf). Falls
+                // back to the primary service only when the uid can't be resolved (v3 inline config).
+                var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                List<Meta> metas;
+                if (!string.IsNullOrEmpty(uid))
                 {
-                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, hideAdult: hideAdult),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, hideAdult: hideAdult),
-                    _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, hideAdult: hideAdult),
-                };
-                return new JsonResult(new MetaListResponse(metas ?? []));
+                    var merged = await _mergedListService.GetMergedListAsync(
+                        tokenData, uid, listType, genre, groupSeasons, hideUnreleased, hideAdult);
+                    metas = merged?.ToList() ?? new List<Meta>();
+                }
+                else
+                {
+                    var single = tokenData.anime_service switch
+                    {
+                        AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, hideAdult: hideAdult),
+                        AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, hideAdult: hideAdult),
+                        _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, hideAdult: hideAdult),
+                    };
+                    metas = single?.ToList() ?? new List<Meta>();
+                }
+
+                // Search → relevance-ranked (ScoreMatch >= 0.4); otherwise alphabetical. Mirrors
+                // LibraryController.Page so the API and the MVC view agree.
+                if (!string.IsNullOrWhiteSpace(search) && metas.Count > 0)
+                {
+                    var q = Utils.NormalizeTitle(search);
+                    metas = metas
+                        .Select(m => (meta: m, score: Utils.ScoreMatch(q, m.name)))
+                        .Where(x => x.score >= 0.4)
+                        .OrderByDescending(x => x.score)
+                        .Select(x => x.meta)
+                        .ToList();
+                }
+                else
+                {
+                    metas = metas.OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase).ToList();
+                }
+                return new JsonResult(new MetaListResponse(metas));
             }
             catch (Exception ex)
             {

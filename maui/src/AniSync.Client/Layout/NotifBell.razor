@@ -40,7 +40,8 @@
                     @foreach (var n in _items)
                     {
                         <a class="notif-item @(n.IsRead ? "" : "notif-item-unread")"
-                           href="@(string.IsNullOrEmpty(n.LinkPath) ? "#" : n.LinkPath)">
+                           href="@(string.IsNullOrEmpty(n.LinkPath) ? "#" : n.LinkPath)"
+                           data-notif-id="@n.Id">
                             @if (!string.IsNullOrEmpty(n.ThumbnailUrl))
                             {
                                 <img class="notif-thumb" src="@n.ThumbnailUrl" alt="" loading="lazy" onerror="this.remove()" />
@@ -49,7 +50,10 @@
                             {
                                 <span class="notif-thumb notif-thumb-placeholder" aria-hidden="true"></span>
                             }
-                            <span class="notif-title">@n.AnimeTitle · Ep @n.EpisodeNumber</span>
+                            <div class="notif-body">
+                                <div class="notif-title">@n.AnimeTitle</div>
+                                <div class="notif-meta">@EpLabel(n) &middot; @RelativeTime(n.CreatedAt)</div>
+                            </div>
                         </a>
                     }
                 }
@@ -116,6 +120,20 @@
         await Api.MarkAllNotificationsReadAsync();
         _count = 0;
         _items = await Api.NotificationsAsync(limit: 20);
+    }
+
+    // Series notifications carry a season (S1E5); single-cour anime don't (Episode 5).
+    private static string EpLabel(NotificationDto n)
+        => n.Season.HasValue ? $"S{n.Season}E{n.EpisodeNumber}" : $"Episode {n.EpisodeNumber}";
+
+    // Mirrors notifications.js relativeTime(): just now / Nm / Nh / Nd ago.
+    private static string RelativeTime(long unixSeconds)
+    {
+        var diff = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - unixSeconds;
+        if (diff < 60) return "just now";
+        if (diff < 3600) return $"{diff / 60}m ago";
+        if (diff < 86400) return $"{diff / 3600}h ago";
+        return $"{diff / 86400}d ago";
     }
 
     public void Dispose()

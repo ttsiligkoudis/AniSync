@@ -50,17 +50,11 @@ namespace AnimeList.Controllers
             _logger = logger;
         }
 
-        [HttpGet("/calendar")]
-        public async Task<IActionResult> Index(string d)
-        {
-            var (_, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
-            if (uid == null) return RedirectToAction("Index", "Home");
-
-            var model = await BuildCalendarModelAsync(uid, d);
-            ViewData["ActiveNav"] = "calendar";
-            ViewData["Title"] = "Calendar";
-            return View(model);
-        }
+        // The original's MVC [HttpGet("/calendar")] view action is intentionally dropped in the
+        // replica: the Blazor /calendar page (Pages/Calendar.razor) serves the UI, and keeping the
+        // MVC route would collide with that Blazor page route. Only the header-authed JSON twin below
+        // is exposed — the controller is admitted to the Web head's ApiOnlyControllerProvider so this
+        // single /api/v1/me/calendar endpoint is reachable, without re-introducing a /calendar collision.
 
         /// <summary>
         /// Header-authed JSON twin of <see cref="Index"/> for the thin client's

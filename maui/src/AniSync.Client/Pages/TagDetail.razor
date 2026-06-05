@@ -1,8 +1,13 @@
 @page "/discover/tag/{Tag}"
+@implements IAsyncDisposable
 @inject IAniSyncApi Api
+@inject IJSRuntime JS
 
-@* Anime tagged with {Tag} — port of Views/Discover/TagDetail.cshtml. Poster grid
-   with skip-offset "Load more" (the server reports HasNextPage). *@
+@* Anime tagged with {Tag} — port of Views/Discover/TagDetail.cshtml. Poster grid with
+   infinite scroll: tag-detail-pagination.js watches .tag-detail-sentinel and pulls the
+   next 1-indexed page (server reports HasNextPage). Here the JS owns only the
+   IntersectionObserver (discover-scroll.js); the fetch + append stay in Blazor,
+   mirroring the sibling Studios.razor listing page. *@
 
 <PageTitle>@Tag · AniSync</PageTitle>
 
@@ -26,26 +31,17 @@
     }
     else if (HasItems)
     {
-        <div class="tag-detail-paginator" data-tag="@Tag" data-page="1">
+        <div class="tag-detail-paginator" data-tag="@Tag" data-page="@_page">
             <PosterGrid Items="_items" EmptyMessage="@EmptyMessage" />
             <div class="paginator-loader" hidden="@(!_loading)" aria-hidden="true">
                 <div class="paginator-loader-spinner"></div>
             </div>
-            <div class="tag-detail-sentinel" aria-hidden="true"></div>
+            <div class="tag-detail-sentinel" @ref="_sentinel" aria-hidden="true"></div>
         </div>
     }
     else
     {
         <PosterGrid Items="_items" EmptyMessage="@EmptyMessage" />
-    }
-
-    @if (_canLoadMore)
-    {
-        <div class="discover-pagination">
-            <button type="button" class="discover-paginator" disabled="@_loading" @onclick="LoadMore">
-                @(_loading ? "Loading…" : "Load more")
-            </button>
-        </div>
     }
 </section>
 
@@ -54,7 +50,13 @@
 
     private readonly List<MetaDto> _items = new();
     private bool _loading;
-    private bool _canLoadMore;
+    private bool _done;
+    private int _page = 1;   // 1-indexed; the next page to request is _page (see LoadPageAsync).
+
+    private ElementReference _sentinel;
+    private IJSObjectReference? _scroll;
+    private DotNetObjectReference<TagDetail>? _selfRef;
+    private int _observerId;
 
     private bool HasItems => _items.Count > 0;
     private string EmptyMessage => $"No anime found for the {Tag} tag.";
@@ -62,21 +64,71 @@
     protected override async Task OnParametersSetAsync()
     {
         _items.Clear();
-        _canLoadMore = false;
-        await Load();
-    }
-
-    private Task LoadMore() => Load();
-
-    private async Task Load()
-    {
+        _page = 1;
+        _done = false;
         _loading = true;
         StateHasChanged();
-        var skip = _items.Count > 0 ? _items.Count.ToString() : null;
-        var resp = await Api.DiscoverByTagAsync(Tag, skip);
+        await LoadPageAsync(initial: true);
+    }
+
+    [JSInvokable]
+    public async Task OnSentinelVisibleAsync()
+    {
+        if (_done || _loading) return;
+        await LoadPageAsync(initial: false);
+    }
+
+    private async Task LoadPageAsync(bool initial)
+    {
+        if (!initial && (_loading || _done)) return;
+        _loading = true;
+        if (!initial) StateHasChanged();
+
+        TagMediaResponse resp;
+        try { resp = await Api.DiscoverByTagAsync(Tag, _page); }
+        catch { resp = new(); }
+
         _items.AddRange(resp.Items);
-        _canLoadMore = resp.HasNextPage;
+        if (!resp.HasNextPage) _done = true;
+        else _page++;
+
         _loading = false;
         StateHasChanged();
+        if (_observerId != 0 && !_done && _scroll is not null)
+        {
+            try { await _scroll.InvokeVoidAsync("reobserve", _observerId); } catch { }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            try { _scroll = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/discover-scroll.js"); }
+            catch { return; }
+        }
+        if (_scroll is null) return;
+
+        var paginatorRendered = HasItems && !_done;   // sentinel only renders with the grid
+        if (paginatorRendered && _observerId == 0)
+        {
+            try { _observerId = await _scroll.InvokeAsync<int>("observe", _sentinel, _selfRef); } catch { }
+        }
+        else if (!paginatorRendered && _observerId != 0)
+        {
+            try { await _scroll.InvokeVoidAsync("disconnect", _observerId); } catch { }
+            _observerId = 0;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_scroll is not null)
+        {
+            if (_observerId != 0) { try { await _scroll.InvokeVoidAsync("disconnect", _observerId); } catch { } }
+            try { await _scroll.DisposeAsync(); } catch { }
+        }
+        _selfRef?.Dispose();
     }
 }

@@ -1,9 +1,10 @@
 @page "/discover/staff/{StaffId:int}"
 @inject IAniSyncApi Api
 
-@* A staff member's anime credits — port of Views/Discover/StaffDetail.cshtml.
-   The staff endpoint paginates via opaque skip but doesn't report HasNextPage,
-   so "Load more" shows while the last page came back full. *@
+@* A staff member's anime credits — 1:1 port of Views/Discover/StaffDetail.cshtml.
+   A single, non-paginated poster grid: the original view renders one _PosterGrid
+   from one GetStaffMediaAsync call (there is no /discover/staff/{id}/page route,
+   no sentinel, no pagination JS). Shape mirrors the sibling ActorDetail.razor. *@
 
 <PageTitle>@Title · AniSync</PageTitle>
 
@@ -13,7 +14,7 @@
         <h1 class="page-title">@Title</h1>
     </header>
 
-    @if (_loading && _items.Count == 0)
+    @if (_loading)
     {
         <div class="library-grid">
             @for (var i = 0; i < 12; i++)
@@ -29,50 +30,28 @@
     {
         <PosterGrid Items="_items" EmptyMessage="@EmptyMessage" />
     }
-
-    @if (_canLoadMore)
-    {
-        <div class="discover-pagination">
-            <button type="button" class="discover-paginator" disabled="@_loading" @onclick="LoadMore">
-                @(_loading ? "Loading…" : "Load more")
-            </button>
-        </div>
-    }
 </section>
 
 @code {
     [Parameter] public int StaffId { get; set; }
 
-    private const int PageSize = 25; // AniList staff-media page size; drives the load-more heuristic.
-
-    private readonly List<MetaDto> _items = new();
+    private IReadOnlyList<MetaDto> _items = Array.Empty<MetaDto>();
     private string? _name;
-    private bool _loading;
-    private bool _canLoadMore;
+    private bool _loading = true;
 
     private string Title => string.IsNullOrEmpty(_name) ? $"Staff #{StaffId}" : _name!;
     private string EmptyMessage => $"No anime found for {Title}.";
 
     protected override async Task OnParametersSetAsync()
     {
-        _items.Clear();
-        _name = null;
-        _canLoadMore = false;
-        await Load();
-    }
-
-    private Task LoadMore() => Load();
-
-    private async Task Load()
-    {
         _loading = true;
-        StateHasChanged();
-        var skip = _items.Count > 0 ? _items.Count.ToString() : null;
-        var resp = await Api.StaffMediaAsync(StaffId, skip);
-        _name ??= resp.Name;
-        _items.AddRange(resp.Items);
-        _canLoadMore = resp.Items.Count >= PageSize;
+        _name = null;
+        _items = Array.Empty<MetaDto>();
+        StaffMediaResponse resp;
+        try { resp = await Api.StaffMediaAsync(StaffId); }
+        catch { resp = new(); }
+        _name = resp.Name;
+        _items = resp.Items;
         _loading = false;
-        StateHasChanged();
     }
 }

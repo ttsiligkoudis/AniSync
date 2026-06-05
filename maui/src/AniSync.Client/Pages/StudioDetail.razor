@@ -1,8 +1,13 @@
 @page "/discover/studio/{StudioId:int}"
+@implements IAsyncDisposable
 @inject IAniSyncApi Api
+@inject IJSRuntime JS
 
-@* A studio's filmography — port of Views/Discover/StudioDetail.cshtml. Poster
-   grid with skip-offset "Load more" (server reports HasNextPage). *@
+@* A studio's filmography — port of Views/Discover/StudioDetail.cshtml. Poster grid
+   with infinite scroll: studio-detail-pagination.js watches .studio-detail-sentinel
+   and pulls the next 1-indexed page (server reports HasNextPage). Here the JS owns
+   only the IntersectionObserver (discover-scroll.js); the fetch + append stay in
+   Blazor, mirroring the sibling Studios.razor listing page. *@
 
 <PageTitle>@Title · AniSync</PageTitle>
 
@@ -26,26 +31,17 @@
     }
     else if (HasItems)
     {
-        <div class="studio-detail-paginator" data-studio-id="@StudioId" data-page="1">
+        <div class="studio-detail-paginator" data-studio-id="@StudioId" data-page="@_page">
             <PosterGrid Items="_items" EmptyMessage="@EmptyMessage" />
             <div class="paginator-loader" hidden="@(!_loading)" aria-hidden="true">
                 <div class="paginator-loader-spinner"></div>
             </div>
-            <div class="studio-detail-sentinel" aria-hidden="true"></div>
+            <div class="studio-detail-sentinel" @ref="_sentinel" aria-hidden="true"></div>
         </div>
     }
     else
     {
         <PosterGrid Items="_items" EmptyMessage="@EmptyMessage" />
-    }
-
-    @if (_canLoadMore)
-    {
-        <div class="discover-pagination">
-            <button type="button" class="discover-paginator" disabled="@_loading" @onclick="LoadMore">
-                @(_loading ? "Loading…" : "Load more")
-            </button>
-        </div>
     }
 </section>
 
@@ -55,7 +51,13 @@
     private readonly List<MetaDto> _items = new();
     private string? _name;
     private bool _loading;
-    private bool _canLoadMore;
+    private bool _done;
+    private int _page = 1;   // 1-indexed; the next page to request is _page (see LoadPageAsync).
+
+    private ElementReference _sentinel;
+    private IJSObjectReference? _scroll;
+    private DotNetObjectReference<StudioDetail>? _selfRef;
+    private int _observerId;
 
     private string Title => string.IsNullOrEmpty(_name) ? $"Studio #{StudioId}" : _name!;
     private bool HasItems => _items.Count > 0;
@@ -65,22 +67,74 @@
     {
         _items.Clear();
         _name = null;
-        _canLoadMore = false;
-        await Load();
-    }
-
-    private Task LoadMore() => Load();
-
-    private async Task Load()
-    {
+        _page = 1;
+        _done = false;
         _loading = true;
         StateHasChanged();
-        var skip = _items.Count > 0 ? _items.Count.ToString() : null;
-        var resp = await Api.StudioMediaAsync(StudioId, skip);
+        await LoadPageAsync(initial: true);
+    }
+
+    [JSInvokable]
+    public async Task OnSentinelVisibleAsync()
+    {
+        if (_done || _loading) return;
+        await LoadPageAsync(initial: false);
+    }
+
+    private async Task LoadPageAsync(bool initial)
+    {
+        if (!initial && (_loading || _done)) return;
+        _loading = true;
+        if (!initial) StateHasChanged();
+
+        StudioMediaResponse resp;
+        try { resp = await Api.StudioMediaAsync(StudioId, _page); }
+        catch { resp = new(); }
+
         _name ??= resp.Name;
         _items.AddRange(resp.Items);
-        _canLoadMore = resp.HasNextPage;
+        // Studio.media mixes manga + anime; the server filters manga out, so a page can
+        // render zero anime while real pages still follow. HasNextPage is the stop signal.
+        if (!resp.HasNextPage) _done = true;
+        else _page++;
+
         _loading = false;
         StateHasChanged();
+        if (_observerId != 0 && !_done && _scroll is not null)
+        {
+            try { await _scroll.InvokeVoidAsync("reobserve", _observerId); } catch { }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            try { _scroll = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/discover-scroll.js"); }
+            catch { return; }
+        }
+        if (_scroll is null) return;
+
+        var paginatorRendered = HasItems && !_done;   // sentinel only renders with the grid
+        if (paginatorRendered && _observerId == 0)
+        {
+            try { _observerId = await _scroll.InvokeAsync<int>("observe", _sentinel, _selfRef); } catch { }
+        }
+        else if (!paginatorRendered && _observerId != 0)
+        {
+            try { await _scroll.InvokeVoidAsync("disconnect", _observerId); } catch { }
+            _observerId = 0;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_scroll is not null)
+        {
+            if (_observerId != 0) { try { await _scroll.InvokeVoidAsync("disconnect", _observerId); } catch { } }
+            try { await _scroll.DisposeAsync(); } catch { }
+        }
+        _selfRef?.Dispose();
     }
 }

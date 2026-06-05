@@ -18,14 +18,16 @@ public interface IAniSyncApi
     /// <summary>Video (movie/series) discovery via Trakt — /api/v1/discover/video/{type}/{mode}.
     /// modes: trending|popular|anticipated|watched|recommended ("For You", needs Trakt connected).</summary>
     Task<IReadOnlyList<MetaDto>> DiscoverVideoAsync(string type, string mode, string? skip = null, string? genre = null, string? search = null, CancellationToken ct = default);
-    /// <summary>Anime tagged with a given AniList tag — /api/v1/discover/by-tag/{tag}.</summary>
-    Task<TagMediaResponse> DiscoverByTagAsync(string tag, string? skip = null, CancellationToken ct = default);
+    /// <summary>Anime tagged with a given AniList tag — /api/v1/discover/by-tag/{tag}. 1-indexed page (server is page-based).</summary>
+    Task<TagMediaResponse> DiscoverByTagAsync(string tag, int page = 1, CancellationToken ct = default);
+    /// <summary>Legacy skip-offset overload for the Discover page's count-based tag pager. Prefer the page-based overload.</summary>
+    Task<TagMediaResponse> DiscoverByTagAsync(string tag, string? skip, CancellationToken ct = default);
     Task<IReadOnlyList<MetaDto>> AiringTodayAsync(CancellationToken ct = default);
 
     // Discover browse-by (tags / studios / staff directories + detail)
     Task<IReadOnlyList<TagSummaryDto>> TagsAsync(CancellationToken ct = default);
     Task<StudiosListResponse> StudiosAsync(int page = 1, string? search = null, CancellationToken ct = default);
-    Task<StudioMediaResponse> StudioMediaAsync(int studioId, string? skip = null, CancellationToken ct = default);
+    Task<StudioMediaResponse> StudioMediaAsync(int studioId, int page = 1, CancellationToken ct = default);
     Task<StaffMediaResponse> StaffMediaAsync(int staffId, string? skip = null, CancellationToken ct = default);
     Task<ActorsListResponse> ActorsAsync(int page = 1, string? search = null, CancellationToken ct = default);
     Task<ActorCreditsResponse?> ActorCreditsAsync(int tmdbId, CancellationToken ct = default);

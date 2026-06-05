@@ -296,7 +296,17 @@ public sealed class AniSyncApi : IAniSyncApi
 
     // ── Discover browse-by ───────────────────────────────────────────────────
 
-    public async Task<TagMediaResponse> DiscoverByTagAsync(string tag, string? skip = null, CancellationToken ct = default)
+    public async Task<TagMediaResponse> DiscoverByTagAsync(string tag, int page = 1, CancellationToken ct = default)
+    {
+        // Server (ApiController.DiscoverByTag) is 1-indexed page-based; matches the StudiosAsync convention.
+        var url = $"api/v1/discover/by-tag/{Uri.EscapeDataString(tag)}?page={page}";
+        return await GetOrDefault<TagMediaResponse>(url, ct) ?? new();
+    }
+
+    // Legacy skip-offset overload kept ONLY so the Discover page's count-based tag pager
+    // (which passes a string item-offset) keeps compiling and behaving exactly as before.
+    // New callers (TagDetail) use the page-based overload above.
+    public async Task<TagMediaResponse> DiscoverByTagAsync(string tag, string? skip, CancellationToken ct = default)
     {
         var url = $"api/v1/discover/by-tag/{Uri.EscapeDataString(tag)}";
         if (!string.IsNullOrWhiteSpace(skip)) url += $"?skip={Uri.EscapeDataString(skip)}";
@@ -316,10 +326,9 @@ public sealed class AniSyncApi : IAniSyncApi
         return await GetOrDefault<StudiosListResponse>(url, ct) ?? new();
     }
 
-    public async Task<StudioMediaResponse> StudioMediaAsync(int studioId, string? skip = null, CancellationToken ct = default)
+    public async Task<StudioMediaResponse> StudioMediaAsync(int studioId, int page = 1, CancellationToken ct = default)
     {
-        var url = $"api/v1/studios/{studioId}/anime";
-        if (!string.IsNullOrWhiteSpace(skip)) url += $"?skip={Uri.EscapeDataString(skip)}";
+        var url = $"api/v1/studios/{studioId}/anime?page={page}";
         return await GetOrDefault<StudioMediaResponse>(url, ct) ?? new();
     }
 
