@@ -1,6 +1,7 @@
 @page "/"
 @inject IAniSyncApi Api
 @inject AppState State
+@inject IJSRuntime JS
 @implements IDisposable
 
 @* Home dashboard — full port of Views/Home/Index.cshtml's section order: the
@@ -354,6 +355,24 @@ else
 
     private DashCustomizeModal? _customize;
     private bool _layoutLoaded;
+    private IJSObjectReference? _nudgeModule;
+
+    // Wire the shared "set up streaming" nudge (reveal-after-dismiss-check + the
+    // "How it works" expander) once it's in the DOM — the inline <script> from
+    // _StreamSetupNudge.cshtml ported to the watch-sources.js module. Without
+    // this the dismissible dashboard nudge ships hidden and never appears.
+    // Idempotent on the JS side, so re-invoking after re-renders is safe.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!State.LoggedIn || !string.IsNullOrEmpty(State.StreamConfig)) return;
+        try
+        {
+            _nudgeModule ??= await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/AniSync.Client/js/watch-sources.js");
+            await _nudgeModule.InvokeVoidAsync("wireNudges");
+        }
+        catch { /* interop best-effort — the CTA link still works without JS */ }
+    }
 
     protected override void OnInitialized()
     {
@@ -379,5 +398,12 @@ else
         StateHasChanged();
     }
 
-    public void Dispose() => State.Changed -= OnStateChanged;
+    public void Dispose()
+    {
+        State.Changed -= OnStateChanged;
+        // Fire-and-forget JS module disposal (IDisposable can't await). The
+        // browser caches the import, so a late disposal is harmless.
+        if (_nudgeModule is not null)
+            _ = _nudgeModule.DisposeAsync().AsTask();
+    }
 }

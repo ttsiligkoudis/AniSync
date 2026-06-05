@@ -235,6 +235,13 @@ public sealed class EpisodeStreamsBootstrap
     public List<EpisodeStreamAddonDto> Addons { get; set; } = new();
     public List<EpisodeExternalLinkDto> ExternalLinks { get; set; } = new();
     public EpisodeSkipTimesDto? SkipTimes { get; set; }
+
+    /// <summary>Not part of the live bootstrap response (the debrid rows fan out
+    /// per-addon). Populated only when this record is reused as the watch page's
+    /// localStorage cache carrier — the cached entry stores the combined
+    /// { debridStreams, externalLinks, skipTimes } shape so a cache read can
+    /// repaint the full source list without re-running the fan-out.</summary>
+    public List<EpisodeStreamDto> DebridStreams { get; set; } = new();
 }
 
 public sealed class EpisodeStreamAddonDto { public int Index { get; set; } public string Name { get; set; } = ""; }
