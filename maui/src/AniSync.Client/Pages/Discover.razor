@@ -165,7 +165,7 @@ else
     private bool _hasTag;
     private string _videoMode = "popular";
     private IReadOnlyList<VideoModeDto> _videoModes = new[] { new VideoModeDto { Slug = "popular", Label = "Popular" } };
-    private bool _videoModesResolved;
+    private Task<IReadOnlyList<VideoModeDto>>? _videoModesTask;
     private string _videoLabelLower = "movies";
     private bool _hasSearch;
     private bool _hasGenre;
@@ -389,11 +389,12 @@ else
 
     private async Task EnsureVideoModesAsync()
     {
-        if (_videoModesResolved) return;
-        _videoModesResolved = true;
-        // Server-authoritative mode list (Trakt configured/connected gating computed server-side,
-        // exactly like DiscoverController.VideoBrowseAsync). Popular-only when Trakt isn't configured.
-        var modes = await Api.VideoModesAsync();
+        // Cache the fetch task so concurrent Refreshes (OnParametersSet + OnStateChanged) await the
+        // SAME call and all see the full mode list — rather than one starting the fetch while the
+        // other renders the [popular] default before it resolves (which left the strip stuck at 2
+        // pills). Server-authoritative gating, exactly like DiscoverController.VideoBrowseAsync.
+        _videoModesTask ??= Api.VideoModesAsync();
+        var modes = await _videoModesTask;
         if (modes.Count > 0) _videoModes = modes;
     }
 

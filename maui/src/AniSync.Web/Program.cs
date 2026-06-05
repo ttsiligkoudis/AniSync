@@ -432,11 +432,23 @@ app.MapGet("/auth/complete", async (HttpContext ctx, ITokenService tokenService,
         : $"localStorage.setItem('anisync.config', {System.Text.Json.JsonSerializer.Serialize(segment)});";
     var nav = System.Text.Json.JsonSerializer.Serialize(returnUrl);
 
+    // Dark, themed loading screen instead of the browser's blank white page — this
+    // bridge renders for a beat before location.replace() lands in the app, and a white
+    // flash between two dark pages reads as a glitch. Spinner + a login/logout-aware line.
+    var msg = string.IsNullOrEmpty(segment) ? "Signing you out…" : "Signing you in…";
     var html =
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Signing in…</title>" +
-        "<meta name=\"robots\" content=\"noindex\"></head>" +
-        $"<body><script>try{{{op}}}catch(e){{}}location.replace({nav});</script>" +
-        $"<noscript>Signed in. <a href=\"{System.Net.WebUtility.HtmlEncode(returnUrl)}\">Continue</a>.</noscript></body></html>";
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>" + msg + "</title>" +
+        "<meta name=\"robots\" content=\"noindex\">" +
+        "<style>html,body{margin:0;height:100%;background:#0b0d12;color:#e8e8ea;" +
+        "font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}" +
+        ".auth-wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.1rem}" +
+        ".auth-spin{width:38px;height:38px;border-radius:50%;border:3px solid rgba(255,255,255,.14);" +
+        "border-top-color:#4f7cff;animation:auth-spin .8s linear infinite}" +
+        "@keyframes auth-spin{to{transform:rotate(360deg)}}" +
+        ".auth-msg{font-size:.95rem;color:#9aa0ab;margin:0}</style></head>" +
+        "<body><div class=\"auth-wrap\"><div class=\"auth-spin\"></div><p class=\"auth-msg\">" + msg + "</p></div>" +
+        $"<script>try{{{op}}}catch(e){{}}location.replace({nav});</script>" +
+        $"<noscript>Done. <a href=\"{System.Net.WebUtility.HtmlEncode(returnUrl)}\">Continue</a>.</noscript></body></html>";
     return Results.Content(html, "text/html");
 });
 
