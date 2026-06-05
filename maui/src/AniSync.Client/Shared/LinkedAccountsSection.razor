@@ -1,0 +1,136 @@
+@inject IAniSyncApi Api
+@inject IAppEnvironment Env
+
+@* Linked-accounts card — Blazor port of _LinkedAccountsSection.cshtml. The
+   Kitsu / AniList / MAL / Trakt rows (or Trakt only when the user's enabled modes
+   are video-only) with the Primary badge, Linked / Needs-reauth badge, Re-link,
+   Unlink and Link affordances, plus the Kitsu inline credentials form. Promotion
+   to primary lives in the service-picker pills in AccountSection above this one;
+   this section only handles Link / Unlink / Re-link.
+
+   Framework adaptations: Unlink → Api.UnlinkAsync + reload (no form POST); OAuth
+   Link/Re-link → anchor into /Auth/LinkProvider; the Kitsu inline form POSTs to
+   /Auth/LinkKitsu; the Kitsu Link/Re-link button toggles the form's visibility
+   (the original's .linked-account-toggle → .linked-kitsu-form.expanded). *@
+
+@if (Config is not null)
+{
+    <section class="section-card">
+        <span class="section-title">Linked Accounts</span>
+        <p class="section-description">
+            Optional sync targets. When you save or auto-track an entry, AniSync writes
+            to your primary account first and then mirrors the change to every linked
+            provider it can map the anime onto.
+        </p>
+
+        <div class="linked-accounts">
+            @foreach (var svc in AllServices)
+            {
+                var label = svc == "MyAnimeList" ? "MyAnimeList" : Pretty(svc);
+                var isPrimary = string.Equals(svc, Config.AnimeService, StringComparison.OrdinalIgnoreCase);
+                var linked = Config.Linked.FirstOrDefault(l => string.Equals(l.Service, svc, StringComparison.OrdinalIgnoreCase));
+                <div class="linked-account-row" data-service="@ServiceIndex(svc)" data-service-name="@svc">
+                    <div class="linked-account-name">@label</div>
+                    <div class="linked-account-actions">
+                        @if (isPrimary)
+                        {
+                            <span class="linked-account-badge linked-account-primary">Primary</span>
+                        }
+                        else if (linked is not null)
+                        {
+                            var needsReauth = linked.NeedsReauth;
+                            <span class="linked-account-badge @(needsReauth ? "linked-account-warn" : "linked-account-connected")">
+                                @(needsReauth ? "Needs re-auth" : "Linked")
+                            </span>
+                            @if (needsReauth)
+                            {
+                                @if (svc == "Kitsu")
+                                {
+                                    <button type="button" class="btn-ghost btn-ghost-sm linked-account-toggle" @onclick="() => Toggle(svc)">Re-link</button>
+                                }
+                                else
+                                {
+                                    <a class="btn-ghost btn-ghost-sm" href="@LinkUrl(svc)">Re-link ↗</a>
+                                }
+                            }
+                            <button type="button" class="btn-ghost btn-ghost-sm" disabled="@(_busy == svc)" @onclick="() => UnlinkAsync(svc)">Unlink</button>
+                        }
+                        else if (svc == "Kitsu")
+                        {
+                            <button type="button" class="btn-ghost btn-ghost-sm linked-account-toggle" @onclick="() => Toggle(svc)">Link</button>
+                        }
+                        else
+                        {
+                            <a class="btn-ghost btn-ghost-sm" href="@LinkUrl(svc)">Link ↗</a>
+                        }
+                    </div>
+                    @if (svc == "Kitsu" && !isPrimary && (linked is null || linked.NeedsReauth))
+                    {
+                        <form method="post" action="@AuthAction("LinkKitsu")" class="linked-account-creds linked-kitsu-form @(_kitsuOpen ? "expanded" : "")">
+                            <input type="text" name="username" placeholder="Kitsu username" required />
+                            <input type="password" name="password" placeholder="Kitsu password" required />
+                            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+                            <button type="submit" class="btn-primary-action btn-login">Link Kitsu</button>
+                            <p class="option-name-sub" style="margin: 0;">
+                                Used only to obtain an OAuth token from Kitsu — your password
+                                is not stored in the configuration.
+                            </p>
+                        </form>
+                    }
+                </div>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter] public ConfigStateDto? Config { get; set; }
+    [Parameter] public EventCallback OnReload { get; set; }
+    // The page the link/re-link redirect returns to — /account here, /configure when
+    // hosted on the Stremio-addon page (matches the original's currentPath threading).
+    [Parameter] public string ReturnUrl { get; set; } = "/account";
+
+    private string? _busy;
+    private bool _kitsuOpen;
+
+    // Which providers are offered as sync targets depends on the enabled modes:
+    // the anime trackers (Kitsu / AniList / MAL) only track anime, while Trakt
+    // tracks anime, movies and series. So anime enabled → all four; video-only →
+    // Trakt only. Default to all when nothing's chosen.
+    private string[] AllServices =>
+        (Config?.EnabledMediaTypes.Count is null or 0)
+        || Config!.EnabledMediaTypes.Contains("anime", StringComparer.OrdinalIgnoreCase)
+            ? new[] { "Kitsu", "Anilist", "MyAnimeList", "Trakt" }
+            : new[] { "Trakt" };
+
+    private string AuthAction(string action) => $"{Env.ApiBaseUrl.TrimEnd('/')}/Auth/{action}";
+    private string LinkUrl(string service) => $"{AuthAction("LinkProvider")}?service={Uri.EscapeDataString(service)}&returnUrl={Uri.EscapeDataString(ReturnUrl)}";
+
+    private static int ServiceIndex(string svc) => svc switch
+    {
+        "Anilist" => 1,
+        "MyAnimeList" => 2,
+        "Trakt" => 3,
+        _ => 0,
+    };
+
+    private void Toggle(string svc)
+    {
+        if (svc == "Kitsu") _kitsuOpen = !_kitsuOpen;
+    }
+
+    private async Task UnlinkAsync(string service)
+    {
+        _busy = service;
+        if (await Api.UnlinkAsync(service)) await OnReload.InvokeAsync();
+        _busy = null;
+    }
+
+    private static string Pretty(string? service) => service switch
+    {
+        "Anilist" => "AniList",
+        "MyAnimeList" => "MyAnimeList",
+        null or "" => "—",
+        _ => service,
+    };
+}

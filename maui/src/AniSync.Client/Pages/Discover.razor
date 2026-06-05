@@ -1,157 +1,502 @@
 @page "/discover"
-@implements IDisposable
+@implements IAsyncDisposable
 @inject IAniSyncApi Api
 @inject AppState State
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
-@* Discover — port of Views/Discover/Index.cshtml. Catalog tabs + (anime) genre
-   filter + poster grid with skip-offset "Load more". The layout's media-type
-   switch picks the surface: Anime uses /api/v1/discover/{kind}; Movies/Series
-   use /api/v1/discover/video/{type}/{mode} (Trakt-backed). Cards in video mode
-   append ?type= via PosterGrid's VideoLinks. *@
+@* Discover — 1:1 port of Views/Discover/Index.cshtml (anime catalog) + Views/Video/Index.cshtml
+   (movies/series browse). One URL, two surfaces, chosen by the active media type (the layout's
+   media-type switch sets it). Tab strips are the shared DiscoverTabs (anime) / VideoModeTabs
+   (video) components, matching _DiscoverTabs.cshtml + the video nav. The active tab + filters
+   live in the query string so the page deep-links like the original; the poster grid fills via
+   infinite scroll (discover-scroll.js sentinel). Top-level elements are direct children of <main>
+   so they pick up its column gap — no .container wrapper (which would collapse them to one child). *@
 
-<PageTitle>Discover · AniSync</PageTitle>
+<PageTitle>@_pageTitle</PageTitle>
 
-<section class="container">
-    <nav class="library-tabs" role="tablist" aria-label="Discover catalogs">
-        @foreach (var (kind, label) in Kinds)
-        {
-            <button type="button" role="tab"
-                    class="library-tab @(_kind == kind ? "library-tab-active" : "")"
-                    aria-selected="@(_kind == kind)"
-                    @onclick="() => SetKind(kind)">
-                @label
-            </button>
-        }
-    </nav>
-
-    @if (IsAnime)
+@if (IsAnime)
+{
+    @* Tag-browse / Hidden page headers (suppress the filter bar; tag also drops the tabs). *@
+    @if (_hasTag)
     {
-        <form class="filter-bar" role="search" @onsubmit="Reload" @onsubmit:preventDefault>
-            <select class="filter-bar-select" @bind="_genre" @bind:after="Reload">
-                <option value="">All genres</option>
-                @foreach (var g in _genres)
-                {
-                    <option value="@g">@g</option>
-                }
-            </select>
-        </form>
-
-        <nav class="discover-browse-by" aria-label="Browse by">
-            <span class="discover-browse-by-label">Browse by</span>
-            <a class="discover-browse-by-link" href="/discover/studio">Studios</a>
-            <a class="discover-browse-by-link" href="/discover/tag">Tags</a>
-            <a class="discover-browse-by-link" href="/discover/actors">Actors</a>
-        </nav>
+        <header class="page-header">
+            <p class="page-subtitle">Tag</p>
+            <h1 class="page-title">@Tag</h1>
+            <p><a class="filter-bar-clear" href="/discover">Clear tag</a></p>
+        </header>
+    }
+    else if (_isHidden)
+    {
+        <header class="page-header">
+            <p class="page-subtitle">Discover</p>
+            <h1 class="page-title">Hidden</h1>
+            <p class="page-header-desc">Titles you've hidden from Discover. Open any and use Unhide to bring it back.</p>
+        </header>
     }
 
-    <div class="discover-results-pane">
-        @if (_loading && _items.Count == 0)
-        {
-            <div class="library-grid">
-                @for (var i = 0; i < 12; i++)
-                {
-                    <div class="library-card library-card-skeleton">
-                        <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
-                        <span class="library-card-skeleton-line"></span>
-                        <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
-                    </div>
-                }
-            </div>
-        }
-        else
-        {
-            <PosterGrid Items="_items" Variant="grid" VideoLinks="!IsAnime" EmptyMessage="Nothing to show here." />
-        }
-    </div>
-
-    @if (_canLoadMore)
+    @if (!_hasTag)
     {
-        <div class="discover-pagination">
-            <button type="button" class="discover-paginator" disabled="@_loading" @onclick="LoadMore">
-                @(_loading ? "Loading…" : "Load more")
-            </button>
+        <DiscoverTabs ActiveList="@(_isHidden ? null : _animeList)" Genre="@Genre" Search="@Search"
+                      Season="@Season" ShowHidden="State.LoggedIn" HiddenActive="_isHidden" />
+
+        @if (!_isHidden)
+        {
+            <form class="filter-bar" role="search" @onsubmit="ApplyAnimeFilters">
+                <input type="search" @bind="_searchInput" @bind:event="oninput"
+                       placeholder="Search anime…" class="filter-bar-search" autocomplete="off" />
+
+                <select class="filter-bar-select" aria-label="Genre" @bind="_genreInput">
+                    <option value="">All genres</option>
+                    @foreach (var g in AnimeGenres)
+                    {
+                        <option value="@g">@g</option>
+                    }
+                </select>
+
+                @if (_animeList == "seasonal")
+                {
+                    <select class="filter-bar-select" aria-label="Season" @bind="_seasonInput">
+                        @foreach (var s in _seasonOptions)
+                        {
+                            <option value="@s">@s</option>
+                        }
+                    </select>
+                }
+
+                <button type="submit" class="filter-bar-submit">Search</button>
+
+                @if (_hasSearch || _hasGenre)
+                {
+                    <a class="filter-bar-clear" href="@AnimeClearHref()">Clear</a>
+                }
+            </form>
+        }
+    }
+}
+else
+{
+    <VideoModeTabs Modes="_videoModes" ActiveMode="@_videoMode" Genre="@Genre" Search="@Search" />
+
+    <form class="filter-bar" role="search" @onsubmit="ApplyVideoFilters">
+        <input type="search" @bind="_searchInput" @bind:event="oninput"
+               placeholder="Search @_videoLabelLower…" class="filter-bar-search" autocomplete="off" />
+
+        <select class="filter-bar-select" aria-label="Genre" @bind="_genreInput">
+            <option value="">All genres</option>
+            @foreach (var g in VideoGenres)
+            {
+                <option value="@g">@g</option>
+            }
+        </select>
+
+        <button type="submit" class="filter-bar-submit">Search</button>
+
+        @if (_hasSearch || _hasGenre)
+        {
+            <a class="filter-bar-clear" href="/discover">Clear</a>
+        }
+    </form>
+}
+
+@* Results pane — skeleton while page 1 loads; bare grid for search; paginated grid + sentinel otherwise. *@
+<div id="discover-results-pane">
+    @if (_loading && _items.Count == 0)
+    {
+        <div class="library-grid">
+            @for (var i = 0; i < 12; i++)
+            {
+                <div class="library-card library-card-skeleton">
+                    <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
+                    <span class="library-card-skeleton-line"></span>
+                    <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                </div>
+            }
         </div>
     }
-</section>
+    else if (_searchMode)
+    {
+        <PosterGrid Items="_items" Variant="grid" VideoLinks="@(!IsAnime)" EmptyMessage="@_emptyMessage" />
+    }
+    else
+    {
+        <div class="discover-paginator">
+            @* Hidden can hold anime + movies/series, so tag video ids with ?type= there too. *@
+            <PosterGrid Items="_items" Variant="grid" VideoLinks="@(!IsAnime || _isHidden)" EmptyMessage="@_emptyMessage" />
+            <div class="paginator-loader" hidden="@(!(_loading && _items.Count > 0))" aria-hidden="true">
+                <div class="paginator-loader-spinner"></div>
+            </div>
+            <div class="discover-sentinel" @ref="_sentinel" aria-hidden="true"></div>
+        </div>
+    }
+</div>
 
 @code {
-    // Catalog tabs differ by surface: anime has the AniList list types; video
-    // (Trakt) has trending / popular / anticipated.
-    private static readonly (string, string)[] AnimeKinds =
-    {
-        ("trending", "Trending"), ("popular", "Most Popular"), ("seasonal", "Seasonal"), ("airing", "Airing"),
-    };
-    private static readonly (string, string)[] VideoKinds =
-    {
-        ("trending", "Trending"), ("popular", "Most Popular"), ("anticipated", "Anticipated"),
-    };
+    // ── Query string: deep-link entry points; tab pills + the filter bar navigate by rewriting these. ──
+    [SupplyParameterFromQuery] public string? List { get; set; }
+    [SupplyParameterFromQuery] public string? Genre { get; set; }
+    [SupplyParameterFromQuery] public string? Search { get; set; }
+    [SupplyParameterFromQuery] public string? Season { get; set; }
+    [SupplyParameterFromQuery] public string? Tag { get; set; }
+    [SupplyParameterFromQuery] public string? Type { get; set; }
 
-    private readonly string[] _genres =
+    // Exact catalog/genre lists from DiscoverController (DiscoverListTypes order, PopularGenres, VideoGenres).
+    private static readonly (string Slug, string Label)[] AnimeTabs =
     {
-        "Action", "Adventure", "Comedy", "Drama", "Slice of Life", "Romance",
-        "Fantasy", "Sci-Fi", "Mystery", "Psychological", "Supernatural", "Sports",
-        "Horror", "Thriller", "Music", "Mecha",
+        ("trending", "Trending"), ("popular", "Popular"), ("seasonal", "Seasonal"), ("airing", "Airing"),
     };
-
-    private string _kind = "trending";
-    private string _genre = "";
-    private bool _loading;
-    private bool _canLoadMore;
-    private readonly List<MetaDto> _items = new();
+    private static readonly string[] AnimeGenres =
+    {
+        "Action", "Adventure", "Comedy", "Drama", "Slice of Life", "Romance", "Fantasy", "Sci-Fi",
+        "Mystery", "Psychological", "Sports", "Supernatural", "Music", "Horror", "Thriller",
+    };
+    private static readonly string[] VideoGenres =
+    {
+        "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", "Drama", "Family",
+        "Fantasy", "History", "Horror", "Mystery", "Romance", "Sci-Fi", "Thriller", "War",
+    };
+    private static readonly string[] SeasonNames = { "Winter", "Spring", "Summer", "Fall" };
 
     private bool IsAnime => State.MediaType == MetaType.anime;
-    private (string Kind, string Label)[] Kinds => IsAnime ? AnimeKinds : VideoKinds;
 
-    protected override void OnInitialized() => State.Changed += OnStateChanged;
+    // ── Surface state, recomputed each Refresh() ──
+    private string _animeList = "trending";
+    private bool _isHidden;
+    private bool _hasTag;
+    private string _videoMode = "popular";
+    private IReadOnlyList<VideoModeDto> _videoModes = new[] { new VideoModeDto { Slug = "popular", Label = "Popular" } };
+    private bool _videoModesResolved;
+    private string _videoLabelLower = "movies";
+    private bool _hasSearch;
+    private bool _hasGenre;
+    private bool _searchMode;   // search → single-shot bare grid, no infinite scroll
 
-    protected override Task OnInitializedAsync() => Reload();
+    // ── Filter inputs (applied together on the Search button / Enter) ──
+    private string _searchInput = "";
+    private string _genreInput = "";
+    private string _seasonInput = "";
+    private IReadOnlyList<string> _seasonOptions = Array.Empty<string>();
 
-    private async Task Reload()
+    // ── Grid + paging ──
+    private readonly List<MetaDto> _items = new();
+    private readonly HashSet<string> _seenIds = new(StringComparer.Ordinal);
+    private bool _loading;
+    private bool _done;
+    private string _emptyMessage = "";
+    private string _pageTitle = "Discover · AniSync";
+
+    // ── Infinite-scroll interop ──
+    private ElementReference _sentinel;
+    private IJSObjectReference? _scroll;
+    private DotNetObjectReference<Discover>? _selfRef;
+    private int _observerId;
+    private MetaType _surfaceMediaType;
+    private bool _hydrated;
+    private MetaType? _pendingPersistType;
+
+    protected override void OnInitialized()
     {
-        _items.Clear();
-        _canLoadMore = false;
-        await Load();
+        _surfaceMediaType = State.MediaType;
+        _hydrated = State.MediaTypesHydrated;
+        State.Changed += OnStateChanged;
     }
 
-    private Task LoadMore() => Load();
-
-    private async Task Load()
+    protected override async Task OnParametersSetAsync()
     {
-        _loading = true;
-        StateHasChanged();
-        var skip = _items.Count > 0 ? _items.Count.ToString() : null;
+        // A ?type= deep-link (dashboard "View all · Series", the browse-by pages) overrides the
+        // active media mode + persists it; the surface then follows State.MediaType. SetMediaType
+        // fires Changed → OnStateChanged → Refresh, so return here to avoid loading twice.
+        if (!string.IsNullOrWhiteSpace(Type) && Enum.TryParse<MetaType>(Type, true, out var t) && t != State.MediaType)
+        {
+            _pendingPersistType = t;
+            _surfaceMediaType = t;
+            State.SetMediaType(t);
+            return;
+        }
+        await Refresh();
+    }
 
-        IReadOnlyList<MetaDto> page;
+    private async Task Refresh()
+    {
+        _hasTag = IsAnime && !string.IsNullOrWhiteSpace(Tag);
+        _isHidden = IsAnime && string.Equals(List, "hidden", StringComparison.OrdinalIgnoreCase) && State.LoggedIn;
+        _hasSearch = !string.IsNullOrWhiteSpace(Search);
+        _hasGenre = !string.IsNullOrWhiteSpace(Genre);
+        _searchMode = _hasSearch && !_hasTag && !_isHidden;
+
+        _searchInput = Search ?? "";
+        _genreInput = Genre ?? "";
+
         if (IsAnime)
         {
-            page = await Api.DiscoverAsync(_kind, string.IsNullOrEmpty(_genre) ? null : _genre, skip);
+            _animeList = (List ?? "").ToLowerInvariant() switch
+            {
+                "popular" => "popular",
+                "seasonal" => "seasonal",
+                "airing" => "airing",
+                _ => "trending",
+            };
+            if (_animeList == "seasonal")
+            {
+                _seasonOptions = BuildSeasonalOptions();
+                _seasonInput = !string.IsNullOrWhiteSpace(Season) ? Season!.Trim() : CurrentSeasonLabel();
+            }
         }
         else
         {
-            var type = State.MediaType == MetaType.movie ? "movie" : "series";
-            page = await Api.DiscoverVideoAsync(type, _kind, skip);
+            _videoLabelLower = State.MediaType == MetaType.movie ? "movies" : "series";
+            await EnsureVideoModesAsync();
+            var requested = (List ?? "").ToLowerInvariant();
+            _videoMode = _videoModes.Any(m => m.Slug == requested)
+                ? requested
+                : (_videoModes.Any(m => m.Slug == "trending") ? "trending" : "popular");
         }
 
-        _items.AddRange(page);
-        _canLoadMore = page.Count >= 20;   // a full-ish page implies more pages
-        _loading = false;
-        StateHasChanged();
+        _pageTitle = BuildTitle();
+
+        // Hold the first load until the media-type preference has hydrated, so the page paints
+        // the chosen surface directly instead of flashing the default (anime) first.
+        if (!State.MediaTypesHydrated)
+        {
+            _loading = true;
+            _items.Clear();
+            StateHasChanged();
+            return;
+        }
+        await ReloadGridAsync();
     }
 
-    private async void SetKind(string kind)
+    private async Task ReloadGridAsync()
     {
-        if (_kind == kind) return;
-        _kind = kind;
-        await Reload();
+        _items.Clear();
+        _seenIds.Clear();
+        _done = false;
+        _loading = true;
+        StateHasChanged();
+        await LoadPageAsync(initial: true);
     }
 
-    // On a media-type switch, reset to a tab valid for the new surface, then reload.
+    [JSInvokable]
+    public async Task OnSentinelVisibleAsync()
+    {
+        if (_searchMode || _done || _loading) return;
+        await LoadPageAsync(initial: false);
+    }
+
+    private async Task LoadPageAsync(bool initial)
+    {
+        if (!initial && (_loading || _done)) return;
+        _loading = true;
+        if (!initial) StateHasChanged();   // reveal the inline loader for page 2+
+
+        var skip = _items.Count > 0 ? _items.Count.ToString() : null;
+        IReadOnlyList<MetaDto> page;
+        try
+        {
+            if (_isHidden)
+            {
+                page = await Api.HiddenAsync(skip);
+            }
+            else if (_hasTag)
+            {
+                var resp = await Api.DiscoverByTagAsync(Tag!, skip);
+                page = resp.Items;
+                if (!resp.HasNextPage) _done = true;
+            }
+            else if (IsAnime)
+            {
+                page = await Api.DiscoverAsync(_animeList,
+                    genre: _hasGenre ? Genre : null,
+                    skip: skip,
+                    season: _animeList == "seasonal" ? _seasonInput : null,
+                    search: _searchMode ? Search : null);
+            }
+            else
+            {
+                var type = State.MediaType == MetaType.movie ? "movie" : "series";
+                page = await Api.DiscoverVideoAsync(type, _videoMode, skip,
+                    genre: _hasGenre ? Genre : null,
+                    search: _searchMode ? Search : null);
+            }
+        }
+        catch
+        {
+            page = Array.Empty<MetaDto>();
+        }
+
+        // Dedupe by id — a provider that ignores skip (e.g. Kitsu's seasonal endpoint) would
+        // otherwise repeat the same page and the grid would grow with duplicates.
+        var added = 0;
+        foreach (var m in page)
+        {
+            if (string.IsNullOrEmpty(m.Id) || _seenIds.Add(m.Id)) { _items.Add(m); added++; }
+        }
+        // Search is single-shot; pagination ends on an empty / all-duplicate page.
+        if (_searchMode || added == 0) _done = true;
+
+        _loading = false;
+        _emptyMessage = _items.Count == 0 ? BuildEmptyMessage() : "";
+        StateHasChanged();
+
+        // Re-arm so a short page that left the sentinel in view keeps pulling.
+        if (_observerId != 0 && !_done && _scroll is not null)
+        {
+            try { await _scroll.InvokeVoidAsync("reobserve", _observerId); } catch { }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            try { _scroll = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/discover-scroll.js"); }
+            catch { return; }
+        }
+        if (_scroll is null) return;
+
+        if (_pendingPersistType is { } pt)
+        {
+            _pendingPersistType = null;
+            await PersistActiveTypeAsync(pt);
+        }
+
+        // Bind the sentinel observer only when the paginated pane is actually rendered (not the
+        // skeleton, not search mode). The pane — and the sentinel element — is destroyed +
+        // recreated whenever a reload goes through the skeleton state, so disconnect on teardown
+        // and re-observe the fresh element when it returns.
+        var paginatorRendered = !_searchMode && !(_loading && _items.Count == 0);
+        if (paginatorRendered && _observerId == 0)
+        {
+            try { _observerId = await _scroll.InvokeAsync<int>("observe", _sentinel, _selfRef); } catch { }
+        }
+        else if (!paginatorRendered && _observerId != 0)
+        {
+            try { await _scroll.InvokeVoidAsync("disconnect", _observerId); } catch { }
+            _observerId = 0;
+        }
+    }
+
     private async void OnStateChanged()
     {
-        if (!Kinds.Any(k => k.Item1 == _kind)) _kind = "trending";
-        await InvokeAsync(Reload);
+        var surfaceChanged = _surfaceMediaType != State.MediaType;
+        var justHydrated = !_hydrated && State.MediaTypesHydrated;
+        _surfaceMediaType = State.MediaType;
+        _hydrated = State.MediaTypesHydrated;
+        if (surfaceChanged || justHydrated) await InvokeAsync(Refresh);
+        else await InvokeAsync(StateHasChanged);   // unrelated change (e.g. login) — refresh chrome only
     }
 
-    public void Dispose() => State.Changed -= OnStateChanged;
+    private async Task EnsureVideoModesAsync()
+    {
+        if (_videoModesResolved) return;
+        _videoModesResolved = true;
+        // Server-authoritative mode list (Trakt configured/connected gating computed server-side,
+        // exactly like DiscoverController.VideoBrowseAsync). Popular-only when Trakt isn't configured.
+        var modes = await Api.VideoModesAsync();
+        if (modes.Count > 0) _videoModes = modes;
+    }
+
+    private async Task PersistActiveTypeAsync(MetaType t)
+    {
+        try
+        {
+            var mt = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/media-type.js");
+            await mt.InvokeVoidAsync("setActiveOnly", t.ToString());
+            await mt.DisposeAsync();
+        }
+        catch { /* prerender / no JS */ }
+    }
+
+    // ── Filter-bar submit + the anime Clear href (preserve the applied filters) ──
+    private void ApplyAnimeFilters()
+    {
+        var q = new List<string> { $"list={_animeList}" };
+        if (!string.IsNullOrWhiteSpace(_genreInput)) q.Add($"genre={Uri.EscapeDataString(_genreInput)}");
+        if (!string.IsNullOrWhiteSpace(_searchInput)) q.Add($"search={Uri.EscapeDataString(_searchInput.Trim())}");
+        if (_animeList == "seasonal" && !string.IsNullOrWhiteSpace(_seasonInput)) q.Add($"season={Uri.EscapeDataString(_seasonInput)}");
+        Nav.NavigateTo("/discover?" + string.Join("&", q));
+    }
+
+    private void ApplyVideoFilters()
+    {
+        var q = new List<string> { $"list={_videoMode}" };
+        if (!string.IsNullOrWhiteSpace(_genreInput)) q.Add($"genre={Uri.EscapeDataString(_genreInput)}");
+        if (!string.IsNullOrWhiteSpace(_searchInput)) q.Add($"search={Uri.EscapeDataString(_searchInput.Trim())}");
+        Nav.NavigateTo("/discover?" + string.Join("&", q));
+    }
+
+    private string AnimeClearHref()
+    {
+        var q = new List<string> { $"list={_animeList}" };
+        if (_animeList == "seasonal" && !string.IsNullOrWhiteSpace(Season)) q.Add($"season={Uri.EscapeDataString(Season!)}");
+        return "/discover?" + string.Join("&", q);
+    }
+
+    private string BuildTitle()
+    {
+        if (!IsAnime)
+        {
+            var label = State.MediaType == MetaType.movie ? "Movies" : "Series";
+            if (_hasSearch) return $"Search: {Search} · {label}";
+            if (_hasGenre) return $"{Genre} · {label}";
+            return $"{label} · AniSync";
+        }
+        if (_isHidden) return "Hidden · Discover";
+        if (_hasSearch) return $"Search: {Search} · Discover";
+        if (_hasTag) return $"#{Tag} · Discover";
+        if (_hasGenre) return $"{Genre} · Discover";
+        if (_animeList == "seasonal") return $"{_seasonInput} · Discover";
+        return $"{AnimeTabs.First(t => t.Slug == _animeList).Label} · Discover";
+    }
+
+    private string BuildEmptyMessage()
+    {
+        if (!IsAnime)
+        {
+            if (_hasSearch) return $"No matches for \"{Search}\".";
+            if (_hasGenre) return $"No {Genre!.ToLower()} {_videoLabelLower} right now.";
+            return $"Couldn't load {_videoLabelLower} — try again later.";
+        }
+        if (_isHidden) return "You haven't hidden anything yet. Open a title and use Hide to tuck it away here.";
+        if (_hasSearch) return $"No matches for \"{Search}\".";
+        if (_hasTag) return $"No anime found with the tag \"{Tag}\".";
+        var activeLabel = AnimeTabs.First(t => t.Slug == _animeList).Label.ToLower();
+        if (_hasGenre) return $"No {Genre!.ToLower()} anime in {activeLabel} right now.";
+        return $"Couldn't load {activeLabel} anime — try again later.";
+    }
+
+    private static IReadOnlyList<string> BuildSeasonalOptions(int yearsBack = 10)
+    {
+        var now = DateTime.UtcNow;
+        var idx = ((now.Month - 1) / 3) + 1;   // start one season ahead (the upcoming-season entry leads)
+        var year = now.Year;
+        if (idx > 3) { idx -= 4; year++; }
+        var total = yearsBack * 4 + 1;
+        var result = new List<string>(total);
+        for (var i = 0; i < total; i++)
+        {
+            result.Add($"{SeasonNames[idx]} {year}");
+            idx--;
+            if (idx < 0) { idx = 3; year--; }
+        }
+        return result;
+    }
+
+    private static string CurrentSeasonLabel()
+    {
+        var now = DateTime.UtcNow;
+        return $"{SeasonNames[(now.Month - 1) / 3]} {now.Year}";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        State.Changed -= OnStateChanged;
+        if (_scroll is not null)
+        {
+            if (_observerId != 0) { try { await _scroll.InvokeVoidAsync("disconnect", _observerId); } catch { } }
+            try { await _scroll.DisposeAsync(); } catch { }
+        }
+        _selfRef?.Dispose();
+    }
 }

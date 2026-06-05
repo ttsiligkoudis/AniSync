@@ -86,4 +86,9 @@ namespace AnimeList.Controllers
 
     /// <summary>A person's filmography split into movies + series.</summary>
     public record ActorCreditsResponse(string Slug, string Name, string Image, List<Meta> Movies, List<Meta> Series);
+
+    /// <summary>The movies/series Discover mode pills (slug + display label), gated by Trakt
+    /// configured/connected server-side — see ApiController.VideoModes.</summary>
+    public record VideoModesResponse(List<VideoModeDto> Modes);
+    public record VideoModeDto(string Slug, string Label);
 }

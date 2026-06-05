@@ -1,5 +1,6 @@
 @inject NavigationManager Nav
 @inject AppState State
+@implements IDisposable
 
 @* Mobile bottom nav + floating "More" sheet — exact port of _Layout.cshtml.
    site.css hides it on wide viewports. The More toggle / sheet behaviour is
@@ -95,7 +96,7 @@
     }
     else
     {
-        <a href="/login" class="bottom-nav-more-row" role="menuitem">
+        <a href="/account" class="bottom-nav-more-row" role="menuitem">
             <svg class="bottom-nav-more-row-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
                 <polyline points="10 17 15 12 10 7"></polyline>
@@ -109,8 +110,29 @@
 @code {
     private string _active = "";
 
+    protected override void OnInitialized()
+    {
+        _active = NavActive.From(Nav.ToBaseRelativePath(Nav.Uri));
+        State.Changed += OnChanged;
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
     protected override void OnParametersSet()
         => _active = NavActive.From(Nav.ToBaseRelativePath(Nav.Uri));
+
+    private void OnChanged() => StateHasChanged();
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        _active = NavActive.From(Nav.ToBaseRelativePath(Nav.Uri));
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        State.Changed -= OnChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
 
     private string Cls(string section) => _active == section ? "active" : "";
 }

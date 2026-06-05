@@ -4,6 +4,7 @@
 @inject AppState State
 @inject ISecureStore Store
 @inject IAniSyncApi Api
+@inject IJSRuntime JS
 
 @* Shared chrome for every page — composed to match _Layout.cshtml's body
    order exactly: drawer (+ backdrop), site header, fixed media-type switch,
@@ -13,6 +14,8 @@
 <NavDrawer />
 
 <AppHeader />
+
+<MediaTypeModal />
 
 <MediaTypeSwitch />
 
@@ -41,7 +44,41 @@
             if (!string.IsNullOrEmpty(saved)) State.SetStreamConfig(saved);
         }
 
+        await HydrateMediaTypesAsync();
         await HydrateSessionAsync();
+    }
+
+    // Seed the switch / dashboard from the stored media-type preference so they
+    // reflect the chosen modes on load. The chooser modal owns first-visit /
+    // autodefault; this only mirrors an existing pick into AppState (interactive
+    // only — prerender has no JS / localStorage).
+    private async Task HydrateMediaTypesAsync()
+    {
+        if (!RendererInfo.IsInteractive) return;
+        try
+        {
+            var js = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/media-type.js");
+            var stored = await js.InvokeAsync<string[]>("getEnabled");
+            if (stored is { Length: > 0 })
+            {
+                var set = stored
+                    .Select(s => Enum.TryParse<MetaType>(s, out var mt) ? (MetaType?)mt : null)
+                    .Where(mt => mt.HasValue)
+                    .Select(mt => mt!.Value)
+                    .ToList();
+                if (set.Count > 0)
+                {
+                    var activeStr = await js.InvokeAsync<string>("getActive");
+                    var active = Enum.TryParse<MetaType>(activeStr, out var a) && set.Contains(a) ? a : set[0];
+                    State.SetEnabledMediaTypes(set, active);
+                }
+            }
+            await js.DisposeAsync();
+        }
+        catch { /* prerender / no JS */ }
+        // Mark hydrated even when nothing was stored (the default set stands) so the
+        // dashboard + switch render now rather than waiting on a set that never comes.
+        State.MarkMediaTypesHydrated();
     }
 
     // Resolve login + the "Connected to X · Y" chrome label. Logged-in == a config

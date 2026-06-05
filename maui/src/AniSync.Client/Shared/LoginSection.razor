@@ -1,0 +1,168 @@
+@inject IAppEnvironment Env
+@inject INativeAuth Native
+@inject AppState State
+@inject ISecureStore Store
+@inject NavigationManager Nav
+
+@* Shared login surface — Blazor port of _LoginSection.cshtml. The provider picker
+   lives in the AccountSection component above this one; here we render the Kitsu
+   inline credentials form, the dispatch button, and (optionally) the anonymous
+   fallback. The Kitsu credentials POST to /Auth/LoginKitsu rather than riding in
+   the URL; AniList / MAL use the GET /Auth/Login redirect-start. Visibility mirrors
+   the picker (the original's JS $(...).toggle() becomes Blazor's re-render off the
+   selected service). On the native head the web anchors/forms are replaced by the
+   INativeAuth path, mirroring Login.razor. *@
+
+<div class="card-section" id="loginCard">
+    @if (Native.IsSupported)
+    {
+        @* Native head: the password grant / OAuth run through INativeAuth (no
+           browser redirect). Mirrors Login.razor's native branch. *@
+        @if (IsKitsu)
+        {
+            <div id="kitsuCreds">
+                <div class="cred-group">
+                    <label for="username" class="required">Username</label>
+                    <input type="text" id="username" name="username" autocomplete="username" required
+                           value="@_username" @oninput="e => _username = e.Value?.ToString() ?? string.Empty" />
+                </div>
+                <div class="cred-group">
+                    <label for="password" class="required">Password</label>
+                    <input type="password" id="password" name="password" autocomplete="current-password" required
+                           value="@_password" @oninput="e => _password = e.Value?.ToString() ?? string.Empty" />
+                </div>
+                <p class="option-name-sub" style="margin-top: 0.5rem;">
+                    AniSync uses your password only for the initial sign-in to Kitsu — it is not stored
+                    in the configuration. After login we keep just the OAuth tokens Kitsu issues, and
+                    refresh them automatically when they expire.
+                </p>
+            </div>
+            <button type="button" id="kitsuLoginBtn" class="btn-primary-action btn-login" disabled="@_busy" @onclick="NativeKitsuAsync">
+                @(_busy ? "Signing in…" : "Login with Kitsu")
+            </button>
+        }
+        else
+        {
+            <button type="button" id="loginUrl" class="btn-primary-action btn-login" disabled="@_busy" @onclick="() => NativeOAuthAsync(SelectedService)">
+                Login with <span id="loginServiceName">@ServiceDisplay</span>
+            </button>
+        }
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <p class="hint-text" role="alert">@_error</p>
+        }
+    }
+    else
+    {
+        <form id="kitsuLoginForm" method="post"
+              action="@AuthAction("LoginKitsu")"
+              autocomplete="on"
+              style="display:@(IsKitsu ? "block" : "none")">
+            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+            <div id="kitsuCreds">
+                <div class="cred-group">
+                    <label for="username" class="required">Username</label>
+                    <input type="text" id="username" name="username" autocomplete="username" required />
+                </div>
+                <div class="cred-group">
+                    <label for="password" class="required">Password</label>
+                    <input type="password" id="password" name="password" autocomplete="current-password" required />
+                </div>
+                <p class="option-name-sub" style="margin-top: 0.5rem;">
+                    AniSync uses your password only for the initial sign-in to Kitsu — it is not stored
+                    in the configuration. After login we keep just the OAuth tokens Kitsu issues, and
+                    refresh them automatically when they expire.
+                </p>
+            </div>
+            <button type="submit" id="kitsuLoginBtn" class="btn-primary-action btn-login">
+                Login with Kitsu
+            </button>
+        </form>
+        <a id="loginUrl" class="btn-primary-action btn-login"
+           data-return-url="@ReturnUrl"
+           style="display:@(IsKitsu ? "none" : "block")"
+           href="@OauthUrl">
+            Login with <span id="loginServiceName">@ServiceDisplay</span>
+        </a>
+    }
+    <div id="kitsuRegister" class="kitsu-register" style="display:@(IsKitsu ? "block" : "none")">
+        <a href="@AuthAction("Register")?returnUrl=@Uri.EscapeDataString(ReturnUrl)" class="hint-text">Don't have a Kitsu account? <span class="kitsu-register-link">Create one</span></a>
+    </div>
+    <div id="anilistRegister" class="kitsu-register" style="display:@(IsAnilist ? "block" : "none")">
+        <a href="https://anilist.co/signup" target="_blank" rel="noopener noreferrer" class="hint-text">Don't have an AniList account? <span class="kitsu-register-link">Create one ↗</span></a>
+    </div>
+    <div id="malRegister" class="kitsu-register" style="display:@(IsMal ? "block" : "none")">
+        <a href="https://myanimelist.net/register.php" target="_blank" rel="noopener noreferrer" class="hint-text">Don't have a MyAnimeList account? <span class="kitsu-register-link">Create one ↗</span></a>
+    </div>
+</div>
+
+@if (AllowAnonymous)
+{
+    <p class="hint-text">Login to your anime list provider to get started.</p>
+
+    <a id="loginAnonymousUrl" class="btn-primary-action btn-login"
+       data-return-url="@ReturnUrl"
+       href="@AnonymousUrl">
+       Or Continue without Account
+    </a>
+}
+
+@code {
+    [Parameter] public string SelectedService { get; set; } = "Kitsu";
+    [Parameter] public string ReturnUrl { get; set; } = "/";
+    [Parameter] public bool AllowAnonymous { get; set; }
+
+    // Native (MAUI) sign-in state — the web head uses anchors/forms instead.
+    private string _username = "";
+    private string _password = "";
+    private bool _busy;
+    private string? _error;
+
+    private bool IsKitsu => string.Equals(SelectedService, "Kitsu", StringComparison.OrdinalIgnoreCase);
+    private bool IsAnilist => string.Equals(SelectedService, "Anilist", StringComparison.OrdinalIgnoreCase);
+    private bool IsMal => string.Equals(SelectedService, "MyAnimeList", StringComparison.OrdinalIgnoreCase);
+
+    private string ServiceDisplay => SelectedService switch
+    {
+        "Anilist" => "AniList",
+        "MyAnimeList" => "MyAnimeList",
+        "Trakt" => "Trakt",
+        _ => "Kitsu",
+    };
+
+    private string AuthAction(string action) => $"{Env.ApiBaseUrl.TrimEnd('/')}/Auth/{action}";
+
+    private string OauthUrl =>
+        $"{AuthAction("Login")}?animeService={Uri.EscapeDataString(SelectedService)}&returnUrl={Uri.EscapeDataString(ReturnUrl)}";
+
+    private string AnonymousUrl =>
+        $"{AuthAction("Login")}?animeService={Uri.EscapeDataString(SelectedService)}&anonymous=true&returnUrl={Uri.EscapeDataString(ReturnUrl)}";
+
+    private async Task NativeOAuthAsync(string service)
+    {
+        _busy = true; _error = null;
+        var config = await Native.StartOAuthAsync(service);
+        await FinishNativeAsync(config);
+    }
+
+    private async Task NativeKitsuAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_username) || string.IsNullOrWhiteSpace(_password))
+        {
+            _error = "Enter your Kitsu username and password.";
+            return;
+        }
+        _busy = true; _error = null;
+        var config = await Native.LoginKitsuAsync(_username.Trim(), _password);
+        await FinishNativeAsync(config);
+    }
+
+    private async Task FinishNativeAsync(string? config)
+    {
+        _busy = false;
+        if (string.IsNullOrEmpty(config)) { _error = "Sign-in failed or was cancelled."; return; }
+        await Store.SetAsync(ISecureStore.ConfigKey, config);
+        State.SetStreamConfig(config);
+        Nav.NavigateTo(ReturnUrl);
+    }
+}

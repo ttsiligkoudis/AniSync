@@ -16,11 +16,10 @@
 
 <PageTitle>Stremio addon · AniSync</PageTitle>
 
-<section class="container config-page">
-    <header class="page-header">
-        <h1 class="page-title">Stremio addon</h1>
-        <p class="page-subtitle">Catalogs · streams · install URL</p>
-    </header>
+<header class="page-header">
+    <h1 class="page-title">Stremio addon</h1>
+    <p class="page-subtitle">Catalogs · streams · install URL</p>
+</header>
 
     @if (_loading)
     {
@@ -38,6 +37,7 @@
     else
     {
         <AccountSection Config="_config" OnReload="ReloadAsync" />
+        <LinkedAccountsSection Config="_config" OnReload="ReloadAsync" ReturnUrl="/configure" />
 
         <!-- ─── CATALOGS ─── -->
         <section class="section-card">
@@ -284,14 +284,8 @@
         </section>
 
         <!-- ─── FLOATING SAVE BAR ─── -->
-        <div class="floating-save-bar" aria-live="polite" role="status">
-            <span class="floating-save-status">@(_dirty ? "Unsaved changes" : "All changes saved")</span>
-            <button class="floating-save-btn" type="button" disabled="@_saving" @onclick="SaveAsync">
-                @(_saving ? "Saving…" : "Save")
-            </button>
-        </div>
+        <FloatingSaveBar Dirty="_dirty" Saving="_saving" OnSave="SaveAsync" />
     }
-</section>
 
 @code {
     private bool _loading = true;
@@ -376,6 +370,19 @@
         _debridProvider = _catalog.Providers.FirstOrDefault()?.Id ?? "";
         foreach (var a in _catalog.Addons) _debridAddons.Add(a.Id!);
         _loading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // body.config-page (original's ViewData["BodyClass"]) → main padding clears
+        // the fixed save bar. OnAfterRenderAsync only runs interactively.
+        if (!firstRender) return;
+        try
+        {
+            _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/configure.js");
+            await _js.InvokeVoidAsync("setConfigPage", true);
+        }
+        catch { /* prerender / no JS */ }
     }
 
     private async Task ReloadAsync()
@@ -508,6 +515,10 @@
 
     public async ValueTask DisposeAsync()
     {
-        if (_js is not null) { try { await _js.DisposeAsync(); } catch { } }
+        if (_js is not null)
+        {
+            try { await _js.InvokeVoidAsync("setConfigPage", false); } catch { }
+            try { await _js.DisposeAsync(); } catch { }
+        }
     }
 }

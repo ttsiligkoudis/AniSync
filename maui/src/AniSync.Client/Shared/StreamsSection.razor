@@ -1,0 +1,349 @@
+@inject IAniSyncApi Api
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@* Shared Streams settings card — Blazor port of _StreamsSection.cshtml. Renders the
+   streams-grid toggles (Manage Entry only when IsStremio; Auto-track when not
+   anonymous; External services always) and, when !IsStremio on a uid-backed config,
+   the full stream-addon manager: the one-click debrid setup, the stream-addon list
+   (drag handle + configure / copy / remove), the manual manifest-URL paste row and
+   the helper paragraph. Toggle changes mark the page dirty; addon add / remove /
+   reorder / copy + debrid add use the same Api.* calls Configure.razor uses. Reorder
+   is drag-by-handle, ported via the configure.js pointer-drag interop. *@
+
+<section class="section-card" id="streams">
+    <span class="section-title">Streams</span>
+    <p class="section-description">
+        @if (IsStremio)
+        {
+            <text>Choose what AniSync attaches to each episode in Stremio.</text>
+        }
+        else
+        {
+            <text>Stream sources surfaced on the in-app episode picker.</text>
+        }
+    </p>
+
+    <div class="streams-grid">
+        @if (IsStremio)
+        {
+            <div class="stream-option">
+                <div class="option-name-wrap">
+                    <span class="option-name">Manage Entry</span>
+                    <span class="option-name-sub">Quick-edit progress, score and notes from Stremio.</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="showManageEntry" checked="@ManageEntry"
+                           @onchange="e => Set(v => ManageEntry = v, (bool)e.Value!)" />
+                    <span class="slider"></span>
+                </label>
+            </div>
+        }
+
+        <div class="stream-option">
+            <div class="option-name-wrap">
+                <span class="option-name">Auto-track progress</span>
+                <span class="option-name-sub">Update your list when you start an episode.</span>
+            </div>
+            <label class="switch">
+                <input type="checkbox" id="autoTrackProgress" checked="@AutoTrack"
+                       @onchange="e => Set(v => AutoTrack = v, (bool)e.Value!)" />
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="stream-option">
+            <div class="option-name-wrap">
+                <span class="option-name">External services</span>
+                <span class="option-name-sub">Crunchyroll, Netflix, HiDive, …</span>
+            </div>
+            <label class="switch">
+                <input type="checkbox" id="showExternalStreams" checked="@Flags.ShowExternalStreams"
+                       @onchange="e => Set(v => Flags.ShowExternalStreams = v, (bool)e.Value!)" />
+                <span class="slider"></span>
+            </label>
+        </div>
+    </div>
+
+    @if (!IsStremio && Config is not null && !string.IsNullOrEmpty(Config.ApiConfig))
+    {
+        <p class="manifest-url-label" style="margin-top: 1.5rem;">Stream addons</p>
+
+        <div class="debrid-setup" id="debridSetup">
+            <div class="debrid-setup-row">
+                <select id="debridProvider" class="debrid-select" aria-label="Debrid provider" @bind="_debridProvider">
+                    @foreach (var p in _catalog.Providers)
+                    {
+                        <option value="@p.Id" data-apikey-url="@p.ApiKeyUrl" data-signup-url="@p.SignUpUrl">@p.Name</option>
+                    }
+                </select>
+                <input id="debridApiKey" class="manifest-url-input" type="password"
+                       placeholder="Paste your API key" autocomplete="off" spellcheck="false"
+                       value="@_debridKey" @oninput="e => _debridKey = e.Value?.ToString() ?? string.Empty" />
+            </div>
+            <div class="debrid-setup-addons">
+                <span class="debrid-setup-addons-label">Add:</span>
+                @foreach (var a in _catalog.Addons)
+                {
+                    <label class="debrid-addon-check">
+                        <input type="checkbox" class="debrid-addon-toggle" value="@a.Id" checked="@_debridAddons.Contains(a.Id!)"
+                               @onchange="e => ToggleDebridAddon(a.Id!, (bool)e.Value!)" />
+                        <span>@a.Name</span>
+                    </label>
+                }
+            </div>
+            <div class="debrid-setup-actions">
+                <span class="debrid-setup-links">
+                    <a id="debridSignUpLink" class="debrid-apikey-link" target="_blank" rel="noopener"
+                       href="@(SelectedProvider?.SignUpUrl)">Sign up ↗</a>
+                    <a id="debridApiKeyLink" class="debrid-apikey-link" target="_blank" rel="noopener"
+                       href="@(SelectedProvider?.ApiKeyUrl)">Get your API key ↗</a>
+                </span>
+                <button id="debridAddBtn" class="btn-ghost btn-ghost-sm" type="button" disabled="@_debridBusy" @onclick="AddDebridAsync">
+                    @(_debridBusy ? "Setting up…" : "Save")
+                </button>
+            </div>
+            @if (!string.IsNullOrEmpty(_debridStatus))
+            {
+                <p id="debridSetupStatus" class="debrid-setup-status @_debridStatusClass" role="status" aria-live="polite">@_debridStatus</p>
+            }
+            else
+            {
+                <p id="debridSetupStatus" class="debrid-setup-status" role="status" aria-live="polite"></p>
+            }
+        </div>
+
+        <ul id="streamAddonList" class="stream-addon-list" @ref="_listRef">
+            @foreach (var addon in Config.StreamAddons)
+            {
+                var configureUrl = addon.Url?.Replace("/manifest.json", "/configure") ?? addon.Url;
+                <li class="stream-addon-row" data-url="@addon.Url">
+                    <span class="stream-addon-drag-handle" aria-label="Drag to reorder" title="Drag to reorder">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <line x1="3" y1="8" x2="21" y2="8"/>
+                            <line x1="3" y1="16" x2="21" y2="16"/>
+                        </svg>
+                    </span>
+                    <div class="stream-addon-meta">
+                        <span class="stream-addon-name">@addon.Name</span>
+                        <span class="stream-addon-url">@addon.Url</span>
+                    </div>
+                    <div class="stream-addon-actions">
+                        <a class="stream-addon-icon-btn stream-addon-configure" href="@configureUrl" target="_blank" rel="noopener" aria-label="Configure" title="Configure">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <circle cx="12" cy="12" r="3"/>
+                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                            </svg>
+                        </a>
+                        <button class="stream-addon-icon-btn stream-addon-copy" type="button" aria-label="Copy manifest URL" title="Copy manifest URL" @onclick="() => CopyAsync(addon.Url)">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                            </svg>
+                        </button>
+                        <button class="stream-addon-icon-btn stream-addon-remove" type="button" aria-label="Remove" title="Remove" @onclick="() => RemoveAddonAsync(addon.Url)">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                <line x1="10" y1="11" x2="10" y2="17"/>
+                                <line x1="14" y1="11" x2="14" y2="17"/>
+                            </svg>
+                        </button>
+                    </div>
+                </li>
+            }
+        </ul>
+        <p class="manifest-url-label">Or paste a manifest URL</p>
+        <div class="manifest-url-row">
+            <input id="streamAddonInput" class="manifest-url-input" type="text"
+                   placeholder="https://….example.com/…/manifest.json" autocomplete="off"
+                   value="@_addonInput" @oninput="e => _addonInput = e.Value?.ToString() ?? string.Empty" />
+            <button id="streamAddonAddBtn" class="btn-ghost btn-ghost-sm" type="button" style="white-space: nowrap;" disabled="@_addonBusy" @onclick="AddAddonAsync">Add</button>
+        </div>
+        <p class="option-name-sub" style="margin-top: 0.5rem;">
+            Already have a configured manifest URL? Paste any Stremio
+            stream-addon manifest — Torrentio
+            (<a href="https://torrentio.strem.fun" target="_blank" rel="noopener">torrentio.strem.fun</a>),
+            MediaFusion (<a href="https://mediafusion.elfhosted.com" target="_blank" rel="noopener">mediafusion.elfhosted.com</a>),
+            Comet (<a href="https://comet.feels.legal/configure" target="_blank" rel="noopener">comet.feels.legal</a>),
+            Jackettio, or
+            <a href="https://aiostreams.elfhosted.com" target="_blank" rel="noopener">AIOStreams</a>
+            (one URL that bundles many addons). Episode lookups fan out across every entry in
+            this list, with duplicates merged by torrent hash.
+        </p>
+    }
+</section>
+
+@code {
+    [Parameter] public bool IsStremio { get; set; }
+    [Parameter, EditorRequired] public ConfigFlags Flags { get; set; } = new();
+    [Parameter] public ConfigStateDto? Config { get; set; }
+    [Parameter] public EventCallback OnDirty { get; set; }
+    [Parameter] public EventCallback OnReload { get; set; }
+
+    private StreamCatalogDto _catalog = new();
+    private string _debridProvider = "";
+    private string _debridKey = "";
+    private readonly HashSet<string> _debridAddons = new(StringComparer.OrdinalIgnoreCase);
+    private bool _debridBusy;
+    private string? _debridStatus;
+    private string? _debridStatusClass;
+
+    private string _addonInput = "";
+    private bool _addonBusy;
+
+    private ElementReference _listRef;
+    private IJSObjectReference? _js;
+    private DotNetObjectReference<StreamsSection>? _selfRef;
+    private bool _reorderBound;
+
+    // Inverted toggles: the user-facing "on" means the disable-flag is off.
+    private bool ManageEntry { get => !Flags.HideManageEntry; set => Flags.HideManageEntry = !value; }
+    private bool AutoTrack { get => !Flags.DisableAutoTrack; set => Flags.DisableAutoTrack = !value; }
+
+    private DebridProviderDto? SelectedProvider =>
+        _catalog.Providers.FirstOrDefault(p => p.Id == _debridProvider) ?? _catalog.Providers.FirstOrDefault();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!RendererInfo.IsInteractive) return;
+        if (!IsStremio && Config is not null && !string.IsNullOrEmpty(Config.ApiConfig))
+        {
+            _catalog = await Api.StreamCatalogAsync();
+            _debridProvider = _catalog.Providers.FirstOrDefault()?.Id ?? "";
+            foreach (var a in _catalog.Addons) _debridAddons.Add(a.Id!);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Bind the pointer-drag reorder handler once the list is in the DOM. The
+        // module is imported lazily; the binding tears itself down + re-binds when
+        // the list element changes (configure.js tracks it per element).
+        if (IsStremio || Config is null || string.IsNullOrEmpty(Config.ApiConfig)) return;
+        if (_reorderBound) return;
+        try
+        {
+            _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/configure.js");
+            _selfRef ??= DotNetObjectReference.Create(this);
+            await _js.InvokeVoidAsync("bindAddonReorder", _listRef, _selfRef);
+            _reorderBound = true;
+        }
+        catch { /* JS unavailable (prerender) — reorder binds on the interactive pass */ }
+    }
+
+    private async Task Set(Action<bool> apply, bool value)
+    {
+        apply(value);
+        await OnDirty.InvokeAsync();
+    }
+
+    private void ToggleDebridAddon(string id, bool on)
+    {
+        if (on) _debridAddons.Add(id); else _debridAddons.Remove(id);
+    }
+
+    private async Task AddDebridAsync()
+    {
+        _debridStatus = null; _debridStatusClass = null;
+        var apiKey = _debridKey.Trim();
+        if (string.IsNullOrEmpty(apiKey))
+        {
+            _debridStatus = "Paste your debrid API key first."; _debridStatusClass = "is-error";
+            return;
+        }
+        if (_debridAddons.Count == 0)
+        {
+            _debridStatus = "Tick at least one addon to add."; _debridStatusClass = "is-error";
+            return;
+        }
+        _debridBusy = true;
+        var result = await Api.AddDebridAddonsAsync(new DebridSetupRequest
+        {
+            Provider = _debridProvider,
+            ApiKey = apiKey,
+            Addons = _debridAddons.ToList(),
+        });
+        if (result is not null)
+        {
+            var added = result.Added.Select(a => a.Name ?? "addon").ToList();
+            var parts = new List<string>();
+            if (added.Count > 0) parts.Add("Added " + string.Join(", ", added) + ".");
+            if (result.Skipped.Count > 0)
+            {
+                var bits = result.Skipped.Select(s => (s.Addon ?? "addon") + " — " + (s.Reason ?? "skipped"));
+                parts.Add("Skipped: " + string.Join("; ", bits) + ".");
+            }
+            if (parts.Count == 0) parts.Add("Nothing to add.");
+            _debridStatus = string.Join(" ", parts);
+            _debridStatusClass = added.Count > 0 ? "is-ok" : "is-error";
+            if (added.Count > 0)
+            {
+                _debridKey = "";
+                _reorderBound = false; // list rows change → re-bind drag after reload
+                await OnReload.InvokeAsync();
+            }
+        }
+        else
+        {
+            _debridStatus = "Could not set up addons right now."; _debridStatusClass = "is-error";
+        }
+        _debridBusy = false;
+    }
+
+    private async Task AddAddonAsync()
+    {
+        var url = _addonInput.Trim();
+        if (string.IsNullOrEmpty(url)) return;
+        _addonBusy = true;
+        var result = await Api.AddStreamAddonAsync(url);
+        if (result is { Added: true })
+        {
+            _addonInput = "";
+            _reorderBound = false;
+            await OnReload.InvokeAsync();
+        }
+        _addonBusy = false;
+    }
+
+    private async Task RemoveAddonAsync(string? url)
+    {
+        if (string.IsNullOrEmpty(url)) return;
+        if (await Api.RemoveStreamAddonAsync(url))
+        {
+            _reorderBound = false;
+            await OnReload.InvokeAsync();
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnAddonReorder(string[] urls)
+    {
+        // Drag-by-handle drop → persist the new order via the same Api call the
+        // catalog page uses, then reload so the rendered list matches the store.
+        if (urls is null || urls.Length == 0) return;
+        if (await Api.ReorderStreamAddonsAsync(urls))
+        {
+            _reorderBound = false;
+            await OnReload.InvokeAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task CopyAsync(string? url)
+    {
+        if (string.IsNullOrEmpty(url)) return;
+        try
+        {
+            _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/configure.js");
+            await _js.InvokeAsync<bool>("copyText", url);
+        }
+        catch { /* clipboard blocked */ }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_js is not null) { try { await _js.DisposeAsync(); } catch { } }
+        _selfRef?.Dispose();
+    }
+}

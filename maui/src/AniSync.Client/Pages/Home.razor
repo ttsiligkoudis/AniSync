@@ -1,6 +1,7 @@
 @page "/"
 @inject IAniSyncApi Api
 @inject AppState State
+@implements IDisposable
 
 @* Home dashboard — full port of Views/Home/Index.cshtml's section order: the
    "Your stats" strip, then the anime shelves (Continue watching / New episodes
@@ -14,33 +15,48 @@
 
 <StatsStrip />
 
-<DashboardShelf Title="Continue watching"
-                MediaType="anime"
-                DashSection="anime-continue"
-                ViewAllHref="/library?list=current&type=anime"
-                Fetch="@(() => Api.ContinueWatchingAsync())" />
+@* Anime shelves render only when anime is one of the enabled modes (mirrors
+   Index.cshtml: Continue-watching is gated on logged-in + animeEnabled, the rest
+   on animeEnabled). Each still self-hides when its fetch returns nothing. *@
+@if (State.MediaTypesHydrated && State.LoggedIn && State.EnabledMediaTypes.Contains(MetaType.anime))
+{
+    <DashboardShelf Title="Continue watching"
+                    MediaType="anime"
+                    DashSection="anime-continue"
+                    ViewAllHref="/library?list=current&type=anime"
+                    Fetch="@(() => Api.ContinueWatchingAsync())" />
+}
 
-<DashboardShelf Title="New Episodes Today"
-                MediaType="anime"
-                DashSection="anime-new-episodes"
-                MutedNote="Refreshes daily"
-                Fetch="@(() => Api.AiringTodayAsync())" />
+@if (State.MediaTypesHydrated && State.EnabledMediaTypes.Contains(MetaType.anime))
+{
+    <DashboardShelf Title="New Episodes Today"
+                    MediaType="anime"
+                    DashSection="anime-new-episodes"
+                    MutedNote="Refreshes daily"
+                    Fetch="@(() => Api.AiringTodayAsync())" />
 
-<DashboardShelf Title="Trending"
-                MediaType="anime"
-                DashSection="anime-trending"
-                ViewAllHref="/discover?list=trending&type=anime"
-                Fetch='@(() => Api.DiscoverAsync("trending"))' />
+    <DashboardShelf Title="Trending"
+                    MediaType="anime"
+                    DashSection="anime-trending"
+                    ViewAllHref="/discover?list=trending&type=anime"
+                    Fetch='@(() => Api.DiscoverAsync("trending"))' />
 
-<DashboardShelf Title="Most Popular"
-                MediaType="anime"
-                DashSection="anime-popular"
-                ViewAllHref="/discover?list=popular&type=anime"
-                Fetch='@(() => Api.DiscoverAsync("popular"))' />
+    <DashboardShelf Title="Most Popular"
+                    MediaType="anime"
+                    DashSection="anime-popular"
+                    ViewAllHref="/discover?list=popular&type=anime"
+                    Fetch='@(() => Api.DiscoverAsync("popular"))' />
+
+    <DashboardShelf Title="Most Anticipated"
+                    MediaType="anime"
+                    DashSection="anime-anticipated"
+                    ViewAllHref="/discover?list=seasonal&type=anime"
+                    Fetch='@(() => Api.DiscoverAsync("seasonal", "Next Season"))' />
+}
 
 @* Movie / series (Trakt-backed) shelves — only rendered for the modes the user
    enabled in the chooser, then shown/hidden by the dashboard media-type filter. *@
-@if (State.EnabledMediaTypes.Contains(MetaType.movie))
+@if (State.MediaTypesHydrated && State.EnabledMediaTypes.Contains(MetaType.movie))
 {
     <DashboardShelf Title="Trending Movies" MediaType="movie" DashSection="movie-trending" VideoLinks="true"
                     ViewAllHref="/discover?list=trending&type=movie"
@@ -53,7 +69,7 @@
                     Fetch='@(() => Api.DiscoverVideoAsync("movie", "anticipated"))' />
 }
 
-@if (State.EnabledMediaTypes.Contains(MetaType.series))
+@if (State.MediaTypesHydrated && State.EnabledMediaTypes.Contains(MetaType.series))
 {
     <DashboardShelf Title="Trending Series" MediaType="series" DashSection="series-trending" VideoLinks="true"
                     ViewAllHref="/discover?list=trending&type=series"
@@ -64,4 +80,14 @@
     <DashboardShelf Title="Most Anticipated Series" MediaType="series" DashSection="series-anticipated" VideoLinks="true"
                     ViewAllHref="/discover?list=anticipated&type=series"
                     Fetch='@(() => Api.DiscoverVideoAsync("series", "anticipated"))' />
+}
+
+@code {
+    // The shelf set is gated on the enabled media types, which load asynchronously
+    // (MainLayout hydrates them from localStorage after the first render) and change
+    // when the chooser modal saves. Re-render on AppState changes so the @if gates
+    // re-evaluate — otherwise the shelves stay frozen at the default (all modes).
+    protected override void OnInitialized() => State.Changed += OnStateChanged;
+    private void OnStateChanged() => StateHasChanged();
+    public void Dispose() => State.Changed -= OnStateChanged;
 }

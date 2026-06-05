@@ -1,5 +1,7 @@
 @inject AppState State
 @inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IAsyncDisposable
 
 @* Fixed media-type switch below the header — port of _MediaTypeSwitch.cshtml.
    Shown only on the dashboard / Library / Discover surfaces and only when more
@@ -7,7 +9,7 @@
    filters sections client-side (via AppState); the others switch the active
    mode. Active state is driven in C# (the web used media-type-switch.js +
    localStorage). *@
-@if (State.EnabledMediaTypes.Count > 1 && _show)
+@if (State.MediaTypesHydrated && State.EnabledMediaTypes.Count > 1 && _show)
 {
     <div class="mt-switch-bar" data-mt-switch="@(_dashboard ? "dashboard" : "navigate")">
         <div class="container mt-switch-inner">
@@ -16,7 +18,7 @@
                 {
                     <button type="button" class="mt-switch-btn @(_selected == "all" ? "active" : "")"
                             data-mt-value="all" role="tab" aria-selected="@(_selected == "all")"
-                            @onclick="@(() => Select("all"))">
+                            @onclick="@(() => SelectAsync("all"))">
                         <span class="mt-switch-icon" aria-hidden="true">
                             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                                 <rect x="3" y="3" width="7" height="7" rx="1.5" />
@@ -33,7 +35,7 @@
                     var isActive = _selected == mt.ToString();
                     <button type="button" class="mt-switch-btn @(isActive ? "active" : "")"
                             data-mt-value="@mt" role="tab" aria-selected="@(isActive)"
-                            @onclick="@(() => Select(mt.ToString()))">
+                            @onclick="@(() => SelectAsync(mt.ToString()))">
                         <span class="mt-switch-icon" aria-hidden="true">
                             @if (mt == MetaType.anime)
                             {
@@ -71,8 +73,21 @@
     private bool _show;
     private bool _dashboard;
     private string _selected = "all";
+    private IJSObjectReference? _js;
 
-    protected override void OnParametersSet()
+    protected override void OnInitialized()
+    {
+        Recompute();
+        // Chrome components don't re-render when the parent layout does, so subscribe
+        // to the shared state directly: AppState for the enabled-mode pill list, and
+        // LocationChanged for the route-driven show/hide + active highlight.
+        State.Changed += OnStateChanged;
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    protected override void OnParametersSet() => Recompute();
+
+    private void Recompute()
     {
         var nav = NavActive.From(Nav.ToBaseRelativePath(Nav.Uri));
         _show = nav is "home" or "library" or "discover";
@@ -81,20 +96,47 @@
         _selected = _dashboard ? "all" : State.MediaType.ToString();
     }
 
-    private void Select(string value)
+    // AppState changed (e.g. the chooser modal changed the enabled set): re-render so
+    // the pill list (foreach State.EnabledMediaTypes) refreshes. Do NOT Recompute —
+    // that would reset the dashboard filter the user just picked.
+    private void OnStateChanged() => StateHasChanged();
+
+    // Navigation drives _show / _dashboard / _selected → recompute on every move.
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        Recompute();
+        StateHasChanged();
+    }
+
+    private async Task SelectAsync(string value)
     {
         _selected = value;
         if (_dashboard)
         {
             // Dashboard filters its sections client-side without touching the
-            // persisted global mode.
+            // persisted global mode (so the "all" filter does NOT persist active).
             State.SetDashboardFilter(value);
         }
         else if (Enum.TryParse<MetaType>(value, out var mt))
         {
             // Library / Discover switch the active mode and reload their content.
             State.SetMediaType(mt);
+            // Persist the active mode so a switched mode survives a reload (the
+            // ACTIVE mode is owned by this toggle as well as the chooser modal).
+            try
+            {
+                _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/media-type.js");
+                await _js.InvokeVoidAsync("setActiveOnly", mt.ToString());
+            }
+            catch { /* prerender / no JS */ }
         }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        State.Changed -= OnStateChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+        if (_js is not null) { try { await _js.DisposeAsync(); } catch { } }
     }
 
     private static string Label(MetaType mt) => mt switch

@@ -50,6 +50,7 @@ namespace AnimeList.Controllers
         private readonly IUserListCache _listCache;
         private readonly IAnimeScheduleService _scheduleService;
         private readonly IWatchingCacheStore _watchingCache;
+        private readonly IHiddenEntryStore _hiddenStore;
         private readonly ILogger<UserApiController> _logger;
 
         public UserApiController(
@@ -64,6 +65,7 @@ namespace AnimeList.Controllers
             IUserListCache listCache,
             IAnimeScheduleService scheduleService,
             IWatchingCacheStore watchingCache,
+            IHiddenEntryStore hiddenStore,
             ILogger<UserApiController> logger)
         {
             _tokenService = tokenService;
@@ -77,6 +79,7 @@ namespace AnimeList.Controllers
             _listCache = listCache;
             _scheduleService = scheduleService;
             _watchingCache = watchingCache;
+            _hiddenStore = hiddenStore;
             _logger = logger;
         }
 
@@ -1009,6 +1012,45 @@ namespace AnimeList.Controllers
                 return StatusCode(500, new ApiError("linked lookup failed"));
             }
         }
+
+        /// <summary>
+        /// The user's Hidden section — titles tucked away from Discover, most-recently-
+        /// hidden first, in the Meta shape for a poster grid. Paginated by skip (24/page).
+        /// Empty for inline (v3) configs with no stored uid (nothing to hide against).
+        /// </summary>
+        [HttpGet("hidden")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(MetaListResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> Hidden(string skip = null)
+        {
+            try
+            {
+                var configuration = await ResolveConfigAsync(ResolvedConfig, _configStore);
+                var uid = configuration?.tokenUid;
+                if (string.IsNullOrEmpty(uid)) return new JsonResult(new MetaListResponse([]));
+
+                const int pageSize = 24;
+                var offset = int.TryParse(skip, out var s) && s > 0 ? s : 0;
+                var hidden = await _hiddenStore.GetPageAsync(uid, pageSize, offset);
+                return new JsonResult(new MetaListResponse(hidden.Select(ToHiddenMeta).ToList()));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Hidden failed.");
+                return StatusCode(500, new ApiError("hidden lookup failed"));
+            }
+        }
+
+        // Projects a stored hidden entry into the Meta shape the poster grid renders —
+        // id / name / poster / type only (the section is a flat restore-list). Mirrors
+        // DiscoverController.ToHiddenMeta so the web + thin-client Hidden views match.
+        private static Meta ToHiddenMeta(HiddenEntry h) => new()
+        {
+            id = h.Id,
+            name = h.Title,
+            poster = h.ImageUrl,
+            type = string.IsNullOrEmpty(h.MediaType) ? MetaType.anime.ToString() : h.MediaType,
+        };
 
         /// <summary>
         /// The user's movies / series library from Trakt for the active tab — the

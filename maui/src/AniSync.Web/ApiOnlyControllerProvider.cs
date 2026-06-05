@@ -16,6 +16,7 @@ public sealed class ApiOnlyControllerProvider : ControllerFeatureProvider
     private static readonly HashSet<string> Allowed = new(StringComparer.Ordinal)
     {
         "ApiController",            // /api/v1/*
+        "ApiActorsController",      // /api/v1/actors, /api/v1/actors/tmdb/{id} (Discover → Actors + ActorDetail)
         "UserApiController",        // /api/v1/me/*
         "ConfigApiController",      // /api/v1/me/config, stream-addons, scrobble, export/import, danger zone
         "NotificationsController",  // /api/v1/notifications/*

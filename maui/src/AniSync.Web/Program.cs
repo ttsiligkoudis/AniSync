@@ -211,13 +211,23 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.AddPolicy("api", httpContext =>
-        RateLimitPartition.GetFixedWindowLimiter(RateLimitKeys.ClientIp(httpContext), _ => new FixedWindowRateLimiterOptions
+    {
+        // Never rate-limit our OWN apps. The web head's server-side self-calls AND the
+        // MAUI native apps (Windows / Android / iOS) all send the AniSync client header
+        // (set on the shared typed HttpClient). Loopback is also exempt for local dev.
+        // The 60/min cap is for third-party API consumers only — applying it to our
+        // apps' dashboard fan-out emptied the page.
+        if (httpContext.Request.Headers[AniSyncApi.ClientHeaderName].ToString() == AniSyncApi.ClientHeaderValue
+            || (httpContext.Connection.RemoteIpAddress is { } ip && System.Net.IPAddress.IsLoopback(ip)))
+            return RateLimitPartition.GetNoLimiter("internal");
+        return RateLimitPartition.GetFixedWindowLimiter(RateLimitKeys.ClientIp(httpContext), _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = 60,
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0,
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-        }));
+        });
+    });
     options.AddPolicy("scrobble", httpContext =>
     {
         var path = httpContext.Request.Path.Value ?? string.Empty;

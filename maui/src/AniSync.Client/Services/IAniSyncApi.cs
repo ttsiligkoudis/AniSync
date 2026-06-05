@@ -14,20 +14,23 @@ public interface IAniSyncApi
     Task<IReadOnlyList<SuggestMatch>> SuggestAsync(string title, int limit = 8, CancellationToken ct = default);
     /// <summary>Relevance-ranked best-match resolver — /api/v1/match (header search "Enter to open top result").</summary>
     Task<IReadOnlyList<MatchResult>> MatchAsync(string title, int limit = 8, CancellationToken ct = default);
-    Task<IReadOnlyList<MetaDto>> DiscoverAsync(string kind, string? genre = null, string? skip = null, CancellationToken ct = default);
-    /// <summary>Video (movie/series) discovery via Trakt — /api/v1/discover/video/{type}/{mode}.</summary>
-    Task<IReadOnlyList<MetaDto>> DiscoverVideoAsync(string type, string mode, string? skip = null, CancellationToken ct = default);
+    Task<IReadOnlyList<MetaDto>> DiscoverAsync(string kind, string? genre = null, string? skip = null, string? season = null, string? search = null, CancellationToken ct = default);
+    /// <summary>Video (movie/series) discovery via Trakt — /api/v1/discover/video/{type}/{mode}.
+    /// modes: trending|popular|anticipated|watched|recommended ("For You", needs Trakt connected).</summary>
+    Task<IReadOnlyList<MetaDto>> DiscoverVideoAsync(string type, string mode, string? skip = null, string? genre = null, string? search = null, CancellationToken ct = default);
     /// <summary>Anime tagged with a given AniList tag — /api/v1/discover/by-tag/{tag}.</summary>
     Task<TagMediaResponse> DiscoverByTagAsync(string tag, string? skip = null, CancellationToken ct = default);
     Task<IReadOnlyList<MetaDto>> AiringTodayAsync(CancellationToken ct = default);
 
     // Discover browse-by (tags / studios / staff directories + detail)
     Task<IReadOnlyList<TagSummaryDto>> TagsAsync(CancellationToken ct = default);
-    Task<StudiosListResponse> StudiosAsync(int page = 1, CancellationToken ct = default);
+    Task<StudiosListResponse> StudiosAsync(int page = 1, string? search = null, CancellationToken ct = default);
     Task<StudioMediaResponse> StudioMediaAsync(int studioId, string? skip = null, CancellationToken ct = default);
     Task<StaffMediaResponse> StaffMediaAsync(int staffId, string? skip = null, CancellationToken ct = default);
     Task<ActorsListResponse> ActorsAsync(int page = 1, string? search = null, CancellationToken ct = default);
     Task<ActorCreditsResponse?> ActorCreditsAsync(int tmdbId, CancellationToken ct = default);
+    /// <summary>The movies/series Discover mode pills (server-authoritative, Trakt-gated) — /api/v1/discover/video-modes.</summary>
+    Task<IReadOnlyList<VideoModeDto>> VideoModesAsync(CancellationToken ct = default);
     Task<SeasonStatsResponse?> SeasonStatsAsync(CancellationToken ct = default);
 
     // Dashboard + library (user-scoped — require X-AniSync-Config)
@@ -38,6 +41,8 @@ public interface IAniSyncApi
     /// <summary>The user's movies / series library from Trakt — /api/v1/me/video-list.
     /// type = movie|series; list = current|completed|planning.</summary>
     Task<IReadOnlyList<MetaDto>> VideoListAsync(string type, string list, CancellationToken ct = default);
+    /// <summary>The user's Hidden section (titles hidden from Discover) — /api/v1/me/hidden?skip=. Paged 24/call.</summary>
+    Task<IReadOnlyList<MetaDto>> HiddenAsync(string? skip = null, CancellationToken ct = default);
     Task<LibraryResponse?> LibraryAsync(string? status = null, CancellationToken ct = default);
 
     // Detail + watch

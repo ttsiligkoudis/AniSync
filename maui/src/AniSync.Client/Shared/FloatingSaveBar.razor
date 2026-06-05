@@ -1,0 +1,18 @@
+@* Floating save bar — Blazor port of _FloatingSaveBar.cshtml. Always visible on
+   the uid-backed account surface; the label swaps between "No changes" (clean) and
+   "Unsaved changes" (any flag-bearing toggle has moved since last save). The button
+   stays clickable in both states. Gated by the page (rendered only when there's a
+   uid-backed config), matching the partial's @if (!AnonymousUser && ConfigUid). *@
+
+<div id="floatingSaveBar" class="floating-save-bar @(Dirty ? "is-dirty" : "")" aria-live="polite" role="status">
+    <span id="floatingSaveStatus" class="floating-save-status">@(Dirty ? "Unsaved changes" : "No changes")</span>
+    <button id="floatingSaveBtn" class="floating-save-btn" type="button" disabled="@Saving" @onclick="OnSave">
+        @(Saving ? "Saving…" : "Save")
+    </button>
+</div>
+
+@code {
+    [Parameter] public bool Dirty { get; set; }
+    [Parameter] public bool Saving { get; set; }
+    [Parameter] public EventCallback OnSave { get; set; }
+}

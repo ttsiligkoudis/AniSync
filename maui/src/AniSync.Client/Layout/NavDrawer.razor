@@ -1,5 +1,6 @@
 @inject NavigationManager Nav
 @inject AppState State
+@implements IDisposable
 
 @* Slide-in navigation drawer — exact port of _Layout.cshtml's .nav-drawer.
    Toggled by the body.drawer-open class (the hamburger / close / backdrop set
@@ -69,7 +70,7 @@
         }
         else
         {
-            <a class="nav-drawer-cta nav-drawer-cta-primary" href="/login">Sign in</a>
+            <a class="nav-drawer-cta nav-drawer-cta-primary" href="/account">Sign in</a>
         }
     </div>
 </aside>
@@ -79,8 +80,31 @@
 @code {
     private string _active = "";
 
+    protected override void OnInitialized()
+    {
+        _active = NavActive.From(Nav.ToBaseRelativePath(Nav.Uri));
+        // Parent re-renders don't cascade here — subscribe so the logged-in links +
+        // the footer Sign in/Disconnect update on auth changes, and the highlight on nav.
+        State.Changed += OnChanged;
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
     protected override void OnParametersSet()
         => _active = NavActive.From(Nav.ToBaseRelativePath(Nav.Uri));
+
+    private void OnChanged() => StateHasChanged();
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        _active = NavActive.From(Nav.ToBaseRelativePath(Nav.Uri));
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        State.Changed -= OnChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
 
     private string Cls(string section) => _active == section ? "active" : "";
 }
