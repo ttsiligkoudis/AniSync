@@ -108,16 +108,22 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Items ?? new();
     }
 
-    public async Task<IReadOnlyList<MetaDto>> ListAsync(string status, CancellationToken ct = default)
+    public async Task<IReadOnlyList<MetaDto>> ListAsync(string status, string? genre = null, string? search = null, CancellationToken ct = default)
     {
-        var resp = await GetOrDefault<MetaListResponse>($"api/v1/me/list?status={Uri.EscapeDataString(status)}", ct);
+        var url = $"api/v1/me/list?status={Uri.EscapeDataString(status)}";
+        // Genre + search are filtered server-side (MergedListService genre filter + ScoreMatch
+        // relevance re-rank) so the library matches the MVC LibraryController.Page behaviour.
+        if (!string.IsNullOrWhiteSpace(genre)) url += $"&genre={Uri.EscapeDataString(genre)}";
+        if (!string.IsNullOrWhiteSpace(search)) url += $"&search={Uri.EscapeDataString(search)}";
+        var resp = await GetOrDefault<MetaListResponse>(url, ct);
         return resp?.Results ?? new();
     }
 
-    public async Task<IReadOnlyList<MetaDto>> VideoListAsync(string type, string list, CancellationToken ct = default)
+    public async Task<IReadOnlyList<MetaDto>> VideoListAsync(string type, string list, string? search = null, CancellationToken ct = default)
     {
-        var resp = await GetOrDefault<MetaListResponse>(
-            $"api/v1/me/video-list?type={Uri.EscapeDataString(type)}&list={Uri.EscapeDataString(list)}", ct);
+        var url = $"api/v1/me/video-list?type={Uri.EscapeDataString(type)}&list={Uri.EscapeDataString(list)}";
+        if (!string.IsNullOrWhiteSpace(search)) url += $"&search={Uri.EscapeDataString(search)}";
+        var resp = await GetOrDefault<MetaListResponse>(url, ct);
         return resp?.Results ?? new();
     }
 

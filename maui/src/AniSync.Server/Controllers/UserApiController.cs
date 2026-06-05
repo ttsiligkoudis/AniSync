@@ -1567,14 +1567,18 @@ namespace AnimeList.Controllers
         /// The user's movies / series library from Trakt for the active tab — the
         /// header-authed twin of LibraryController.VideoPaneAsync. <paramref name="type"/>
         /// is <c>movie</c> or <c>series</c>; <paramref name="list"/> is
-        /// <c>current</c> (Continue Watching) / <c>completed</c> (Watched) /
-        /// <c>planning</c> (Watchlist). Returns hydrated, anime-excluded video Metas.
-        /// Empty when Trakt isn't configured or the config has no stored row.
+        /// <c>current</c> (Continue Watching / playback) / <c>completed</c> (Watched
+        /// history) / <c>planning</c> (Watchlist) / <c>paused</c> (On Hold) /
+        /// <c>dropped</c> — the last two ride AniSync-managed Trakt personal lists,
+        /// resolved by TraktService.GetListAsync. <paramref name="search"/> applies the
+        /// same relevance re-rank (ScoreMatch &gt;= 0.4) the anime list + the MVC
+        /// VideoPaneAsync use. Returns hydrated, anime-excluded video Metas. Empty when
+        /// Trakt isn't configured or the config has no stored row.
         /// </summary>
         [HttpGet("video-list")]
         [RequireConfig]
         [ProducesResponseType(typeof(MetaListResponse), StatusCodes.Status200OK)]
-        public async Task<IActionResult> VideoList(string type = "movie", string list = "current")
+        public async Task<IActionResult> VideoList(string type = "movie", string list = "current", string search = null)
         {
             var cfg = await Utils.ResolveConfigAsync(ResolvedConfig, _configStore);
             var uid = cfg?.tokenUid;
@@ -1583,15 +1587,35 @@ namespace AnimeList.Controllers
 
             var mediaType = string.Equals(type, "series", StringComparison.OrdinalIgnoreCase)
                 ? MetaType.series : MetaType.movie;
+            // Same tab → Trakt-list mapping the original uses; Paused / Dropped resolve to the
+            // AniSync-managed personal lists inside TraktService.GetListAsync (today they fell
+            // through to Current here, so On Hold / Dropped silently showed the Watching list).
             var listType = list?.ToLowerInvariant() switch
             {
                 "completed" or "watched" => ListType.Completed,
                 "planning" or "watchlist" or "planned" => ListType.Planning,
+                "paused" or "on_hold" or "onhold" => ListType.Paused,
+                "dropped" => ListType.Dropped,
+                "rewatching" or "repeating" => ListType.Repeating,
                 _ => ListType.Current,
             };
 
             var items = await _traktService.GetListAsync(uid, listType, mediaType);
             var metas = await items.ToVideoMetas().ExcludeAnimeAsync(_mappingService);
+
+            // Search → relevance-ranked (ScoreMatch >= 0.4), mirroring the anime List action and
+            // the MVC VideoPaneAsync; otherwise leave the Trakt order intact.
+            if (!string.IsNullOrWhiteSpace(search) && metas.Count > 0)
+            {
+                var q = Utils.NormalizeTitle(search);
+                metas = metas
+                    .Select(m => (meta: m, score: Utils.ScoreMatch(q, m.name)))
+                    .Where(x => x.score >= 0.4)
+                    .OrderByDescending(x => x.score)
+                    .Select(x => x.meta)
+                    .ToList();
+            }
+
             return Ok(new MetaListResponse(metas));
         }
 

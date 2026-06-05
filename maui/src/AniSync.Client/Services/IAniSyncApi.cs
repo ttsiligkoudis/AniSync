@@ -39,10 +39,13 @@ public interface IAniSyncApi
     Task<AnilistUserStatsDto?> AnilistStatsAsync(CancellationToken ct = default);
     Task<TraktUserStatsDto?> TraktStatsAsync(CancellationToken ct = default);
     Task<IReadOnlyList<MetaDto>> ContinueWatchingAsync(int limit = 15, CancellationToken ct = default);
-    Task<IReadOnlyList<MetaDto>> ListAsync(string status, CancellationToken ct = default);
+    /// <summary>The user's merged tracker list for a status — /api/v1/me/list. <paramref name="genre"/>
+    /// filters server-side; <paramref name="search"/> applies the server's ScoreMatch relevance re-rank.</summary>
+    Task<IReadOnlyList<MetaDto>> ListAsync(string status, string? genre = null, string? search = null, CancellationToken ct = default);
     /// <summary>The user's movies / series library from Trakt — /api/v1/me/video-list.
-    /// type = movie|series; list = current|completed|planning.</summary>
-    Task<IReadOnlyList<MetaDto>> VideoListAsync(string type, string list, CancellationToken ct = default);
+    /// type = movie|series; list = current|completed|planning|paused|dropped. <paramref name="search"/>
+    /// applies the server's ScoreMatch relevance re-rank.</summary>
+    Task<IReadOnlyList<MetaDto>> VideoListAsync(string type, string list, string? search = null, CancellationToken ct = default);
     /// <summary>The user's Hidden section (titles hidden from Discover) — /api/v1/me/hidden?skip=. Paged 24/call.</summary>
     Task<IReadOnlyList<MetaDto>> HiddenAsync(string? skip = null, CancellationToken ct = default);
     Task<LibraryResponse?> LibraryAsync(string? status = null, CancellationToken ct = default);

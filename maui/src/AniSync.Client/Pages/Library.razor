@@ -3,14 +3,18 @@
 @inject IAniSyncApi Api
 @inject AppState State
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 @* Library — port of Views/Library/Index.cshtml. Status tabs (Watching /
-   Completed / Planning / Paused / Dropped / Rewatching) over /api/v1/me/list,
-   plus a search filter, rendered as a poster grid. User-scoped, so it needs the
-   config credential; when streaming/sign-in isn't set up it shows the same
+   Completed / Planning / Paused / Dropped / Rewatching) over /api/v1/me/list
+   (anime) or /api/v1/me/video-list (movies / series, Trakt), plus a server-side
+   genre + search filter, rendered as a poster grid. The active tab + filters live
+   in the query string so the page deep-links like the original (the dashboard
+   "View all · …" links carry ?list=&type=, and the back button works). User-scoped,
+   so it needs the config credential; when sign-in isn't set up it shows the same
    "sign in" prompt the web app does for anonymous visitors. *@
 
-<PageTitle>Library · AniSync</PageTitle>
+<PageTitle>@_pageTitle</PageTitle>
 
 <section>
     @if (string.IsNullOrEmpty(State.StreamConfig))
@@ -22,37 +26,46 @@
     }
     else
     {
+        @* List-type tabs lead the page. Each is an anchor — clicking navigates with
+           the selected list. The active genre flows through so switching from
+           Watching → Completed keeps the genre filter applied (the original does
+           the same: genre rides every tab href, search does not). *@
         <nav class="library-tabs" role="tablist" aria-label="Library lists">
             @foreach (var (status, label) in Tabs)
             {
-                <button type="button" role="tab"
-                        class="library-tab @(_status == status ? "library-tab-active" : "")"
-                        aria-selected="@(_status == status ? "true" : "false")"
-                        @onclick="() => SetStatus(status)">
+                var isActive = _status == status;
+                <a class="library-tab @(isActive ? "library-tab-active" : "")"
+                   href="@TabHref(status)"
+                   role="tab"
+                   aria-selected="@(isActive ? "true" : "false")">
                     @label
-                </button>
+                </a>
             }
         </nav>
 
-        <form class="filter-bar" role="search" @onsubmit:preventDefault>
+        @* Combined filter form: search input + genre dropdown + explicit Search
+           button. Nothing auto-submits — the user picks filters then commits them
+           together. Submitting navigates (deep-linkable + back-button friendly);
+           the server does the genre filter + ScoreMatch search ranking. *@
+        <form class="filter-bar" role="search" @onsubmit="ApplyFilters" @onsubmit:preventDefault>
             <input type="search" class="filter-bar-search" placeholder="@($"Search {_noun}…")"
-                   value="@_search" @oninput="OnSearch" autocomplete="off" />
+                   @bind="_searchInput" @bind:event="oninput" autocomplete="off" />
             @* The genre dropdown is an AniList/MAL/Kitsu catalog filter — it doesn't apply to
                the Trakt-sourced movie / series lists, so it's anime-only. *@
-            @if (IsAnime && _genreOptions.Count > 0)
+            @if (IsAnime)
             {
-                <select class="filter-bar-select" aria-label="Genre" @bind="_genre">
+                <select class="filter-bar-select" aria-label="Genre" @bind="_genreInput">
                     <option value="">All genres</option>
-                    @foreach (var g in _genreOptions)
+                    @foreach (var g in PopularGenres)
                     {
                         <option value="@g">@g</option>
                     }
                 </select>
             }
             <button type="submit" class="filter-bar-submit">Search</button>
-            @if (!string.IsNullOrEmpty(_search) || !string.IsNullOrEmpty(_genre))
+            @if (_hasSearch || _hasGenre)
             {
-                <a class="filter-bar-clear" href="javascript:void(0)" @onclick="ClearFilters" @onclick:preventDefault>Clear</a>
+                <a class="filter-bar-clear" href="@ClearHref()">Clear</a>
             }
         </form>
 
@@ -72,7 +85,7 @@
             }
             else
             {
-                <PosterGrid Items="_filtered" Variant="grid" VideoLinks="@(!IsAnime)"
+                <PosterGrid Items="_items" Variant="grid" VideoLinks="@(!IsAnime)"
                             EmptyMessage="@_emptyMessage" />
             }
         </div>
@@ -80,9 +93,16 @@
 </section>
 
 @code {
+    // ── Query string: deep-link entry points; tabs + the filter bar navigate by rewriting these. ──
+    [SupplyParameterFromQuery] public string? List { get; set; }
+    [SupplyParameterFromQuery] public string? Genre { get; set; }
+    [SupplyParameterFromQuery] public string? Search { get; set; }
+    [SupplyParameterFromQuery] public string? Type { get; set; }
+
     // Same vocabulary for both anime and video now — video's Paused / Dropped ride
     // AniSync-managed Trakt personal lists. Anime adds the extra Rewatching tab;
-    // video stops at Dropped (no Repeating list type upstream).
+    // video stops at Dropped (no Repeating list type upstream). Order = LibraryController's
+    // UserListTypes / VideoListTypes.
     private static readonly (string Status, string Label)[] AnimeTabs =
     {
         ("current", "Watching"), ("completed", "Completed"), ("planning", "Planning"),
@@ -94,14 +114,49 @@
         ("paused", "On Hold"), ("dropped", "Dropped"),
     };
 
+    // Mirrors LibraryController.PopularGenres (== DiscoverController.PopularGenres) — the
+    // fixed anime-genre picker, surfaced as a server-side filter on the merged list.
+    private static readonly string[] PopularGenres =
+    {
+        "Action", "Adventure", "Comedy", "Drama", "Slice of Life",
+        "Romance", "Fantasy", "Sci-Fi", "Mystery", "Psychological",
+        "Sports", "Supernatural", "Music", "Horror", "Thriller",
+    };
+
     private bool IsAnime => State.MediaType == MetaType.anime;
     private (string Status, string Label)[] Tabs => IsAnime ? AnimeTabs : VideoTabs;
 
+    // ── Surface state, recomputed each Refresh() from the query string. ──
     private string _status = "current";
-    private string _search = "";
-    private string _genre = "";
+    private bool _hasSearch;
+    private bool _hasGenre;
     private bool _loading;
     private IReadOnlyList<MetaDto> _items = Array.Empty<MetaDto>();
+    private string _pageTitle = "Library · AniSync";
+    private string _emptyMessage = "";
+
+    // ── Filter inputs (applied together on the Search button / Enter). ──
+    private string _searchInput = "";
+    private string _genreInput = "";
+
+    // ── Trakt-configured detection for the video empty-state copy (mirrors
+    //    LibraryController.VideoPaneAsync's _traktService.IsConfigured). The
+    //    server-authoritative video-modes set carries Trakt-only modes only when
+    //    the server has Trakt configured, so its presence is the signal. ──
+    private bool? _traktConfigured;
+    private Task<IReadOnlyList<VideoModeDto>>? _videoModesTask;
+
+    // The user's primary anime service, for the anime empty-state copy
+    // ("Nothing in your {label} list on {AnimeService}."). Fetched lazily + cached;
+    // /api/v1/me/list doesn't carry it, and LinkedResponse.Primary is the raw
+    // anime_service.ToString() the original Model.AnimeService renders. MainLayout
+    // already hits this endpoint at startup, so it's typically warm.
+    private string? _animeService;
+    private Task<LinkedResponse?>? _linkedTask;
+
+    // ── Media-type deep-link bookkeeping (mirrors Discover.razor). ──
+    private MetaType _surfaceMediaType;
+    private MetaType? _pendingPersistType;
 
     private string _activeLabel => Tabs.FirstOrDefault(t => t.Status == _status).Label ?? "";
 
@@ -112,80 +167,203 @@
         _ => "anime",
     };
 
-    // Mirror the server's three-case empty copy (search → genre → default list).
-    private string _emptyMessage
+    protected override void OnInitialized()
     {
-        get
-        {
-            if (!string.IsNullOrWhiteSpace(_search))
-                return $"No matches for \"{_search.Trim()}\".";
-            if (!string.IsNullOrEmpty(_genre))
-                return $"No {_genre.ToLower()} anime in your {_activeLabel} list.";
-            return $"Nothing in your {_activeLabel} list.";
-        }
+        _surfaceMediaType = State.MediaType;
+        State.Changed += OnStateChanged;
     }
 
-    // Genre options are derived from the loaded list so they always match what's
-    // actually filterable (the list API doesn't take a genre parameter).
-    private IReadOnlyList<string> _genreOptions =>
-        _items.Where(m => m.Genres is { Count: > 0 })
-            .SelectMany(m => m.Genres!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(g => g)
-            .ToList();
-
-    private IReadOnlyList<MetaDto> _filtered
+    protected override async Task OnParametersSetAsync()
     {
-        get
+        // A ?type= deep-link (dashboard "View all · Series" etc.) overrides the active media
+        // mode + persists it; the surface then follows State.MediaType. SetMediaType fires
+        // Changed → OnStateChanged → Refresh, so return here to avoid loading twice.
+        if (!string.IsNullOrWhiteSpace(Type) && Enum.TryParse<MetaType>(Type, true, out var t) && t != State.MediaType)
         {
-            IEnumerable<MetaDto> q = _items;
-            if (!string.IsNullOrWhiteSpace(_search))
-                q = q.Where(m => m.Name.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase));
-            if (!string.IsNullOrEmpty(_genre))
-                q = q.Where(m => m.Genres is { Count: > 0 }
-                                 && m.Genres!.Contains(_genre, StringComparer.OrdinalIgnoreCase));
-            return q.ToList();
+            _pendingPersistType = t;
+            _surfaceMediaType = t;
+            State.SetMediaType(t);
+            return;
         }
+        await Refresh();
     }
 
-    protected override void OnInitialized() => State.Changed += OnStateChanged;
+    private async Task Refresh()
+    {
+        if (string.IsNullOrEmpty(State.StreamConfig)) return;
 
-    protected override Task OnInitializedAsync() => Load();
+        _status = ParseStatus(List);
+        _hasSearch = !string.IsNullOrWhiteSpace(Search);
+        _hasGenre = IsAnime && !string.IsNullOrWhiteSpace(Genre);
+        _searchInput = Search ?? "";
+        _genreInput = IsAnime ? (Genre ?? "") : "";
+        _pageTitle = BuildTitle();
+
+        await Load();
+    }
+
+    // Parse ?list= against the active media type's tab set; default to Watching and
+    // silently coerce unknown values (matches LibraryController.ParseListType's tolerance).
+    private string ParseStatus(string? raw)
+    {
+        var slug = (raw ?? "").Trim().ToLowerInvariant();
+        return Tabs.Any(t => t.Status == slug) ? slug : "current";
+    }
 
     private async Task Load()
     {
-        if (string.IsNullOrEmpty(State.StreamConfig)) return;
-        // The active tab may not exist for the current media type (e.g. switching to
-        // movies while on the anime-only "Rewatching" tab) — clamp to a valid one.
-        if (!Tabs.Any(t => t.Status == _status)) _status = "current";
-
         _loading = true;
+        _items = Array.Empty<MetaDto>();
         StateHasChanged();
-        _items = IsAnime
-            ? await Api.ListAsync(_status)
-            : await Api.VideoListAsync(State.MediaType == MetaType.movie ? "movie" : "series", _status);
+
+        if (IsAnime)
+        {
+            _items = await Api.ListAsync(_status,
+                genre: _hasGenre ? Genre : null,
+                search: _hasSearch ? Search : null);
+            // Only needed for the no-filter empty-state copy; fetch lazily then.
+            if (_items.Count == 0 && !_hasSearch && !_hasGenre)
+                await EnsureAnimeServiceAsync();
+        }
+        else
+        {
+            // Resolve Trakt-configured once (drives the empty-state copy) alongside the list.
+            await EnsureTraktConfiguredAsync();
+            _items = await Api.VideoListAsync(
+                State.MediaType == MetaType.movie ? "movie" : "series", _status,
+                search: _hasSearch ? Search : null);
+        }
+
+        _emptyMessage = BuildEmptyMessage();
         _loading = false;
         StateHasChanged();
     }
 
-    private async void SetStatus(string status)
+    // ── Filter-bar submit + tab / clear hrefs (genre rides every tab + the clear link). ──
+    private void ApplyFilters()
     {
-        if (_status == status) return;
-        _status = status;
-        _search = "";
-        _genre = "";
-        await Load();
+        var q = new List<string> { $"list={_status}" };
+        if (IsAnime && !string.IsNullOrWhiteSpace(_genreInput)) q.Add($"genre={Uri.EscapeDataString(_genreInput)}");
+        if (!string.IsNullOrWhiteSpace(_searchInput)) q.Add($"search={Uri.EscapeDataString(_searchInput.Trim())}");
+        q.Add($"type={State.MediaType}");
+        Nav.NavigateTo("/library?" + string.Join("&", q));
     }
 
-    private void OnSearch(ChangeEventArgs e) => _search = e.Value?.ToString() ?? "";
-
-    private void ClearFilters()
+    private string TabHref(string status)
     {
-        _search = "";
-        _genre = "";
+        var q = new List<string> { $"list={status}" };
+        // Preserve the active genre across tab switches (the original keeps it; search does not ride).
+        if (IsAnime && _hasGenre) q.Add($"genre={Uri.EscapeDataString(Genre!)}");
+        q.Add($"type={State.MediaType}");
+        return "/library?" + string.Join("&", q);
     }
 
-    private async void OnStateChanged() => await InvokeAsync(Load);
+    private string ClearHref()
+    {
+        var q = new List<string> { $"list={_status}", $"type={State.MediaType}" };
+        return "/library?" + string.Join("&", q);
+    }
+
+    private string BuildTitle()
+    {
+        if (_hasSearch) return $"Search: {Search} · Library";
+        if (_hasGenre) return $"{Genre} · {_activeLabel} · Library";
+        return $"{_activeLabel} · Library";
+    }
+
+    // Empty-state copy: anime mirrors LibraryController (search → genre → default list);
+    // video mirrors VideoPaneAsync's Trakt-specific copy + the "not configured" variant.
+    private string BuildEmptyMessage()
+    {
+        if (IsAnime)
+        {
+            if (_hasSearch) return $"No matches for \"{Search!.Trim()}\".";
+            if (_hasGenre) return $"No {Genre!.ToLower()} anime in your {_activeLabel} list.";
+            // "…on {AnimeService}." — fall back to the bare sentence if the service is unknown.
+            return string.IsNullOrEmpty(_animeService)
+                ? $"Nothing in your {_activeLabel} list."
+                : $"Nothing in your {_activeLabel} list on {_animeService}.";
+        }
+
+        if (_traktConfigured == false)
+            return "Trakt isn't configured on this server, so movie / series lists aren't available.";
+        if (_hasSearch) return $"No matches for \"{Search!.Trim()}\".";
+        var kind = State.MediaType == MetaType.movie ? "movies" : "series";
+        var videoLabel = VideoLabel(_status);
+        return $"Nothing in your {kind} {videoLabel} on Trakt. Connect Trakt from your Account to track {kind}.";
+    }
+
+    // The video tab labels VideoPaneAsync uses in its empty-state copy differ from the
+    // tab-strip labels (Continue Watching / Watched / Watchlist for the three Trakt-native
+    // lists; On Hold / Dropped keep their strip label).
+    private static string VideoLabel(string status) => status switch
+    {
+        "current" => "Continue Watching",
+        "completed" => "Watched",
+        "planning" => "Watchlist",
+        "paused" => "On Hold",
+        "dropped" => "Dropped",
+        _ => status,
+    };
+
+    private async Task EnsureTraktConfiguredAsync()
+    {
+        if (_traktConfigured.HasValue) return;
+        // The video-modes set is server-authoritative + Trakt-gated: Trakt-only modes
+        // (trending/anticipated/watched) appear only when the server has Trakt configured;
+        // the Cinemeta-only "popular" is always present. So >1 mode (or any non-popular
+        // mode) ⇒ configured. Cache the task so it's fetched at most once.
+        _videoModesTask ??= Api.VideoModesAsync();
+        var modes = await _videoModesTask;
+        // An empty set means the modes call itself failed (the server always returns at least
+        // "popular") — leave it unknown so a transient failure doesn't mislabel as "not configured".
+        if (modes.Count == 0) { _traktConfigured = null; return; }
+        _traktConfigured = modes.Any(m => !string.Equals(m.Slug, "popular", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task EnsureAnimeServiceAsync()
+    {
+        if (_animeService is not null) return;
+        _linkedTask ??= Api.LinkedAsync();
+        var linked = await _linkedTask;
+        _animeService = linked?.Primary ?? "";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_pendingPersistType is { } pt)
+        {
+            _pendingPersistType = null;
+            await PersistActiveTypeAsync(pt);
+        }
+    }
+
+    private async Task PersistActiveTypeAsync(MetaType t)
+    {
+        try
+        {
+            var mt = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/media-type.js");
+            await mt.InvokeVoidAsync("setActiveOnly", t.ToString());
+            await mt.DisposeAsync();
+        }
+        catch { /* prerender / no JS */ }
+    }
+
+    private async void OnStateChanged()
+    {
+        // The media-type switch (or a ?type= persist) changed the surface — re-resolve the
+        // tabs + reload against the new list. Other changes (e.g. login) just refresh chrome.
+        if (_surfaceMediaType != State.MediaType)
+        {
+            _surfaceMediaType = State.MediaType;
+            _traktConfigured = null;   // re-derive per surface (anime path ignores it)
+            await InvokeAsync(Refresh);
+        }
+        else
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
 
     public void Dispose() => State.Changed -= OnStateChanged;
 }
