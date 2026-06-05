@@ -83,6 +83,8 @@
         <span class="bottom-nav-more-row-label">Install app</span>
     </button>
     <span class="bottom-nav-more-divider" aria-hidden="true"></span>
+    @if (State.SessionHydrated)
+    {
     @if (State.HasSession)
     {
         <a href="/logout" class="bottom-nav-more-row bottom-nav-more-row-danger" role="menuitem" data-disconnect>
@@ -104,6 +106,7 @@
             </svg>
             <span class="bottom-nav-more-row-label">Sign in</span>
         </a>
+    }
     }
 </div>
 

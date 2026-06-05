@@ -36,6 +36,13 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Prerender has no JS / localStorage, so it can't know whether a config credential is
+        // stored. Leave the session + media types un-hydrated there so the chrome renders
+        // neutral (no Sign in / Disconnect, no signed-out dashboard) rather than committing the
+        // signed-out state and flashing it to a signed-in user. Everything hydrates on the
+        // interactive pass below, where localStorage is readable.
+        if (!RendererInfo.IsInteractive) return;
+
         // Hydrate the saved config credential once at startup so the dashboard,
         // Library and Watch pages authenticate without a trip through Settings.
         if (string.IsNullOrEmpty(State.StreamConfig))
@@ -93,14 +100,14 @@
             return;
         }
 
+        // Config present → signed in. Flip the chrome to signed-in NOW rather than blocking on
+        // the linked-accounts round-trip — that wait was the visible "loads as signed-out, then
+        // a second later loads my config" delay. The "Connected to X · Y" label fills in below
+        // once /me/linked returns (a second, cheaper HydrateSession that only updates the label).
+        State.HydrateSession(true, "");
+
         var linked = await Api.LinkedAsync();
-        if (linked is null || string.IsNullOrEmpty(linked.Primary))
-        {
-            // Config present but couldn't resolve linked accounts — still logged
-            // in (the credential exists), just without a resolved services label.
-            State.HydrateSession(true, "");
-            return;
-        }
+        if (linked is null || string.IsNullOrEmpty(linked.Primary)) return;
 
         var services = new List<string> { PrettyService(linked.Primary) };
         services.AddRange(linked.Linked

@@ -73,6 +73,35 @@
    (_DashCustomize, at the bottom). The "is-on-switch-row" modifier lifts it
    onto the pills row only when that bar is present (more than one media type
    enabled); otherwise it sits at the top-right of the content. *@
+@if (!State.SessionHydrated)
+{
+    @* Session not resolved yet (prerender / pre-hydration) — render neutral skeleton shelves so a
+       signed-in user never sees the signed-out dashboard first. It commits once, on hydration. *@
+    @for (var s = 0; s < 3; s++)
+    {
+        <section class="dashboard-section">
+            <div class="dashboard-section-header">
+                <h2 class="dashboard-section-title"><span class="library-card-skeleton-line" style="display:inline-block;width:180px;height:1.1em"></span></h2>
+            </div>
+            <div data-shelf-container>
+                <div class="poster-scroll-row">
+                    @for (var i = 0; i < 12; i++)
+                    {
+                        <div class="library-card library-card-skeleton">
+                            <div class="library-card-poster-wrap">
+                                <div class="library-card-poster skeleton-shimmer"></div>
+                            </div>
+                            <span class="library-card-skeleton-line"></span>
+                            <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                        </div>
+                    }
+                </div>
+            </div>
+        </section>
+    }
+}
+else
+{
 <div class="dash-customize-float @(_combined ? "is-on-switch-row" : "")">
     <button type="button" class="dash-customize-btn" @onclick="() => _customize?.Open()">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -299,6 +328,7 @@
         }
     </div>
 </section>
+}
 
 @* Dashboard layout chooser — Blazor port of _DashCustomize.cshtml (reorder + hide, persisted to
    the account). Opened by the "Customize" trigger up top; sections read their order/visibility

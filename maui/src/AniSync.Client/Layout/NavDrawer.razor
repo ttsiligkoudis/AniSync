@@ -61,16 +61,20 @@
         }
     </nav>
     <div class="nav-drawer-footer">
-        @if (State.HasSession)
+        @* Gate on SessionHydrated so the footer doesn't flash Sign in before the stored config is read. *@
+        @if (State.SessionHydrated)
         {
-            <span class="nav-drawer-status">
-                @(State.LoggedIn ? $"✓ Connected to {State.ConnectedLabel}" : "✓ Connected without account")
-            </span>
-            <a class="nav-drawer-cta nav-drawer-cta-secondary" href="/logout" data-disconnect>Disconnect</a>
-        }
-        else
-        {
-            <a class="nav-drawer-cta nav-drawer-cta-primary" href="/account">Sign in</a>
+            @if (State.HasSession)
+            {
+                <span class="nav-drawer-status">
+                    @(State.LoggedIn ? $"✓ Connected to {State.ConnectedLabel}" : "✓ Connected without account")
+                </span>
+                <a class="nav-drawer-cta nav-drawer-cta-secondary" href="/logout" data-disconnect>Disconnect</a>
+            }
+            else
+            {
+                <a class="nav-drawer-cta nav-drawer-cta-primary" href="/account">Sign in</a>
+            }
         }
     </div>
 </aside>

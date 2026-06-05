@@ -17,6 +17,12 @@ public sealed class AppState
     public bool HasSession { get; private set; }
     public string ConnectedLabel { get; private set; } = "";
 
+    /// <summary>True once the session/auth state has been resolved from storage at startup
+    /// (interactive). The chrome + dashboard wait for this so a signed-in user never sees the
+    /// signed-out chrome/content flash first — everything renders neutral until the real state
+    /// is known, then commits once. Stays false through prerender (no localStorage there).</summary>
+    public bool SessionHydrated { get; private set; }
+
     /// <summary>True once the media-type preference has been read from storage at
     /// startup (interactive). The dashboard + media-type switch wait for this so they
     /// render the chosen modes directly instead of flashing the default (all) first.</summary>
@@ -109,6 +115,7 @@ public sealed class AppState
         LoggedIn = loggedIn;
         HasSession = loggedIn;
         ConnectedLabel = connectedLabel ?? "";
+        SessionHydrated = true;
         Changed?.Invoke();
     }
 

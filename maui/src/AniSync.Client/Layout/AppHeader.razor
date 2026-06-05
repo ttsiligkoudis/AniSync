@@ -121,13 +121,19 @@
             </svg>
         </button>
 
-        @if (State.HasSession)
+        @* Gate the auth CTA on SessionHydrated so a signed-in user never sees "Sign in" flash
+           before the stored config is read (it resolves to Disconnect a beat later). Until then
+           render nothing here rather than committing the wrong state. *@
+        @if (State.SessionHydrated)
         {
-            <a class="site-header-cta site-header-cta-secondary" href="/logout" data-disconnect>Disconnect</a>
-        }
-        else
-        {
-            <a class="site-header-cta site-header-cta-primary" href="/account">Sign in</a>
+            @if (State.HasSession)
+            {
+                <a class="site-header-cta site-header-cta-secondary" href="/logout" data-disconnect>Disconnect</a>
+            }
+            else
+            {
+                <a class="site-header-cta site-header-cta-primary" href="/account">Sign in</a>
+            }
         }
 
         <button class="hamburger-btn" aria-label="Open menu"
