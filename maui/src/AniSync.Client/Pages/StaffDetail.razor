@@ -5,35 +5,30 @@
    The staff endpoint paginates via opaque skip but doesn't report HasNextPage,
    so "Load more" shows while the last page came back full. *@
 
-<PageTitle>@(_name ?? "Staff") · AniSync</PageTitle>
+<PageTitle>@Title · AniSync</PageTitle>
 
-<section class="container">
-    <div class="discover-browse-header">
-        <a class="watch-back" href="/discover/tag">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
-            <span>Discover</span>
-        </a>
-        <h1 class="dashboard-section-title">@(_name ?? "Staff")</h1>
-    </div>
+<section>
+    <header class="page-header">
+        <p class="page-subtitle">Anime by</p>
+        <h1 class="page-title">@Title</h1>
+    </header>
 
-    <div class="discover-results-pane">
-        @if (_loading && _items.Count == 0)
-        {
-            <div class="library-grid">
-                @for (var i = 0; i < 12; i++)
-                {
-                    <div class="library-card library-card-skeleton">
-                        <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
-                        <span class="library-card-skeleton-line"></span>
-                    </div>
-                }
-            </div>
-        }
-        else
-        {
-            <PosterGrid Items="_items" Variant="grid" EmptyMessage="No anime credits found." />
-        }
-    </div>
+    @if (_loading && _items.Count == 0)
+    {
+        <div class="library-grid">
+            @for (var i = 0; i < 12; i++)
+            {
+                <div class="library-card library-card-skeleton">
+                    <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
+                    <span class="library-card-skeleton-line"></span>
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <PosterGrid Items="_items" EmptyMessage="@EmptyMessage" />
+    }
 
     @if (_canLoadMore)
     {
@@ -54,6 +49,9 @@
     private string? _name;
     private bool _loading;
     private bool _canLoadMore;
+
+    private string Title => string.IsNullOrEmpty(_name) ? $"Staff #{StaffId}" : _name!;
+    private string EmptyMessage => $"No anime found for {Title}.";
 
     protected override async Task OnParametersSetAsync()
     {

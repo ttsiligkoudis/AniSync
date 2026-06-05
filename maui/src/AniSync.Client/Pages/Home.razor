@@ -1,93 +1,336 @@
 @page "/"
 @inject IAniSyncApi Api
 @inject AppState State
-@implements IDisposable
 
 @* Home dashboard — full port of Views/Home/Index.cshtml's section order: the
-   "Your stats" strip, then the anime shelves (Continue watching / New episodes
-   today / Trending / Most popular), then the movie / series (video) shelves for
-   the modes the user enabled. The fixed media-type switch lives in the layout;
-   each section carries data-media-type and hides itself when the dashboard filter
-   excludes it (handled inside StatsStrip / DashboardShelf). Every shelf loads
-   independently from the existing JSON API. *@
+   optional stream-setup nudge, the "Customize" float, the "Your stats" strip,
+   then the anime shelves (Continue watching / New episodes today / Trending /
+   Most popular / Most anticipated), then the movie / series (video) shelves for
+   the modes the user enabled, the "Browse By" grid, and the layout-chooser modal.
+   The fixed media-type switch lives in the layout; each section carries
+   data-media-type and hides itself when the dashboard filter excludes it
+   (handled inside StatsStrip / DashboardShelf). Every shelf loads independently
+   from the existing JSON API. *@
 
 <PageTitle>AniSync</PageTitle>
 
-<StatsStrip />
-
-@* Anime shelves render only when anime is one of the enabled modes (mirrors
-   Index.cshtml: Continue-watching is gated on logged-in + animeEnabled, the rest
-   on animeEnabled). Each still self-hides when its fetch returns nothing. *@
-@if (State.MediaTypesHydrated && State.LoggedIn && State.EnabledMediaTypes.Contains(MetaType.anime))
+@* Streaming nudge — logged-in users who haven't configured a stream addon yet.
+   The shared banner self-hides via its own client wiring (localStorage dismiss);
+   here it's gated on the stored stream config being absent. *@
+@if (State.LoggedIn && string.IsNullOrEmpty(State.StreamConfig))
 {
-    <DashboardShelf Title="Continue watching"
-                    MediaType="anime"
-                    DashSection="anime-continue"
-                    ViewAllHref="/library?list=current&type=anime"
-                    Fetch="@(() => Api.ContinueWatchingAsync())" />
+    @* Shared "set up streaming" nudge (dismissible variant) — inlined port of
+       Views/Shared/_StreamSetupNudge.cshtml. Ships hidden; the global nudge
+       wiring reveals it after checking the localStorage dismiss flag. *@
+    <section class="stream-nudge" data-stream-nudge hidden>
+        <button class="stream-nudge-dismiss" type="button" aria-label="Dismiss" data-stream-nudge-dismiss>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+        </button>
+        <div class="stream-nudge-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+        </div>
+        <div class="stream-nudge-body">
+            <h3 class="stream-nudge-title">Watch right here, in AniSync</h3>
+            <p class="stream-nudge-text">
+                Add a stream addon to surface debrid-cached sources on every episode's player.
+            </p>
+            <div class="stream-nudge-actions">
+                <a class="stream-nudge-cta" href="/account#streams">Set up streaming →</a>
+                <button class="stream-nudge-learn"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="@_nudgeDetailId"
+                        data-stream-nudge-toggle>
+                    How it works
+                </button>
+            </div>
+            <div id="@_nudgeDetailId" class="stream-nudge-detail">
+                <p>
+                    A <strong>stream addon</strong> (Torrentio, MediaFusion, Comet,
+                    AIOStreams, …) finds torrents for an episode and hands AniSync
+                    a list of ready-to-play sources.
+                </p>
+                <p>
+                    Pair it with a <strong>debrid</strong> service (Real-Debrid,
+                    AllDebrid, Premiumize, …): paste your debrid API key and the
+                    addon unlocks instantly-streamable, cached copies — no
+                    downloads, no seeding. The quick setup on
+                    <a href="/account#streams">Account → Streams</a> wires both up
+                    in one step.
+                </p>
+            </div>
+        </div>
+    </section>
 }
 
-@if (State.MediaTypesHydrated && State.EnabledMediaTypes.Contains(MetaType.anime))
+@* Dashboard customisation entry point — opens the layout chooser modal
+   (_DashCustomize, at the bottom). The "is-on-switch-row" modifier lifts it
+   onto the pills row only when that bar is present (more than one media type
+   enabled); otherwise it sits at the top-right of the content. *@
+<div class="dash-customize-float @(_combined ? "is-on-switch-row" : "")">
+    <button type="button" class="dash-customize-btn" data-dash-customize-open>
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line>
+            <line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line>
+            <line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line>
+        </svg>
+        <span>Customize</span>
+    </button>
+</div>
+
+<StatsStrip />
+
+@if (_animeEnabled)
 {
-    <DashboardShelf Title="New Episodes Today"
+    <DashboardShelf Title="@($"Continue watching{_animeSuffix}")"
+                    MediaType="anime"
+                    DashSection="anime-continue"
+                    SkeletonCount="6"
+                    ViewAllHref="/library?list=current&type=anime"
+                    Fetch="@(() => Api.ContinueWatchingAsync())" />
+
+    <DashboardShelf Title="@($"New Episodes Today{_animeSuffix}")"
                     MediaType="anime"
                     DashSection="anime-new-episodes"
                     MutedNote="Refreshes daily"
                     Fetch="@(() => Api.AiringTodayAsync())" />
 
-    <DashboardShelf Title="Trending"
+    <DashboardShelf Title="@($"Trending{_animeSuffix}")"
                     MediaType="anime"
                     DashSection="anime-trending"
                     ViewAllHref="/discover?list=trending&type=anime"
                     Fetch='@(() => Api.DiscoverAsync("trending"))' />
 
-    <DashboardShelf Title="Most Popular"
+    <DashboardShelf Title="@($"Most Popular{_animeSuffix}")"
                     MediaType="anime"
                     DashSection="anime-popular"
                     ViewAllHref="/discover?list=popular&type=anime"
                     Fetch='@(() => Api.DiscoverAsync("popular"))' />
 
-    <DashboardShelf Title="Most Anticipated"
+    <DashboardShelf Title="@($"Most Anticipated{_animeSuffix}")"
                     MediaType="anime"
                     DashSection="anime-anticipated"
                     ViewAllHref="/discover?list=seasonal&type=anime"
-                    Fetch='@(() => Api.DiscoverAsync("seasonal", "Next Season"))' />
+                    Fetch='@(() => Api.DiscoverAsync("seasonal"))' />
 }
 
-@* Movie / series (Trakt-backed) shelves — only rendered for the modes the user
-   enabled in the chooser, then shown/hidden by the dashboard media-type filter. *@
-@if (State.MediaTypesHydrated && State.EnabledMediaTypes.Contains(MetaType.movie))
+@* Movie / series (Trakt-backed) shelves — grouped by list type so the page reads
+   down the list types (all Continue watching, then all Trending, …), matching the
+   web. Continue watching needs a Trakt link, so it self-hides when empty. Titles
+   carry the "· Movies / · Series" suffix only when more than one mode is enabled. *@
+@if (State.LoggedIn)
 {
-    <DashboardShelf Title="Trending Movies" MediaType="movie" DashSection="movie-trending" VideoLinks="true"
-                    ViewAllHref="/discover?list=trending&type=movie"
-                    Fetch='@(() => Api.DiscoverVideoAsync("movie", "trending"))' />
-    <DashboardShelf Title="Popular Movies" MediaType="movie" DashSection="movie-popular" VideoLinks="true"
-                    ViewAllHref="/discover?list=popular&type=movie"
-                    Fetch='@(() => Api.DiscoverVideoAsync("movie", "popular"))' />
-    <DashboardShelf Title="Most Anticipated Movies" MediaType="movie" DashSection="movie-anticipated" VideoLinks="true"
-                    ViewAllHref="/discover?list=anticipated&type=movie"
-                    Fetch='@(() => Api.DiscoverVideoAsync("movie", "anticipated"))' />
+    @foreach (var vt in _videoTypes)
+    {
+        <DashboardShelf Title="@($"Continue watching{VideoSuffix(vt)}")"
+                        MediaType="@VideoSlug(vt)"
+                        DashSection="@($"video-continue-{VideoSlug(vt)}")"
+                        VideoLinks="true"
+                        SkeletonCount="6"
+                        ViewAllHref="@($"/library?list=current&type={VideoSlug(vt)}")"
+                        Fetch="@(() => Api.VideoListAsync(VideoSlug(vt), "current"))" />
+    }
 }
 
-@if (State.MediaTypesHydrated && State.EnabledMediaTypes.Contains(MetaType.series))
+@foreach (var vt in _videoTypes)
 {
-    <DashboardShelf Title="Trending Series" MediaType="series" DashSection="series-trending" VideoLinks="true"
-                    ViewAllHref="/discover?list=trending&type=series"
-                    Fetch='@(() => Api.DiscoverVideoAsync("series", "trending"))' />
-    <DashboardShelf Title="Popular Series" MediaType="series" DashSection="series-popular" VideoLinks="true"
-                    ViewAllHref="/discover?list=popular&type=series"
-                    Fetch='@(() => Api.DiscoverVideoAsync("series", "popular"))' />
-    <DashboardShelf Title="Most Anticipated Series" MediaType="series" DashSection="series-anticipated" VideoLinks="true"
-                    ViewAllHref="/discover?list=anticipated&type=series"
-                    Fetch='@(() => Api.DiscoverVideoAsync("series", "anticipated"))' />
+    <DashboardShelf Title="@($"Trending{VideoSuffix(vt)}")"
+                    MediaType="@VideoSlug(vt)"
+                    DashSection="@($"video-trending-{VideoSlug(vt)}")"
+                    VideoLinks="true"
+                    ViewAllHref="@($"/discover?list=trending&type={VideoSlug(vt)}")"
+                    Fetch="@(() => Api.DiscoverVideoAsync(VideoSlug(vt), "trending"))" />
 }
+
+@foreach (var vt in _videoTypes)
+{
+    <DashboardShelf Title="@($"Most Popular{VideoSuffix(vt)}")"
+                    MediaType="@VideoSlug(vt)"
+                    DashSection="@($"video-popular-{VideoSlug(vt)}")"
+                    VideoLinks="true"
+                    ViewAllHref="@($"/discover?list=popular&type={VideoSlug(vt)}")"
+                    Fetch="@(() => Api.DiscoverVideoAsync(VideoSlug(vt), "popular"))" />
+}
+
+@foreach (var vt in _videoTypes)
+{
+    <DashboardShelf Title="@($"Most Anticipated{VideoSuffix(vt)}")"
+                    MediaType="@VideoSlug(vt)"
+                    DashSection="@($"video-anticipated-{VideoSlug(vt)}")"
+                    VideoLinks="true"
+                    ViewAllHref="@($"/discover?list=anticipated&type={VideoSlug(vt)}")"
+                    Fetch="@(() => Api.DiscoverVideoAsync(VideoSlug(vt), "anticipated"))" />
+}
+
+@* Browse By: secondary discovery surfaces. Four browse paths per mode — all
+   functional, all under /discover. Trending shows for every mode (no ?type so it
+   respects the selected type). *@
+<section class="dashboard-section" data-dash-section="browse">
+    <div class="dashboard-section-header">
+        <h2 class="dashboard-section-title">Browse By</h2>
+        <span class="dashboard-section-link-muted">Find your next favourite</span>
+    </div>
+    <div class="browse-grid">
+        <div data-media-type="anime movie series" style="display:contents">
+        <a class="browse-tile" href="/discover?list=trending">
+            <span class="browse-tile-icon browse-tile-icon-blue">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                    <polyline points="17 6 23 6 23 12"></polyline>
+                </svg>
+            </span>
+            <div class="browse-tile-body">
+                <h3 class="browse-tile-title">Trending</h3>
+                <p class="browse-tile-text">What's hot right now</p>
+            </div>
+        </a>
+        </div>
+        @if (_animeEnabled)
+        {
+        <div data-media-type="anime" style="display:contents">
+        <a class="browse-tile" href="/discover?list=seasonal&type=anime">
+            <span class="browse-tile-icon browse-tile-icon-blue">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+            </span>
+            <div class="browse-tile-body">
+                <h3 class="browse-tile-title">Seasons</h3>
+                <p class="browse-tile-text">Browse by release season</p>
+            </div>
+        </a>
+
+        <a class="browse-tile" href="/discover/studio?type=anime">
+            <span class="browse-tile-icon browse-tile-icon-amber">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="4" y="3" width="16" height="18" rx="1"></rect>
+                    <line x1="9" y1="8" x2="9" y2="8.01"></line>
+                    <line x1="15" y1="8" x2="15" y2="8.01"></line>
+                    <line x1="9" y1="12" x2="9" y2="12.01"></line>
+                    <line x1="15" y1="12" x2="15" y2="12.01"></line>
+                    <line x1="9" y1="16" x2="9" y2="16.01"></line>
+                    <line x1="15" y1="16" x2="15" y2="16.01"></line>
+                </svg>
+            </span>
+            <div class="browse-tile-body">
+                <h3 class="browse-tile-title">Studios</h3>
+                <p class="browse-tile-text">Browse by studio</p>
+            </div>
+        </a>
+
+        <a class="browse-tile" href="/discover/tag?type=anime">
+            <span class="browse-tile-icon browse-tile-icon-purple">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                    <line x1="7" y1="7" x2="7.01" y2="7"></line>
+                </svg>
+            </span>
+            <div class="browse-tile-body">
+                <h3 class="browse-tile-title">Tags</h3>
+                <p class="browse-tile-text">Browse by tag</p>
+            </div>
+        </a>
+        </div>
+        }
+        @if (_videoTypes.Count > 0)
+        {
+        <div data-media-type="movie series" style="display:contents">
+        <a class="browse-tile" href="/discover?list=popular">
+            <span class="browse-tile-icon browse-tile-icon-green">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
+                </svg>
+            </span>
+            <div class="browse-tile-body">
+                <h3 class="browse-tile-title">Popular</h3>
+                <p class="browse-tile-text">Most-watched picks</p>
+            </div>
+        </a>
+
+        <a class="browse-tile" href="/discover?list=watched">
+            <span class="browse-tile-icon browse-tile-icon-amber">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+            </span>
+            <div class="browse-tile-body">
+                <h3 class="browse-tile-title">Most Watched</h3>
+                <p class="browse-tile-text">This week's top plays</p>
+            </div>
+        </a>
+
+        <a class="browse-tile" href="/discover?list=anticipated">
+            <span class="browse-tile-icon browse-tile-icon-purple">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                </svg>
+            </span>
+            <div class="browse-tile-body">
+                <h3 class="browse-tile-title">Anticipated</h3>
+                <p class="browse-tile-text">Upcoming releases</p>
+            </div>
+        </a>
+
+        <a class="browse-tile" href="/discover/actors">
+            <span class="browse-tile-icon browse-tile-icon-blue">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+            </span>
+            <div class="browse-tile-body">
+                <h3 class="browse-tile-title">Actors</h3>
+                <p class="browse-tile-text">Browse by actor</p>
+            </div>
+        </a>
+        </div>
+        }
+    </div>
+</section>
+
+@* Dashboard layout chooser modal — port of _DashCustomize.cshtml. Populated +
+   driven by dashboard-layout.js in the web; the markup is rendered here for
+   structural parity. The "Customize" trigger lives up top (.dash-customize-float). *@
+<div class="dash-modal-backdrop" data-dash-modal-backdrop hidden></div>
+<div class="dash-modal" data-dash-modal role="dialog" aria-modal="true" aria-labelledby="dash-modal-title" hidden>
+    <div class="dash-modal-card">
+        <button type="button" class="dash-modal-close" aria-label="Close" data-dash-modal-close>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+        </button>
+        <h2 class="dash-modal-title" id="dash-modal-title">Customize dashboard</h2>
+        <p class="dash-modal-subtitle">Reorder sections and choose what shows. Synced to your account.</p>
+        <ul class="dash-modal-list" data-dash-modal-list></ul>
+        <div class="dash-modal-footer">
+            <button type="button" class="dash-modal-reset" data-dash-reset>Reset to default</button>
+            <button type="button" class="dash-modal-done" data-dash-modal-done>Save</button>
+        </div>
+    </div>
+</div>
 
 @code {
-    // The shelf set is gated on the enabled media types, which load asynchronously
-    // (MainLayout hydrates them from localStorage after the first render) and change
-    // when the chooser modal saves. Re-render on AppState changes so the @if gates
-    // re-evaluate — otherwise the shelves stay frozen at the default (all modes).
-    protected override void OnInitialized() => State.Changed += OnStateChanged;
-    private void OnStateChanged() => StateHasChanged();
-    public void Dispose() => State.Changed -= OnStateChanged;
+    private bool _animeEnabled => State.EnabledMediaTypes.Contains(MetaType.anime);
+    private List<MetaType> _videoTypes => State.EnabledMediaTypes.Where(t => t != MetaType.anime).ToList();
+    private bool _combined => State.EnabledMediaTypes.Count > 1;
+    private string _animeSuffix => _combined ? " · Anime" : "";
+
+    private static string VideoSlug(MetaType vt) => vt == MetaType.movie ? "movie" : "series";
+    private string VideoSuffix(MetaType vt) => _combined ? " · " + (vt == MetaType.movie ? "Movies" : "Series") : "";
+
+    // Unique id so the nudge's aria-controls stays valid (matches the web's
+    // Guid-derived detail id).
+    private readonly string _nudgeDetailId = "streamNudgeDetail-" + Guid.NewGuid().ToString("N")[..8];
 }

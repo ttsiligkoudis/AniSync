@@ -21,13 +21,20 @@
 
 <section class="watch-header">
     <a class="watch-back" href="@BackHref">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M15 18l-6-6 6-6"></path>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
         </svg>
         <span>@(_meta?.Name ?? "Back")</span>
     </a>
     <h1 class="watch-title">@_title</h1>
-    <p class="watch-meta">@_seasonLabel</p>
+    <p class="watch-meta">
+        @_seasonLabel
+        @if (!string.IsNullOrEmpty(_metaDate))
+        {
+            <span class="watch-meta-dot">·</span> <span>@_metaDate</span>
+        }
+    </p>
 </section>
 
 <section class="watch-player-wrap">
@@ -46,6 +53,10 @@
                 @if (!string.IsNullOrEmpty(_meta?.Background))
                 {
                     <img class="watch-player-backdrop" src="@_meta!.Background" alt="" loading="lazy" decoding="async" />
+                }
+                @if (!string.IsNullOrEmpty(_metaThumbnail))
+                {
+                    <img class="watch-player-poster" src="@_metaThumbnail" alt="" loading="lazy" decoding="async" />
                 }
                 <span class="watch-player-prompt">
                     @if (Env.SupportsNativePlayback && _playingUrl is not null)
@@ -183,6 +194,8 @@
     private string _type = "series";
     private string _title = "Watch";
     private string _seasonLabel = "";
+    private string? _metaDate;
+    private string? _metaThumbnail;
     private bool _autoPlayNext = true;
     private bool _autoTrack = true;
     private bool _autoSkip;
@@ -214,7 +227,12 @@
         _episodes = epsTask.Result;
 
         _title = $"Episode {Episode}";
-        _seasonLabel = Season is int s ? $"Season {s} · Episode {Episode}" : $"Episode {Episode}";
+        // S{n} · E{ep} when the title actually spans multiple seasons, else
+        // "Episode {ep}" — mirrors Watch.cshtml's seasonLabel.
+        var hasSeasons = _episodes.Select(e => e.Season).Distinct().Count() > 1;
+        _seasonLabel = hasSeasons ? $"S{season} · E{Episode}" : $"Episode {Episode}";
+        _metaDate = null;
+        _metaThumbnail = null;
 
         // Prev/next within the same season ordering.
         var ordered = _episodes.Where(e => e.Season == season).OrderBy(e => e.Episode).ToList();
@@ -225,6 +243,9 @@
             _next = idx < ordered.Count - 1 ? ordered[idx + 1] : null;
             var cur = ordered[idx];
             if (!string.IsNullOrEmpty(cur.Title)) _title = $"{Episode}. {cur.Title}";
+            if (!string.IsNullOrEmpty(cur.Released) && cur.Released!.Length >= 10)
+                _metaDate = cur.Released![..10];
+            _metaThumbnail = cur.Thumbnail;
         }
 
         // Resolve playable sources once streaming is configured.

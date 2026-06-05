@@ -12,7 +12,7 @@
 
 <PageTitle>Calendar · AniSync</PageTitle>
 
-<div class="container cal-page">
+<div class="cal-page">
     <header class="cal-header">
         <div class="cal-title-group">
             <h1 class="cal-title">Calendar</h1>
@@ -85,13 +85,13 @@
                                     <div class="cal-card-thumb">
                                         @if (!string.IsNullOrEmpty(ep.CoverImage))
                                         {
-                                            <img src="@ep.CoverImage" alt="" loading="lazy" decoding="async" onerror="this.remove()" />
+                                            <img src="@ep.CoverImage" alt="" loading="lazy" decoding="async" />
                                         }
                                         else
                                         {
                                             <span class="cal-card-thumb-ph" aria-hidden="true"></span>
                                         }
-                                        <span class="cal-card-time">@AirTime(ep.AiringAt)</span>
+                                        <span class="cal-card-time" data-ts="@ep.AiringAt">@AirTime(ep.AiringAt)</span>
                                     </div>
                                     <div class="cal-card-info">
                                         <div class="cal-card-title">@ep.Title</div>
@@ -124,7 +124,8 @@
     private static string MonthLabel(string? iso) => DateOnly.TryParse(iso, out var d) ? d.ToString("MMM") : "";
     private static string DayNumber(string? iso) => DateOnly.TryParse(iso, out var d) ? d.Day.ToString() : "";
     private static string DowLabel(string? iso) => DateOnly.TryParse(iso, out var d) ? d.ToString("ddd") : "";
-    private static string AirTime(long unix) => DateTimeOffset.FromUnixTimeSeconds(unix).LocalDateTime.ToString("h:mm tt");
+    private static string AirTime(long unix) => DateTimeOffset.FromUnixTimeSeconds(unix).UtcDateTime
+        .ToString("h:mm tt", System.Globalization.CultureInfo.InvariantCulture);
 
     private static string EpisodeMeta(CalendarEpisodeDto ep)
     {

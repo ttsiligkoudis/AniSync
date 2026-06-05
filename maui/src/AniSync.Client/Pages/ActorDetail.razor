@@ -4,16 +4,23 @@
 @* Actor filmography — port of Views/Discover/ActorDetail.cshtml. Movies + series
    credits (Trakt-backed) as poster grids that link into the video detail pages. *@
 
-<PageTitle>@(_credits?.Name ?? "Actor") · AniSync</PageTitle>
+<PageTitle>@Title · AniSync</PageTitle>
 
-<section class="container">
-    <div class="discover-browse-header">
-        <a class="watch-back" href="/discover/actors">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
-            <span>All actors</span>
-        </a>
-        <h1 class="dashboard-section-title">@(_credits?.Name ?? "Actor")</h1>
-    </div>
+<section>
+    <header class="page-header actor-header">
+        <span class="actor-header-avatar">
+            <span class="actor-header-avatar-initial" aria-hidden="true">@Initial</span>
+            @if (!string.IsNullOrEmpty(_credits?.Image))
+            {
+                <img class="actor-header-avatar-img" src="@_credits.Image" alt="" loading="lazy"
+                     decoding="async" onerror="this.remove()" />
+            }
+        </span>
+        <span class="actor-header-text">
+            <span class="page-subtitle">Movies &amp; Series</span>
+            <h1 class="page-title">@Title</h1>
+        </span>
+    </header>
 
     @if (_loading)
     {
@@ -21,22 +28,22 @@
     }
     else if (_credits is null || (_credits.Movies.Count == 0 && _credits.Series.Count == 0))
     {
-        <p class="hint-text">No credits found for this person.</p>
+        <p class="hint-text">No titles found for @Title.</p>
     }
     else
     {
         @if (_credits.Movies.Count > 0)
         {
-            <section class="anime-detail-section">
-                <h2 class="anime-detail-section-title">Movies</h2>
-                <PosterGrid Items="_credits.Movies" Variant="grid" VideoLinks="true" />
+            <section class="discover-group">
+                <h2 class="discover-group-title">Movies</h2>
+                <PosterGrid Items="_credits.Movies" VideoLinks="true" />
             </section>
         }
         @if (_credits.Series.Count > 0)
         {
-            <section class="anime-detail-section">
-                <h2 class="anime-detail-section-title">Series</h2>
-                <PosterGrid Items="_credits.Series" Variant="grid" VideoLinks="true" />
+            <section class="discover-group">
+                <h2 class="discover-group-title">Series</h2>
+                <PosterGrid Items="_credits.Series" VideoLinks="true" />
             </section>
         }
     }
@@ -47,6 +54,9 @@
 
     private ActorCreditsResponse? _credits;
     private bool _loading = true;
+
+    private string Title => string.IsNullOrEmpty(_credits?.Name) ? "Actor" : _credits!.Name!;
+    private string Initial => string.IsNullOrEmpty(Title) ? "?" : Title[..1];
 
     protected override async Task OnParametersSetAsync()
     {
