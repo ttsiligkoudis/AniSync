@@ -23,6 +23,24 @@ public sealed class AppState
     /// is known, then commits once. Stays false through prerender (no localStorage there).</summary>
     public bool SessionHydrated { get; private set; }
 
+    /// <summary>True once MainLayout has finished reading the stored config credential from
+    /// localStorage on the interactive pass (whether or not one was found). Distinct from
+    /// <see cref="SessionHydrated"/>, which the cookie-backed prerender bridge can flip true
+    /// EARLY (before the credential is read) just to render signed-in chrome. The dashboard
+    /// gates its data-bearing content on THIS so its shelves/stats/layout fetch only after the
+    /// X-AniSync-Config credential is available — otherwise they'd fire credential-less and come
+    /// back empty (the "refresh shows me logged out" bug).</summary>
+    public bool ConfigHydrated { get; private set; }
+
+    /// <summary>Mark the config credential resolved (called by MainLayout after its localStorage
+    /// hydration completes). Idempotent.</summary>
+    public void MarkConfigHydrated()
+    {
+        if (ConfigHydrated) return;
+        ConfigHydrated = true;
+        Changed?.Invoke();
+    }
+
     /// <summary>True once the media-type preference has been read from storage at
     /// startup (interactive). The dashboard + media-type switch wait for this so they
     /// render the chosen modes directly instead of flashing the default (all) first.</summary>

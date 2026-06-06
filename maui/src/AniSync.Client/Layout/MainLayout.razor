@@ -49,16 +49,26 @@
         // interactive pass below, where localStorage is readable.
         if (!RendererInfo.IsInteractive) return;
 
-        // Hydrate the saved config credential once at startup so the dashboard,
-        // Library and Watch pages authenticate without a trip through Settings.
-        if (string.IsNullOrEmpty(State.StreamConfig))
+        try
         {
-            var saved = await Store.GetAsync(ISecureStore.ConfigKey);
-            if (!string.IsNullOrEmpty(saved)) State.SetStreamConfig(saved);
-        }
+            // Hydrate the saved config credential once at startup so the dashboard,
+            // Library and Watch pages authenticate without a trip through Settings.
+            if (string.IsNullOrEmpty(State.StreamConfig))
+            {
+                var saved = await Store.GetAsync(ISecureStore.ConfigKey);
+                if (!string.IsNullOrEmpty(saved)) State.SetStreamConfig(saved);
+            }
 
-        await HydrateMediaTypesAsync();
-        await HydrateSessionAsync();
+            await HydrateMediaTypesAsync();
+            await HydrateSessionAsync();
+        }
+        finally
+        {
+            // Signal the credential is resolved (found or not) so the dashboard can render its
+            // data-bearing shelves WITH the X-AniSync-Config header. Always runs — even if a
+            // hydration step throws — so the dashboard never hangs on the skeleton.
+            State.MarkConfigHydrated();
+        }
     }
 
     // Seed the switch / dashboard from the stored media-type preference so they
