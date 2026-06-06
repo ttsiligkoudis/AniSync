@@ -30,7 +30,20 @@
 
 @if (_loading)
 {
-    <p class="hint-text">Loading account…</p>
+    @* The account cards need the localStorage credential (unreadable during prerender), so a
+       load is unavoidable on refresh — show card-shaped shimmer placeholders instead of a bare
+       "Loading account…" line so the page holds its shape until the real cards land. *@
+    <section class="section-card" aria-busy="true">
+        <span class="sr-only">Loading account…</span>
+        <span class="library-card-skeleton-line" style="display:block;width:35%;height:1.3em;margin-bottom:1.1rem"></span>
+        <span class="library-card-skeleton-line" style="display:block;width:100%;height:2.6em;margin-bottom:0.7rem"></span>
+        <span class="library-card-skeleton-line library-card-skeleton-line-short" style="height:1.1em"></span>
+    </section>
+    <section class="section-card" aria-busy="true">
+        <span class="library-card-skeleton-line" style="display:block;width:45%;height:1.3em;margin-bottom:1.1rem"></span>
+        <span class="library-card-skeleton-line" style="display:block;width:100%;height:2.1em;margin-bottom:0.6rem"></span>
+        <span class="library-card-skeleton-line" style="display:block;width:80%;height:2.1em"></span>
+    </section>
 }
 else
 {

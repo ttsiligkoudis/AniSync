@@ -17,7 +17,25 @@
 <PageTitle>@_pageTitle</PageTitle>
 
 <section>
-    @if (string.IsNullOrEmpty(State.StreamConfig))
+    @if (!State.ConfigHydrated)
+    {
+        @* Credential not resolved yet (prerender / pre-hydration). Render a neutral skeleton
+           rather than the "Sign in" prompt — gating on the empty StreamConfig alone flashed
+           "Sign in" on every refresh until localStorage hydration committed the real session.
+           Mirrors the dashboard, which gates its content on ConfigHydrated for the same reason. *@
+        <h1 class="dashboard-section-title">Library</h1>
+        <div class="library-grid">
+            @for (var i = 0; i < 12; i++)
+            {
+                <div class="library-card library-card-skeleton">
+                    <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
+                    <span class="library-card-skeleton-line"></span>
+                    <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                </div>
+            }
+        </div>
+    }
+    else if (string.IsNullOrEmpty(State.StreamConfig))
     {
         <h1 class="dashboard-section-title">Library</h1>
         <p class="hint-text">
