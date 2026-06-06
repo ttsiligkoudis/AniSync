@@ -1,5 +1,7 @@
 @inject IAniSyncApi Api
 @inject NavigationManager Nav
+@inject AppState State
+@inject IPrerenderSession Prerender
 @implements IDisposable
 
 @* Episode-release notification bell — interactive C# port of the header bell
@@ -73,7 +75,20 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await RefreshCountAsync();
+        // Replay the prerendered unread count so the badge doesn't blink off on the interactive
+        // remount before the credential hydrates (web only; no-op on native).
+        if (RendererInfo.IsInteractive && Prerender.TryReplay<int>(CountKey, out var saved))
+            _count = saved;
+
+        // Fetch only when we actually have a credential. On the interactive pass StreamConfig is
+        // empty until MainLayout reads it from localStorage, and a credential-less count call comes
+        // back 0 — which would blank the badge that the prerender (where the credential is seeded)
+        // correctly showed. We refresh for real once it hydrates (OnStateChanged).
+        if (!string.IsNullOrEmpty(State.StreamConfig))
+        {
+            _credentialFetchDone = true;
+            await RefreshCountAsync();
+        }
 
         // Live-refresh the unread badge once interactive (the credential lives in
         // localStorage, unreadable during prerender; and OnInitializedAsync runs twice,
@@ -81,11 +96,31 @@
         if (RendererInfo.IsInteractive && !_liveStarted)
         {
             _liveStarted = true;
+            State.Changed += OnStateChanged;
             Nav.LocationChanged += OnLocationChanged;
             // Poll every 60s so freshly-aired episode notifications surface without a reload.
             _poll = new System.Threading.Timer(
                 _ => _ = InvokeAsync(RefreshCountAsync), null,
                 TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
+        }
+
+        // Prerender (credential seeded): stash the count so the interactive remount replays it.
+        if (!RendererInfo.IsInteractive)
+            Prerender.Persist<int>(CountKey, RendererInfo.IsInteractive, () => _count);
+    }
+
+    private const string CountKey = "notif.count";
+    private bool _credentialFetchDone;
+
+    // Fire the catch-up fetch exactly once — when the credential first hydrates on the interactive
+    // circuit. After that the 60s poll + per-navigation refresh keep the badge live; we don't want to
+    // refetch on every unrelated State.Changed (media-type toggle, theme, etc.).
+    private void OnStateChanged()
+    {
+        if (!_credentialFetchDone && !string.IsNullOrEmpty(State.StreamConfig))
+        {
+            _credentialFetchDone = true;
+            _ = InvokeAsync(RefreshCountAsync);
         }
     }
 
@@ -138,7 +173,11 @@
 
     public void Dispose()
     {
-        if (_liveStarted) Nav.LocationChanged -= OnLocationChanged;
+        if (_liveStarted)
+        {
+            Nav.LocationChanged -= OnLocationChanged;
+            State.Changed -= OnStateChanged;
+        }
         _poll?.Dispose();
     }
 }
