@@ -74,10 +74,12 @@
    (_DashCustomize, at the bottom). The "is-on-switch-row" modifier lifts it
    onto the pills row only when that bar is present (more than one media type
    enabled); otherwise it sits at the top-right of the content. *@
-@if (!State.SessionHydrated)
+@if (!State.SessionHydrated || !State.DashLayoutLoaded)
 {
-    @* Session not resolved yet (prerender / pre-hydration) — render neutral skeleton shelves so a
-       signed-in user never sees the signed-out dashboard first. It commits once, on hydration. *@
+    @* Session / saved layout not resolved yet (prerender, pre-hydration, or the layout
+       fetch in flight) — render neutral skeleton shelves so a signed-in user never sees
+       the signed-out dashboard first, AND so the real shelves paint once in the saved
+       order/visibility rather than flashing the default order then reordering. *@
     @for (var s = 0; s < 3; s++)
     {
         <section class="dashboard-section">
@@ -399,14 +401,37 @@ else
         }
     }
 
-    // Load the saved dashboard layout once the session has hydrated (it needs the config credential).
+    // Resolve the saved dashboard layout BEFORE the shelves paint, so they render once in the
+    // saved order/visibility instead of flashing the default order then reordering. The shelves
+    // are gated on State.DashLayoutLoaded; this drives it to true in every case (loaded from the
+    // account, or "default stands" for an anonymous / no-config visitor, or on fetch failure so
+    // the skeleton never hangs). DashLayoutLoaded survives navigation, so revisiting Home neither
+    // re-gates nor re-fetches.
     private async Task TryLoadLayoutAsync()
     {
-        if (_layoutLoaded || !State.LoggedIn || string.IsNullOrEmpty(State.StreamConfig)) return;
-        _layoutLoaded = true;
-        var json = await Api.GetDashboardLayoutAsync();
-        if (!string.IsNullOrWhiteSpace(json))
-            State.SetDashLayout(DashboardLayout.Merge(json));   // fires Changed → sections re-render
+        if (State.DashLayoutLoaded || _layoutLoaded) return;   // already resolved, or a fetch is in flight
+        if (!State.SessionHydrated) return;                    // wait until the signed-in state is known
+
+        if (State.LoggedIn && !string.IsNullOrEmpty(State.StreamConfig))
+        {
+            _layoutLoaded = true;
+            try
+            {
+                var json = await Api.GetDashboardLayoutAsync();
+                if (!string.IsNullOrWhiteSpace(json))
+                    State.SetDashLayout(DashboardLayout.Merge(json));   // sets DashLayoutLoaded + fires Changed
+                else
+                    State.MarkDashLayoutResolved();                     // nothing saved → default stands
+            }
+            catch
+            {
+                State.MarkDashLayoutResolved();                         // fetch failed → keep default, don't hang
+            }
+            return;
+        }
+
+        // Anonymous / no stored config → no saved layout; the default order stands.
+        State.MarkDashLayoutResolved();
     }
 
     private async void OnStateChanged()

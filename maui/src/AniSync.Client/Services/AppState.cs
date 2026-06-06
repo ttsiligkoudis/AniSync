@@ -62,6 +62,14 @@ public sealed class AppState
     /// re-render on Changed. Reorder is applied via CSS flex `order`, not DOM-moving JS.</summary>
     public IReadOnlyList<LayoutEntry> DashLayout { get; private set; } = DashboardLayout.Default();
 
+    /// <summary>True once the saved dashboard layout has been resolved for this session
+    /// (loaded from the account, or determined to be the default for an anonymous/no-config
+    /// visitor). The dashboard waits for this before rendering shelves so they paint in the
+    /// saved order/visibility once, instead of flashing the default order then reordering.
+    /// Survives client-side navigation (AppState is circuit-scoped), so revisiting Home
+    /// doesn't re-gate or re-fetch.</summary>
+    public bool DashLayoutLoaded { get; private set; }
+
     /// <summary>
     /// The user's Stremio addon config string, used to resolve playable sources
     /// (GET /{config}/stream/...). Held in secure storage on MAUI and supplied
@@ -101,6 +109,16 @@ public sealed class AppState
     public void SetDashLayout(IReadOnlyList<LayoutEntry> layout)
     {
         DashLayout = layout;
+        DashLayoutLoaded = true;
+        Changed?.Invoke();
+    }
+
+    /// <summary>Mark the layout resolved without changing it — for the anonymous / no-config
+    /// case where there's nothing saved to load and the default order stands.</summary>
+    public void MarkDashLayoutResolved()
+    {
+        if (DashLayoutLoaded) return;
+        DashLayoutLoaded = true;
         Changed?.Invoke();
     }
 
