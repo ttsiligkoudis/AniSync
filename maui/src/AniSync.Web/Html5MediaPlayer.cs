@@ -20,12 +20,17 @@ public sealed class Html5MediaPlayer : IMediaPlayer, IAsyncDisposable
 {
     private const string VideoElementId = "watch-video";
     private const string ConfigHeader = "X-AniSync-Config";
+    // ArtPlayer + watch-player.js are loaded lazily here (off every non-watch page) the
+    // first time a source plays — see wwwroot/js/watch-loader.js.
+    private const string ArtPlayerUrl = "https://unpkg.com/artplayer@5/dist/artplayer.js";
+    private const string WatchPlayerUrl = "js/watch-player.js";
 
     private readonly IJSRuntime _js;
     private readonly AppState _state;
     private readonly IAppEnvironment _env;
     private readonly IConfiguration _config;
     private DotNetObjectReference<PlaybackCallbacks>? _ref;
+    private IJSObjectReference? _loader;
 
     public Html5MediaPlayer(IJSRuntime js, AppState state, IAppEnvironment env, IConfiguration config)
     {
@@ -54,6 +59,13 @@ public sealed class Html5MediaPlayer : IMediaPlayer, IAsyncDisposable
 
         try
         {
+            // Lazy-load the video stack on first play (ArtPlayer + watch-player.js are no
+            // longer on every page). Resolves once window.anisyncWatch is defined, so the
+            // anisyncWatch.* calls below are safe; watch-player.js's play() polls for
+            // window.Artplayer itself, so the engine just needs to be on its way.
+            _loader ??= await _js.InvokeAsync<IJSObjectReference>("import", "./js/watch-loader.js");
+            await _loader.InvokeVoidAsync("ensure", ct, ArtPlayerUrl, WatchPlayerUrl);
+
             // Seed the environment half of the embedded-subtitle pipeline's context
             // (the API origin + config credential it fetches /episode-subtitles +
             // /resolve-stream with, plus the optional CF CORS proxy). The page seeds
@@ -101,7 +113,15 @@ public sealed class Html5MediaPlayer : IMediaPlayer, IAsyncDisposable
         _ref = null;
     }
 
-    public async ValueTask DisposeAsync() => await StopAsync();
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync();
+        if (_loader is not null)
+        {
+            try { await _loader.DisposeAsync(); } catch { }
+            _loader = null;
+        }
+    }
 
     /// <summary>JS-invokable bridge forwarding player events to the page callbacks.</summary>
     public sealed class PlaybackCallbacks
