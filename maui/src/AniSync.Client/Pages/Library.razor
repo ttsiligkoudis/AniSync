@@ -17,8 +17,11 @@
 
 <PageTitle>@_pageTitle</PageTitle>
 
-<section>
-    @* Content shows as soon as we have a credential — seeded server-side from the anisync_uid cookie
+@* No wrapper element: the tabs / filter bar / results pane are direct children of <main> so they
+   pick up its column gap (var(--space-5)) — same as Discover. A wrapping <section> would collapse
+   them into one flex child and the page would render with no spacing between the filter bar and grid. *@
+
+@* Content shows as soon as we have a credential — seeded server-side from the anisync_uid cookie
        during prerender, replayed on the interactive remount (_replayed), or hydrated from localStorage.
        Only once we KNOW there's no credential (ConfigHydrated && none) do we show "Sign in"; before
        that we render a neutral skeleton rather than flashing the signed-out prompt. *@
@@ -109,7 +112,6 @@
             }
         </div>
     }
-</section>
 
 @code {
     // ── Query string: deep-link entry points; tabs + the filter bar navigate by rewriting these. ──
