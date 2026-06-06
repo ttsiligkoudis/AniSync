@@ -1,7 +1,8 @@
 @page "/"
 @inject IAniSyncApi Api
 @inject AppState State
-@implements IDisposable
+@inject IJSRuntime JS
+@implements IAsyncDisposable
 
 @* Home dashboard — full port of Views/Home/Index.cshtml's section order: the
    optional stream-setup nudge, the "Customize" float, the "Your stats" strip,
@@ -354,6 +355,7 @@ else
 
     private DashCustomizeModal? _customize;
     private bool _layoutLoaded;
+    private IJSObjectReference? _js;
 
     protected override void OnInitialized()
     {
@@ -361,6 +363,20 @@ else
         // shelf blocks when the enabled media types hydrate + when the saved layout loads / changes.
         State.Changed += OnStateChanged;
         _ = TryLoadLayoutAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // body.dash-page (original's ViewData["BodyClass"]) makes <main> the containing
+        // block for the absolutely-positioned "Customize" float and tucks the content
+        // under the sticky media-type pills. OnAfterRenderAsync only runs interactively.
+        if (!firstRender) return;
+        try
+        {
+            _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/dashboard.js");
+            await _js.InvokeVoidAsync("setDashPage", true);
+        }
+        catch { /* prerender / no JS */ }
     }
 
     // Load the saved dashboard layout once the session has hydrated (it needs the config credential).
@@ -379,5 +395,13 @@ else
         StateHasChanged();
     }
 
-    public void Dispose() => State.Changed -= OnStateChanged;
+    public async ValueTask DisposeAsync()
+    {
+        State.Changed -= OnStateChanged;
+        if (_js is not null)
+        {
+            try { await _js.InvokeVoidAsync("setDashPage", false); } catch { }
+            try { await _js.DisposeAsync(); } catch { }
+        }
+    }
 }
