@@ -1,5 +1,6 @@
 @page "/discover/actor/tmdb/{TmdbId:int}"
 @inject IAniSyncApi Api
+@inject IPrerenderSession Prerender
 
 @* Actor filmography — port of Views/Discover/ActorDetail.cshtml. Movies + series
    credits (Trakt-backed) as poster grids that link into the video detail pages. *@
@@ -60,8 +61,40 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        var key = PersistKey();
+
+        // Interactive remount after a prerender: replay the stashed credits instead of resetting to the
+        // skeleton + refetching, so a refresh doesn't flash content → "Loading…" → content. Native and
+        // client-side navigations (no stash) fall through to a normal load.
+        if (RendererInfo.IsInteractive && _appliedKey != key
+            && Prerender.TryReplay<PersistedActor?>(key, out var snap) && snap is not null)
+        {
+            _appliedKey = key;
+            RestoreActor(snap);
+            return;
+        }
+        if (_appliedKey == key) return;   // already loaded/replayed this exact view; ignore redundant re-renders
+
         _loading = true;
         _credits = await Api.ActorCreditsAsync(TmdbId);
+        _loading = false;
+
+        _appliedKey = key;
+        // Prerender: stash a snapshot so the interactive remount replays it. Web-only; no-op otherwise.
+        if (!RendererInfo.IsInteractive)
+            Prerender.Persist<PersistedActor>(key, RendererInfo.IsInteractive, Snapshot);
+    }
+
+    private string? _appliedKey;
+    private string PersistKey() => $"actor:{TmdbId}";
+
+    private sealed record PersistedActor(ActorCreditsResponse? Credits);
+
+    private PersistedActor Snapshot() => new(_credits);
+
+    private void RestoreActor(PersistedActor snap)
+    {
+        _credits = snap.Credits;
         _loading = false;
     }
 }

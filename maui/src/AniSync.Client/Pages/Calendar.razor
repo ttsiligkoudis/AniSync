@@ -1,6 +1,7 @@
 @page "/calendar"
 @inject IAniSyncApi Api
 @inject AppState State
+@inject IPrerenderSession Prerender
 
 @* Calendar — port of Views/Calendar/Index.cshtml. A Sunday-first week strip
    (today highlighted, dots mark days with episodes) with prev/next/Today week
@@ -115,9 +116,50 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        var key = PersistKey();
+
+        // Interactive remount after a prerender: replay the calendar the prerender stashed (keyed by
+        // this exact week) instead of refetching, so a logged-in refresh doesn't flash content →
+        // skeleton → content. Consumed once; a later client-side navigation (different week, or
+        // nothing stashed) falls through to a normal load.
+        if (RendererInfo.IsInteractive && _appliedKey != key
+            && Prerender.TryReplay<PersistedCalendar?>(key, out var snap) && snap is not null)
+        {
+            _appliedKey = key;
+            RestoreCalendar(snap);
+            return;
+        }
+
+        // Already loaded this exact week — don't let a parent re-render (e.g. after the credential
+        // hydrates) re-invoke OnParametersSet and refetch over the replayed model.
+        if (_appliedKey == key) return;
+
         if (string.IsNullOrEmpty(State.StreamConfig)) { _loading = false; return; }
         _loading = true;
         _model = await Api.CalendarAsync(D);
+        _loading = false;
+
+        _appliedKey = key;
+
+        // Prerender (cookie-seeded credential): stash this week so the interactive remount replays it
+        // instead of refetching. Web-only; no-op on native and on the interactive pass.
+        if (!RendererInfo.IsInteractive)
+            Prerender.Persist<PersistedCalendar>(key, RendererInfo.IsInteractive, Snapshot);
+    }
+
+    // ── Prerender → interactive replay (web only; no-op on native) ──────────────────────────────
+    private string? _appliedKey;
+
+    // Keyed by the requested week (?d=) so a stashed calendar is never replayed onto a different week.
+    private string PersistKey() => $"calendar:{D}";
+
+    private sealed record PersistedCalendar(CalendarResponse? Model);
+
+    private PersistedCalendar Snapshot() => new(_model);
+
+    private void RestoreCalendar(PersistedCalendar snap)
+    {
+        _model = snap.Model;
         _loading = false;
     }
 

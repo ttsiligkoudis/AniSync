@@ -4,6 +4,7 @@
 @inject AppState State
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject IPrerenderSession Prerender
 
 @* Browse by studio — 1:1 port of Views/Discover/Studios.cshtml. Shared Discover tab strip
    (Studios pill active) + a server-side search + a popularity-sorted studio-tile grid with
@@ -81,6 +82,16 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
+        var key = PersistKey();
+
+        // Interactive remount after a prerender: replay the stashed first page (keyed by the active
+        // search) instead of refetching, so a refresh doesn't flash content → skeleton → content.
+        // Consumed once; a real client-side navigation changes the key and falls through to a fresh load.
+        if (RendererInfo.IsInteractive && _appliedKey != key
+            && Prerender.TryReplay<PersistedStudios?>(key, out var snap) && snap is not null)
+        { _appliedKey = key; RestoreStudios(snap); return; }
+        if (_appliedKey == key) return;
+
         // Anime-only surface; a movie/series preference belongs on /discover's video browse.
         if (State.MediaTypesHydrated && State.MediaType != MetaType.anime) { Nav.NavigateTo("/discover"); return; }
 
@@ -91,6 +102,31 @@ else
         _loading = true;
         StateHasChanged();
         await LoadPageAsync(initial: true);
+
+        _appliedKey = key;
+        // Prerender: stash the loaded first page so the interactive remount replays it (above). Web-only;
+        // no-op on native and on the interactive pass.
+        if (!RendererInfo.IsInteractive) Prerender.Persist<PersistedStudios>(key, RendererInfo.IsInteractive, Snapshot);
+    }
+
+    // ── Prerender → interactive replay (web only; no-op on native) ──────────────────────────────
+    private string? _appliedKey;
+
+    // Keyed by the active search so a stashed page is never replayed onto a different query.
+    private string PersistKey() => $"studios:{Search}";
+
+    private sealed record PersistedStudios(List<StudioSummaryDto> Studios, int Page, bool Done);
+
+    private PersistedStudios Snapshot() => new(_studios.ToList(), _page, _done);
+
+    private void RestoreStudios(PersistedStudios snap)
+    {
+        _studios.Clear();
+        _studios.AddRange(snap.Studios);
+        _page = snap.Page;
+        _done = snap.Done;
+        _searchInput = Search ?? "";
+        _loading = false;
     }
 
     [JSInvokable]

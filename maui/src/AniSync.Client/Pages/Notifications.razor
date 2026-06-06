@@ -4,6 +4,7 @@
 @inject IAppEnvironment Env
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject IPrerenderSession Prerender
 
 @* Notifications — full episode-release history. Port of the /notifications page
    over /api/v1/notifications: paginated list (infinite scroll), mark-read-on-open,
@@ -168,13 +169,30 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadPageAsync(initial: true);
-        _loading = false;
+        // Replay the first page the prerender stashed (cookie-seeded credential → real list) instead of
+        // refetching, so a logged-in refresh doesn't flash the "Loading…" line. Falls through to the
+        // normal load when there's nothing to replay (anonymous / client-side navigation).
+        if (RendererInfo.IsInteractive
+            && Prerender.TryReplay<PersistedNotifications?>(PersistKey, out var snap) && snap is not null)
+        {
+            RestoreFrom(snap);
+            _loading = false;
+        }
+        else
+        {
+            await LoadPageAsync(initial: true);
+            _loading = false;
+
+            // Prerender: stash the loaded first page so the interactive remount replays it.
+            if (!RendererInfo.IsInteractive)
+                Prerender.Persist<PersistedNotifications>(PersistKey, RendererInfo.IsInteractive, Snapshot);
+        }
 
         // Web Push opt-in is web-head only; hidden when the deployment has no
         // VAPID keys configured (status.Enabled == false), the browser lacks the
-        // Push API, or the user has blocked notifications at the browser level.
-        if (!Env.IsNative)
+        // Push API, or the user has blocked notifications at the browser level. JS is
+        // only live interactively, so this runs on the interactive pass (replay or fresh load).
+        if (RendererInfo.IsInteractive && !Env.IsNative)
         {
             var status = await Api.PushStatusAsync();
             if (status is { Enabled: true })
@@ -190,6 +208,26 @@ else
                 StateHasChanged();
             }
         }
+    }
+
+    // Carries the prerendered first page across to the interactive circuit (web only; no-op on native).
+    private const string PersistKey = "notifications";
+    private sealed record PersistedNotifications(
+        List<NotificationDto> Items, List<long> ReadIds, int Skip, bool Done);
+
+    private PersistedNotifications Snapshot()
+        => new(_items.ToList(), _readIds.ToList(), _skip, _done);
+
+    // Reinstate the loaded first page + paging cursor exactly as LoadPageAsync(initial:true) leaves it,
+    // so the interactive first render matches the prerendered list and infinite scroll continues cleanly.
+    private void RestoreFrom(PersistedNotifications snap)
+    {
+        _items.Clear();
+        _items.AddRange(snap.Items);
+        _readIds.Clear();
+        foreach (var id in snap.ReadIds) _readIds.Add(id);
+        _skip = snap.Skip;
+        _done = snap.Done;
     }
 
     private async Task LoadPageAsync(bool initial)

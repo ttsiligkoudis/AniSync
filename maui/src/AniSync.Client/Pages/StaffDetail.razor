@@ -1,5 +1,6 @@
 @page "/discover/staff/{StaffId:int}"
 @inject IAniSyncApi Api
+@inject IPrerenderSession Prerender
 
 @* A staff member's anime credits — 1:1 port of Views/Discover/StaffDetail.cshtml.
    A single, non-paginated poster grid: the original view renders one _PosterGrid
@@ -44,6 +45,20 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        var key = PersistKey();
+
+        // Interactive remount after a prerender: replay the stashed list instead of resetting to the
+        // skeleton + refetching, so a refresh doesn't flash content → skeleton → content. Native and
+        // client-side navigations (no stash) fall through to a normal load.
+        if (RendererInfo.IsInteractive && _appliedKey != key
+            && Prerender.TryReplay<PersistedStaff?>(key, out var snap) && snap is not null)
+        {
+            _appliedKey = key;
+            RestoreStaff(snap);
+            return;
+        }
+        if (_appliedKey == key) return;   // already loaded/replayed this exact view; ignore redundant re-renders
+
         _loading = true;
         _name = null;
         _items = Array.Empty<MetaDto>();
@@ -52,6 +67,25 @@
         catch { resp = new(); }
         _name = resp.Name;
         _items = resp.Items;
+        _loading = false;
+
+        _appliedKey = key;
+        // Prerender: stash a snapshot so the interactive remount replays it. Web-only; no-op otherwise.
+        if (!RendererInfo.IsInteractive)
+            Prerender.Persist<PersistedStaff>(key, RendererInfo.IsInteractive, Snapshot);
+    }
+
+    private string? _appliedKey;
+    private string PersistKey() => $"staff:{StaffId}";
+
+    private sealed record PersistedStaff(List<MetaDto> Items, string? Name);
+
+    private PersistedStaff Snapshot() => new(_items.ToList(), _name);
+
+    private void RestoreStaff(PersistedStaff snap)
+    {
+        _items = snap.Items;
+        _name = snap.Name;
         _loading = false;
     }
 }
