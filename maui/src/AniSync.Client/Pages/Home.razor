@@ -2,7 +2,7 @@
 @inject IAniSyncApi Api
 @inject AppState State
 @inject IJSRuntime JS
-@implements IDisposable
+@implements IAsyncDisposable
 
 @* Home dashboard — full port of Views/Home/Index.cshtml's section order: the
    optional stream-setup nudge, the "Customize" float, the "Your stats" strip,
@@ -355,24 +355,8 @@ else
 
     private DashCustomizeModal? _customize;
     private bool _layoutLoaded;
+    private IJSObjectReference? _js;
     private IJSObjectReference? _nudgeModule;
-
-    // Wire the shared "set up streaming" nudge (reveal-after-dismiss-check + the
-    // "How it works" expander) once it's in the DOM — the inline <script> from
-    // _StreamSetupNudge.cshtml ported to the watch-sources.js module. Without
-    // this the dismissible dashboard nudge ships hidden and never appears.
-    // Idempotent on the JS side, so re-invoking after re-renders is safe.
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (!State.LoggedIn || !string.IsNullOrEmpty(State.StreamConfig)) return;
-        try
-        {
-            _nudgeModule ??= await JS.InvokeAsync<IJSObjectReference>(
-                "import", "./_content/AniSync.Client/js/watch-sources.js");
-            await _nudgeModule.InvokeVoidAsync("wireNudges");
-        }
-        catch { /* interop best-effort — the CTA link still works without JS */ }
-    }
 
     protected override void OnInitialized()
     {
@@ -380,6 +364,39 @@ else
         // shelf blocks when the enabled media types hydrate + when the saved layout loads / changes.
         State.Changed += OnStateChanged;
         _ = TryLoadLayoutAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // body.dash-page (original's ViewData["BodyClass"]) makes <main> the containing
+        // block for the absolutely-positioned "Customize" float and tucks the content
+        // under the sticky media-type pills. Set once, on the first interactive render.
+        if (firstRender)
+        {
+            try
+            {
+                _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/dashboard.js");
+                await _js.InvokeVoidAsync("setDashPage", true);
+            }
+            catch { /* prerender / no JS */ }
+        }
+
+        // Wire the shared "set up streaming" nudge (reveal-after-dismiss-check + the
+        // "How it works" expander) once it's in the DOM — the inline <script> from
+        // _StreamSetupNudge.cshtml ported to the watch-sources.js module. Without this
+        // the dismissible dashboard nudge ships hidden and never appears. Runs each
+        // render (idempotent on the JS side) so it catches the nudge appearing after
+        // hydration; gated to when it's actually shown.
+        if (State.LoggedIn && string.IsNullOrEmpty(State.StreamConfig))
+        {
+            try
+            {
+                _nudgeModule ??= await JS.InvokeAsync<IJSObjectReference>(
+                    "import", "./_content/AniSync.Client/js/watch-sources.js");
+                await _nudgeModule.InvokeVoidAsync("wireNudges");
+            }
+            catch { /* interop best-effort — the CTA link still works without JS */ }
+        }
     }
 
     // Load the saved dashboard layout once the session has hydrated (it needs the config credential).
@@ -398,12 +415,17 @@ else
         StateHasChanged();
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         State.Changed -= OnStateChanged;
-        // Fire-and-forget JS module disposal (IDisposable can't await). The
-        // browser caches the import, so a late disposal is harmless.
+        if (_js is not null)
+        {
+            try { await _js.InvokeVoidAsync("setDashPage", false); } catch { }
+            try { await _js.DisposeAsync(); } catch { }
+        }
         if (_nudgeModule is not null)
-            _ = _nudgeModule.DisposeAsync().AsTask();
+        {
+            try { await _nudgeModule.DisposeAsync(); } catch { }
+        }
     }
 }
