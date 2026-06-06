@@ -6458,6 +6458,56 @@ a.stats-cell-link:hover {
     background: var(--overlay-04);
 }
 
+/* Hero loading skeleton (Detail.razor while _loading). Shimmer blocks shaped like
+   the real hero — poster, title, info line, status/state chips, watch-next CTA — so
+   the layout holds steady when the meta lands. Sizing only; .skeleton-shimmer paints
+   the animated fill (these set no background, so they don't clobber its gradient). */
+.anime-detail-skeleton-poster {
+    width: 160px;
+    aspect-ratio: 2 / 3;
+    border-radius: 0.75rem;
+}
+
+@media (min-width: 600px) {
+    .anime-detail-skeleton-poster {
+        width: 200px;
+    }
+}
+
+.anime-detail-skeleton-bar {
+    border-radius: 6px;
+    max-width: 100%;
+}
+
+.anime-detail-skeleton-title {
+    width: min(70%, 22rem);
+    height: 1.9rem;
+}
+
+.anime-detail-skeleton-info {
+    width: min(50%, 14rem);
+    height: 0.95rem;
+}
+
+.anime-detail-skeleton-cta {
+    width: 9rem;
+    height: 2.25rem;
+    border-radius: 999px;
+    margin-top: 0.3rem;
+}
+
+.anime-detail-skeleton-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.anime-detail-skeleton-chip {
+    width: 4.5rem;
+    height: 1.5rem;
+    border-radius: 999px;
+}
+
 /* Wraps the poster so the score badge can overlay it. Sizes to the poster
    (line-height:0 strips the inline-image gap) and stays a fixed flex item in
    the hero body, same as the bare poster used to be. */
