@@ -74,11 +74,13 @@
    (_DashCustomize, at the bottom). The "is-on-switch-row" modifier lifts it
    onto the pills row only when that bar is present (more than one media type
    enabled); otherwise it sits at the top-right of the content. *@
-@if (!State.SessionHydrated || !State.DashLayoutLoaded)
+@if (!State.ConfigHydrated || !State.DashLayoutLoaded)
 {
-    @* Session / saved layout not resolved yet (prerender, pre-hydration, or the layout
-       fetch in flight) — render neutral skeleton shelves so a signed-in user never sees
-       the signed-out dashboard first, AND so the real shelves paint once in the saved
+    @* Config credential / saved layout not resolved yet (prerender, pre-hydration, or the
+       layout fetch in flight) — render neutral skeleton shelves. Gating on ConfigHydrated
+       (not SessionHydrated, which the prerender bridge flips true early for the chrome) means
+       the shelves/stats only render once the X-AniSync-Config credential is available, so they
+       fetch WITH it (no "logged out on refresh" empty dashboard), AND paint once in the saved
        order/visibility rather than flashing the default order then reordering. *@
     @for (var s = 0; s < 3; s++)
     {
@@ -410,7 +412,10 @@ else
     private async Task TryLoadLayoutAsync()
     {
         if (State.DashLayoutLoaded || _layoutLoaded) return;   // already resolved, or a fetch is in flight
-        if (!State.SessionHydrated) return;                    // wait until the signed-in state is known
+        // Wait for the credential to be read from storage — not SessionHydrated, which the
+        // prerender bridge flips true before StreamConfig exists. Resolving earlier would take
+        // the anonymous branch (default layout) and skip the user's saved layout entirely.
+        if (!State.ConfigHydrated) return;
 
         if (State.LoggedIn && !string.IsNullOrEmpty(State.StreamConfig))
         {
