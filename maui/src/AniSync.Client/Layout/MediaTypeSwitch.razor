@@ -98,8 +98,9 @@
         _show = nav is "home" or "library" or "discover"
                 && !path.StartsWith("/meta") && !path.StartsWith("/watch");
         _dashboard = nav == "home";
-        // Dashboard defaults to "All"; the other surfaces start on the active mode.
-        _selected = _dashboard ? "all" : State.MediaType.ToString();
+        // Each surface tracks its own remembered pick: the dashboard its filter (All / a mode,
+        // persisted via media-type.js + hydrated in MainLayout), the others the shared active mode.
+        _selected = _dashboard ? State.DashboardFilter : State.MediaType.ToString();
     }
 
     // AppState changed (chooser modal / hydration / a media-type switch): re-render so the
@@ -125,9 +126,21 @@
         _selected = value;
         if (_dashboard)
         {
-            // Dashboard filters its sections client-side without touching the
-            // persisted global mode (so the "all" filter does NOT persist active).
+            // The dashboard filters its sections client-side; remember the pick (persisted) so it
+            // survives navigation + reload.
             State.SetDashboardFilter(value);
+            // Picking a concrete mode on the dashboard also drives the connected Discover/Library
+            // surfaces (one-way — their own toggle never writes back to the dashboard filter). "All"
+            // has no equivalent there, so it leaves the active mode alone.
+            MetaType? propagate = value != "all" && Enum.TryParse<MetaType>(value, out var dmt) ? dmt : null;
+            if (propagate is MetaType pmt) State.SetMediaType(pmt);
+            try
+            {
+                _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/media-type.js");
+                await _js.InvokeVoidAsync("setDashFilter", value);
+                if (propagate is MetaType pmt2) await _js.InvokeVoidAsync("setActiveOnly", pmt2.ToString());
+            }
+            catch { /* prerender / no JS — in-memory state above still applied */ }
         }
         else if (Enum.TryParse<MetaType>(value, out var mt))
         {
