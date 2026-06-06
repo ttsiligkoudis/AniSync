@@ -924,6 +924,38 @@ namespace AnimeList.Controllers
         }
 
         /// <summary>
+        /// Aggregate Trakt watch stats (movies / shows / episodes / hours) for the
+        /// dashboard "Your stats" video row — the API twin of the web's
+        /// <c>Home/TraktStatsData</c> (which the thin clients can't reach: the UI
+        /// HomeController is filtered out of the Blazor host). Sourced from Trakt's
+        /// users stats endpoint. Returns 404 when Trakt isn't connected (or the
+        /// upstream blips), which the client treats as "hide the video stats row".
+        /// </summary>
+        [HttpGet("trakt-stats")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(TraktUserStats), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> TraktStats()
+        {
+            try
+            {
+                var configuration = await ResolveConfigAsync(ResolvedConfig, _configStore);
+                var uid = configuration?.tokenUid;
+                if (string.IsNullOrEmpty(uid))
+                    return NotFound(new ApiError("config is not stored"));
+
+                var stats = await _traktService.GetUserStatsAsync(uid);
+                if (stats == null) return NotFound(new ApiError("Trakt is not connected"));
+                return new JsonResult(stats);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API Trakt stats failed.");
+                return StatusCode(500, new ApiError("trakt stats lookup failed"));
+            }
+        }
+
+        /// <summary>
         /// Continue-watching shelf — the user's <c>Current</c>/Watching list
         /// from their primary tracker, capped at <paramref name="limit"/>
         /// items. Same data the dashboard's "Continue your anime journey"
