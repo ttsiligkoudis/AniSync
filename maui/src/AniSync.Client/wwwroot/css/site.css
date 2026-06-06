@@ -5561,6 +5561,40 @@ a.stats-cell-link:hover {
     animation: skeleton-shimmer 1.4s linear infinite;
 }
 
+/* Stats strip loading state: while a group carries [data-stats-loading], hide
+   the "—" placeholder behind a shimmer block sized to the final number's visual
+   weight. The cell stays in layout so the grid doesn't reflow when the real
+   numbers land. Mirrors the original web dashboard's stats skeleton. */
+[data-stats-loading] .stats-number {
+    color: transparent;
+    user-select: none;
+    border-radius: 5px;
+    min-width: 3rem;
+    height: 1.1rem;
+    background-color: var(--overlay-05);
+    background-image: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0) 0%,
+        var(--overlay-08) 50%,
+        rgba(255, 255, 255, 0) 100%);
+    background-size: 200% 100%;
+    background-repeat: no-repeat;
+    animation: skeleton-shimmer 1.4s linear infinite;
+}
+
+/* While the shimmer is up, reveal the Mean / Hours cells that sit [hidden] until
+   their value proves non-zero, so the skeleton shows the SAME cells (and titles)
+   as the loaded card — no extra cell popping in when the numbers land. Once the
+   loading flag clears, any still-zero cell collapses back to hidden. */
+[data-stats-loading] .stats-cell[hidden] {
+    display: grid !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    [data-stats-loading] .stats-number { animation: none; }
+}
+
+
 /* Honour OS-level reduced-motion preference — pause the sweep and
    leave a static muted block. Still reads as "loading" via the
    muted fill alone; just doesn't strobe. */
