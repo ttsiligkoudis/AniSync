@@ -54,4 +54,28 @@ public sealed class WebPrerenderSession : IPrerenderSession
             state.HydrateSession(true, "");
         }
     }
+
+    // Interactive: hand back whatever the prerender stashed under this key (and clear it, so a later
+    // client-side navigation to the same page reloads normally with its skeleton).
+    public bool TryReplay<T>(string key, out T value)
+    {
+        var ok = _persist.TryTakeFromJson<T>(key, out var stored);
+        value = stored!;
+        return ok;
+    }
+
+    // Prerender only: register a persist callback that serialises the page's snapshot into the response
+    // so the interactive remount can replay it. Skipped on the interactive pass (nothing to bridge into).
+    public void Persist<T>(string key, bool isInteractive, Func<T> snapshot)
+    {
+        if (isInteractive) return;
+        _persist.RegisterOnPersisting(() =>
+        {
+            // Best-effort: a snapshot/serialise hiccup must not fail the prerender — the interactive
+            // pass simply finds nothing to replay and reloads normally (with its skeleton).
+            try { _persist.PersistAsJson(key, snapshot()); }
+            catch { /* ignored */ }
+            return Task.CompletedTask;
+        });
+    }
 }
