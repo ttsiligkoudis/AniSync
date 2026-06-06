@@ -2,22 +2,24 @@
 @inject IAniSyncApi Api
 @inject AppState State
 
-@* "Your stats" panel — port of the stats-section in Index.cshtml. The web
-   filled the cells from JS (localStorage + /Home/AnilistStats + TraktStatsData);
-   here we fetch in C# and render the numbers directly. Anime row sources from
-   AniList, the movies/series row from Trakt; group labels show only when both
-   are present ("combined"). Rows hide per the dashboard media-type filter. *@
+@* "Your stats" panel — port of the stats-section in Index.cshtml. Anime row sources from
+   AniList, the movies/series row from Trakt; group labels show only when both are present
+   ("combined"). Rows hide per the dashboard media-type filter. While the AniList / Trakt
+   fetches are in flight the panel renders a loading skeleton (the cells + a shimmer block
+   in place of each number, sized like the final value) so it doesn't pop in empty — the
+   numbers fill once the fetch lands. Which groups show during loading is predicted from the
+   enabled media types; any that come back without data collapse once loading clears. *@
 
-@if (!LayoutHidden && (_anime is not null || _trakt is not null))
+@if (!LayoutHidden && (ShowAnimeGroup || ShowTraktGroup))
 {
     <section class="dashboard-section stats-section" data-dash-section="stats" data-media-type="@_statsTypes" style="order:@Order">
         <div class="dashboard-section-header">
             <h2 class="dashboard-section-title">Your stats</h2>
         </div>
 
-        @if (_anime is not null && ShowAnime)
+        @if (ShowAnimeGroup && ShowAnime)
         {
-            <div class="stats-group" data-media-type="anime">
+            <div class="stats-group" data-media-type="anime" data-stats-loading="@LoadingAttr">
                 <div class="stats-group-head">
                     @if (_combined)
                     {
@@ -59,7 +61,7 @@
                                 <polyline points="17 2 12 7 7 2"></polyline>
                             </svg>
                         </span>
-                        <div class="stats-number">@_anime.Watching</div>
+                        <div class="stats-number">@(_anime is not null ? _anime.Watching.ToString() : "—")</div>
                         <div class="stats-label">Watching</div>
                     </div>
                     <div class="stats-cell" data-stat="completed">
@@ -69,41 +71,38 @@
                                 <polyline points="22 4 12 14.01 9 11.01"></polyline>
                             </svg>
                         </span>
-                        <div class="stats-number">@_anime.Completed</div>
+                        <div class="stats-number">@(_anime is not null ? _anime.Completed.ToString() : "—")</div>
                         <div class="stats-label">Completed</div>
                     </div>
-                    @if (_anime.MeanScore is > 0)
-                    {
-                        <div class="stats-cell" data-stat="mean">
-                            <span class="stats-icon stats-icon-purple">
-                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-                                </svg>
-                            </span>
-                            <div class="stats-number">@_anime.MeanScore!.Value.ToString("0.0")</div>
-                            <div class="stats-label">Mean</div>
-                        </div>
-                    }
-                    @if (_anime.TotalHoursWatched > 0)
-                    {
-                        <div class="stats-cell" data-stat="hours">
-                            <span class="stats-icon stats-icon-amber">
-                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <circle cx="12" cy="12" r="10"></circle>
-                                    <polyline points="12 6 12 12 16 14"></polyline>
-                                </svg>
-                            </span>
-                            <div class="stats-number">@_anime.TotalHoursWatched</div>
-                            <div class="stats-label">Hours</div>
-                        </div>
-                    }
+                    @* Mean / Hours sit [hidden] until their value proves non-zero; the
+                       [data-stats-loading] CSS reveals them while the skeleton is up so the
+                       loading card shows the same cells as the loaded one. *@
+                    <div class="stats-cell" data-stat="mean" hidden="@(_anime?.MeanScore is not > 0)">
+                        <span class="stats-icon stats-icon-purple">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                            </svg>
+                        </span>
+                        <div class="stats-number">@(_anime?.MeanScore is { } ms && ms > 0 ? ms.ToString("0.0") : "—")</div>
+                        <div class="stats-label">Mean</div>
+                    </div>
+                    <div class="stats-cell" data-stat="hours" hidden="@(_anime is not { TotalHoursWatched: > 0 })">
+                        <span class="stats-icon stats-icon-amber">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                        </span>
+                        <div class="stats-number">@(_anime is { TotalHoursWatched: > 0 } ah ? ah.TotalHoursWatched.ToString() : "—")</div>
+                        <div class="stats-label">Hours</div>
+                    </div>
                 </div>
             </div>
         }
 
-        @if (_trakt is not null && ShowVideo)
+        @if (ShowTraktGroup && ShowVideo)
         {
-            <div class="stats-group" data-media-type="movie series">
+            <div class="stats-group" data-media-type="movie series" data-stats-loading="@LoadingAttr">
                 <div class="stats-group-head">
                     @if (_combined)
                     {
@@ -122,7 +121,7 @@
                                 <line x1="3" y1="12" x2="21" y2="12"></line>
                             </svg>
                         </span>
-                        <div class="stats-number">@_trakt.MoviesWatched</div>
+                        <div class="stats-number">@(_trakt is not null ? _trakt.MoviesWatched.ToString() : "—")</div>
                         <div class="stats-label">Movies</div>
                     </div>
                     <div class="stats-cell" data-trakt-stat="shows">
@@ -132,7 +131,7 @@
                                 <polyline points="8 3 12 7 16 3"></polyline>
                             </svg>
                         </span>
-                        <div class="stats-number">@_trakt.ShowsWatched</div>
+                        <div class="stats-number">@(_trakt is not null ? _trakt.ShowsWatched.ToString() : "—")</div>
                         <div class="stats-label">Shows</div>
                     </div>
                     <div class="stats-cell" data-trakt-stat="episodes">
@@ -142,22 +141,19 @@
                                 <line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line>
                             </svg>
                         </span>
-                        <div class="stats-number">@_trakt.EpisodesWatched</div>
+                        <div class="stats-number">@(_trakt is not null ? _trakt.EpisodesWatched.ToString() : "—")</div>
                         <div class="stats-label">Episodes</div>
                     </div>
-                    @if (_trakt.TotalHoursWatched > 0)
-                    {
-                        <div class="stats-cell" data-trakt-stat="hours">
-                            <span class="stats-icon stats-icon-amber">
-                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <circle cx="12" cy="12" r="10"></circle>
-                                    <polyline points="12 6 12 12 16 14"></polyline>
-                                </svg>
-                            </span>
-                            <div class="stats-number">@_trakt.TotalHoursWatched</div>
-                            <div class="stats-label">Hours</div>
-                        </div>
-                    }
+                    <div class="stats-cell" data-trakt-stat="hours" hidden="@(_trakt is not { TotalHoursWatched: > 0 })">
+                        <span class="stats-icon stats-icon-amber">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                        </span>
+                        <div class="stats-number">@(_trakt is { TotalHoursWatched: > 0 } th ? th.TotalHoursWatched.ToString() : "—")</div>
+                        <div class="stats-label">Hours</div>
+                    </div>
                 </div>
             </div>
         }
@@ -171,14 +167,28 @@
 
     private AnilistUserStatsDto? _anime;
     private TraktUserStatsDto? _trakt;
-    private bool _combined => _anime is not null && _trakt is not null;
+    private bool _loading = true;
 
-    // Union of the media types whose row is present — mirrors the web's
-    // statsTypes so the dashboard switch hides the whole panel only when
-    // neither row matches the active filter.
+    // While loading we don't yet know which trackers returned data, so predict the groups
+    // from the enabled media types (anime → AniList row, movies/series → Trakt row). Stats are
+    // login-gated (they come from linked accounts), so an anonymous visitor shows no skeleton.
+    // Once the fetch lands, fall back to "show the row only if it actually has data".
+    private bool ShowAnimeGroup => _loading
+        ? State.LoggedIn && State.EnabledMediaTypes.Contains(MetaType.anime)
+        : _anime is not null;
+    private bool ShowTraktGroup => _loading
+        ? State.LoggedIn && State.EnabledMediaTypes.Any(t => t != MetaType.anime)
+        : _trakt is not null;
+    private bool _combined => ShowAnimeGroup && ShowTraktGroup;
+
+    // null omits the attribute; "" renders data-stats-loading="" which the skeleton CSS matches.
+    private string? LoadingAttr => _loading ? "" : null;
+
+    // Union of the media types whose row is present — mirrors the web's statsTypes so the
+    // dashboard switch hides the whole panel only when neither row matches the active filter.
     private string _statsTypes => string.Join(" ",
-        (_anime is not null ? new[] { "anime" } : Array.Empty<string>())
-        .Concat(_trakt is not null ? new[] { "movie", "series" } : Array.Empty<string>()));
+        (ShowAnimeGroup ? new[] { "anime" } : Array.Empty<string>())
+        .Concat(ShowTraktGroup ? new[] { "movie", "series" } : Array.Empty<string>()));
 
     private bool ShowAnime => State.DashboardFilter is "all" or "anime";
     private bool ShowVideo => State.DashboardFilter is "all" or "movie" or "series";
@@ -187,12 +197,14 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // Independent fetches — a missing Trakt/AniList link just drops that row.
+        // Independent fetches — a missing Trakt/AniList link just drops that row. The component
+        // renders the skeleton on its first pass (while this awaits), then fills on completion.
         var anime = Api.AnilistStatsAsync();
         var trakt = Api.TraktStatsAsync();
         await Task.WhenAll(anime, trakt);
         _anime = anime.Result;
         _trakt = trakt.Result;
+        _loading = false;
     }
 
     private void OnFilterChanged() => StateHasChanged();
