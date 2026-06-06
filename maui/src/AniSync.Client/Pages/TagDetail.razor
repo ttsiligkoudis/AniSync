@@ -2,6 +2,7 @@
 @implements IAsyncDisposable
 @inject IAniSyncApi Api
 @inject IJSRuntime JS
+@inject IPrerenderSession Prerender
 
 @* Anime tagged with {Tag} — port of Views/Discover/TagDetail.cshtml. Poster grid with
    infinite scroll: tag-detail-pagination.js watches .tag-detail-sentinel and pulls the
@@ -63,12 +64,47 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        var key = PersistKey();
+
+        // Interactive remount after a prerender: replay the stashed first page instead of resetting to
+        // the skeleton + refetching, so a refresh doesn't flash content → skeleton → content. Infinite
+        // scroll resumes from the replayed _page. Native + client-side navigations fall through.
+        if (RendererInfo.IsInteractive && _appliedKey != key
+            && Prerender.TryReplay<PersistedTag?>(key, out var snap) && snap is not null)
+        {
+            _appliedKey = key;
+            RestoreTag(snap);
+            return;
+        }
+        if (_appliedKey == key) return;   // already loaded/replayed this exact view; ignore redundant re-renders
+
         _items.Clear();
         _page = 1;
         _done = false;
         _loading = true;
         StateHasChanged();
         await LoadPageAsync(initial: true);
+
+        _appliedKey = key;
+        // Prerender: stash the first-page snapshot so the interactive remount replays it. Web-only.
+        if (!RendererInfo.IsInteractive)
+            Prerender.Persist<PersistedTag>(key, RendererInfo.IsInteractive, Snapshot);
+    }
+
+    private string? _appliedKey;
+    private string PersistKey() => $"tag:{Tag}";
+
+    private sealed record PersistedTag(List<MetaDto> Items, int Page, bool Done);
+
+    private PersistedTag Snapshot() => new(_items.ToList(), _page, _done);
+
+    private void RestoreTag(PersistedTag snap)
+    {
+        _items.Clear();
+        _items.AddRange(snap.Items);
+        _page = snap.Page;
+        _done = snap.Done;
+        _loading = false;
     }
 
     [JSInvokable]

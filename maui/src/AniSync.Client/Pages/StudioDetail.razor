@@ -2,6 +2,7 @@
 @implements IAsyncDisposable
 @inject IAniSyncApi Api
 @inject IJSRuntime JS
+@inject IPrerenderSession Prerender
 
 @* A studio's filmography — port of Views/Discover/StudioDetail.cshtml. Poster grid
    with infinite scroll: studio-detail-pagination.js watches .studio-detail-sentinel
@@ -65,6 +66,20 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        var key = PersistKey();
+
+        // Interactive remount after a prerender: replay the stashed first page instead of resetting to
+        // the skeleton + refetching, so a refresh doesn't flash content → skeleton → content. Infinite
+        // scroll resumes from the replayed _page. Native + client-side navigations fall through.
+        if (RendererInfo.IsInteractive && _appliedKey != key
+            && Prerender.TryReplay<PersistedStudio?>(key, out var snap) && snap is not null)
+        {
+            _appliedKey = key;
+            RestoreStudio(snap);
+            return;
+        }
+        if (_appliedKey == key) return;   // already loaded/replayed this exact view; ignore redundant re-renders
+
         _items.Clear();
         _name = null;
         _page = 1;
@@ -72,6 +87,28 @@
         _loading = true;
         StateHasChanged();
         await LoadPageAsync(initial: true);
+
+        _appliedKey = key;
+        // Prerender: stash the first-page snapshot so the interactive remount replays it. Web-only.
+        if (!RendererInfo.IsInteractive)
+            Prerender.Persist<PersistedStudio>(key, RendererInfo.IsInteractive, Snapshot);
+    }
+
+    private string? _appliedKey;
+    private string PersistKey() => $"studio:{StudioId}";
+
+    private sealed record PersistedStudio(List<MetaDto> Items, string? Name, int Page, bool Done);
+
+    private PersistedStudio Snapshot() => new(_items.ToList(), _name, _page, _done);
+
+    private void RestoreStudio(PersistedStudio snap)
+    {
+        _items.Clear();
+        _items.AddRange(snap.Items);
+        _name = snap.Name;
+        _page = snap.Page;
+        _done = snap.Done;
+        _loading = false;
     }
 
     [JSInvokable]

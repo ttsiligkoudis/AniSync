@@ -3,6 +3,7 @@
 @inject IAniSyncApi Api
 @inject AppState State
 @inject NavigationManager Nav
+@inject IPrerenderSession Prerender
 
 @* Browse by tag — 1:1 port of Views/Discover/Tags.cshtml. Shared Discover tab strip (Tags pill
    active) + every AniList tag grouped by category, with a client-side name filter (Esc clears).
@@ -61,8 +62,31 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // Interactive remount after a prerender: replay the tag list the prerender stashed instead of
+        // refetching, so a refresh doesn't flash content → skeleton → content. No-op on native and on a
+        // client-side navigation (nothing stashed) → normal load.
+        if (RendererInfo.IsInteractive && Prerender.TryReplay<PersistedTags?>(PersistKey(), out var snap) && snap is not null)
+        { RestoreTags(snap); return; }
+
         if (State.MediaTypesHydrated && State.MediaType != MetaType.anime) { Nav.NavigateTo("/discover"); return; }
         _tags = await Api.TagsAsync();
+        _loading = false;
+
+        // Prerender: stash the loaded list so the interactive remount replays it (above). Web-only; no-op
+        // on native and on the interactive pass.
+        if (!RendererInfo.IsInteractive) Prerender.Persist<PersistedTags>(PersistKey(), RendererInfo.IsInteractive, Snapshot);
+    }
+
+    // Param-less list (the filter is client-side) — a constant key is enough.
+    private string PersistKey() => "tags";
+
+    private sealed record PersistedTags(List<TagSummaryDto> Tags);
+
+    private PersistedTags Snapshot() => new(_tags.ToList());
+
+    private void RestoreTags(PersistedTags snap)
+    {
+        _tags = snap.Tags;
         _loading = false;
     }
 

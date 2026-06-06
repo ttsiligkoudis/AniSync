@@ -5,6 +5,7 @@
 @inject IAppEnvironment Env
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject IPrerenderSession Prerender
 @implements IAsyncDisposable
 
 @* Advanced settings — Blazor port of Advanced.cshtml. Backfill linked accounts,
@@ -158,19 +159,47 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // localStorage (the credential) is unreadable during prerender — wait for
-        // interactive so a logged-in user isn't bounced to /login. Re-runs interactively.
-        if (!RendererInfo.IsInteractive) return;
+        // Replay the config the prerender stashed (cookie-seeded credential → real cards) instead of
+        // re-reading localStorage + refetching, so a logged-in refresh doesn't flash the loading line.
+        // Falls through to the normal load when there's nothing to replay (anonymous / client-side nav).
+        if (RendererInfo.IsInteractive
+            && Prerender.TryReplay<PersistedAdvanced?>(PersistKey, out var snap) && snap is { Config: not null })
+        {
+            RestoreFrom(snap);
+            _loading = false;
+            return;
+        }
 
+        // Resolve the credential: seeded server-side during prerender (from the anisync_uid cookie),
+        // else read from localStorage on the interactive pass. With no credential during prerender
+        // (anonymous / no cookie) stay on the loading skeleton and let the interactive pass resolve it.
         if (string.IsNullOrEmpty(State.StreamConfig))
         {
+            if (!RendererInfo.IsInteractive) return;
             var saved = await Store.GetAsync(ISecureStore.ConfigKey);
             if (!string.IsNullOrEmpty(saved)) State.SetStreamConfig(saved);
         }
+        // Still no credential after the interactive localStorage read → bounce to login (as before).
         if (string.IsNullOrEmpty(State.StreamConfig)) { Nav.NavigateTo("/login"); return; }
 
         await ReloadAsync();
         _loading = false;
+
+        // Prerender (credential seeded): stash the loaded config so the interactive remount replays it.
+        if (!RendererInfo.IsInteractive && _config is not null)
+            Prerender.Persist<PersistedAdvanced>(PersistKey, RendererInfo.IsInteractive, Snapshot);
+    }
+
+    // Carries the prerendered config across to the interactive circuit (web only; no-op on native).
+    private const string PersistKey = "advanced";
+    private sealed record PersistedAdvanced(ConfigStateDto? Config);
+    private PersistedAdvanced Snapshot() => new(_config);
+
+    // Reinstate the config + the derived Plex username field exactly as ReloadAsync does after a fetch.
+    private void RestoreFrom(PersistedAdvanced snap)
+    {
+        _config = snap.Config;
+        _plexUsername = _config?.PlexUsername ?? "";
     }
 
     private async Task ReloadAsync()

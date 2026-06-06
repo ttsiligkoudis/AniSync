@@ -76,9 +76,19 @@ public sealed class WebPrerenderSession : IPrerenderSession
     // client-side navigation to the same page reloads normally with its skeleton).
     public bool TryReplay<T>(string key, out T value)
     {
-        var ok = _persist.TryTakeFromJson<T>(key, out var stored);
-        value = stored!;
-        return ok;
+        // Best-effort: a deserialise hiccup (shape drift, partial blob) must never throw into a page's
+        // load path — the page just finds nothing to replay and loads normally (with its skeleton).
+        try
+        {
+            var ok = _persist.TryTakeFromJson<T>(key, out var stored);
+            value = stored!;
+            return ok;
+        }
+        catch
+        {
+            value = default!;
+            return false;
+        }
     }
 
     // Prerender only: register a persist callback that serialises the page's snapshot into the response

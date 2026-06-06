@@ -4,6 +4,7 @@
 @inject AppState State
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject IPrerenderSession Prerender
 
 @* Browse by actor — 1:1 port of Views/Discover/Actors.cshtml. The video Discover mode strip
    (Actors pill active) + a TMDB person search + a photo-tile grid with infinite scroll. Each tile
@@ -87,6 +88,16 @@ else
         if (State.MediaType == MetaType.anime)
             State.SetMediaType(_type == "series" ? MetaType.series : MetaType.movie);
 
+        var key = PersistKey();
+
+        // Interactive remount after a prerender: replay the stashed first page (keyed by the resolved
+        // type + search) instead of refetching, so a refresh doesn't flash content → skeleton → content.
+        // Consumed once; a real client-side navigation changes the key and falls through to a fresh load.
+        if (RendererInfo.IsInteractive && _appliedKey != key
+            && Prerender.TryReplay<PersistedActors?>(key, out var snap) && snap is not null)
+        { _appliedKey = key; RestoreActors(snap); return; }
+        if (_appliedKey == key) return;
+
         _searchInput = Search ?? "";
         _actors.Clear();
         _page = 1;
@@ -94,6 +105,31 @@ else
         _loading = true;
         StateHasChanged();
         await LoadPageAsync(initial: true);
+
+        _appliedKey = key;
+        // Prerender: stash the loaded first page so the interactive remount replays it (above). Web-only;
+        // no-op on native and on the interactive pass.
+        if (!RendererInfo.IsInteractive) Prerender.Persist<PersistedActors>(key, RendererInfo.IsInteractive, Snapshot);
+    }
+
+    // ── Prerender → interactive replay (web only; no-op on native) ──────────────────────────────
+    private string? _appliedKey;
+
+    // Keyed by the resolved type + active search so a stashed page is never replayed onto a different query.
+    private string PersistKey() => $"actors:{_type}:{Search}";
+
+    private sealed record PersistedActors(List<ActorSummaryDto> Actors, int Page, bool Done);
+
+    private PersistedActors Snapshot() => new(_actors.ToList(), _page, _done);
+
+    private void RestoreActors(PersistedActors snap)
+    {
+        _actors.Clear();
+        _actors.AddRange(snap.Actors);
+        _page = snap.Page;
+        _done = snap.Done;
+        _searchInput = Search ?? "";
+        _loading = false;
     }
 
     [JSInvokable]

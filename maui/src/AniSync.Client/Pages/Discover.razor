@@ -4,6 +4,7 @@
 @inject AppState State
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject IPrerenderSession Prerender
 
 @* Discover — 1:1 port of Views/Discover/Index.cshtml (anime catalog) + Views/Video/Index.cshtml
    (movies/series browse). One URL, two surfaces, chosen by the active media type (the layout's
@@ -203,6 +204,24 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
+        var key = DiscoverKey();
+
+        // Interactive remount after a prerender: replay the grid the prerender stashed (keyed by this
+        // exact surface + query) instead of refetching, so a refresh doesn't flash content → skeleton →
+        // content. Consumed once; a later client-side navigation (different key, or nothing stashed)
+        // falls through to a normal load.
+        if (RendererInfo.IsInteractive && _appliedKey != key
+            && Prerender.TryReplay<PersistedDiscover?>(key, out var snap) && snap is not null)
+        {
+            _appliedKey = key;
+            RestoreDiscover(snap);
+            return;
+        }
+
+        // Already loaded this exact key — don't let a parent re-render (e.g. after a hydrate) re-invoke
+        // OnParametersSet and refetch over the replayed grid.
+        if (_appliedKey == key) return;
+
         // A ?type= deep-link (dashboard "View all · Series", the browse-by pages) overrides the
         // active media mode + persists it; the surface then follows State.MediaType. SetMediaType
         // fires Changed → OnStateChanged → Refresh, so return here to avoid loading twice.
@@ -214,6 +233,55 @@ else
             return;
         }
         await Refresh();
+    }
+
+    // ── Prerender → interactive replay (web only; no-op on native) ──────────────────────────────
+    private string? _appliedKey;
+
+    // Keyed by the active surface (media type) + the exact query so a stashed grid is never replayed
+    // onto a different tab/filter/surface. Infinite-scroll page 2+ isn't snapshotted — only the
+    // prerendered page 1, which is all that's on screen before the user scrolls.
+    private string DiscoverKey() => $"disc:{State.MediaType}:{List}:{Genre}:{Search}:{Season}:{Tag}";
+
+    private sealed record PersistedDiscover(
+        List<MetaDto> Items, MetaType Surface, string AnimeList, bool IsHidden, bool HasTag,
+        string VideoMode, List<VideoModeDto> VideoModes, string VideoLabelLower,
+        bool HasSearch, bool HasGenre, bool SearchMode,
+        string SearchInput, string GenreInput, string SeasonInput, List<string> SeasonOptions,
+        bool Done, string EmptyMessage, string PageTitle);
+
+    private PersistedDiscover Snapshot() => new(
+        _items.ToList(), _surfaceMediaType, _animeList, _isHidden, _hasTag,
+        _videoMode, _videoModes.ToList(), _videoLabelLower,
+        _hasSearch, _hasGenre, _searchMode,
+        _searchInput, _genreInput, _seasonInput, _seasonOptions.ToList(),
+        _done, _emptyMessage, _pageTitle);
+
+    private void RestoreDiscover(PersistedDiscover snap)
+    {
+        _items.Clear();
+        _items.AddRange(snap.Items);
+        _seenIds.Clear();
+        foreach (var m in snap.Items)
+            if (!string.IsNullOrEmpty(m.Id)) _seenIds.Add(m.Id);
+        _surfaceMediaType = snap.Surface;
+        _animeList = snap.AnimeList;
+        _isHidden = snap.IsHidden;
+        _hasTag = snap.HasTag;
+        _videoMode = snap.VideoMode;
+        if (snap.VideoModes.Count > 0) _videoModes = snap.VideoModes;
+        _videoLabelLower = snap.VideoLabelLower;
+        _hasSearch = snap.HasSearch;
+        _hasGenre = snap.HasGenre;
+        _searchMode = snap.SearchMode;
+        _searchInput = snap.SearchInput;
+        _genreInput = snap.GenreInput;
+        _seasonInput = snap.SeasonInput;
+        _seasonOptions = snap.SeasonOptions;
+        _done = snap.Done;
+        _emptyMessage = snap.EmptyMessage;
+        _pageTitle = snap.PageTitle;
+        _loading = false;
     }
 
     private async Task Refresh()
@@ -337,6 +405,16 @@ else
         _loading = false;
         _emptyMessage = _items.Count == 0 ? BuildEmptyMessage() : "";
         StateHasChanged();
+
+        // Mark this surface+query as loaded and (on prerender) stash page 1 so the interactive remount
+        // replays it instead of refetching. Only the initial page is snapshotted — that's all that's on
+        // screen before the user scrolls. Web-only; no-op on native and on the interactive pass.
+        if (initial)
+        {
+            _appliedKey = DiscoverKey();
+            if (!RendererInfo.IsInteractive)
+                Prerender.Persist<PersistedDiscover>(_appliedKey, RendererInfo.IsInteractive, Snapshot);
+        }
 
         // Re-arm so a short page that left the sentinel in view keeps pulling.
         if (_observerId != 0 && !_done && _scroll is not null)
