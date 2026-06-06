@@ -1,11 +1,15 @@
 @inject AppState State
 @inject IAniSyncApi Api
+@inject IJSRuntime JS
+@implements IAsyncDisposable
 
 @* Customize dashboard modal — Blazor port of _DashCustomize.cshtml + dashboard-layout.js's modal.
    Lists the sections present on this dashboard (gated by the enabled media types); each row
-   reorders (↑/↓) and toggles visibility. Edits a draft; Save lifts it into AppState.DashLayout
-   (which the sections read for their CSS order + hidden state) and persists it to the account
-   (/api/v1/me/dashboard-layout). Closing/cancelling discards the draft. *@
+   drag-reorders (by its grip handle, like the stream-addon list) and toggles visibility. Edits a
+   draft; Save lifts it into AppState.DashLayout (which the sections read for their CSS order +
+   hidden state) and persists it to the account (/api/v1/me/dashboard-layout). Closing/cancelling
+   discards the draft. The drag uses the shared configure.js pointer-drag interop (bindReorder);
+   like the original it doesn't mutate the DOM — Blazor re-renders from the staged order. *@
 @if (_open)
 {
     <div class="dash-modal-backdrop" @onclick="Close"></div>
@@ -18,24 +22,17 @@
                 </svg>
             </button>
             <h2 class="dash-modal-title" id="dash-modal-title">Customize dashboard</h2>
-            <p class="dash-modal-subtitle">Reorder sections and choose what shows. Synced to your account.</p>
-            <ul class="dash-modal-list">
-                @{ var rows = _draft.Where(e => _present.Contains(e.Key)).ToList(); }
-                @foreach (var entry in rows)
+            <p class="dash-modal-subtitle">Drag to reorder sections and choose what shows. Synced to your account.</p>
+            <ul class="dash-modal-list" @ref="_listRef">
+                @foreach (var entry in _draft.Where(e => _present.Contains(e.Key)))
                 {
                     var key = entry.Key;
-                    var isFirst = rows[0].Key == key;
-                    var isLast = rows[^1].Key == key;
-                    <li class="dash-modal-row @(entry.Visible ? "" : "is-hidden")" data-key="@key">
-                        <span class="dash-row-handle" style="display:inline-flex;flex-direction:column;gap:1px">
-                            <button type="button" aria-label="Move up" disabled="@isFirst" @onclick="() => Move(key, -1)"
-                                    style="background:none;border:0;color:inherit;cursor:pointer;padding:0;line-height:0.7;opacity:@(isFirst ? "0.3" : "1")">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"></polyline></svg>
-                            </button>
-                            <button type="button" aria-label="Move down" disabled="@isLast" @onclick="() => Move(key, 1)"
-                                    style="background:none;border:0;color:inherit;cursor:pointer;padding:0;line-height:0.7;opacity:@(isLast ? "0.3" : "1")">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                            </button>
+                    <li class="dash-modal-row @(entry.Visible ? "" : "is-hidden")" data-key="@key" @key="key">
+                        <span class="dash-row-handle" aria-label="Drag to reorder" title="Drag to reorder">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <line x1="3" y1="9" x2="21" y2="9"></line>
+                                <line x1="3" y1="15" x2="21" y2="15"></line>
+                            </svg>
                         </span>
                         <span class="dash-row-label">@DashboardLayout.LabelFor(key)</span>
                         <button type="button" class="dash-row-toggle" aria-pressed="@(entry.Visible ? "true" : "false")"
@@ -58,16 +55,59 @@
     private List<LayoutEntry> _draft = new();
     private HashSet<string> _present = new(StringComparer.Ordinal);
 
+    private ElementReference _listRef;
+    private IJSObjectReference? _js;
+    private DotNetObjectReference<DashCustomizeModal>? _selfRef;
+    private bool _reorderBound;
+
     /// <summary>Open the chooser — snapshot the current layout into an editable draft.</summary>
     public void Open()
     {
         _draft = State.DashLayout.Select(e => new LayoutEntry { Key = e.Key, Visible = e.Visible }).ToList();
         _present = PresentKeys();
         _open = true;
+        _reorderBound = false;   // the list element is re-created each open → rebind the drag
         StateHasChanged();
     }
 
     private void Close() => _open = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Bind the pointer-drag reorder once the list is in the DOM (only while open).
+        // Reuses the stream-addon list's interop with dash-specific selectors + callback.
+        if (!_open || _reorderBound) return;
+        try
+        {
+            _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/configure.js");
+            _selfRef ??= DotNetObjectReference.Create(this);
+            await _js.InvokeVoidAsync("bindReorder", _listRef, _selfRef, new
+            {
+                rowSelector = ".dash-modal-row",
+                handleSelector = ".dash-row-handle",
+                dataAttr = "data-key",
+                method = "OnDashReorder",
+            });
+            _reorderBound = true;
+        }
+        catch { /* JS unavailable (prerender) — binds on the interactive pass */ }
+    }
+
+    [JSInvokable]
+    public void OnDashReorder(string[] keys)
+    {
+        // Drag drop: rearrange the staged draft to the new on-screen key order. Only the
+        // displayed (present) keys move; non-present entries keep their absolute slots and
+        // every entry keeps its visible flag — mirrors dashboard-layout.js applyDraggedOrder.
+        if (keys is null || keys.Length == 0) return;
+        var byKey = _draft.ToDictionary(e => e.Key, StringComparer.Ordinal);
+        var inDrag = new HashSet<string>(keys, StringComparer.Ordinal);
+        var queue = new Queue<string>(keys.Where(byKey.ContainsKey));
+        for (var i = 0; i < _draft.Count; i++)
+            if (inDrag.Contains(_draft[i].Key) && queue.Count > 0)
+                _draft[i] = byKey[queue.Dequeue()];
+        StateHasChanged();
+    }
 
     private async Task Save()
     {
@@ -83,20 +123,6 @@
     {
         var e = _draft.FirstOrDefault(x => x.Key == key);
         if (e is not null) e.Visible = !e.Visible;
-    }
-
-    // Swap the entry with the adjacent PRESENT entry (non-present keys keep their slots).
-    private void Move(string key, int dir)
-    {
-        var idx = _draft.FindIndex(e => e.Key == key);
-        if (idx < 0) return;
-        var target = -1;
-        for (var i = idx + dir; i >= 0 && i < _draft.Count; i += dir)
-        {
-            if (_present.Contains(_draft[i].Key)) { target = i; break; }
-        }
-        if (target < 0) return;
-        (_draft[idx], _draft[target]) = (_draft[target], _draft[idx]);
     }
 
     // The sections actually rendered on this dashboard, gated by the user's enabled media types
@@ -124,5 +150,11 @@
         }
         keys.Add("browse");
         return keys;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_js is not null) { try { await _js.DisposeAsync(); } catch { } }
+        _selfRef?.Dispose();
     }
 }

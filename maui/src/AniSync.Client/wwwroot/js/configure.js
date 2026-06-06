@@ -74,21 +74,27 @@ export function hasStreamsHash() {
     return location.hash === '#streams';
 }
 
-// ── Stream-addon drag reorder ─────────────────────────────────────────────
-// Pointer-event reorder on the drag handle — a faithful port of the
-// _ConfigurePageScript handler. Single code path for mouse + touch + pen
-// (setPointerCapture redirects move/up to the handle even when the pointer
-// drifts off it). On drop it computes the intended new order from the drop
-// target — WITHOUT mutating the DOM — and hands it back to .NET via
-// dotnet.invokeMethodAsync('OnAddonReorder', urls). Blazor owns the list
-// rendering and re-renders from that order; mutating the DOM here would desync
-// Blazor's keyed diff and corrupt the order on its next render. Matching the
-// original, the reorder isn't persisted on drop — the component marks the page
-// dirty and the POST is folded into the page's Save.
+// ── Pointer-drag reorder (generic) ────────────────────────────────────────
+// Pointer-event reorder on a per-row drag handle — a faithful port of the
+// _ConfigurePageScript handler, generalised so both the stream-addon list and
+// the dashboard customise modal share one code path. Single path for mouse +
+// touch + pen (setPointerCapture redirects move/up to the handle even when the
+// pointer drifts off it). On drop it computes the intended new order from the
+// drop target — WITHOUT mutating the DOM — and hands it back to .NET via
+// dotnet.invokeMethodAsync(method, order). Blazor owns the list rendering and
+// re-renders from that order; mutating the DOM here would desync Blazor's keyed
+// diff. Matching the original, the reorder isn't persisted on drop — the
+// component stages it.
 const _addonBindings = new WeakMap();
 
-export function bindAddonReorder(list, dotnet) {
+// opts: { rowSelector, handleSelector, dataAttr, method }. Defaults target the
+// stream-addon list so bindAddonReorder stays a thin wrapper.
+export function bindReorder(list, dotnet, opts) {
     if (!list) return;
+    const rowSelector = (opts && opts.rowSelector) || '.stream-addon-row';
+    const handleSelector = (opts && opts.handleSelector) || '.stream-addon-drag-handle';
+    const dataAttr = (opts && opts.dataAttr) || 'data-url';
+    const method = (opts && opts.method) || 'OnAddonReorder';
     // Re-bind cleanly if Blazor re-rendered the list element.
     const prev = _addonBindings.get(list);
     if (prev) prev();
@@ -105,7 +111,7 @@ export function bindAddonReorder(list, dotnet) {
     // vertical span contains clientY, plus whether the pointer is in its top or
     // bottom half. Returns null when the list is empty.
     function findDropTarget(clientY) {
-        const rows = list.querySelectorAll('.stream-addon-row:not(.is-dragging)');
+        const rows = list.querySelectorAll(rowSelector + ':not(.is-dragging)');
         for (let i = 0; i < rows.length; i++) {
             const rect = rows[i].getBoundingClientRect();
             if (clientY < rect.top) return { row: rows[i], before: true };
@@ -119,17 +125,17 @@ export function bindAddonReorder(list, dotnet) {
     }
 
     function currentOrder() {
-        return Array.from(list.querySelectorAll('.stream-addon-row'))
-            .map(function (r) { return r.getAttribute('data-url') || ''; })
+        return Array.from(list.querySelectorAll(rowSelector))
+            .map(function (r) { return r.getAttribute(dataAttr) || ''; })
             .filter(function (u) { return !!u; });
     }
 
     function onPointerDown(e) {
-        const handle = e.target.closest('.stream-addon-drag-handle');
+        const handle = e.target.closest(handleSelector);
         if (!handle || !list.contains(handle)) return;
         // Ignore right-click / middle-click — e.button is 0 for left/touch/pen.
         if (e.button !== undefined && e.button !== 0) return;
-        const row = handle.closest('.stream-addon-row');
+        const row = handle.closest(rowSelector);
         if (!row) return;
         // preventDefault on touch keeps the browser from scrolling instead.
         e.preventDefault();
@@ -151,7 +157,7 @@ export function bindAddonReorder(list, dotnet) {
         const row = drag.row;
         const handle = drag.handle;
         const before = currentOrder();
-        const draggedUrl = row.getAttribute('data-url') || '';
+        const draggedUrl = row.getAttribute(dataAttr) || '';
         const drop = (e && typeof e.clientY === 'number') ? findDropTarget(e.clientY) : null;
 
         row.classList.remove('is-dragging');
@@ -162,7 +168,7 @@ export function bindAddonReorder(list, dotnet) {
         // Compute the intended order from the drop target WITHOUT moving the DOM —
         // Blazor re-renders the list from the order we hand back (see the header note).
         if (!drop || !draggedUrl) return;
-        const targetUrl = drop.row.getAttribute('data-url') || '';
+        const targetUrl = drop.row.getAttribute(dataAttr) || '';
         if (!targetUrl || targetUrl === draggedUrl) return;
         const after = before.filter(function (u) { return u !== draggedUrl; });
         const idx = after.indexOf(targetUrl);
@@ -176,7 +182,7 @@ export function bindAddonReorder(list, dotnet) {
             if (before[i] !== after[i]) changed = true;
         }
         if (changed && dotnet) {
-            dotnet.invokeMethodAsync('OnAddonReorder', after);
+            dotnet.invokeMethodAsync(method, after);
         }
     }
 
@@ -199,4 +205,14 @@ export function bindAddonReorder(list, dotnet) {
         _addonBindings.delete(list);
     };
     _addonBindings.set(list, dispose);
+}
+
+// Stream-addon list reorder — named wrapper kept for StreamsSection's existing call.
+export function bindAddonReorder(list, dotnet) {
+    return bindReorder(list, dotnet, {
+        rowSelector: '.stream-addon-row',
+        handleSelector: '.stream-addon-drag-handle',
+        dataAttr: 'data-url',
+        method: 'OnAddonReorder',
+    });
 }
