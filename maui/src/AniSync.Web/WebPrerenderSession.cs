@@ -1,4 +1,6 @@
+using System.Linq;
 using AniSync.Client.Services;
+using AniSync.Client.Models;
 using Microsoft.AspNetCore.Components;
 
 namespace AniSync.Web;
@@ -63,14 +65,84 @@ public sealed class WebPrerenderSession : IPrerenderSession
                 }
                 catch { /* malformed cookie → leave config unseeded; pages fall back to their skeleton */ }
             }
+
+            // Media-type prefs from cookies (written by media-type.js — same keys as the original web
+            // app) so the toggle + the right active mode / dashboard filter render from the first paint,
+            // instead of defaulting to anime and flashing once localStorage hydrates on the interactive
+            // pass. Applies to anonymous visitors too (no credential needed).
+            if (ctx is not null) SeedMediaTypes(state, ctx);
         }
-        else if (_persist.TryTakeFromJson<bool>(PersistKey, out var loggedIn) && loggedIn)
+        else
         {
             // Interactive: render the same signed-in chrome the prerender committed (no flash). The
             // real config + connected label are filled in by MainLayout's localStorage hydration.
-            state.HydrateSession(true, "");
+            if (_persist.TryTakeFromJson<bool>(PersistKey, out var loggedIn) && loggedIn)
+                state.HydrateSession(true, "");
+
+            // Restore the media-type prefs the prerender bridged so the toggle + active mode + dashboard
+            // filter are correct from the FIRST interactive render — otherwise they'd blink to the
+            // default (anime / no toggle) until MainLayout's async localStorage read lands.
+            if (_persist.TryTakeFromJson<MediaSeed>(MediaPersistKey, out var ms) && ms is not null)
+                ApplyMediaSeed(state, ms.Enabled, ms.Active, ms.Dash);
         }
     }
+
+    // Persisted across prerender→interactive (non-sensitive, unlike the credential) so the media-type
+    // chrome doesn't blink on hydration.
+    private const string MediaPersistKey = "anisync.mediaTypes";
+    private sealed record MediaSeed(string? Enabled, string? Active, string? Dash);
+
+    // Prerender: mirror MainLayout's interactive (localStorage) media-type hydration, but from the
+    // cookies media-type.js writes — so a configured user's enabled set, active mode and dashboard
+    // filter are known at first paint. Only acts when a pref cookie exists, so first-visit users keep
+    // their normal flow (default set + the chooser). Cookie values are URL-encoded (the enabled set is
+    // a comma list → %2C), so unescape on read. Bridges the raw values to the interactive circuit.
+    private void SeedMediaTypes(AppState state, Microsoft.AspNetCore.Http.HttpContext ctx)
+    {
+        var enabled = Decode(ctx.Request.Cookies["anisync_media_types"]);
+        var active = Decode(ctx.Request.Cookies["anisync_media_type"]);
+        var dash = Decode(ctx.Request.Cookies["anisync_dash_filter"]);
+
+        // Nothing stored → leave un-hydrated so the interactive pass / first-visit chooser decide.
+        if (string.IsNullOrEmpty(enabled) && string.IsNullOrEmpty(active)) return;
+
+        ApplyMediaSeed(state, enabled, active, dash);
+        _persist.RegisterOnPersisting(() =>
+        {
+            _persist.PersistAsJson(MediaPersistKey, new MediaSeed(enabled, active, dash));
+            return Task.CompletedTask;
+        });
+    }
+
+    // Parse the (cookie- or persisted-) raw values into AppState. Shared by the prerender cookie read
+    // and the interactive replay so both commit identical state.
+    private static void ApplyMediaSeed(AppState state, string? enabledRaw, string? activeRaw, string? dashRaw)
+    {
+        var set = (enabledRaw ?? "")
+            .Split(',', System.StringSplitOptions.RemoveEmptyEntries | System.StringSplitOptions.TrimEntries)
+            .Select(s => System.Enum.TryParse<MetaType>(s, out var mt) ? (MetaType?)mt : null)
+            .Where(mt => mt.HasValue).Select(mt => mt!.Value).Distinct().ToList();
+
+        if (set.Count > 0)
+        {
+            var active = System.Enum.TryParse<MetaType>(activeRaw, out var a) && set.Contains(a) ? a : set[0];
+            state.SetEnabledMediaTypes(set, active);
+        }
+        else if (System.Enum.TryParse<MetaType>(activeRaw, out var a))
+        {
+            // Active set via the toggle but the enabled-set cookie isn't present → apply against the default set.
+            state.SetMediaType(a);
+        }
+
+        if (dashRaw == "all"
+            || (System.Enum.TryParse<MetaType>(dashRaw, out var dm) && (set.Count == 0 || set.Contains(dm))))
+            state.SetDashboardFilter(dashRaw!);
+
+        state.MarkMediaTypesHydrated();
+    }
+
+    private static string? Decode(string? raw)
+        => string.IsNullOrEmpty(raw) ? raw : System.Uri.UnescapeDataString(raw);
 
     // Interactive: hand back whatever the prerender stashed under this key (and clear it, so a later
     // client-side navigation to the same page reloads normally with its skeleton).
