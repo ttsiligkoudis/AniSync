@@ -19,10 +19,28 @@ public interface IPrerenderSession
     /// a session, so the chrome renders signed-in from the first paint with no flash.
     /// </summary>
     void Bootstrap(AppState state, bool isInteractive);
+
+    /// <summary>
+    /// Web only: on the interactive pass, replay a snapshot a page stashed during prerender so it can
+    /// re-render its prerendered content instead of refetching — which otherwise flashes
+    /// content → skeleton → content (and double-hits the API). Returns false on native, or when nothing
+    /// was persisted under <paramref name="key"/> (e.g. a client-side navigation, which has no prerender).
+    /// </summary>
+    bool TryReplay<T>(string key, out T value);
+
+    /// <summary>
+    /// Web only: on the prerender pass, stash a snapshot under <paramref name="key"/> so the interactive
+    /// remount can replay it via <see cref="TryReplay{T}"/>. No-op on native and when
+    /// <paramref name="isInteractive"/> is true. <paramref name="snapshot"/> is invoked when state is
+    /// persisted (end of prerender), so it captures the component's final loaded state.
+    /// </summary>
+    void Persist<T>(string key, bool isInteractive, Func<T> snapshot);
 }
 
 /// <summary>No-op (native / fallback): the normal localStorage hydration drives session state.</summary>
 public sealed class NoOpPrerenderSession : IPrerenderSession
 {
     public void Bootstrap(AppState state, bool isInteractive) { }
+    public bool TryReplay<T>(string key, out T value) { value = default!; return false; }
+    public void Persist<T>(string key, bool isInteractive, Func<T> snapshot) { }
 }

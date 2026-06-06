@@ -3,6 +3,7 @@
 @inject NavigationManager Nav
 @inject AppState State
 @inject IJSRuntime JS
+@inject IPrerenderSession Prerender
 
 @* Anime/title detail — port of Views/Meta/Detail.cshtml (anime path). Hero
    (backdrop + poster + score + title + info + airing status + user-state pill +
@@ -493,6 +494,9 @@ else
     private IReadOnlyList<MetaDto> _related = Array.Empty<MetaDto>();
     private IReadOnlyList<MetaDto> _recommendations = Array.Empty<MetaDto>();
     private IReadOnlyList<LinkDto> _supplementary = Array.Empty<LinkDto>();
+    // Raw anime source-link inputs, retained so the prerender snapshot can rebuild the
+    // source chips on the interactive replay (BuildSourceChips needs them).
+    private AnimeSourceLinksDto? _sourceLinks;
     private string? _trailerId;
     private readonly List<SourceChip> _sourceChips = new();
     private bool _synopsisExpanded;
@@ -539,14 +543,27 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
+        _typeQuery = QueryValue("type");
+
+        // On the interactive pass right after a prerender, replay the snapshot the prerender
+        // stashed instead of resetting to the skeleton and refetching — otherwise the page
+        // flashes prerendered content → skeleton → content (and double-hits the API). Native
+        // (no-op session) and client-side navigations (no prerender stash) fall through to a
+        // normal load + skeleton, which is the right behaviour there.
+        if (RendererInfo.IsInteractive && TryReplaySnapshot(out var snap) && snap is { Meta: not null })
+        {
+            RestoreFrom(snap);
+            return;
+        }
+
         _loading = true;
         _jsBound = false;
-        _typeQuery = QueryValue("type");
         _sourceChips.Clear();
         _state = null;
         _heartFilled = _heartHidden = _isHidden = _traktConnected = false;
         _videoCast = Array.Empty<VideoCastDto>();
         _certification = null;
+        _sourceLinks = null;
         _related = Array.Empty<MetaDto>();
         _supplementary = Array.Empty<LinkDto>();
         _streams = Array.Empty<StreamingLinkDto>();
@@ -561,6 +578,83 @@ else
         {
             await LoadAnimeAsync();
         }
+
+        _seasons = _episodes.Select(e => e.Season > 0 ? e.Season : 1).Distinct().OrderBy(s => s).ToList();
+        if (_seasons.Count == 0) _seasons.Add(1);
+        _multiSeason = _seasons.Count > 1;
+        _activeSeason = PickDefaultSeason();
+        ApplyUserState();
+        ComputeWatchCta();
+        _loading = false;
+
+        // Prerender: stash a snapshot so the interactive remount replays it (above) with no flash
+        // and no second API round-trip. Web-only; no-op on native and on the interactive pass.
+        if (_meta is not null)
+            Prerender.Persist<PersistedDetail>(PersistKey(), RendererInfo.IsInteractive, Snapshot);
+    }
+
+    // Per-page-instance key (type + id) — only one detail page prerenders per request, but keying by
+    // the title keeps a stale snapshot from ever being replayed onto a different one.
+    private string PersistKey() => $"detail:{_typeQuery}:{Id}";
+
+    // Best-effort replay: a deserialise hiccup falls back to a normal load (the skeleton), never a
+    // broken page.
+    private bool TryReplaySnapshot(out PersistedDetail? snap)
+    {
+        try { return Prerender.TryReplay<PersistedDetail?>(PersistKey(), out snap); }
+        catch { snap = null; return false; }
+    }
+
+    // Everything the render needs that came off the network, captured at the end of the prerender load.
+    // Only public API DTOs (already JSON-round-tripped across the API) are stored; the derived bits
+    // (chips / info line / seasons / CTA / heart) are recomputed verbatim in RestoreFrom.
+    private sealed record PersistedDetail(
+        MetaDto? Meta,
+        List<EpisodeInfoDto> Episodes,
+        List<StreamingLinkDto> Streams,
+        List<MetaDto> Related,
+        List<MetaDto> Recommendations,
+        List<LinkDto> Supplementary,
+        string? TrailerId,
+        DetailStateDto? State,
+        AnimeSourceLinksDto? Links,
+        List<VideoCastDto> VideoCast,
+        string? Certification);
+
+    private PersistedDetail Snapshot() => new(
+        _meta,
+        _episodes.ToList(),
+        _streams.ToList(),
+        _related.ToList(),
+        _recommendations.ToList(),
+        _supplementary.ToList(),
+        _trailerId,
+        _state,
+        _sourceLinks,
+        _videoCast.ToList(),
+        _certification);
+
+    // Reinstate the loaded data and re-derive everything exactly as the load path does, so the
+    // interactive first render is identical to the prerendered DOM (no flash).
+    private void RestoreFrom(PersistedDetail snap)
+    {
+        _meta = snap.Meta;
+        _episodes = snap.Episodes;
+        _streams = snap.Streams;
+        _related = snap.Related;
+        _recommendations = snap.Recommendations;
+        _supplementary = snap.Supplementary;
+        _trailerId = snap.TrailerId;
+        _state = snap.State;
+        _sourceLinks = snap.Links;
+        _videoCast = snap.VideoCast;
+        _certification = snap.Certification;
+        _traktConnected = _state?.TraktConnected ?? false;
+
+        _jsBound = false;
+        _sourceChips.Clear();
+        if (IsVideo) BuildVideoSourceChips(); else BuildSourceChips(_sourceLinks);
+        _infoLine = BuildInfoLine(_meta, IsVideo ? _certification : null);
 
         _seasons = _episodes.Select(e => e.Season > 0 ? e.Season : 1).Distinct().OrderBy(s => s).ToList();
         if (_seasons.Count == 0) _seasons.Add(1);
@@ -600,7 +694,8 @@ else
         _supplementary = supp.Result;
         _trailerId = trailer.Result;
         _state = stateTask.Result;
-        BuildSourceChips(links.Result);
+        _sourceLinks = links.Result;
+        BuildSourceChips(_sourceLinks);
         _infoLine = BuildInfoLine(_meta, null);
     }
 
