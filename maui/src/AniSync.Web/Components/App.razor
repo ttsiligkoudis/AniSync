@@ -7,14 +7,18 @@
     <base href="/" />
     <meta name="theme-color" content="#0b0d12" />
     <ResourcePreloader />
-    <!-- Shared design system (verbatim site.css) from the AniSync.Client RCL. -->
-    <link rel="stylesheet" href="_content/AniSync.Client/css/site.css" />
-    <link rel="stylesheet" href="AniSync.Web.styles.css" />
+    @* Static assets go through @Assets[...] so MapStaticAssets serves them fingerprinted
+       (Cache-Control: immutable, 1yr → "Add Expires headers") AND content-negotiated
+       brotli/gzip ("Compress with gzip"). site.min.css is the rcssmin-minified build of
+       site.css (the RCL source; MAUI keeps the unminified one). *@
+    <link rel="stylesheet" href="@Assets["_content/AniSync.Client/css/site.min.css"]" />
+    <link rel="stylesheet" href="@Assets["AniSync.Web.styles.css"]" />
     <ImportMap />
-    <link rel="icon" href="_content/AniSync.Client/favicon.ico" />
-    <!-- PWA: installable Web head (manifest + icons + conservative service worker). -->
+    <link rel="icon" href="@Assets["_content/AniSync.Client/favicon.ico"]" />
+    <!-- PWA: installable Web head (manifest + icons + conservative service worker).
+         manifest stays at a stable (unfingerprinted) URL so its scope is fixed. -->
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="@Assets["icons/icon-192.png"]" />
     <HeadOutlet @rendermode="InteractiveServer" />
 </head>
 
@@ -23,19 +27,14 @@
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <!-- Shared shell behaviour (theme toggle, back button, mobile "More" sheet). -->
-    <script src="_content/AniSync.Client/js/chrome.js"></script>
-    <!-- ArtPlayer engine (web head). `defer` keeps it off the render-blocking
-         path; `new Artplayer` only runs inside anisyncWatch.play on a source-row
-         click, long after a deferred script has executed, so window.Artplayer is
-         guaranteed defined by first interaction. ArtPlayer ships its CSS embedded
-         in the bundle, so there's no separate stylesheet to wire in. -->
-    <script src="https://unpkg.com/artplayer@5/dist/artplayer.js" defer></script>
-    <!-- Web-head player driver: ArtPlayer mount + embedded-MKV subtitle pipeline,
-         driving art.video behind the IMediaPlayer contract (resume / progress /
-         ended / stream-event interop). -->
-    <script src="js/watch-player.js"></script>
+    <script src="@Assets["_content/AniSync.Client/js/chrome.js"]"></script>
+    <!-- ArtPlayer (large, third-party) + the 66 KB watch-player.js driver are NOT
+         loaded here: they're only needed on /watch, so loading them on every page
+         was dead weight + a render-blocking script + an extra third-party request.
+         Html5MediaPlayer now injects both on the first source play via
+         js/watch-loader.js (watch-player.js's play() already polls for window.Artplayer). -->
     <!-- Web Push opt-in interop (subscribe / unsubscribe). -->
-    <script src="js/push.js"></script>
+    <script src="@Assets["js/push.js"]" defer></script>
     <script>
         // Register the PWA service worker (network-first; safe across deploys).
         if ('serviceWorker' in navigator) {
