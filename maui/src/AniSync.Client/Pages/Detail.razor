@@ -17,9 +17,24 @@
 
 @if (_loading)
 {
-    <section class="anime-detail-hero anime-detail-hero-flat">
+    @* Hero skeleton — mirrors the loaded layout (poster + title + info + chips + CTA)
+       so the page reads as "loading this title" and doesn't jump when the real meta
+       lands. Flat-hero (no backdrop) until we know whether there's banner art. *@
+    <section class="anime-detail-hero anime-detail-hero-flat anime-detail-hero-skeleton" aria-busy="true" aria-live="polite">
+        <span class="sr-only">Loading…</span>
         <div class="anime-detail-hero-body">
-            <p class="hint-text">Loading…</p>
+            <div class="anime-detail-poster-wrap">
+                <div class="anime-detail-skeleton-poster skeleton-shimmer"></div>
+            </div>
+            <div class="anime-detail-meta">
+                <div class="anime-detail-skeleton-bar anime-detail-skeleton-title skeleton-shimmer"></div>
+                <div class="anime-detail-skeleton-bar anime-detail-skeleton-info skeleton-shimmer"></div>
+                <div class="anime-detail-skeleton-chips">
+                    <span class="anime-detail-skeleton-chip skeleton-shimmer"></span>
+                    <span class="anime-detail-skeleton-chip skeleton-shimmer"></span>
+                </div>
+                <div class="anime-detail-skeleton-bar anime-detail-skeleton-cta skeleton-shimmer"></div>
+            </div>
         </div>
     </section>
 }
