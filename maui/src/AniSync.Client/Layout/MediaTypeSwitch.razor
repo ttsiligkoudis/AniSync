@@ -89,8 +89,14 @@
 
     private void Recompute()
     {
-        var nav = NavActive.From(Nav.ToBaseRelativePath(Nav.Uri));
-        _show = nav is "home" or "library" or "discover";
+        var rel = Nav.ToBaseRelativePath(Nav.Uri);
+        var nav = NavActive.From(rel);
+        // Only the browse surfaces (dashboard / Library / Discover). NavActive folds /meta and /watch
+        // into "discover" so the bottom-nav highlights Discover there — but the switch must NOT appear
+        // on a title's detail or watch page, so exclude those explicitly.
+        var path = "/" + rel.Split('?', '#')[0].Trim('/');
+        _show = nav is "home" or "library" or "discover"
+                && !path.StartsWith("/meta") && !path.StartsWith("/watch");
         _dashboard = nav == "home";
         // Dashboard defaults to "All"; the other surfaces start on the active mode.
         _selected = _dashboard ? "all" : State.MediaType.ToString();
