@@ -20,14 +20,19 @@
 }
 
 
+/* Themed to the app's design tokens (var(--surface-raised) / --text / --accent) so the
+   reconnect dialog reads as part of AniSync in both light and dark themes, instead of
+   the stock white box. Layout + the show/hide state classes above are unchanged. */
 #components-reconnect-modal {
-    background-color: white;
+    background-color: var(--surface-raised);
+    color: var(--text-strong);
     width: 20rem;
+    max-width: calc(100vw - 2rem);
     margin: 20vh auto;
     padding: 2rem;
-    border: 0;
-    border-radius: 0.5rem;
-    box-shadow: 0 3px 6px 2px rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
     opacity: 0;
     transition: display 0.5s allow-discrete, overlay 0.5s allow-discrete;
     animation: components-reconnect-modal-fadeOutOpacity 0.5s both;
@@ -41,7 +46,8 @@
 }
 
 #components-reconnect-modal::backdrop {
-    background-color: rgba(0, 0, 0, 0.4);
+    background-color: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(4px);
     animation: components-reconnect-modal-fadeInOpacity 0.5s ease-in-out;
     opacity: 1;
 }
@@ -86,22 +92,35 @@
 #components-reconnect-modal p {
     margin: 0;
     text-align: center;
+    font-size: 0.95rem;
+    line-height: 1.4;
+}
+
+/* Secondary states (retrying / failed / resume-failed) read as dimmer captions. */
+#components-reconnect-modal .components-reconnect-repeated-attempt-visible,
+#components-reconnect-modal .components-reconnect-failed-visible,
+#components-reconnect-modal .components-resume-failed-visible {
+    color: var(--text-dim);
 }
 
 #components-reconnect-modal button {
     border: 0;
-    background-color: #6b9ed2;
-    color: white;
-    padding: 4px 24px;
-    border-radius: 4px;
+    background-color: var(--accent-fill);
+    color: var(--on-accent);
+    font: inherit;
+    font-weight: 600;
+    padding: 0.5rem 1.5rem;
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+    transition: background-color 0.15s ease;
 }
 
     #components-reconnect-modal button:hover {
-        background-color: #3b6ea2;
+        background-color: var(--accent-fill-hover);
     }
 
     #components-reconnect-modal button:active {
-        background-color: #6b9ed2;
+        background-color: var(--accent-fill);
     }
 
 .components-rejoining-animation {
@@ -112,7 +131,7 @@
 
     .components-rejoining-animation div {
         position: absolute;
-        border: 3px solid #0087ff;
+        border: 3px solid var(--accent);
         opacity: 1;
         border-radius: 50%;
         animation: components-rejoining-animation 1.5s cubic-bezier(0, 0.2, 0.8, 1) infinite;
