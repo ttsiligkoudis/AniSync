@@ -66,14 +66,17 @@ export function setActiveOnly(active) {
 }
 
 // The dashboard's own toggle ("all" + the enabled modes) is tracked separately from the
-// ACTIVE mode so the dashboard remembers its pick independently of Discover/Library. Client
-// only (the dashboard filters its sections in-page), so localStorage is enough — no cookie.
+// ACTIVE mode so the dashboard remembers its pick independently of Discover/Library. Written to
+// localStorage AND a cookie (like the other prefs) so the prerender can read it server-side and
+// render the right toggle on first paint instead of flashing the default.
 const DASH_KEY = 'anisync-dash-filter';
+const DASH_COOKIE = 'anisync_dash_filter';
 export function getDashFilter() {
     try { return localStorage.getItem(DASH_KEY); } catch (_) { return null; }
 }
 export function setDashFilter(v) {
     try { localStorage.setItem(DASH_KEY, v); } catch (_) { /* private mode */ }
+    setCookie(DASH_COOKIE, v);
 }
 
 // Full-page reload after a pick — exactly what the original media-type.js did.
