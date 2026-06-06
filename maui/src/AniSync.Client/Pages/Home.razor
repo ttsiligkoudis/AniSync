@@ -356,6 +356,7 @@ else
     private DashCustomizeModal? _customize;
     private bool _layoutLoaded;
     private IJSObjectReference? _js;
+    private IJSObjectReference? _nudgeModule;
 
     protected override void OnInitialized()
     {
@@ -369,14 +370,33 @@ else
     {
         // body.dash-page (original's ViewData["BodyClass"]) makes <main> the containing
         // block for the absolutely-positioned "Customize" float and tucks the content
-        // under the sticky media-type pills. OnAfterRenderAsync only runs interactively.
-        if (!firstRender) return;
-        try
+        // under the sticky media-type pills. Set once, on the first interactive render.
+        if (firstRender)
         {
-            _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/dashboard.js");
-            await _js.InvokeVoidAsync("setDashPage", true);
+            try
+            {
+                _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/dashboard.js");
+                await _js.InvokeVoidAsync("setDashPage", true);
+            }
+            catch { /* prerender / no JS */ }
         }
-        catch { /* prerender / no JS */ }
+
+        // Wire the shared "set up streaming" nudge (reveal-after-dismiss-check + the
+        // "How it works" expander) once it's in the DOM — the inline <script> from
+        // _StreamSetupNudge.cshtml ported to the watch-sources.js module. Without this
+        // the dismissible dashboard nudge ships hidden and never appears. Runs each
+        // render (idempotent on the JS side) so it catches the nudge appearing after
+        // hydration; gated to when it's actually shown.
+        if (State.LoggedIn && string.IsNullOrEmpty(State.StreamConfig))
+        {
+            try
+            {
+                _nudgeModule ??= await JS.InvokeAsync<IJSObjectReference>(
+                    "import", "./_content/AniSync.Client/js/watch-sources.js");
+                await _nudgeModule.InvokeVoidAsync("wireNudges");
+            }
+            catch { /* interop best-effort — the CTA link still works without JS */ }
+        }
     }
 
     // Load the saved dashboard layout once the session has hydrated (it needs the config credential).
@@ -402,6 +422,10 @@ else
         {
             try { await _js.InvokeVoidAsync("setDashPage", false); } catch { }
             try { await _js.DisposeAsync(); } catch { }
+        }
+        if (_nudgeModule is not null)
+        {
+            try { await _nudgeModule.DisposeAsync(); } catch { }
         }
     }
 }

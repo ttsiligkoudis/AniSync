@@ -1,6 +1,6 @@
 @page "/meta/{Id}/watch/{Episode:int}"
 @page "/meta/{Id}/watch/{Season:int}/{Episode:int}"
-@implements IDisposable
+@implements IAsyncDisposable
 @inject IAniSyncApi Api
 @inject AppState State
 @inject IAppEnvironment Env
@@ -9,13 +9,22 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
-@* Watch page — port of Views/Meta/Watch.cshtml. Header + player surface +
-   prev/next nav + source picker. Playback diverges by host (the only place it
-   has to): the native MAUI head plays the selected source through LibVLCSharp
-   (IMediaPlayer), fixing the browser's audio-codec gaps; the Web head plays it
-   in an HTML5 <video>. Sources come from the user's Stremio addon config; when
-   that isn't set up the page shows the same "set up streaming" prompt the web
-   app does. *@
+@* Watch page — port of Views/Meta/Watch.cshtml (source-list stage). Header +
+   player surface + prev/next nav + the enriched source picker. Playback diverges
+   by host (the only place it has to): the native MAUI head plays the selected
+   source through LibVLCSharp (IMediaPlayer), fixing the browser's audio-codec
+   gaps; the Web head plays it in an HTML5 <video> via watch-player.js. Sources
+   come from the user's Stremio addon config; when that isn't set up the page
+   shows the same shared "set up streaming" nudge the web app does.
+
+   The Sources panel reproduces the original's renderSources: enriched
+   .episode-stream-row rows (quality / release-title / provider / source / hdr /
+   hevc / audio + silent-audio ⚠ / size / seeders / language / per-row external
+   button / "✓ Last played"), the progressive per-addon fan-out with the
+   "Debrid streams · N / M" badge, capStreamsPerResolution + the playable-first
+   (HEVC-risky / unsupported-audio / iOS-container) re-sorts, the provider filter
+   tabs, the #watchSourcesRefresh button, and the localStorage 10-min TTL stream
+   cache (anisync.streams.{uid}.{key}) via the watch-sources.js interop module. *@
 
 <PageTitle>@_title · AniSync</PageTitle>
 
@@ -27,7 +36,7 @@
         </svg>
         <span>@(_meta?.Name ?? "Back")</span>
     </a>
-    <h1 class="watch-title">@_title</h1>
+    <h1 class="watch-title">@_episodeLabel</h1>
     <p class="watch-meta">
         @_seasonLabel
         @if (!string.IsNullOrEmpty(_metaDate))
@@ -41,11 +50,13 @@
     <div class="watch-player">
         @if (_playingUrl is not null && !Env.SupportsNativePlayback)
         {
-            @* Web head: HTML5 fallback (browser codec limits apply). The
-               Html5MediaPlayer attaches to this element by id to wire resume,
-               progress (auto-track) and ended (auto-play-next) via JS interop. *@
-            <video id="watch-video" class="watch-player-video" controls src="@_playingUrl"
-                   style="width:100%;height:100%;background:#000;"></video>
+            @* Web head: the ArtPlayer engine mounts INTO this container (it
+               replaces the children with its own <video> + chrome). The
+               Html5MediaPlayer drives it by this id — wiring resume, progress
+               (mark-watched at 70%), ended, the stream-error fallback, the
+               embedded-MKV subtitle pipeline, and the ±10s / settings / fullscreen
+               controls — exactly as the original Watch.cshtml's #watchPlayer host. *@
+            <div id="watch-video" class="watch-player-video" style="width:100%;height:100%;background:#000;"></div>
         }
         else
         {
@@ -63,6 +74,10 @@
                     {
                         @:Playing in the native player…
                     }
+                    else if (_sourcesResolved && !_hasStreamAddons)
+                    {
+                        @:Set up streaming below to start watching.
+                    }
                     else
                     {
                         @:Pick a source below to start watching.
@@ -70,14 +85,65 @@
                 </span>
             </div>
         }
+        @* AniSkip corner button — C#-driven (OnProgress computes _activeSkip), but
+           given the original's id so watch-player.js can relocate it into
+           ArtPlayer's $player after init (so it stays visible in fullscreen-web). *@
         @if (_activeSkip is not null && _playingUrl is not null && !Env.SupportsNativePlayback)
         {
-            <button type="button" class="watch-skip-btn" @onclick="SkipCurrentAsync">
-                Skip @(IsOutro(_activeSkip) ? "Outro" : "Intro")
+            <button type="button" id="watchSkipButton" class="watch-skip-btn" @onclick="SkipCurrentAsync">
+                @(_activeSkip.Label) →
             </button>
         }
     </div>
+    @* Player toolbar (web head). The auto-skip toggle persists across episodes
+       (matches the original's localStorage anisync.autoSkip → here pref:autoskip in
+       C#); it shows only when AniSkip returned markers. The mobile embedded-subs
+       opt-in + the embedded-status pill + the subtitle chip are driven by
+       watch-player.js (the embedded-MKV pipeline writes to them) — a faithful port
+       of the .watch-player-toolbar in Watch.cshtml. *@
+    @if (!Env.SupportsNativePlayback && _playingUrl is not null)
+    {
+        <div class="watch-player-toolbar">
+            <button id="watchSkipAuto" class="watch-toggle @(_autoSkip ? "is-active" : "")" type="button"
+                    aria-pressed="@(_autoSkip ? "true" : "false")" hidden="@(!_hasSkipMarkers)" @onclick="ToggleAutoSkipAsync">
+                <span class="watch-toggle-dot" aria-hidden="true"></span>
+                <span>Auto-skip intro / outro</span>
+            </button>
+            <button id="watchEmbedMobileOptIn" class="watch-toggle" type="button" aria-pressed="false" hidden>
+                <span class="watch-toggle-dot" aria-hidden="true"></span>
+                <span>Try embedded subs on mobile</span>
+            </button>
+            <span id="watchEmbeddedStatus" class="watch-embed-status" hidden></span>
+            <span id="watchSubsProvider" class="watch-embed-status" hidden></span>
+        </div>
+    }
+    @* Stream fallback panel — rendered by JS-surfaced video error / watchdog
+       timeout / iOS-container fast-fail (web head only; the native LibVLCSharp
+       head decodes everything). Per-reason copy + Retry + Open-externally, a
+       faithful port of Watch.cshtml's #watchPlayerFallback / showFallback. *@
+    @if (!Env.SupportsNativePlayback && _fallbackReason is not null)
+    {
+        <div id="watchPlayerFallback" class="watch-player-fallback" data-fallback-reason="@_fallbackReason">
+            <p class="hint-text" style="margin: 0 0 0.75rem;">@FallbackMessage(_fallbackReason)</p>
+            <div class="watch-fallback-actions">
+                <button type="button" class="btn-ghost btn-ghost-sm" @onclick="RetryFallbackAsync">Retry</button>
+                <button type="button" class="btn-ghost btn-ghost-sm @(_fallbackOpening ? "is-loading" : "")"
+                        disabled="@_fallbackOpening" @onclick="OpenFallbackExternallyAsync">
+                    @(_fallbackOpening ? "Opening…" : "Open externally")
+                </button>
+            </div>
+        </div>
+    }
 </section>
+
+@* iOS Files hand-off toast — surfaced after an external .m3u download on iOS
+   Safari (the original gated this on window.AniSyncToast; the replica has no
+   global toast, so the launcher hands the message back here for a transient
+   inline notice). Auto-dismisses after ~9s. *@
+@if (!string.IsNullOrEmpty(_toast))
+{
+    <div class="watch-launch-toast" role="status">@_toast</div>
+}
 
 <nav class="watch-nav">
     @if (_prev is not null)
@@ -104,79 +170,269 @@
     }
 </nav>
 
-<section class="watch-sources">
+<section class="watch-sources" id="watchSources">
     <div class="watch-section-header">
         <h2 class="watch-section-title">Sources</h2>
-        <label class="watch-toggle">
-            <input type="checkbox" @bind="_autoTrack" @bind:after="SaveAutoTrackPref" />
-            <span class="watch-toggle-dot"></span> Auto-track
-        </label>
-        <label class="watch-toggle">
-            <input type="checkbox" @bind="_autoPlayNext" />
-            <span class="watch-toggle-dot"></span> Auto-play next
-        </label>
-        @if (_skips.Count > 0)
+        @if (_showRefresh)
         {
-            <label class="watch-toggle">
-                <input type="checkbox" @bind="_autoSkip" @bind:after="SaveAutoSkipPref" />
-                <span class="watch-toggle-dot"></span> Auto-skip
-            </label>
-        }
-        @if (!Env.SupportsNativePlayback && _subtitles.Count > 0 && _playingUrl is not null)
-        {
-            <label class="watch-sub-select-label">
-                <span>Subtitles</span>
-                <select class="watch-sub-select" @onchange="OnSubtitleChange">
-                    <option value="-1" selected="@(_subtitleIndex < 0)">Off</option>
-                    @for (var i = 0; i < _subtitles.Count; i++)
-                    {
-                        var idx = i;
-                        <option value="@idx" selected="@(idx == _subtitleIndex)">@_subtitles[idx].Label</option>
-                    }
-                </select>
-            </label>
+            <button type="button" id="watchSourcesRefresh" class="episode-stream-action watch-sources-refresh @(_streamsLoading ? "is-loading" : "")"
+                    title="Refresh sources" aria-label="Refresh sources" disabled="@_streamsLoading" @onclick="RefreshSourcesAsync">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                </svg>
+            </button>
         }
     </div>
-    <div class="watch-sources-body">
-        @if (string.IsNullOrEmpty(State.StreamConfig))
+    @* No standalone subtitle <select> on the web head — the ArtPlayer engine owns
+       the subtitle picker inside its settings menu (None → embedded SSA → OS VTT),
+       exactly as the original Watch.cshtml. watch-player.js builds + refreshes that
+       selector as the embedded-MKV extraction surfaces tracks. *@
+    <div class="watch-sources-body" id="watchSourcesBody">
+        @if (_loadingSources)
         {
-            <p class="hint-text">
-                Streaming isn't set up yet. <a href="/settings">Set up streaming</a> to play episodes here.
-            </p>
-        }
-        else if (_loadingSources)
-        {
-            <div class="episode-stream-skeleton">
+            <ul class="episode-stream-skeleton" aria-hidden="true">
                 @for (var i = 0; i < 4; i++)
                 {
-                    <div class="episode-stream-skeleton-row">
-                        <div class="episode-stream-skeleton-quality"></div>
-                        <div class="episode-stream-skeleton-meta">
-                            <span class="episode-stream-skeleton-line"></span>
-                            <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short"></span>
-                        </div>
-                    </div>
+                    <li class="episode-stream-skeleton-row">
+                        <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
+                        <span class="episode-stream-skeleton-meta">
+                            <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
+                            <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
+                        </span>
+                    </li>
                 }
-            </div>
-        }
-        else if (_sources.Count == 0)
-        {
-            <p class="hint-text">No playable sources found for this episode.</p>
+            </ul>
         }
         else
         {
-            <div class="episode-stream-actions">
-                @foreach (var s in _sources)
-                {
-                    <button type="button" class="episode-stream-action @(_playingUrl == s.Url ? "is-loading" : "")"
-                            @onclick="() => PlayAsync(s)">
-                        @s.Label
-                    </button>
-                }
-            </div>
+            @* Debrid streams — the enriched rows. Shown whenever there are rows
+               or addons are still in flight (so the section appears immediately
+               on the first addon's response). *@
+            @if (_showDebridHeader)
+            {
+                <h3 class="watch-section-subtitle">
+                    Debrid streams
+                    @if (_pendingAddons)
+                    {
+                        <span class="watch-section-progress">@_progressCompleted / @_progressTotal</span>
+                    }
+                </h3>
+            }
+
+            @* Provider filter tabs (Stremio-style): "All" + one tab per distinct
+               addon that returned a stream, in first-seen order. Only worth
+               showing once two or more providers are present. *@
+            @if (_providers.Count >= 2)
+            {
+                <div class="episode-stream-filters" role="tablist">
+                    <button type="button" data-provider="all"
+                            class="episode-stream-filter @(_providerFilter == "all" ? "is-active" : "")"
+                            @onclick='() => SetProviderFilter("all")'>All</button>
+                    @foreach (var p in _providers)
+                    {
+                        var prov = p;
+                        <button type="button" data-provider="@prov"
+                                class="episode-stream-filter @(_providerFilter == prov ? "is-active" : "")"
+                                @onclick="() => SetProviderFilter(prov)">@prov</button>
+                    }
+                </div>
+            }
+
+            @if (_debrid.Count > 0)
+            {
+                <ul class="episode-stream-list">
+                    @foreach (var s in _debrid)
+                    {
+                        var stream = s;
+                        var firstLine = FirstReleaseLine(stream.Description)
+                            ?? (stream.Title ?? stream.Name ?? "").Split('\n').FirstOrDefault() ?? "";
+                        var isLast = _lastSourceUrl is not null && stream.Url == _lastSourceUrl;
+                        var hidden = _providerFilter != "all" && (stream.Provider ?? "Other") != _providerFilter;
+                        <li class="episode-stream-row @(isLast ? "is-last-played" : "")"
+                            data-stream-url="@(stream.Url ?? "")" data-provider="@(stream.Provider ?? "Other")"
+                            style="@(hidden ? "display:none" : "")">
+                            <button type="button" class="episode-stream-pick @(_playingUrl == stream.Url ? "is-loading" : "")"
+                                    @onclick="() => PlayAsync(stream)">
+                                <span class="episode-stream-quality">@(string.IsNullOrEmpty(stream.Quality) ? "—" : stream.Quality)</span>
+                                <span class="episode-stream-meta">
+                                    <span class="episode-stream-title">@firstLine</span>
+                                    @{
+                                        var hasSub = isLast
+                                            || !string.IsNullOrEmpty(stream.Provider) || !string.IsNullOrEmpty(stream.Source)
+                                            || !string.IsNullOrEmpty(stream.Hdr) || stream.IsHevc
+                                            || stream.AudioUnsupported || !string.IsNullOrEmpty(stream.Audio)
+                                            || !string.IsNullOrEmpty(stream.Size) || stream.Seeders > 0
+                                            || !string.IsNullOrEmpty(stream.Language);
+                                    }
+                                    @if (hasSub)
+                                    {
+                                        <span class="episode-stream-sub">
+                                            @if (isLast)
+                                            {
+                                                <span class="episode-stream-played-badge" title="Last source you played">✓ Last played</span>
+                                            }
+                                            @if (!string.IsNullOrEmpty(stream.Provider))
+                                            {
+                                                <span class="episode-stream-provider">@stream.Provider</span>
+                                            }
+                                            @if (!string.IsNullOrEmpty(stream.Source))
+                                            {
+                                                <span class="episode-stream-source">@stream.Source</span>
+                                            }
+                                            @if (!string.IsNullOrEmpty(stream.Hdr))
+                                            {
+                                                <span class="episode-stream-hdr">@stream.Hdr</span>
+                                            }
+                                            @if (stream.IsHevc)
+                                            {
+                                                <span class="episode-stream-hevc" data-supported="@(_hevcRisky ? "false" : "true")"
+                                                      title="@(_hevcRisky ? "HEVC / 10-bit — Chrome/Edge on desktop frequently corrupts these files into visual artifacts and there’s no software fallback. Open it in an external player (VLC / Infuse), or try Firefox." : "HEVC / 10-bit — your browser should decode this fine. Use the external-player button if you see artifacts anyway.")">HEVC</span>
+                                            }
+                                            @if (stream.AudioUnsupported)
+                                            {
+                                                <span class="episode-stream-hevc" data-supported="false"
+                                                      title="@($"This release's audio ({stream.Audio ?? "Dolby/DTS"}) can't be decoded by most browsers — you'll get picture with no sound. Open it in an external player (VLC / Infuse), or pick a stream with AAC audio.")">@($"{stream.Audio ?? "Audio"} ⚠")</span>
+                                            }
+                                            else if (!string.IsNullOrEmpty(stream.Audio))
+                                            {
+                                                <span class="episode-stream-audio">@stream.Audio</span>
+                                            }
+                                            @if (!string.IsNullOrEmpty(stream.Size))
+                                            {
+                                                <span class="episode-stream-size">@stream.Size</span>
+                                            }
+                                            @if (stream.Seeders > 0)
+                                            {
+                                                <span class="episode-stream-seeders">👤 @stream.Seeders</span>
+                                            }
+                                            @if (!string.IsNullOrEmpty(stream.Language))
+                                            {
+                                                <span class="episode-stream-language">@stream.Language</span>
+                                            }
+                                        </span>
+                                    }
+                                </span>
+                            </button>
+                            @* Side action: open externally. Sits alongside the pick
+                               button so the click targets don't overlap. Resolves the
+                               debrid CDN URL (Api.ResolveStreamAsync) + a sidecar VTT,
+                               then dispatches via watch-launch.js: Android intent://
+                               chooser · desktop vlc:// probe → .m3u · iOS Files toast.
+                               On the native head it plays inline through LibVLCSharp
+                               instead (VLC decodes everything; external launch is
+                               web-only). *@
+                            <div class="episode-stream-actions">
+                                @{
+                                    var extLoading = _externalLoadingUrl is not null && stream.Url == _externalLoadingUrl;
+                                }
+                                <button type="button" class="episode-stream-action episode-stream-action-external @(extLoading ? "is-loading" : "")"
+                                        title="Open with another app" disabled="@extLoading" @onclick="() => OpenExternallyAsync(stream)">
+                                    @if (extLoading)
+                                    {
+                                        <span class="episode-stream-action-spinner" role="status" aria-label="Opening…"></span>
+                                    }
+                                    else
+                                    {
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                            <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+                                        </svg>
+                                    }
+                                </button>
+                            </div>
+                        </li>
+                    }
+                </ul>
+            }
+
+            @if (_external.Count > 0)
+            {
+                <h3 class="watch-section-subtitle">@(_debrid.Count > 0 ? "Other sites" : "Watch on")</h3>
+                <ul class="episode-stream-list episode-stream-list-external">
+                    @foreach (var l in _external)
+                    {
+                        <li class="episode-stream-row">
+                            <a class="episode-stream-pick" href="@l.Url" target="_blank" rel="noopener noreferrer">
+                                <span class="episode-stream-title">@l.Site</span>
+                            </a>
+                        </li>
+                    }
+                </ul>
+            }
+
+            @if (_pendingAddons && _debrid.Count == 0)
+            {
+                @* No streams from any settled addon yet — keep a skeleton visible
+                   so the user sees the section is alive while slower addons fan out. *@
+                <ul class="episode-stream-skeleton" aria-hidden="true">
+                    @for (var i = 0; i < 4; i++)
+                    {
+                        <li class="episode-stream-skeleton-row">
+                            <span class="episode-stream-skeleton-quality skeleton-shimmer"></span>
+                            <span class="episode-stream-skeleton-meta">
+                                <span class="episode-stream-skeleton-line skeleton-shimmer"></span>
+                                <span class="episode-stream-skeleton-line episode-stream-skeleton-line-short skeleton-shimmer"></span>
+                            </span>
+                        </li>
+                    }
+                </ul>
+            }
+            else if (!_pendingAddons && _debrid.Count == 0 && _external.Count == 0)
+            {
+                @* Nothing found / nothing to fetch. The "set up streaming" upsell
+                   lives in the persistent nudge below, so keep this terse. *@
+                <p class="hint-text">No streaming sources found for this episode.</p>
+            }
         }
     </div>
 </section>
+
+@* Persistent "set up streaming" nudge — shown below the Sources section whenever
+   the user has no stream addon, even when external links are listed above.
+   External links navigate out; a stream addon (+ debrid) is what unlocks in-app,
+   debrid-cached playback, so the nudge stays relevant alongside them. Same shared
+   component as the dashboard (inlined port of _StreamSetupNudge.cshtml, non-
+   dismissible variant — it IS the panel's call to action). Anonymous viewers get
+   the "Sign in" CTA (→ /account) since adding an addon requires an account. *@
+@if (_sourcesResolved && !_hasStreamAddons)
+{
+    <section class="stream-nudge" data-stream-nudge>
+        <div class="stream-nudge-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+        </div>
+        <div class="stream-nudge-body">
+            <h3 class="stream-nudge-title">Watch right here, in AniSync</h3>
+            <p class="stream-nudge-text">
+                Add a stream addon to surface debrid-cached sources on every episode's player.
+            </p>
+            <div class="stream-nudge-actions">
+                <a class="stream-nudge-cta" href="@(_anonymous ? "/account" : "/account#streams")">@(_anonymous ? "Sign in →" : "Set up streaming →")</a>
+                <button class="stream-nudge-learn" type="button" aria-expanded="false"
+                        aria-controls="@_nudgeDetailId" data-stream-nudge-toggle>
+                    How it works
+                </button>
+            </div>
+            <div id="@_nudgeDetailId" class="stream-nudge-detail">
+                <p>
+                    A <strong>stream addon</strong> (Torrentio, MediaFusion, Comet,
+                    AIOStreams, …) finds torrents for an episode and hands AniSync
+                    a list of ready-to-play sources.
+                </p>
+                <p>
+                    Pair it with a <strong>debrid</strong> service (Real-Debrid,
+                    AllDebrid, Premiumize, …): paste your debrid API key and the
+                    addon unlocks instantly-streamable, cached copies — no
+                    downloads, no seeding. The quick setup on
+                    <a href="/account#streams">Account → Streams</a> wires both up
+                    in one step.
+                </p>
+            </div>
+        </div>
+    </section>
+}
 
 @code {
     [Parameter] public string Id { get; set; } = "";
@@ -185,39 +441,120 @@
 
     private MetaDto? _meta;
     private IReadOnlyList<EpisodeInfoDto> _episodes = Array.Empty<EpisodeInfoDto>();
-    private IReadOnlyList<StremioStream> _sources = Array.Empty<StremioStream>();
     private IReadOnlyList<SubtitleTrack> _subtitles = Array.Empty<SubtitleTrack>();
     private EpisodeInfoDto? _prev, _next;
+    private bool _hasSeasons;
+
+    // Fan-out result (built progressively; capped + sorted on every render).
+    private List<EpisodeStreamDto> _rawDebrid = new();         // appended in addon-completion order
+    private List<EpisodeStreamDto> _debrid = new();            // capped + sorted for display
+    private List<EpisodeExternalLinkDto> _external = new();
+    private List<string> _providers = new();                   // distinct provider names, first-seen order
+    private EpisodeSkipTimesDto? _skipTimes;
+    private int _progressCompleted, _progressTotal;
+    private bool _pendingAddons;
+
     private bool _loadingSources;
+    private bool _streamsLoading;
+    private bool _showRefresh = true;
+    private bool _hasStreamAddons;
+    private bool _externalStreamsEnabled;
+    private bool _anonymous;
+    // True once the bootstrap has resolved, so the "set up streaming" nudge +
+    // the empty-state player prompt only commit after the real addon state is
+    // known (no flicker on first load). Sticky across Prev/Next navs.
+    private bool _sourcesResolved;
+
     private string? _playingUrl;
     private PlaybackRequest? _pendingWebPlay;
     private string _type = "series";
     private string _title = "Watch";
+    private string _episodeLabel = "Watch";
     private string _seasonLabel = "";
     private string? _metaDate;
     private string? _metaThumbnail;
-    private bool _autoPlayNext = true;
-    private bool _autoTrack = true;
+
+    private bool _marked;          // one-shot mark-watched guard (per episode view)
+    private double _lastSaved;     // resume-throttle marker
+
+    // AniSkip overlay state (driven by the bootstrap skipTimes).
+    private SkipBand? _activeSkip;
     private bool _autoSkip;
-    private bool _tracked;
-    private double _lastSaved;
-    private IReadOnlyList<SkipMarker> _skips = Array.Empty<SkipMarker>();
-    private SkipMarker? _activeSkip;
-    private readonly HashSet<SkipMarker> _skipped = new();
+    private readonly HashSet<string> _skippedBands = new();
+
     private int _subtitleIndex = -1;
+
+    private string _providerFilter = "all";
+    private string? _lastSourceUrl;
+
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _launch;       // watch-launch.js (web head only)
+    private readonly string _nudgeDetailId = "streamNudgeDetail-" + Guid.NewGuid().ToString("N")[..8];
+
+    // Fallback panel (web head). Set by the JS-surfaced video error / watchdog
+    // timeout / iOS-container fast-fail (OnStreamEvent). Reason drives the copy +
+    // is exposed as data-fallback-reason for parity with the original.
+    private string? _fallbackReason;
+    private EpisodeStreamDto? _fallbackStream;   // the source the fallback offers Retry / Open-externally for
+    private bool _fallbackOpening;
+
+    // Transient iOS Files hand-off toast (auto-dismissing) + its cancellation.
+    private string? _toast;
+    private CancellationTokenSource? _toastCts;
+
+    // The stream URL whose per-row external button is mid-resolve (spinner +
+    // disabled), mirroring setExternalActionLoading. Null when none in flight.
+    private string? _externalLoadingUrl;
+
+    // True once the skip-range bands have been painted for the current source so
+    // the OnProgress tick doesn't repaint every frame (only retries until painted).
+    private bool _skipRangesPainted;
+
+    // Per-resolution cap + ordering (mirror of capStreamsPerResolution).
+    private const int StreamsPerResolution = 5;
+    private static readonly string[] ResolutionOrder = { "2160p", "1440p", "1080p", "720p", "480p" };
+
+    // Browser HEVC reliability heuristic + iOS-Safari container check, mirrored
+    // from the original. Resolved once via JS on the web head (no-ops native).
+    private bool _hevcRisky;
+    private bool _isIosSafari;
+
+    // Display helpers driven by the capped/sorted list.
+    private bool _showDebridHeader => _debrid.Count > 0 || _pendingAddons;
+
+    // True when AniSkip returned at least one OP/ED marker — gates the auto-skip
+    // toggle's visibility (the original hides it when there's nothing to act on).
+    private bool _hasSkipMarkers => _skipTimes is not null && (_skipTimes.Intro is not null || _skipTimes.Outro is not null);
 
     protected override async Task OnParametersSetAsync()
     {
+        // Reset per-episode state (a Prev/Next nav re-enters this with new params).
         _playingUrl = null;
-        _tracked = false;
+        _marked = false;
+        _marking = false;
+        _lastSaved = 0;
         _activeSkip = null;
-        _skipped.Clear();
+        _skippedBands.Clear();
+        _fallbackReason = null;
+        _fallbackStream = null;
+        _fallbackOpening = false;
+        _skipRangesPainted = false;
         _subtitleIndex = -1;
+        _rawDebrid = new();
+        _debrid = new();
+        _external = new();
+        _providers = new();
+        _skipTimes = null;
+        _progressCompleted = _progressTotal = 0;
+        _pendingAddons = false;
+        _providerFilter = "all";
+        _lastSourceUrl = null;
+        _showRefresh = true;
         _type = QueryValue("type") ?? "series";
         var season = Season ?? 1;
 
-        // Preferences persist across episodes/launches.
-        _autoTrack = await Store.GetAsync("pref:autotrack") is not "0";
+        // Preference persists across episodes/launches (matches localStorage
+        // anisync.autoSkip in the original).
         _autoSkip = await Store.GetAsync("pref:autoskip") is "1";
 
         var metaTask = Api.AnimeAsync(Id);
@@ -226,53 +563,331 @@
         _meta = metaTask.Result;
         _episodes = epsTask.Result;
 
-        _title = $"Episode {Episode}";
         // S{n} · E{ep} when the title actually spans multiple seasons, else
         // "Episode {ep}" — mirrors Watch.cshtml's seasonLabel.
-        var hasSeasons = _episodes.Select(e => e.Season).Distinct().Count() > 1;
-        _seasonLabel = hasSeasons ? $"S{season} · E{Episode}" : $"Episode {Episode}";
+        _hasSeasons = _episodes.Select(e => e.Season).Where(s => s > 0).DefaultIfEmpty(1).Distinct().Count() > 1
+            || _episodes.Any(e => (e.Season > 0 ? e.Season : 1) != season);
+        _seasonLabel = _hasSeasons ? $"S{season} · E{Episode}" : $"Episode {Episode}";
+        _title = $"Episode {Episode}";
+        _episodeLabel = $"Episode {Episode}";
         _metaDate = null;
         _metaThumbnail = null;
 
         // Prev/next within the same season ordering.
-        var ordered = _episodes.Where(e => e.Season == season).OrderBy(e => e.Episode).ToList();
+        var ordered = _episodes.Where(e => (e.Season > 0 ? e.Season : 1) == season).OrderBy(e => e.Episode).ToList();
         var idx = ordered.FindIndex(e => e.Episode == Episode);
         if (idx >= 0)
         {
             _prev = idx > 0 ? ordered[idx - 1] : null;
             _next = idx < ordered.Count - 1 ? ordered[idx + 1] : null;
             var cur = ordered[idx];
-            if (!string.IsNullOrEmpty(cur.Title)) _title = $"{Episode}. {cur.Title}";
-            if (!string.IsNullOrEmpty(cur.Released) && cur.Released!.Length >= 10)
+            // Episode title line: prefer the episode name, else "Episode N".
+            _episodeLabel = !string.IsNullOrEmpty(cur.Title) ? cur.Title! : $"Episode {Episode}";
+            _title = _episodeLabel;
+            // Header date prefers AniList's airingAt (more accurate for in-season
+            // shows) over the Cinemeta `released` string.
+            if (cur.AiringAt is long airing)
+            {
+                _metaDate = DateTimeOffset.FromUnixTimeSeconds(airing).UtcDateTime.ToString("yyyy-MM-dd");
+            }
+            else if (!string.IsNullOrEmpty(cur.Released) && cur.Released!.Length >= 10)
+            {
                 _metaDate = cur.Released![..10];
+            }
             _metaThumbnail = cur.Thumbnail;
         }
-
-        // Resolve playable sources once streaming is configured.
-        if (!string.IsNullOrEmpty(State.StreamConfig))
+        else
         {
-            _loadingSources = true;
-            var streamId = _type == "movie" ? Id : $"{Id}:{season}:{Episode}";
-            _sources = await Api.PlaybackSourcesAsync(State.StreamConfig!, _type, streamId);
-            _loadingSources = false;
+            _prev = _next = null;
         }
 
-        // External subtitle tracks (OpenSubtitles) + AniSkip OP/ED markers.
-        var subsTask = Api.SubtitlesAsync(Id, Episode, Season);
-        var skipTask = Api.SkipMarkersAsync(Id, Episode);
-        await Task.WhenAll(subsTask, skipTask);
-        _subtitles = subsTask.Result;
-        _skips = skipTask.Result;
+        // External OpenSubtitles tracks for the in-page selector (web head). The
+        // AniSkip markers ride the episode-streams bootstrap below.
+        _subtitles = await Api.SubtitlesAsync(Id, Episode, _hasSeasons ? season : null);
+
+        // Kick the fan-out. Cache-first; falls through to a live fetch.
+        await LoadSourcesAsync(useCache: true);
     }
 
-    private async Task PlayAsync(StremioStream s)
+    // ── Source fan-out ────────────────────────────────────────────────────────
+    // Bootstrap (addons + external links + skip times), then per-addon debrid
+    // fetches fanned out so the fastest addon's results render the moment they
+    // arrive instead of being gated on the slowest. Mirrors fetchStreams +
+    // applyStreamData in the original.
+    private async Task LoadSourcesAsync(bool useCache)
+    {
+        var season = Season ?? 1;
+
+        // Cache-first (web only — interop module is loaded lazily). On the native
+        // head we always fetch fresh (localStorage isn't the right store there).
+        if (useCache && !Env.SupportsNativePlayback)
+        {
+            var cached = await ReadCacheAsync();
+            if (cached is not null)
+            {
+                ApplyBootstrapExtras(cached);
+                _rawDebrid = cached.DebridStreams ?? new();
+                _pendingAddons = false;
+                _sourcesResolved = true;
+                RecomputeDisplay();
+                _lastSourceUrl = await ReadLastSourceAsync();
+                return;
+            }
+        }
+
+        _loadingSources = true;
+        _streamsLoading = true;
+        StateHasChanged();
+
+        var streamSeason = _hasSeasons ? season : (int?)null;
+        var bootstrap = await Api.EpisodeStreamsBootstrapAsync(
+            Id, streamSeason, Episode, _type == "movie" ? "movie" : null);
+
+        _loadingSources = false;
+        _sourcesResolved = true;
+
+        if (bootstrap is null)
+        {
+            // Couldn't load — leave the empty-state line + refresh control.
+            _hasStreamAddons = false;
+            _externalStreamsEnabled = false;
+            _anonymous = !State.LoggedIn;
+            _streamsLoading = false;
+            RecomputeDisplay();
+            return;
+        }
+
+        _anonymous = bootstrap.Anonymous;
+        _hasStreamAddons = bootstrap.Addons.Count > 0 || bootstrap.AddonsConfigured;
+        _externalStreamsEnabled = bootstrap.ExternalLinks.Count > 0;
+        _external = bootstrap.ExternalLinks ?? new();
+        _skipTimes = bootstrap.SkipTimes;
+        _lastSourceUrl = await ReadLastSourceAsync();
+
+        var addons = bootstrap.Addons ?? new();
+        if (addons.Count == 0)
+        {
+            // Nothing to fan out — render the external-links / empty-state path.
+            // No cache write (the negative scenario stays re-attemptable).
+            _pendingAddons = false;
+            _streamsLoading = false;
+            // Hide the refresh control when there's neither an addon nor external
+            // links — there's nothing it could surface.
+            _showRefresh = _hasStreamAddons || _externalStreamsEnabled;
+            RecomputeDisplay();
+            return;
+        }
+
+        // Initial paint with the "0 / N" badge.
+        _progressTotal = addons.Count;
+        _progressCompleted = 0;
+        _pendingAddons = true;
+        RecomputeDisplay();
+
+        // Fan out: append each addon's streams in completion order so the fastest
+        // addon's rows stay at the top while slower addons resolve.
+        var tasks = addons.Select(a => FetchAddonAsync(a.Index, streamSeason, season)).ToList();
+        while (tasks.Count > 0)
+        {
+            var done = await Task.WhenAny(tasks);
+            tasks.Remove(done);
+            var streams = await done;
+            if (streams.Count > 0) _rawDebrid.AddRange(streams);
+            _progressCompleted++;
+            _pendingAddons = tasks.Count > 0;
+            RecomputeDisplay();
+            await InvokeAsync(StateHasChanged);
+        }
+
+        _streamsLoading = false;
+
+        // Cache the final combined shape (skips empty debrid lists internally).
+        await WriteCacheAsync();
+        StateHasChanged();
+    }
+
+    private async Task<List<EpisodeStreamDto>> FetchAddonAsync(int addonIndex, int? streamSeason, int season)
+    {
+        var list = await Api.EpisodeStreamsAsync(
+            Id, addonIndex, streamSeason, Episode, _type == "movie" ? "movie" : null);
+        return list.ToList();
+    }
+
+    private void ApplyBootstrapExtras(EpisodeStreamsBootstrap data)
+    {
+        _anonymous = data.Anonymous;
+        _hasStreamAddons = data.Addons.Count > 0 || data.AddonsConfigured;
+        _externalStreamsEnabled = data.ExternalLinks.Count > 0;
+        _external = data.ExternalLinks ?? new();
+        _skipTimes = data.SkipTimes;
+        _showRefresh = _hasStreamAddons || _externalStreamsEnabled;
+    }
+
+    // Recompute the capped + sorted display list and the provider tab set from
+    // the raw fan-out accumulation. Mirrors renderSources' cap + the four
+    // browser-aware re-sorts.
+    private void RecomputeDisplay()
+    {
+        var capped = CapStreamsPerResolution(_rawDebrid);
+
+        // Universal playability pass: push sources whose audio no browser can
+        // decode (Dolby/DTS/TrueHD) below the audio-OK picks, on every browser.
+        if (capped.Count > 1)
+            capped = StableOrder(capped, s => s.AudioUnsupported);
+
+        // HEVC-risky browsers: push HEVC / 10-bit sources to the bottom.
+        if (_hevcRisky && capped.Count > 1)
+            capped = StableOrder(capped, s => s.IsHevc);
+
+        // iOS Safari: push MKV / AVI containers below MP4 / M4V (can't play inline).
+        if (_isIosSafari && capped.Count > 1)
+            capped = StableOrder(capped, s => IosCannotPlay(s));
+
+        _debrid = capped;
+
+        // Provider tabs: distinct providers in first-seen order. Drop a stale
+        // selection if that provider didn't come back this render.
+        _providers = new();
+        foreach (var s in _debrid)
+        {
+            var p = s.Provider ?? "Other";
+            if (!_providers.Contains(p)) _providers.Add(p);
+        }
+        if (_providerFilter != "all" && !_providers.Contains(_providerFilter))
+            _providerFilter = "all";
+    }
+
+    // Stable partition: items where `bad` is false keep their order and come
+    // first; bad ones keep their order and sink to the back.
+    private static List<EpisodeStreamDto> StableOrder(List<EpisodeStreamDto> src, Func<EpisodeStreamDto, bool> bad)
+    {
+        var good = new List<EpisodeStreamDto>(src.Count);
+        var worse = new List<EpisodeStreamDto>();
+        foreach (var s in src) (bad(s) ? worse : good).Add(s);
+        good.AddRange(worse);
+        return good;
+    }
+
+    // Across all add-ons, dedup by infoHash then keep the best N per resolution.
+    // Within a resolution, audio-unsupported releases sink (silent video), then
+    // ties break on seeders, then arrival order. Mirror of capStreamsPerResolution.
+    private static List<EpisodeStreamDto> CapStreamsPerResolution(List<EpisodeStreamDto> streams)
+    {
+        if (streams.Count <= 1) return new List<EpisodeStreamDto>(streams);
+
+        // 1. Dedup across addons by infoHash (fall back to URL), keep first seen.
+        var seen = new HashSet<string>();
+        var deduped = new List<EpisodeStreamDto>();
+        foreach (var s in streams)
+        {
+            var key = ((s.InfoHash ?? s.Url) ?? "").ToLowerInvariant();
+            if (key.Length > 0 && !seen.Add(key)) continue;
+            deduped.Add(s);
+        }
+
+        // 2. Bucket by resolution, remembering arrival order for stable ties.
+        var buckets = new Dictionary<string, List<(EpisodeStreamDto s, int i)>>();
+        for (var i = 0; i < deduped.Count; i++)
+        {
+            var r = ResolutionKey(deduped[i]);
+            if (!buckets.TryGetValue(r, out var list)) buckets[r] = list = new();
+            list.Add((deduped[i], i));
+        }
+
+        // 3. Emit high→low (then any unrecognised labels), top N of each.
+        var order = new List<string>(ResolutionOrder);
+        foreach (var r in buckets.Keys)
+            if (!order.Contains(r)) order.Add(r);
+
+        var outList = new List<EpisodeStreamDto>();
+        foreach (var r in order)
+        {
+            if (!buckets.TryGetValue(r, out var bucket)) continue;
+            bucket.Sort((a, b) =>
+            {
+                var aBad = a.s.AudioUnsupported ? 1 : 0;
+                var bBad = b.s.AudioUnsupported ? 1 : 0;
+                if (aBad != bBad) return aBad - bBad;
+                if (a.s.Seeders != b.s.Seeders) return b.s.Seeders - a.s.Seeders;
+                return a.i - b.i;
+            });
+            foreach (var x in bucket.Take(StreamsPerResolution)) outList.Add(x.s);
+        }
+        return outList;
+    }
+
+    private static string ResolutionKey(EpisodeStreamDto s)
+    {
+        var q = (s.Quality ?? "").ToLowerInvariant().Trim();
+        return q.Length > 0 ? q : "unknown";
+    }
+
+    // iOS Safari can't demux these containers at all. Gate on the CONTAINER only
+    // (HEVC-in-MP4 is fine on iOS via VideoToolbox) from the release filename.
+    private static bool IosCannotPlay(EpisodeStreamDto s)
+    {
+        var name = ((s.Title ?? s.Name) ?? "").Split('\n').FirstOrDefault() ?? "";
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            name, @"\.(mkv|avi|wmv|flv|m2ts|ts|vob|ogm|divx|rmvb)(?=$|[^a-z0-9])",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
+    // Picks the release-title line out of an addon's raw description (the text
+    // Stremio shows in its right-hand column): strip a leading icon, skip pure
+    // metadata / codec-only lines. Mirror of firstReleaseLine. Returns null when
+    // nothing usable so the caller's fallback chain decides.
+    private static readonly System.Text.RegularExpressions.Regex MetaPrefixRe =
+        new(@"^[\s💾👤🌐🔗⭐🏷📅🎬🔍]", System.Text.RegularExpressions.RegexOptions.Compiled);
+    private static readonly System.Text.RegularExpressions.Regex CodecWordRe = new(
+        @"^(?:hevc|x26[45]|h\.?26[45]|av1|avc|aac|ac-?3|e-?ac-?3|ddp?|dd\+|dts(?:-?(?:hd|x|es|ma))?|truehd|atmos|flac|opus|mp3|pcm|web-?dl|web-?rip|bluray|bdrip|brrip|remux|hdtv|hdr10?\+?|dv|dolby|digital|plus|\d{3,4}p|4k|2k|10-?bit|hi10p?|multi|dual|sub(?:bed)?|dub(?:bed)?|ma|es|hd)$",
+        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    private static readonly System.Text.RegularExpressions.Regex LeadingIconRe =
+        new(@"^[^\p{L}\p{N}(]+", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static string? FirstReleaseLine(string? desc)
+    {
+        if (string.IsNullOrEmpty(desc)) return null;
+        foreach (var raw in desc.Split('\n'))
+        {
+            var t = (raw ?? "").Trim();
+            if (t.Length == 0) continue;
+            if (MetaPrefixRe.IsMatch(t)) continue;
+            var cleaned = LeadingIconRe.Replace(t, "").Trim();
+            if (cleaned.Length == 0) continue;
+            var words = cleaned.Split(new[] { ' ', '\t', '•', '·', '|' }, StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length > 0 && words.All(w => CodecWordRe.IsMatch(w))) continue;
+            return cleaned;
+        }
+        return null;
+    }
+
+    // ── Play / mark-watched / scrobble ─────────────────────────────────────────
+    private async Task PlayAsync(EpisodeStreamDto s)
     {
         if (string.IsNullOrEmpty(s.Url)) return;
+        await MarkSourcePlayedAsync(s.Url!);
+
+        // Clear any prior fallback (a fresh pick gets a clean attempt) + remember
+        // this source so the fallback's Retry / Open-externally act on it.
+        _fallbackReason = null;
+        _fallbackStream = s;
+        _skipRangesPainted = false;
+
+        // iOS Safari can't demux MKV / AVI inline at all (any codec), so skip the
+        // doomed <video> attempt — which would just show black until the watchdog
+        // — and surface the ios-container guidance + Open-externally path now.
+        // Mirrors playStream's iosCannotPlayContainer fast-fail. Native head
+        // (LibVLCSharp) plays everything, so this only gates the web head.
+        if (!Env.SupportsNativePlayback && _isIosSafari && IosCannotPlay(s))
+        {
+            _playingUrl = null;
+            _fallbackReason = "ios-container";
+            StateHasChanged();
+            return;
+        }
+
         _playingUrl = s.Url;
 
-        // Resume from the last saved position and let the host player report
-        // progress + completion back so we can persist resume + auto-track +
-        // auto-play-next (kept here so both heads share the logic).
         var resume = await ReadResumeAsync();
         var request = new PlaybackRequest(
             Url: s.Url!,
@@ -280,7 +895,8 @@
             ResumeSeconds: resume,
             Subtitles: _subtitles,
             OnProgress: OnProgress,
-            OnEnded: OnEnded);
+            OnEnded: OnEnded,
+            OnStreamEvent: OnStreamEvent);
 
         if (Env.SupportsNativePlayback)
         {
@@ -288,53 +904,266 @@
         }
         else
         {
-            // Web head: the <video> element must exist in the DOM before the JS
-            // player can attach, so defer the PlayAsync call to OnAfterRenderAsync
-            // (it renders this frame because _playingUrl is now set).
+            // Web head: the <video> must exist in the DOM before the JS player can
+            // attach, so defer the PlayAsync to OnAfterRenderAsync (renders this
+            // frame because _playingUrl is now set).
             _pendingWebPlay = request;
             StateHasChanged();
         }
     }
 
+    // ── Stream fallback panel (web head) ────────────────────────────────────────
+    // Surfaced by watch-player.js when the <video> errors, the 25s/8s watchdog
+    // fires, or 3+ buffer stalls cluster. Port of Watch.cshtml's video:error /
+    // startStreamWatchdog / recordBufferStall + showFallback wiring.
+    //   error   → 'network' (debrid link likely expired) or 'decode' (codec).
+    //   timeout → watchdog: nothing decoded yet.
+    //   stall   → buffer-underrun hint (routes to the external player).
+    //   playing → recovered: auto-dismiss whatever fallback is up.
+    private void OnStreamEvent(string kind, string? reason)
+    {
+        switch (kind)
+        {
+            case "playing":
+                if (_fallbackReason is not null) { _fallbackReason = null; InvokeAsync(StateHasChanged); }
+                break;
+            case "timeout":
+                if (_fallbackReason is null) { _fallbackReason = "timeout"; InvokeAsync(StateHasChanged); }
+                break;
+            case "stall":
+                // Buffer-underrun hint — the original showed this through
+                // ArtPlayer's transient notice overlay (video keeps playing). The
+                // replica has no such overlay, so surface the equivalent auto-
+                // dismissing toast instead of the persistent fallback panel.
+                _ = ShowToastAsync(
+                    "Playback laggy? Use the external-player button next to the source for a smoother stream.",
+                    6000);
+                break;
+            case "error":
+                _fallbackReason = reason == "network" ? "network" : "decode";
+                InvokeAsync(StateHasChanged);
+                break;
+        }
+    }
+
+    // Tailored copy per failure mode (verbatim from showFallback) so the user gets
+    // a diagnosis, not a generic wall.
+    private string FallbackMessage(string reason) => reason switch
+    {
+        "decode" => "Your browser can't decode this stream — the codec isn't supported. Open it in an external player, or try a different source below.",
+        "network" => "The stream couldn't be reached. The debrid link may have expired — pick the source again, or try a different one.",
+        "ios-container" => "Safari on iPhone / iPad can't play this file's container (MKV / AVI). Pick an MP4 source below if one's listed, or tap Open externally to watch in VLC, Infuse, or another video app.",
+        "timeout" => _isIosSafari
+            ? "Safari on iPad / iPhone can't play most MKV streams. Tap Open externally to launch it in VLC, Infuse, or another video app."
+            : "This source hasn't started playing yet. It might just be slow — wait a bit, retry, or try another source below.",
+        _ => "Couldn't play this stream. Try another source below, or open it externally.",
+    };
+
+    private async Task RetryFallbackAsync()
+    {
+        var s = _fallbackStream;
+        _fallbackReason = null;
+        if (s is not null) await PlayAsync(s);
+        else StateHasChanged();
+    }
+
+    private async Task OpenFallbackExternallyAsync()
+    {
+        var s = _fallbackStream;
+        if (s is null) return;
+        _fallbackOpening = true;
+        StateHasChanged();
+        try { await OpenExternallyAsync(s); }
+        finally { _fallbackOpening = false; StateHasChanged(); }
+    }
+
+    // External-player launch — port of openWithExternalPlayer + resolvePlaybackUrl
+    // + the sidecar-subtitle wiring. The user is committing to watch in an app we
+    // can't observe, so mark watched now (the server's Range 0-0 probe guards
+    // against marking an RD DMCA placeholder; we also skip the mark client-side
+    // when the loaded player is showing a < 60s clip). Then resolve the post-
+    // redirect debrid CDN URL and hand it to the platform launcher:
+    //   Android intent:// chooser · desktop vlc:// probe → .m3u · iOS Files toast.
+    // Web-only: the native LibVLCSharp head plays every codec/container inline, so
+    // there's no external launch there (and intent/vlc/blob are browser APIs).
+    private async Task OpenExternallyAsync(EpisodeStreamDto s)
+    {
+        if (string.IsNullOrEmpty(s.Url)) return;
+        await MarkSourcePlayedAsync(s.Url!);
+
+        // Skip the watched-mark only when the in-app player is loaded AND showing a
+        // < 60s clip (the RD DMCA placeholder). On the cold-click case (no player)
+        // we mark + let the server's sourceUrl probe do the placeholder check.
+        MarkWatched("external-launch", s.Url);
+
+        if (Env.SupportsNativePlayback)
+        {
+            // Native head: VLC plays everything inline — just play it (no external
+            // hand-off). Resolve first so MediaFusion IP-bound URLs work.
+            var nativeUrl = await Api.ResolveStreamAsync(s.Url!) ?? s.Url!;
+            var resume = await ReadResumeAsync();
+            await Player.PlayAsync(new PlaybackRequest(nativeUrl, _title, resume, _subtitles, OnProgress, OnEnded));
+            _playingUrl = s.Url;
+            StateHasChanged();
+            return;
+        }
+
+        // Spinner + disable on the row's button while resolve + dispatch is in
+        // flight (2–3s on a cold debrid cache). Mirrors setExternalActionLoading.
+        _externalLoadingUrl = s.Url;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            var resolved = await Api.ResolveStreamAsync(s.Url!) ?? s.Url!;
+            var displayName = (FirstReleaseLine(s.Description)
+                ?? (s.Title ?? s.Name ?? "").Split('\n').FirstOrDefault() ?? "").Trim();
+            var sidecar = ExternalSidecarUrl();
+            var toast = await (await LaunchModuleAsync())
+                .InvokeAsync<string?>("openExternally", resolved, displayName, sidecar);
+            if (!string.IsNullOrEmpty(toast)) await ShowToastAsync(toast!, 9000);
+        }
+        catch { /* best-effort — a failed dispatch leaves the row usable */ }
+        finally
+        {
+            _externalLoadingUrl = null;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // Picks the sidecar VTT to hand the external player, mirroring
+    // sidecarFromCurrentPick + fetchEnglishSidecarForStream: the currently-selected
+    // track when one's picked, else the first English track (same auto-preselect as
+    // the in-app player). Returns an absolute /api/v1/sub/{b64url}/subtitle.vtt URL
+    // (path-based so VLC's extension sniff registers it), or null.
+    private string? ExternalSidecarUrl()
+    {
+        if (_subtitles.Count == 0) return null;
+        var pick = _subtitleIndex >= 0 && _subtitleIndex < _subtitles.Count
+            ? _subtitles[_subtitleIndex]
+            : _subtitles.FirstOrDefault(t => (t.Language ?? "").StartsWith("en", StringComparison.OrdinalIgnoreCase));
+        if (pick is null || string.IsNullOrEmpty(pick.Url)) return null;
+        return BuildSidecarVttUrl(pick.Url!);
+    }
+
+    // Builds the path-based subtitle proxy URL the external launcher needs:
+    // {apiOrigin}/api/v1/sub/{base64url(upstream)}/subtitle.vtt. The final path
+    // segment is literally "subtitle.vtt" so VLC / Infuse identify it as a subtitle
+    // slave by file extension (a "?url=" query suffix doesn't register). Mirrors
+    // toExternalSidecarUrl; the server's MetaProxyController.SubtitleByPath decodes
+    // the segment and serves the same SRT→VTT body as /api/v1/subtitle.
+    private string BuildSidecarVttUrl(string upstreamUrl)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(upstreamUrl);
+        var b64 = Convert.ToBase64String(bytes)
+            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+        var path = $"api/v1/sub/{b64}/subtitle.vtt";
+        var baseUrl = Env.ApiBaseUrl;
+        return string.IsNullOrWhiteSpace(baseUrl) ? "/" + path : $"{baseUrl.TrimEnd('/')}/{path}";
+    }
+
+    private async Task ShowToastAsync(string message, int ms)
+    {
+        _toastCts?.Cancel();
+        var cts = _toastCts = new CancellationTokenSource();
+        _toast = message;
+        await InvokeAsync(StateHasChanged);
+        try { await Task.Delay(ms, cts.Token); }
+        catch (TaskCanceledException) { return; }
+        if (!cts.IsCancellationRequested)
+        {
+            _toast = null;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender && !Env.SupportsNativePlayback)
+        {
+            // Resolve the browser HEVC / iOS heuristics once (web head only —
+            // false on native, which decodes everything via LibVLCSharp). Drives
+            // the row badge colour + the playable-first re-sorts.
+            try
+            {
+                var flags = await (await ModuleAsync()).InvokeAsync<ClientFlags>("clientFlags");
+                if (flags.HevcRisky != _hevcRisky || flags.IosSafari != _isIosSafari)
+                {
+                    _hevcRisky = flags.HevcRisky;
+                    _isIosSafari = flags.IosSafari;
+                    RecomputeDisplay();
+                    StateHasChanged();
+                }
+            }
+            catch { /* interop best-effort — leave heuristics false */ }
+
+            // History-stack hygiene + horizontal-swipe nav (web head only). wireNav
+            // classifies the entry + binds back/prev/next (location.replace flattens
+            // the stack); wireSwipe arms left/right swipe → prev/next episode. Both
+            // are idempotent + read hrefs off the rendered <a>s, so firstRender is
+            // the right (single) wiring point even though Prev/Next re-enter the
+            // page via full reload.
+            try
+            {
+                var launch = await LaunchModuleAsync();
+                await launch.InvokeVoidAsync("wireNav");
+                await launch.InvokeVoidAsync("wireSwipe");
+            }
+            catch { /* best-effort — keyboard / link nav still works */ }
+        }
+
+        // Wire the shared nudge (reveal + "How it works" expander) after any render
+        // that may have just mounted it. Idempotent on the JS side.
+        if (!Env.SupportsNativePlayback && _sourcesResolved && !_hasStreamAddons)
+        {
+            try { await (await ModuleAsync()).InvokeVoidAsync("wireNudges"); }
+            catch { /* best-effort */ }
+        }
+
         if (_pendingWebPlay is not null)
         {
             var req = _pendingWebPlay;
             _pendingWebPlay = null;
             await Player.PlayAsync(req);
         }
+
+        // Wire the player toolbar (web head): relocate the C#-rendered AniSkip button
+        // into ArtPlayer's $player so it survives fullscreen, and reveal/wire the
+        // mobile embedded-subs opt-in when the network is in a skip-prone state. Run
+        // on every render while playing — the skip button appears/disappears with
+        // _activeSkip, so a single firstRender wiring would miss it. Idempotent JS.
+        if (!Env.SupportsNativePlayback && _playingUrl is not null)
+        {
+            try { await JS.InvokeVoidAsync("anisyncWatch.wireToolbar"); }
+            catch { /* best-effort — the button still works in its C# position */ }
+        }
     }
 
-    private string ResumeKey => $"pos:{Id}:{Season ?? 1}:{Episode}";
+    private sealed class ClientFlags { public bool HevcRisky { get; set; } public bool IosSafari { get; set; } }
 
-    private async Task<double?> ReadResumeAsync()
-    {
-        var saved = await Store.GetAsync(ResumeKey);
-        return double.TryParse(saved, out var v) && v > 0 ? v : null;
-    }
-
-    // Persist resume at most every ~5s; clear it within 15s of the end so a
-    // finished episode doesn't reopen mid-credits next time.
+    // Persist resume at most every ~5s; clear it within 15s of the end. Mark the
+    // episode watched at 70% (the original's threshold). AniSkip surfaces a Skip
+    // button while inside an OP/ED band and auto-seeks past it when auto-skip is on.
     private async void OnProgress(double positionSec, double durationSec)
     {
-        // AniSkip: surface a "Skip Intro/Outro" button while inside an OP/ED band,
-        // and seek past it automatically when auto-skip is on (once per marker).
         var prevActive = _activeSkip;
-        _activeSkip = _skips.FirstOrDefault(m => IsSkippable(m) && positionSec >= m.Start && positionSec < m.End);
-        if (_autoSkip && _activeSkip is not null && _skipped.Add(_activeSkip))
+        _activeSkip = ActiveSkipBand(positionSec);
+        if (_autoSkip && _activeSkip is not null && _skippedBands.Add(_activeSkip.Key))
         {
             var end = _activeSkip.End;
             _activeSkip = null;
-            await Player.SeekAsync(end);
+            await Player.SeekAsync(end + 1);
         }
         if (!ReferenceEquals(prevActive, _activeSkip)) await InvokeAsync(StateHasChanged);
 
-        // Auto-track once past ~90% — the first-party equivalent of a scrobble:
-        // bump the tracker entry's progress to this episode via the entries API
-        // (no media-server webhook needed; uses the config credential already set).
-        if (durationSec > 0 && positionSec >= durationSec * 0.9)
-            await AutoTrackAsync();
+        // Paint the OP/ED bands once the player reports a real duration (the first
+        // timeupdate with a known duration is the earliest reliable point). Web head
+        // only; retried each tick until painted. The duration is threaded through so
+        // launch.js can convert seconds→% against ArtPlayer's progress bar.
+        if (!_skipRangesPainted && !Env.SupportsNativePlayback) await PaintSkipRangesAsync(durationSec);
+
+        // Mark-watched at 70% (duration ≥ 60s guards against RD DMCA placeholders).
+        if (durationSec >= 60 && positionSec >= durationSec * 0.70)
+            MarkWatched("progress-70", null);
 
         if (durationSec > 0 && positionSec > durationSec - 15)
         {
@@ -348,53 +1177,214 @@
 
     private async void OnEnded()
     {
-        await AutoTrackAsync();
+        MarkWatched("ended", null);
         await Store.SetAsync(ResumeKey, null);
         _playingUrl = null;
-        if (_autoPlayNext && _next is not null)
-            Nav.NavigateTo(EpisodeHref(_next));
-        else
-            await InvokeAsync(StateHasChanged);
+        _skipRangesPainted = false;
+        // Tear down the ArtPlayer instance + the embedded-subtitle pipeline so it
+        // doesn't linger over the unmounted container (web head). StopAsync routes
+        // to anisyncWatch.stop (art.destroy + extraction abort + pill clear).
+        if (!Env.SupportsNativePlayback)
+        {
+            await Player.StopAsync();
+            // Tear down the OP/ED band overlay too (the strip is appended to the
+            // persistent .watch-player, so it survives the container unmount).
+            if (_launch is not null)
+            {
+                try { await _launch.InvokeVoidAsync("clearSkipRanges", "watch-video"); } catch { /* best-effort */ }
+            }
+        }
+        await InvokeAsync(StateHasChanged);
     }
 
-    // Mark this episode watched on the tracker (once per episode view).
-    private async Task AutoTrackAsync()
+    // One-shot mark-watched POST (per episode view). Routes to Trakt history for
+    // video (type "movie"/"series"), else the tracker dispatch. Cleared on a full
+    // page reload (Prev/Next nav) — different episode = mark again. Fire-and-forget.
+    private bool _marking;
+    private async void MarkWatched(string reason, string? sourceUrl)
     {
-        if (_tracked || !_autoTrack || string.IsNullOrEmpty(State.StreamConfig)) return;
-        _tracked = true;
-        await Api.SaveEntryAsync(Id, new EntrySaveRequest { Status = "Watching", Progress = Episode }, Season);
+        if (_marked || _marking) return;
+        _marking = true;
+        _marked = true;
+        try
+        {
+            var type = _type is "movie" or "series" ? _type : null;
+            var res = await Api.MarkWatchedAsync(
+                Id, Episode, _hasSeasons ? (Season ?? 1) : null, type, sourceUrl);
+            // ok:false with a transient reason → clear the guard so a later
+            // trigger retries (matches the original's save-failed / placeholder
+            // handling).
+            if (res is { Ok: false, Reason: "save-failed" or "placeholder" })
+                _marked = false;
+        }
+        catch { _marked = false; }
+        finally { _marking = false; }
     }
 
-    private Task SaveAutoTrackPref() => Store.SetAsync("pref:autotrack", _autoTrack ? "1" : "0");
-    private Task SaveAutoSkipPref() => Store.SetAsync("pref:autoskip", _autoSkip ? "1" : "0");
+    private string ResumeKey => $"pos:{Id}:{Season ?? 1}:{Episode}";
 
-    // Only OP/ED bands drive the skip button; recap/preview markers are informational.
-    private static bool IsSkippable(SkipMarker m)
+    private async Task<double?> ReadResumeAsync()
     {
-        var t = (m.Type ?? "").ToLowerInvariant();
-        return t is "op" or "ed" or "mixed-op" or "mixed-ed";
+        var saved = await Store.GetAsync(ResumeKey);
+        return double.TryParse(saved, out var v) && v > 0 ? v : null;
     }
 
-    private static bool IsOutro(SkipMarker m) => (m.Type ?? "").ToLowerInvariant().Contains("ed");
+    // ── AniSkip (bootstrap skipTimes drive the corner button) ───────────────────
+    private sealed record SkipBand(string Label, double Start, double End)
+    {
+        public string Key => $"{Label}:{Start:0}";
+    }
+
+    private SkipBand? ActiveSkipBand(double t)
+    {
+        var times = _skipTimes;
+        if (times is null) return null;
+        if (times.Intro is { } intro && t >= intro.Start && t < intro.End - 0.5)
+            return new SkipBand("Skip intro", intro.Start, intro.End);
+        if (times.Outro is { } outro && t >= outro.Start && t < outro.End - 0.5)
+            return new SkipBand("Skip outro", outro.Start, outro.End);
+        return null;
+    }
 
     private async Task SkipCurrentAsync()
     {
         if (_activeSkip is null) return;
         var end = _activeSkip.End;
-        _skipped.Add(_activeSkip);
+        _skippedBands.Add(_activeSkip.Key);
         _activeSkip = null;
-        await Player.SeekAsync(end);
+        await Player.SeekAsync(end + 1);
     }
 
-    private async Task OnSubtitleChange(ChangeEventArgs e)
+    // Toggle the persisted auto-skip preference (same boundary as the original's
+    // localStorage anisync.autoSkip — here pref:autoskip via ISecureStore so it
+    // survives across episodes/launches). The next OnProgress tick acts on it.
+    private async Task ToggleAutoSkipAsync()
     {
-        if (int.TryParse(e.Value?.ToString(), out var idx))
+        _autoSkip = !_autoSkip;
+        await Store.SetAsync("pref:autoskip", _autoSkip ? "1" : "0");
+    }
+
+    // ── Provider filter + last-played + refresh ─────────────────────────────────
+    private void SetProviderFilter(string provider) => _providerFilter = provider;
+
+    private async Task RefreshSourcesAsync()
+    {
+        if (_streamsLoading) return;
+        await ClearCacheAsync();
+        _rawDebrid = new();
+        _debrid = new();
+        RecomputeDisplay();
+        await LoadSourcesAsync(useCache: false);
+    }
+
+    // ── localStorage interop (cache + last-played), web head only ───────────────
+    private string? CacheKey
+    {
+        get
         {
-            _subtitleIndex = idx;
-            await JS.InvokeVoidAsync("anisyncWatch.setSubtitle", idx);
+            var uid = State.StreamConfig;
+            if (string.IsNullOrEmpty(uid)) return null;
+            var season = _hasSeasons ? (Season ?? 1).ToString() : "_";
+            return $"anisync.streams.{uid}.{Id}|s={season}|e={Episode}" + (_type == "movie" ? "|movie" : "");
         }
     }
 
+    private string? LastSourceKey
+    {
+        get
+        {
+            var uid = State.StreamConfig;
+            if (string.IsNullOrEmpty(uid)) return null;
+            var season = _hasSeasons ? (Season ?? 1).ToString() : "_";
+            return $"anisync.lastSource.{uid}.{Id}|s={season}|e={Episode}" + (_type == "movie" ? "|movie" : "");
+        }
+    }
+
+    private async Task<EpisodeStreamsBootstrap?> ReadCacheAsync()
+    {
+        var key = CacheKey;
+        if (key is null) return null;
+        try
+        {
+            return await (await ModuleAsync()).InvokeAsync<EpisodeStreamsBootstrap?>("readCache", key);
+        }
+        catch { return null; }
+    }
+
+    private async Task WriteCacheAsync()
+    {
+        var key = CacheKey;
+        if (key is null) return;
+        // Reassemble the combined shape the original cached (debrid + external +
+        // skip times). The module skips empty debrid lists internally.
+        var data = new EpisodeStreamsBootstrap
+        {
+            Anonymous = _anonymous,
+            AddonsConfigured = _hasStreamAddons,
+            ExternalLinks = _external,
+            SkipTimes = _skipTimes,
+            DebridStreams = _rawDebrid,
+        };
+        try { await (await ModuleAsync()).InvokeVoidAsync("writeCache", key, data); } catch { /* best-effort */ }
+    }
+
+    private async Task ClearCacheAsync()
+    {
+        var key = CacheKey;
+        if (key is null) return;
+        try { await (await ModuleAsync()).InvokeVoidAsync("clearCache", key); } catch { /* best-effort */ }
+    }
+
+    private async Task<string?> ReadLastSourceAsync()
+    {
+        var key = LastSourceKey;
+        if (key is null) return null;
+        try { return await (await ModuleAsync()).InvokeAsync<string?>("readLastSource", key); }
+        catch { return null; }
+    }
+
+    private async Task MarkSourcePlayedAsync(string url)
+    {
+        _lastSourceUrl = url;
+        var key = LastSourceKey;
+        if (key is null) return;
+        try { await (await ModuleAsync()).InvokeVoidAsync("writeLastSource", key, url); } catch { /* best-effort */ }
+    }
+
+    private async Task<IJSObjectReference> ModuleAsync()
+        => _module ??= await JS.InvokeAsync<IJSObjectReference>(
+            "import", "./_content/AniSync.Client/js/watch-sources.js");
+
+    // Player-glue module (web head only): external launcher + skip-range paint +
+    // history/swipe nav. Guarded behind !SupportsNativePlayback at every call site
+    // (the intent/vlc/blob/DOM paths are browser-only; native uses LibVLCSharp).
+    private async Task<IJSObjectReference> LaunchModuleAsync()
+        => _launch ??= await JS.InvokeAsync<IJSObjectReference>(
+            "import", "./_content/AniSync.Client/js/watch-launch.js");
+
+    // Repaint the AniSkip OP/ED bands over the player progress strip from the
+    // bootstrap skipTimes. Port of paintSkipRanges (web head only — the native
+    // player draws its own timeline). Retried from OnProgress until duration is
+    // known (the bands need seconds→% conversion). The live duration is threaded
+    // through from OnProgress because #watch-video is ArtPlayer's container <div>
+    // (not a <video>), so watch-launch.js can't read .duration off it directly —
+    // launch.js retargets the band paint onto ArtPlayer's .art-control-progress.
+    private async Task PaintSkipRangesAsync(double durationSec = 0)
+    {
+        if (Env.SupportsNativePlayback || _playingUrl is null || _skipTimes is null) return;
+        if (_skipTimes.Intro is null && _skipTimes.Outro is null) return;
+        if (!(durationSec > 0)) return; // wait for a real duration before converting seconds→%
+        try
+        {
+            object? Band(EpisodeSkipMarkerDto? m) => m is null ? null : new { start = m.Start, end = m.End };
+            var painted = await (await LaunchModuleAsync()).InvokeAsync<bool>(
+                "paintSkipRanges", "watch-video", Band(_skipTimes.Intro), Band(_skipTimes.Outro), durationSec);
+            if (painted) _skipRangesPainted = true;
+        }
+        catch { /* best-effort — the corner Skip button still works without the paint */ }
+    }
+
+    // ── Nav helpers ─────────────────────────────────────────────────────────────
     private string BackHref
     {
         get
@@ -407,8 +1397,8 @@
     private string EpisodeHref(EpisodeInfoDto ep)
     {
         var q = QueryValue("type") is { Length: > 0 } t ? $"?type={t}" : "";
-        return Season is int
-            ? $"/meta/{Uri.EscapeDataString(Id)}/watch/{ep.Season}/{ep.Episode}{q}"
+        return _hasSeasons
+            ? $"/meta/{Uri.EscapeDataString(Id)}/watch/{(ep.Season > 0 ? ep.Season : 1)}/{ep.Episode}{q}"
             : $"/meta/{Uri.EscapeDataString(Id)}/watch/{ep.Episode}{q}";
     }
 
@@ -423,6 +1413,20 @@
         return null;
     }
 
-    // Tear down native playback when leaving the page (web <video> unmounts itself).
-    public void Dispose() => _ = Player.StopAsync();
+    // Tear down native playback + the JS modules when leaving the page (web <video>
+    // unmounts itself).
+    public async ValueTask DisposeAsync()
+    {
+        _toastCts?.Cancel();
+        await Player.StopAsync();
+        if (_launch is not null)
+        {
+            try { await _launch.InvokeVoidAsync("unwireSwipe"); } catch { /* circuit gone */ }
+            try { await _launch.DisposeAsync(); } catch { /* circuit gone */ }
+        }
+        if (_module is not null)
+        {
+            try { await _module.DisposeAsync(); } catch { /* circuit gone */ }
+        }
+    }
 }

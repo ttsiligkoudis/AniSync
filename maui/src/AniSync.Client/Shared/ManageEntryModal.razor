@@ -26,6 +26,23 @@
             else
             {
                 <form class="entry-modal-form" @onsubmit="Save" @onsubmit:preventDefault>
+                    @* Season selector — only for franchises split across multiple service
+                       entries (a cross-service id mapped to ≥ 2 cours). Picking a cour
+                       refetches that mapping's saved entry and rebinds the form. Mirrors
+                       the MVC ManageEntry #seasonSelect. *@
+                    @if (_seasons.Count > 1)
+                    {
+                        <div class="entry-modal-field">
+                            <label class="entry-modal-label" for="entry-modal-season">Season</label>
+                            <select id="entry-modal-season" class="entry-modal-select"
+                                    value="@_selectedEntryId" @onchange="OnSeasonChanged">
+                                @foreach (var s in _seasons)
+                                {
+                                    <option value="@s.Id">@s.Label</option>
+                                }
+                            </select>
+                        </div>
+                    }
                     <div class="entry-modal-field">
                         <label class="entry-modal-label" for="entry-modal-status">Status</label>
                         <select id="entry-modal-status" class="entry-modal-select" @bind="_status">
@@ -51,7 +68,11 @@
                     </div>
                     <div class="entry-modal-field">
                         <label class="entry-modal-label" for="entry-modal-score">Score</label>
-                        <input id="entry-modal-score" class="entry-modal-input" type="number" min="0" max="10" step="0.1" placeholder="0–10" @bind="_score" />
+                        <div class="entry-modal-progress-row">
+                            <input id="entry-modal-score" class="entry-modal-input" type="number" min="0"
+                                   max="@_scoreMax" step="@_scoreStep" placeholder="@($"0–{_scoreMax}")" @bind="_score" />
+                            <span class="entry-modal-total">/ @_scoreMax</span>
+                        </div>
                     </div>
                     <div class="entry-modal-field-row">
                         <div class="entry-modal-field">
@@ -102,6 +123,10 @@
     [Parameter] public bool Visible { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback OnSaved { get; set; }
+    /// <summary>"movie" / "series" when the pill belongs to a Cinemeta video detail page —
+    /// routes the GET / save / remove through Trakt (watchlist / history / rating) instead
+    /// of the anime tracker. Null / empty for anime.</summary>
+    [Parameter] public string? MediaType { get; set; }
 
     private bool _loading;
     private bool _saving;
@@ -117,6 +142,40 @@
     private int? _total;
     private bool _inList;
     private bool _loadedFor;
+
+    // Per-cour season picker state for cross-service franchises. _seasons is the
+    // dropdown options; _selectedEntryId is the resolved per-cour id we fetch + save
+    // against (the MVC currentEntryId()). _service is the primary AnimeService int
+    // (0 Kitsu, 1 AniList, 2 MyAnimeList, 3 Trakt) — drives the score range below.
+    private List<EntrySeasonDto> _seasons = new();
+    private string? _selectedEntryId;
+    private int? _service;
+
+    // The id the Save / Delete go through: the picked cour for a franchise, else the
+    // original id. Mirrors the MVC ManageEntry currentEntryId().
+    private string CurrentEntryId => string.IsNullOrEmpty(_selectedEntryId) ? Id : _selectedEntryId;
+
+    // Video (movie / series) entries track on Trakt — the GET / save / remove carry
+    // the media type so the server routes to Trakt instead of the anime tracker. Null
+    // type for anime keeps the existing behaviour.
+    private bool IsVideo => MediaType == "movie" || MediaType == "series";
+
+    // Per-service score range — mirrors the MVC ManageEntry scoreMax/scoreStep:
+    // AniList 0–100 step 0.1; MyAnimeList 0–10 step 1; Kitsu 0–10 step 0.5.
+    // 1 == AniList, 2 == MyAnimeList (AnimeService enum); everything else is the
+    // 0–10 default (Kitsu / Trakt / unknown).
+    private string _scoreMax = "10";
+    private string _scoreStep = "0.5";
+
+    private void ApplyScoreRange()
+    {
+        (_scoreMax, _scoreStep) = _service switch
+        {
+            1 => ("100", "0.1"), // AniList
+            2 => ("10", "1"),    // MyAnimeList
+            _ => ("10", "0.5"),  // Kitsu / Trakt / default
+        };
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -135,7 +194,22 @@
     {
         _loading = true;
         _error = null;
-        var entry = await Api.GetEntryAsync(Id, Season);
+        _seasons = new();
+        _selectedEntryId = null;
+        _service = null;
+        var resp = await Api.GetEntryAsync(Id, Season, MediaType);
+        _seasons = resp?.Seasons ?? new();
+        _selectedEntryId = resp?.SelectedEntryId;
+        _service = resp?.Service;
+        ApplyScoreRange();
+        BindEntry(resp?.Entry);
+        _loading = false;
+    }
+
+    // Maps a loaded entry (or null = not on this cour's list) onto the form fields.
+    // Shared by the initial load and the per-cour refetch.
+    private void BindEntry(AnimeEntryDto? entry)
+    {
         if (entry is not null)
         {
             _status = Canonicalize(entry.Status);
@@ -159,6 +233,30 @@
             _notes = null;
             _total = null;
         }
+    }
+
+    // User picked a different cour from the dropdown → refetch that mapping's saved
+    // entry by its id and rebind. Mirrors the MVC #seasonSelect change handler, which
+    // re-reads StremioGetEntry for the chosen cour's id.
+    private async Task OnSeasonChanged(ChangeEventArgs e)
+    {
+        var courId = e.Value?.ToString();
+        if (string.IsNullOrEmpty(courId)) return;
+        _selectedEntryId = courId;
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+        // Fetch the entry for the picked cour. The new id is native (anilist:N / kitsu:N /
+        // mal:N), so the server short-circuits the season resolution and returns just that
+        // cour's entry; we keep our existing _seasons / _service.
+        var resp = await Api.GetEntryAsync(courId);
+        BindEntry(resp?.Entry);
+        // Mirror the MVC change handler's data-total fallback: when the cour's entry
+        // carries no episode count, fall back to the picked option's count so the
+        // progress max + "/ N" still reflect the cour.
+        if ((_total is null or 0) &&
+            _seasons.FirstOrDefault(s => s.Id == courId)?.TotalEpisodes is int opt && opt > 0)
+            _total = opt;
         _loading = false;
     }
 
@@ -167,7 +265,10 @@
         if (string.IsNullOrEmpty(_status)) { _error = "Pick a status, or use Remove to take it off your list."; return; }
         _saving = true;
         _error = null;
-        var resp = await Api.SaveEntryAsync(Id, new EntrySaveRequest
+        // Send the resolved per-cour id so the server writes the right anime — see
+        // CurrentEntryId / the MVC currentEntryId(). MediaType routes a video entry
+        // through Trakt instead of the anime tracker.
+        var resp = await Api.SaveEntryAsync(CurrentEntryId, new EntrySaveRequest
         {
             Status = _status,
             Progress = _progress,
@@ -176,7 +277,7 @@
             StartedAt = _startedAt?.ToString("yyyy-MM-dd"),
             FinishedAt = _finishedAt?.ToString("yyyy-MM-dd"),
             Notes = _notes,
-        }, Season);
+        }, Season, MediaType);
         _saving = false;
         if (resp is { Ok: true })
         {
@@ -194,7 +295,12 @@
         _saving = true;
         _removing = true;
         _error = null;
-        var resp = await Api.DeleteEntryAsync(Id, Season);
+        // Video (Trakt) has no DELETE route — removal is a save with an empty status
+        // (the server's Trakt save maps null → "" → remove from watchlist / history).
+        // Anime keeps the dedicated DELETE.
+        var resp = IsVideo
+            ? await Api.SaveEntryAsync(CurrentEntryId, new EntrySaveRequest { Status = null }, Season, MediaType)
+            : await Api.DeleteEntryAsync(CurrentEntryId, Season);
         _saving = false;
         _removing = false;
         if (resp is { Ok: true })

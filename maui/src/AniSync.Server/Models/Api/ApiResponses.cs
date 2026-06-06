@@ -58,6 +58,28 @@ namespace AnimeList.Models.Api
     /// <summary>Cross-service id bundle (AniList/MAL/Kitsu/IMDb/TMDB/TVDB/AniDB) for an anime, used by detail-page "open on X" buttons.</summary>
     public record SourceLinksResponse(AnimeSourceLinks Links);
 
+    /// <summary>One cast member for the video (movie / series) detail hero. Sourced
+    /// from Trakt — <c>Image</c> is the headshot (null when Trakt has none, the card
+    /// falls back to the name initial); <c>Slug</c> links the card to the actor's
+    /// filmography at /discover/actor/{slug} (null when absent).</summary>
+    public record VideoCastDto(string Name, string? Character, string? Image, string? Slug);
+
+    /// <summary>Movie / series detail — the Trakt-enriched twin of <see cref="AnimeResponse"/>
+    /// for Cinemeta-backed video ids. <c>Meta</c> carries the Cinemeta base overridden by
+    /// Trakt's richer data (overview / runtime / artwork / trailer); <c>Episodes</c> is the
+    /// merged Trakt-episodes-plus-Cinemeta-thumbnails list (empty for movies);
+    /// <c>Recommended</c> is the Trakt /related row hydrated to posters; <c>Cast</c> feeds
+    /// the video-cast-scroll; <c>Certification</c> rides the hero info line. One enriched
+    /// response so the video detail page renders off a single call, mirroring
+    /// MetaController.VideoDetail / EnrichVideoMetaAsync.</summary>
+    public record VideoMetaResponse(
+        Meta Meta,
+        List<VideoCastDto> Cast,
+        string? Certification,
+        List<EpisodeInfo> Episodes,
+        List<Meta> Recommended,
+        string? TrailerYoutubeId);
+
     /// <summary>Current-season aggregate counts from AniList.</summary>
     public record SeasonStatsResponse(int CurrentlyAiring, int NewThisSeason, int TotalThisSeason);
 
@@ -85,22 +107,42 @@ namespace AnimeList.Models.Api
     /// <summary>Episode list extracted from an anime's full meta — same data the detail page renders, without the show envelope.</summary>
     public record EpisodesResponse(string AnimeId, List<EpisodeInfo> Episodes);
 
-    /// <summary>One episode row in <see cref="EpisodesResponse"/>.</summary>
+    /// <summary>One episode row in <see cref="EpisodesResponse"/>. <c>AiringAt</c> is
+    /// the AniList-overlaid airing timestamp (Unix seconds, UTC) when present; the
+    /// detail page's "has this episode aired yet?" gate prefers it over the Cinemeta
+    /// <c>Released</c> string (AniList's community schedule leads Cinemeta's
+    /// <c>released</c> by 1–2 days for some shows). Null when the cross-service
+    /// mapping has no AniList schedule.</summary>
     public record EpisodeInfo(
         int Season,
         int Episode,
         string? Title,
         string? Thumbnail,
         string? Released,
-        string? Overview);
+        string? Overview,
+        long? AiringAt = null);
 
     // ── User-scoped endpoints ────────────────────────────────────────────────
 
     /// <summary>Library export from the primary provider, optionally filtered by status.</summary>
     public record LibraryResponse(string Primary, string? Status, List<AnimeEntry> Entries);
 
-    /// <summary>One library entry's full state.</summary>
-    public record EntryResponse(AnimeEntry Entry);
+    /// <summary>One library entry's full state.
+    /// <para>For multi-cour franchises reached via a cross-service id (imdb:/tmdb:),
+    /// <c>Seasons</c> carries one option per mapped cour, <c>SelectedEntryId</c> is the
+    /// auto-resolved per-cour id the <c>Entry</c> was read against, and <c>Service</c> is
+    /// the primary provider's <see cref="AnimeService"/> as an int (so the modal can pick
+    /// the right score range + status vocabulary). All three are null/empty for native ids
+    /// (anilist:/kitsu:/mal:) that don't need a season picker. Mirrors the MVC
+    /// MetaController.GetEntryByApi shape.</para>
+    /// <para><c>Entry</c> is null when the resolved cour isn't on the user's list yet —
+    /// the response still carries <c>Seasons</c> so the modal can render the dropdown and
+    /// land on the "None" status.</para></summary>
+    public record EntryResponse(
+        AnimeEntry Entry,
+        List<EntrySeason> Seasons = null,
+        int? Service = null,
+        string SelectedEntryId = null);
 
     /// <summary>User's AniList statistics — counts, mean score, total hours watched. Requires an AniList token (primary or linked).</summary>
     public record UserStatsResponse(AnilistUserStats Stats);
@@ -162,4 +204,93 @@ namespace AnimeList.Models.Api
 
     /// <summary>Per-side snapshot fields surfaced by the diff.</summary>
     public record DiffEntrySnapshot(string MediaId, string? Status, int Progress);
+
+    // ── Watch: episode streams / subtitles / mark-watched / scrobble ──────────
+    // Ports the MVC MetaController.Web.cs /meta/* enrichment surface onto the
+    // header-authed /api/v1/me/* API. Wire shapes mirror the original's
+    // anonymous-object JSON exactly (camelCase via System.Text.Json defaults).
+
+    /// <summary>Bootstrap payload for the watch page's source picker —
+    /// GET /api/v1/me/episode-streams (no <c>addonIndex</c>). Hands the client the
+    /// list of configured stream addons (so it can fan out its own per-addon
+    /// fetches), the addon-independent external links, and the AniSkip markers.
+    /// Mirrors MetaController.EpisodeStreams' bootstrap branch.</summary>
+    public record EpisodeStreamsBootstrapResponse(
+        bool Anonymous,
+        bool AddonsConfigured,
+        List<EpisodeStreamAddonDto> Addons,
+        List<EpisodeExternalLinkDto> ExternalLinks,
+        EpisodeSkipTimesDto SkipTimes);
+
+    /// <summary>One configured stream addon slot — the client fans out a per-addon
+    /// fetch by re-calling episode-streams with <c>addonIndex</c>.</summary>
+    public record EpisodeStreamAddonDto(int Index, string Name);
+
+    /// <summary>An external streaming destination (Crunchyroll / Netflix / …) for
+    /// the source picker's "Other sites" bucket.</summary>
+    public record EpisodeExternalLinkDto(string Site, string Url);
+
+    /// <summary>AniSkip intro/outro markers for the episode, or null members when
+    /// AniSkip has no match. Seconds from file start.</summary>
+    public record EpisodeSkipTimesDto(EpisodeSkipMarkerDto? Intro, EpisodeSkipMarkerDto? Outro);
+
+    /// <summary>One AniSkip marker (start/end in seconds).</summary>
+    public record EpisodeSkipMarkerDto(double Start, double End);
+
+    /// <summary>Per-addon fan-out payload — GET /api/v1/me/episode-streams?addonIndex=N.
+    /// Carries the enriched debrid rows for that one addon. Mirrors
+    /// MetaController.EpisodeStreams' addonIndex branch.</summary>
+    public record EpisodeStreamsResponse(List<EpisodeStreamDto> DebridStreams);
+
+    /// <summary>One enriched debrid stream row. Quality / size / seeders / language /
+    /// provider / infoHash / isHevc / source / hdr / audio / audioUnsupported /
+    /// description are the same fields the MVC EpisodeStreams addonIndex branch
+    /// labelled onto each stream so the watch page can render the release line,
+    /// dedup by infoHash, apply the per-resolution cap, and warn on unplayable
+    /// codecs / audio.</summary>
+    public record EpisodeStreamDto(
+        string Name,
+        string Title,
+        string Url,
+        string Quality,
+        string Size,
+        bool Playable,
+        int Seeders,
+        string Language,
+        string Provider,
+        string InfoHash,
+        bool IsHevc,
+        string Source,
+        string Hdr,
+        string Audio,
+        bool AudioUnsupported,
+        string Description);
+
+    /// <summary>Subtitle lookup result for one episode — GET /api/v1/me/episode-subtitles.
+    /// Mirrors MetaController.EpisodeSubtitles' shape (subtitles[] + providerCounts).</summary>
+    public record EpisodeSubtitlesResponse(
+        List<EpisodeSubtitleDto> Subtitles,
+        EpisodeSubtitleProviderCounts ProviderCounts);
+
+    /// <summary>One subtitle track returned by the episode-subtitles lookup. <c>Url</c>
+    /// is the upstream OpenSubtitles URL; the client routes it through the subtitle
+    /// proxy (GET /api/v1/subtitle) for the same-origin SRT→VTT conversion.</summary>
+    public record EpisodeSubtitleDto(string Lang, string Label, string Url, string Source);
+
+    /// <summary>Per-provider subtitle counts alongside <see cref="EpisodeSubtitlesResponse"/>.</summary>
+    public record EpisodeSubtitleProviderCounts(int OpenSubtitles);
+
+    /// <summary>Result of POST /api/v1/me/mark-watched. <c>Reason</c> is a stable opt-out
+    /// / failure code (no-auth / anonymous / opted-out / placeholder / no-uid /
+    /// trakt-not-connected / save-failed / invalid-request) or null on success.</summary>
+    public record MarkWatchedResponse(bool Ok, string? Reason = null);
+
+    /// <summary>Result of POST /api/v1/me/scrobble-progress (Trakt Continue-Watching
+    /// pause-scrobble). <c>Reason</c> mirrors MarkWatched's reason-code vocabulary
+    /// (not-video / out-of-range / no-auth / no-uid / opted-out / trakt-not-connected).</summary>
+    public record ScrobbleProgressResponse(bool Ok, string? Reason = null);
+
+    /// <summary>Result of GET /api/v1/resolve-stream — the post-redirect debrid CDN
+    /// URL the supplied resolver URL's 302 points at (or the original on any failure).</summary>
+    public record ResolveStreamResponse(string ResolvedUrl);
 }

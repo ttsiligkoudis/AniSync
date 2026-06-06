@@ -108,16 +108,22 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Items ?? new();
     }
 
-    public async Task<IReadOnlyList<MetaDto>> ListAsync(string status, CancellationToken ct = default)
+    public async Task<IReadOnlyList<MetaDto>> ListAsync(string status, string? genre = null, string? search = null, CancellationToken ct = default)
     {
-        var resp = await GetOrDefault<MetaListResponse>($"api/v1/me/list?status={Uri.EscapeDataString(status)}", ct);
+        var url = $"api/v1/me/list?status={Uri.EscapeDataString(status)}";
+        // Genre + search are filtered server-side (MergedListService genre filter + ScoreMatch
+        // relevance re-rank) so the library matches the MVC LibraryController.Page behaviour.
+        if (!string.IsNullOrWhiteSpace(genre)) url += $"&genre={Uri.EscapeDataString(genre)}";
+        if (!string.IsNullOrWhiteSpace(search)) url += $"&search={Uri.EscapeDataString(search)}";
+        var resp = await GetOrDefault<MetaListResponse>(url, ct);
         return resp?.Results ?? new();
     }
 
-    public async Task<IReadOnlyList<MetaDto>> VideoListAsync(string type, string list, CancellationToken ct = default)
+    public async Task<IReadOnlyList<MetaDto>> VideoListAsync(string type, string list, string? search = null, CancellationToken ct = default)
     {
-        var resp = await GetOrDefault<MetaListResponse>(
-            $"api/v1/me/video-list?type={Uri.EscapeDataString(type)}&list={Uri.EscapeDataString(list)}", ct);
+        var url = $"api/v1/me/video-list?type={Uri.EscapeDataString(type)}&list={Uri.EscapeDataString(list)}";
+        if (!string.IsNullOrWhiteSpace(search)) url += $"&search={Uri.EscapeDataString(search)}";
+        var resp = await GetOrDefault<MetaListResponse>(url, ct);
         return resp?.Results ?? new();
     }
 
@@ -134,6 +140,10 @@ public sealed class AniSyncApi : IAniSyncApi
         var resp = await GetOrDefault<AnimeResponse>($"api/v1/anime/{Uri.EscapeDataString(id)}", ct);
         return resp?.Meta;
     }
+
+    public Task<VideoMetaResponse?> VideoAsync(string type, string id, CancellationToken ct = default)
+        => GetOrDefault<VideoMetaResponse>(
+            $"api/v1/video/{Uri.EscapeDataString(type)}/{Uri.EscapeDataString(id)}", ct);
 
     public async Task<IReadOnlyList<StreamingLinkDto>> StreamsAsync(string id, CancellationToken ct = default)
     {
@@ -164,6 +174,69 @@ public sealed class AniSyncApi : IAniSyncApi
         var url = $"{config.Trim('/')}/stream/{Uri.EscapeDataString(type)}/{Uri.EscapeDataString(streamId)}.json";
         var resp = await GetOrDefault<StremioStreamsResponse>(url, ct);
         return resp?.Streams.Where(s => !string.IsNullOrEmpty(s.Url)).ToList() ?? new();
+    }
+
+    // ── Watch: episode streams / subtitles / mark-watched / scrobble ──────────
+
+    public Task<EpisodeStreamsBootstrap?> EpisodeStreamsBootstrapAsync(string id, int? season, int episode, string? type = null, CancellationToken ct = default)
+        => GetOrDefault<EpisodeStreamsBootstrap>(EpisodeStreamsUrl(id, season, episode, type, addonIndex: null), ct);
+
+    public async Task<IReadOnlyList<EpisodeStreamDto>> EpisodeStreamsAsync(string id, int addonIndex, int? season, int episode, string? type = null, CancellationToken ct = default)
+    {
+        var resp = await GetOrDefault<EpisodeStreamsResponse>(EpisodeStreamsUrl(id, season, episode, type, addonIndex), ct);
+        return resp?.DebridStreams ?? new();
+    }
+
+    // Shared URL builder for the two episode-streams modes — bootstrap (addonIndex
+    // null) and per-addon fan-out. Movie-typed entries forward ?type=movie so the
+    // server drops season+episode from the addon id shape.
+    private static string EpisodeStreamsUrl(string id, int? season, int episode, string? type, int? addonIndex)
+    {
+        var url = $"api/v1/me/episode-streams?id={Uri.EscapeDataString(id)}&episode={episode}";
+        if (season.HasValue) url += $"&season={season.Value}";
+        if (!string.IsNullOrWhiteSpace(type)) url += $"&type={Uri.EscapeDataString(type)}";
+        if (addonIndex.HasValue) url += $"&addonIndex={addonIndex.Value}";
+        return url;
+    }
+
+    public async Task<EpisodeSubtitlesResponse?> EpisodeSubtitlesAsync(string id, int? season, int episode, string? filename = null, string? type = null, CancellationToken ct = default)
+    {
+        var url = $"api/v1/me/episode-subtitles?id={Uri.EscapeDataString(id)}&episode={episode}";
+        if (season.HasValue) url += $"&season={season.Value}";
+        if (!string.IsNullOrWhiteSpace(filename)) url += $"&filename={Uri.EscapeDataString(filename)}";
+        if (!string.IsNullOrWhiteSpace(type)) url += $"&type={Uri.EscapeDataString(type)}";
+        return await GetOrDefault<EpisodeSubtitlesResponse>(url, ct);
+    }
+
+    public Task<MarkWatchedResult?> MarkWatchedAsync(string id, int episode, int? season = null, string? type = null, string? sourceUrl = null, CancellationToken ct = default)
+        => PostJson<object, MarkWatchedResult>("api/v1/me/mark-watched",
+            new { id, season, episode, type, sourceUrl }, ct);
+
+    public Task<ScrobbleProgressResult?> ScrobbleProgressAsync(string id, string type, double progress, int? season = null, int episode = 0, CancellationToken ct = default)
+        => PostJson<object, ScrobbleProgressResult>("api/v1/me/scrobble-progress",
+            new { id, type, season, episode, progress }, ct);
+
+    public async Task<string?> ResolveStreamAsync(string url, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        var resp = await GetOrDefault<ResolveStreamResult>(
+            $"api/v1/resolve-stream?url={Uri.EscapeDataString(url)}", ct);
+        return resp?.ResolvedUrl;
+    }
+
+    public string SubtitleProxyUrl(string upstreamUrl)
+    {
+        if (string.IsNullOrWhiteSpace(upstreamUrl)) return upstreamUrl;
+        // Absolute so a <track src> resolves to the backend origin regardless of the
+        // head's own origin. The proxy (GET /api/v1/subtitle) does the same-origin
+        // SRT→VTT conversion + CORS headers so the player's track load doesn't need a
+        // cross-origin opt-in. Falls back to a relative path when ApiBaseUrl isn't
+        // resolvable yet (web head, build-time) — still correct same-origin on the web.
+        var query = $"api/v1/subtitle?url={Uri.EscapeDataString(upstreamUrl)}";
+        var baseUrl = _env.ApiBaseUrl;
+        return string.IsNullOrWhiteSpace(baseUrl)
+            ? "/" + query
+            : $"{baseUrl.TrimEnd('/')}/{query}";
     }
 
     public async Task<AuthProvidersDto> AuthProvidersAsync(CancellationToken ct = default)
@@ -248,20 +321,42 @@ public sealed class AniSyncApi : IAniSyncApi
     private sealed class RemovedResult { public bool Removed { get; set; } }
     private sealed class ChangedResult { public bool Changed { get; set; } }
 
-    public async Task<AnimeEntryDto?> GetEntryAsync(string id, int? season = null, CancellationToken ct = default)
+    public async Task<EntryResponse?> GetEntryAsync(string id, int? season = null, string? type = null, CancellationToken ct = default)
     {
         var url = $"api/v1/me/entries/{Uri.EscapeDataString(id)}";
-        if (season.HasValue) url += $"?season={season.Value}";
-        var resp = await GetOrDefault<EntryResponse>(url, ct);
-        return resp?.Entry;
+        var q = new List<string>();
+        if (season.HasValue) q.Add($"season={season.Value}");
+        if (!string.IsNullOrWhiteSpace(type)) q.Add($"type={Uri.EscapeDataString(type)}");
+        if (q.Count > 0) url += "?" + string.Join("&", q);
+        return await GetOrDefault<EntryResponse>(url, ct);
     }
 
-    public async Task<SaveEntryResponse?> SaveEntryAsync(string id, EntrySaveRequest request, int? season = null, CancellationToken ct = default)
+    public async Task<SaveEntryResponse?> SaveEntryAsync(string id, EntrySaveRequest request, int? season = null, string? type = null, CancellationToken ct = default)
     {
         var url = $"api/v1/me/entries/{Uri.EscapeDataString(id)}";
-        if (season.HasValue) url += $"?season={season.Value}";
+        var q = new List<string>();
+        if (season.HasValue) q.Add($"season={season.Value}");
+        if (!string.IsNullOrWhiteSpace(type)) q.Add($"type={Uri.EscapeDataString(type)}");
+        if (q.Count > 0) url += "?" + string.Join("&", q);
         return await PostJson<EntrySaveRequest, SaveEntryResponse>(url, request, ct);
     }
+
+    public async Task<DetailStateDto?> DetailStateAsync(string id, int? season = null, string? type = null, CancellationToken ct = default)
+    {
+        var url = $"api/v1/me/state/{Uri.EscapeDataString(id)}";
+        var q = new List<string>();
+        if (season.HasValue) q.Add($"season={season.Value}");
+        if (!string.IsNullOrWhiteSpace(type)) q.Add($"type={Uri.EscapeDataString(type)}");
+        if (q.Count > 0) url += "?" + string.Join("&", q);
+        return await GetOrDefault<DetailStateDto>(url, ct);
+    }
+
+    public Task<ToggleWatchingResult?> ToggleWatchingAsync(string id, int? season = null, string? type = null, CancellationToken ct = default)
+        => PostJson<object, ToggleWatchingResult>("api/v1/me/watching/toggle", new { id, season, type }, ct);
+
+    public Task<ToggleHiddenResult?> ToggleHiddenAsync(string id, string? title = null, string? imageUrl = null, string? mediaType = null, CancellationToken ct = default)
+        => PostJson<object, ToggleHiddenResult>("api/v1/me/hidden/toggle",
+            new { id, title, imageUrl, mediaType }, ct);
 
     public async Task<IReadOnlyList<NotificationDto>> NotificationsAsync(int limit = 20, int skip = 0, CancellationToken ct = default)
     {

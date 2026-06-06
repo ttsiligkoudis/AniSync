@@ -39,16 +39,23 @@ public interface IAniSyncApi
     Task<AnilistUserStatsDto?> AnilistStatsAsync(CancellationToken ct = default);
     Task<TraktUserStatsDto?> TraktStatsAsync(CancellationToken ct = default);
     Task<IReadOnlyList<MetaDto>> ContinueWatchingAsync(int limit = 15, CancellationToken ct = default);
-    Task<IReadOnlyList<MetaDto>> ListAsync(string status, CancellationToken ct = default);
+    /// <summary>The user's merged tracker list for a status — /api/v1/me/list. <paramref name="genre"/>
+    /// filters server-side; <paramref name="search"/> applies the server's ScoreMatch relevance re-rank.</summary>
+    Task<IReadOnlyList<MetaDto>> ListAsync(string status, string? genre = null, string? search = null, CancellationToken ct = default);
     /// <summary>The user's movies / series library from Trakt — /api/v1/me/video-list.
-    /// type = movie|series; list = current|completed|planning.</summary>
-    Task<IReadOnlyList<MetaDto>> VideoListAsync(string type, string list, CancellationToken ct = default);
+    /// type = movie|series; list = current|completed|planning|paused|dropped. <paramref name="search"/>
+    /// applies the server's ScoreMatch relevance re-rank.</summary>
+    Task<IReadOnlyList<MetaDto>> VideoListAsync(string type, string list, string? search = null, CancellationToken ct = default);
     /// <summary>The user's Hidden section (titles hidden from Discover) — /api/v1/me/hidden?skip=. Paged 24/call.</summary>
     Task<IReadOnlyList<MetaDto>> HiddenAsync(string? skip = null, CancellationToken ct = default);
     Task<LibraryResponse?> LibraryAsync(string? status = null, CancellationToken ct = default);
 
     // Detail + watch
     Task<MetaDto?> AnimeAsync(string id, CancellationToken ct = default);
+    /// <summary>Movie / series detail (Trakt-enriched, Cinemeta-backed) — /api/v1/video/{type}/{id}.
+    /// Returns the meta + Trakt cast + certification + merged episode list + recommended row in one
+    /// call. <paramref name="type"/> = "movie"/"series". The video-shaped twin of <see cref="AnimeAsync"/>.</summary>
+    Task<VideoMetaResponse?> VideoAsync(string type, string id, CancellationToken ct = default);
     Task<IReadOnlyList<StreamingLinkDto>> StreamsAsync(string id, CancellationToken ct = default);
     Task<IReadOnlyList<EpisodeInfoDto>> EpisodesAsync(string id, CancellationToken ct = default);
     Task<IReadOnlyList<MetaDto>> RelatedAsync(string id, CancellationToken ct = default);
@@ -61,6 +68,36 @@ public interface IAniSyncApi
     Task<IReadOnlyList<SubtitleTrack>> SubtitlesAsync(string id, int episode, int? season = null, CancellationToken ct = default);
     Task<IReadOnlyList<SkipMarker>> SkipMarkersAsync(string id, int episode, CancellationToken ct = default);
     Task<FillerResponse?> FillerAsync(string titleOrId, CancellationToken ct = default);
+
+    // ── Watch: episode streams / subtitles / mark-watched / scrobble (header-authed) ──
+    /// <summary>Bootstrap the watch page's source picker — GET /api/v1/me/episode-streams
+    /// (no addonIndex): configured stream addons (for per-addon fan-out), external links,
+    /// and AniSkip markers. <paramref name="type"/> = "movie"/"series" for Cinemeta video.</summary>
+    Task<EpisodeStreamsBootstrap?> EpisodeStreamsBootstrapAsync(string id, int? season, int episode, string? type = null, CancellationToken ct = default);
+    /// <summary>Fan out one configured stream addon's debrid rows — GET
+    /// /api/v1/me/episode-streams?addonIndex=N. Returns the enriched rows (quality / size /
+    /// seeders / language / provider / infoHash / isHevc / source / hdr / audio /
+    /// audioUnsupported / description) for the client to merge + cap + warn on.</summary>
+    Task<IReadOnlyList<EpisodeStreamDto>> EpisodeStreamsAsync(string id, int addonIndex, int? season, int episode, string? type = null, CancellationToken ct = default);
+    /// <summary>Release-matched subtitle lookup for the picked source — GET
+    /// /api/v1/me/episode-subtitles. <paramref name="filename"/> is the chosen source's
+    /// file name (the OpenSubtitles timing-match signal).</summary>
+    Task<EpisodeSubtitlesResponse?> EpisodeSubtitlesAsync(string id, int? season, int episode, string? filename = null, string? type = null, CancellationToken ct = default);
+    /// <summary>Mark an episode watched (70 % / external hand-off) — POST /api/v1/me/mark-watched.
+    /// Anime → primary tracker + fan-out; movie / series → Trakt history. <paramref name="sourceUrl"/>,
+    /// when set, triggers the debrid-placeholder probe before persisting.</summary>
+    Task<MarkWatchedResult?> MarkWatchedAsync(string id, int episode, int? season = null, string? type = null, string? sourceUrl = null, CancellationToken ct = default);
+    /// <summary>Park a movie / series playback position in Trakt's Continue Watching — POST
+    /// /api/v1/me/scrobble-progress. <paramref name="progress"/> is 0-100 (the &lt;1 % and 95 %+
+    /// tail are filtered client-side).</summary>
+    Task<ScrobbleProgressResult?> ScrobbleProgressAsync(string id, string type, double progress, int? season = null, int episode = 0, CancellationToken ct = default);
+    /// <summary>Follow a resolver URL's 302 to the debrid CDN URL — GET /api/v1/resolve-stream.
+    /// Host-allow-listed server-side; returns the resolved URL or null on failure.</summary>
+    Task<string?> ResolveStreamAsync(string url, CancellationToken ct = default);
+    /// <summary>Builds the same-origin subtitle-proxy URL (GET /api/v1/subtitle?url=…) for a
+    /// &lt;track src&gt; — the server fetches the upstream URL and converts SRT→VTT with CORS
+    /// so the player's track load needs no cross-origin opt-in. Synchronous (no network).</summary>
+    string SubtitleProxyUrl(string upstreamUrl);
 
     // Auth (which sign-in providers the backend can start)
     Task<AuthProvidersDto> AuthProvidersAsync(CancellationToken ct = default);
@@ -94,9 +131,23 @@ public interface IAniSyncApi
     Task<RegenerateResult?> ImportConfigJsonAsync(string backupJson, CancellationToken ct = default);
 
     // Tracking (manage-entry modal + sync)
-    Task<AnimeEntryDto?> GetEntryAsync(string id, int? season = null, CancellationToken ct = default);
-    Task<SaveEntryResponse?> SaveEntryAsync(string id, EntrySaveRequest request, int? season = null, CancellationToken ct = default);
+    /// <summary>One library entry by media id (Manage Entry modal). For a cross-service
+    /// franchise the response also carries the per-cour Season dropdown options, the
+    /// resolved cour id, and the primary service (for the per-service score range). Refetch
+    /// a specific cour by calling again with that cour's id. <paramref name="type"/> =
+    /// "movie"/"series" reads the Trakt video state instead (Cinemeta video detail).</summary>
+    Task<EntryResponse?> GetEntryAsync(string id, int? season = null, string? type = null, CancellationToken ct = default);
+    Task<SaveEntryResponse?> SaveEntryAsync(string id, EntrySaveRequest request, int? season = null, string? type = null, CancellationToken ct = default);
     Task<SaveEntryResponse?> DeleteEntryAsync(string id, int? season = null, CancellationToken ct = default);
+    /// <summary>Per-user detail-page state (list entry + hidden flag) in one call —
+    /// /api/v1/me/state/{id}. Drives the hero pill, quick-add heart, and Hide button.
+    /// <paramref name="type"/> = "movie"/"series" reads the Trakt video state.</summary>
+    Task<DetailStateDto?> DetailStateAsync(string id, int? season = null, string? type = null, CancellationToken ct = default);
+    /// <summary>Quick-add heart toggle for the Currently Watching list — POST /api/v1/me/watching/toggle.
+    /// <paramref name="type"/> = "movie"/"series" routes the toggle to Trakt (Cinemeta video).</summary>
+    Task<ToggleWatchingResult?> ToggleWatchingAsync(string id, int? season = null, string? type = null, CancellationToken ct = default);
+    /// <summary>Hide / unhide an anime from Discover — POST /api/v1/me/hidden/toggle.</summary>
+    Task<ToggleHiddenResult?> ToggleHiddenAsync(string id, string? title = null, string? imageUrl = null, string? mediaType = null, CancellationToken ct = default);
     Task<LinkedResponse?> LinkedAsync(CancellationToken ct = default);
     Task<PromoteResponse?> PromotePrimaryAsync(string service, bool force = false, CancellationToken ct = default);
     Task<DiffResponse?> SyncDiffAsync(CancellationToken ct = default);
