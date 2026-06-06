@@ -65,6 +65,17 @@ export function setActiveOnly(active) {
     setCookie(ACTIVE_COOKIE, active);
 }
 
+// The dashboard's own toggle ("all" + the enabled modes) is tracked separately from the
+// ACTIVE mode so the dashboard remembers its pick independently of Discover/Library. Client
+// only (the dashboard filters its sections in-page), so localStorage is enough — no cookie.
+const DASH_KEY = 'anisync-dash-filter';
+export function getDashFilter() {
+    try { return localStorage.getItem(DASH_KEY); } catch (_) { return null; }
+}
+export function setDashFilter(v) {
+    try { localStorage.setItem(DASH_KEY, v); } catch (_) { /* private mode */ }
+}
+
 // Full-page reload after a pick — exactly what the original media-type.js did.
 // Must be a RELOAD, not a Blazor Nav navigation: the app ships a cross-document
 // @view-transition (navigation: auto), and a programmatic navigation fires it,

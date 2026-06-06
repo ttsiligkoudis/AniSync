@@ -96,6 +96,13 @@
                     State.SetEnabledMediaTypes(set, active);
                 }
             }
+
+            // Restore the dashboard's own toggle ("all" or a mode) so it survives a reload like the
+            // active mode does. Accept "all" or any enabled mode; ignore a stale/disabled value.
+            var dash = await js.InvokeAsync<string>("getDashFilter");
+            if (dash == "all" || (Enum.TryParse<MetaType>(dash, out var dm) && State.EnabledMediaTypes.Contains(dm)))
+                State.SetDashboardFilter(dash);
+
             await js.DisposeAsync();
         }
         catch { /* prerender / no JS */ }
