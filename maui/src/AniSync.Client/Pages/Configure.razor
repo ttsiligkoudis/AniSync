@@ -9,10 +9,17 @@
 
 @* Stremio addon configuration — Blazor port of Stremio.cshtml + its shared
    partials. Account + Linked Accounts (shared component), the catalog Enable /
-   Discover-Only grid, Streams toggles + stream-addon manager + one-click debrid,
-   anime Preferences, and the live install-URL card. Toggle state is the three flag
-   bytes (ConfigFlags mirrors the server bit layout); Save persists them and the
-   server returns a fresh install segment (revision bumped) so the URL changes. *@
+   Discover-Only grid, the shared Streams + Preferences cards, and the live
+   install-URL card. Toggle state is the three flag bytes (ConfigFlags mirrors the
+   server bit layout); Save persists them and the server returns a fresh install
+   segment (revision bumped) so the URL changes.
+
+   Streams + Preferences render via the SHARED StreamsSection / PreferencesSection
+   components (same ones the /account page uses) — matching the original, where
+   _StreamsSection / _PreferencesSection were partials mounted by both pages. On
+   the Stremio page StreamsSection runs with IsStremio=true, which shows just the
+   stream toggles; the full stream-addon / debrid manager lives on /account (the
+   original hid it here too). *@
 
 <PageTitle>Stremio addon · AniSync</PageTitle>
 
@@ -37,7 +44,7 @@
     else
     {
         <AccountSection Config="_config" OnReload="ReloadAsync" />
-        <LinkedAccountsSection Config="_config" OnReload="ReloadAsync" ReturnUrl="/configure" />
+        <LinkedAccountsSection Config="_config" OnReload="ReloadAsync" ReturnUrl="/configure" AnimeEnabled="AnimeEnabled" />
 
         <!-- ─── CATALOGS ─── -->
         <section class="section-card">
@@ -78,166 +85,14 @@
             </div>
         </section>
 
-        <!-- ─── STREAMS ─── -->
-        <section class="section-card" id="streams">
-            <span class="section-title">Streams</span>
-            <p class="section-description">Choose what AniSync attaches to each episode in Stremio.</p>
-            <div class="streams-grid">
-                <div class="stream-option">
-                    <div class="option-name-wrap">
-                        <span class="option-name">Manage Entry</span>
-                        <span class="option-name-sub">Quick-edit progress, score and notes from Stremio.</span>
-                    </div>
-                    <label class="switch">
-                        <input type="checkbox" checked="@ManageEntry" @onchange="e => { ManageEntry = (bool)e.Value!; MarkDirty(); }" />
-                        <span class="slider"></span>
-                    </label>
-                </div>
-                <div class="stream-option">
-                    <div class="option-name-wrap">
-                        <span class="option-name">Auto-track progress</span>
-                        <span class="option-name-sub">Update your list when you start an episode.</span>
-                    </div>
-                    <label class="switch">
-                        <input type="checkbox" checked="@AutoTrack" @onchange="e => { AutoTrack = (bool)e.Value!; MarkDirty(); }" />
-                        <span class="slider"></span>
-                    </label>
-                </div>
-                <div class="stream-option">
-                    <div class="option-name-wrap">
-                        <span class="option-name">External services</span>
-                        <span class="option-name-sub">Crunchyroll, Netflix, HiDive, …</span>
-                    </div>
-                    <label class="switch">
-                        <input type="checkbox" checked="@_flags.ShowExternalStreams" @onchange="e => { _flags.ShowExternalStreams = (bool)e.Value!; MarkDirty(); }" />
-                        <span class="slider"></span>
-                    </label>
-                </div>
-            </div>
+        <!-- ─── STREAMS (shared component) ─── -->
+        @* IsStremio=true → just the stream toggles (Manage Entry / Auto-track /
+           External services). The stream-addon + debrid manager is hidden here and
+           lives on /account, exactly as the original _StreamsSection did. *@
+        <StreamsSection IsStremio="true" Flags="_flags" Config="_config" OnDirty="MarkDirty" OnReload="ReloadAsync" />
 
-            <!-- Stream addons -->
-            <p class="manifest-url-label" style="margin-top:1.5rem;">Stream addons</p>
-            @if (_catalog.Providers.Count > 0)
-            {
-                <div class="debrid-setup">
-                    <div class="debrid-setup-row">
-                        <select class="debrid-select" @bind="_debridProvider" aria-label="Debrid provider">
-                            @foreach (var p in _catalog.Providers)
-                            {
-                                <option value="@p.Id">@p.Name</option>
-                            }
-                        </select>
-                        <input class="manifest-url-input" type="password" placeholder="Paste your API key"
-                               autocomplete="off" spellcheck="false"
-                               value="@_debridKey" @oninput="e => _debridKey = e.Value?.ToString() ?? string.Empty" />
-                    </div>
-                    <div class="debrid-setup-addons">
-                        <span class="debrid-setup-addons-label">Add:</span>
-                        @foreach (var a in _catalog.Addons)
-                        {
-                            <label class="debrid-addon-check">
-                                <input type="checkbox" checked="@_debridAddons.Contains(a.Id!)"
-                                       @onchange="e => ToggleDebridAddon(a.Id!, (bool)e.Value!)" />
-                                <span>@a.Name</span>
-                            </label>
-                        }
-                    </div>
-                    <div class="debrid-setup-actions">
-                        <span class="debrid-setup-links">
-                            @if (SelectedProvider?.SignUpUrl is { Length: > 0 } su)
-                            {
-                                <a class="debrid-apikey-link" target="_blank" rel="noopener" href="@su">Sign up ↗</a>
-                            }
-                            @if (SelectedProvider?.ApiKeyUrl is { Length: > 0 } ak)
-                            {
-                                <a class="debrid-apikey-link" target="_blank" rel="noopener" href="@ak">Get your API key ↗</a>
-                            }
-                        </span>
-                        <button class="btn-ghost btn-ghost-sm" type="button" disabled="@_debridBusy" @onclick="AddDebridAsync">
-                            @(_debridBusy ? "Setting up…" : "Save")
-                        </button>
-                    </div>
-                    @if (!string.IsNullOrEmpty(_debridStatus))
-                    {
-                        <p class="debrid-setup-status" role="status">@_debridStatus</p>
-                    }
-                </div>
-            }
-
-            <ul class="stream-addon-list">
-                @for (var i = 0; i < _config.StreamAddons.Count; i++)
-                {
-                    var addon = _config.StreamAddons[i];
-                    var idx = i;
-                    <li class="stream-addon-row">
-                        <div class="stream-addon-meta">
-                            <span class="stream-addon-name">@addon.Name</span>
-                            <span class="stream-addon-url">@addon.Url</span>
-                        </div>
-                        <div class="stream-addon-actions">
-                            <button class="stream-addon-icon-btn" type="button" title="Move up"
-                                    disabled="@(idx == 0)" @onclick="() => MoveAddonAsync(idx, -1)">▲</button>
-                            <button class="stream-addon-icon-btn" type="button" title="Move down"
-                                    disabled="@(idx == _config.StreamAddons.Count - 1)" @onclick="() => MoveAddonAsync(idx, 1)">▼</button>
-                            <button class="stream-addon-icon-btn stream-addon-remove" type="button" title="Remove"
-                                    @onclick="() => RemoveAddonAsync(addon.Url!)">✕</button>
-                        </div>
-                    </li>
-                }
-            </ul>
-            <p class="manifest-url-label">Or paste a manifest URL</p>
-            <div class="manifest-url-row">
-                <input class="manifest-url-input" type="text" placeholder="https://….example.com/…/manifest.json"
-                       autocomplete="off" value="@_addonInput" @oninput="e => _addonInput = e.Value?.ToString() ?? string.Empty" />
-                <button class="btn-ghost btn-ghost-sm" type="button" style="white-space:nowrap;"
-                        disabled="@_addonBusy" @onclick="AddAddonAsync">@(_addonBusy ? "Adding…" : "Add")</button>
-            </div>
-            @if (!string.IsNullOrEmpty(_addonStatus))
-            {
-                <p class="option-name-sub">@_addonStatus</p>
-            }
-        </section>
-
-        <!-- ─── PREFERENCES ─── -->
-        @if (AnimeEnabled)
-        {
-            <section class="section-card">
-                <span class="section-title">Preferences</span>
-                <p class="section-description">General display preferences that apply across the site and the Stremio addon.</p>
-                <div class="streams-grid">
-                    <div class="stream-option">
-                        <div class="option-name-wrap">
-                            <span class="option-name">Hide unaired anime from Watching</span>
-                            <span class="option-name-sub">Filter not-yet-aired entries out of your Currently Watching list.</span>
-                        </div>
-                        <label class="switch">
-                            <input type="checkbox" checked="@_flags.HideUnreleasedFromWatching" @onchange="e => { _flags.HideUnreleasedFromWatching = (bool)e.Value!; MarkDirty(); }" />
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-                    <div class="stream-option">
-                        <div class="option-name-wrap">
-                            <span class="option-name">Group anime seasons</span>
-                            <span class="option-name-sub">Collapse multi-cour franchises into a single card.</span>
-                        </div>
-                        <label class="switch">
-                            <input type="checkbox" checked="@_flags.EnableSeasonGrouping" @onchange="e => { _flags.EnableSeasonGrouping = (bool)e.Value!; MarkDirty(); }" />
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-                    <div class="stream-option">
-                        <div class="option-name-wrap">
-                            <span class="option-name">Show 18+ anime content</span>
-                            <span class="option-name-sub">Off (default) hides hentai / R18 entries from Discover, Library, and the catalogs.</span>
-                        </div>
-                        <label class="switch">
-                            <input type="checkbox" checked="@_flags.ShowAdultContent" @onchange="e => { _flags.ShowAdultContent = (bool)e.Value!; MarkDirty(); }" />
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-                </div>
-            </section>
-        }
+        <!-- ─── PREFERENCES (shared component) ─── -->
+        <PreferencesSection Flags="_flags" AnimeEnabled="AnimeEnabled" OnDirty="MarkDirty" />
 
         <!-- ─── INSTALL ─── -->
         <section class="section-card">
@@ -295,33 +150,25 @@
     private bool _dirty;
     private bool _saving;
 
-    private StreamCatalogDto _catalog = new();
-    private string _debridProvider = "";
-    private string _debridKey = "";
-    private readonly HashSet<string> _debridAddons = new(StringComparer.OrdinalIgnoreCase);
-    private bool _debridBusy;
-    private string? _debridStatus;
-
-    private string _addonInput = "";
-    private bool _addonBusy;
-    private string? _addonStatus;
-
     private bool _copied;
     private IJSObjectReference? _js;
 
     private bool _allEnable;
     private bool _allDiscover;
 
-    private bool AnimeEnabled => _config?.EnabledMediaTypes.Count is null or 0
-        || _config!.EnabledMediaTypes.Contains("anime", StringComparer.OrdinalIgnoreCase);
+    // Anime-only cards (the Preferences toggles + the anime sync targets in
+    // LinkedAccountsSection) gate on the user's real media-type pick. That choice
+    // lives client-side (AppState, hydrated from localStorage by MainLayout) — NOT in
+    // the server config: the Blazor-Server self-call to /api/v1/me/config can't see the
+    // browser media-type cookie and the pick is never persisted to the DB, so the
+    // server defaults EnabledMediaTypes to anime. Wait for hydration so anime cards
+    // aren't flashed for non-anime users.
+    private bool AnimeEnabled =>
+        State.MediaTypesHydrated && State.EnabledMediaTypes.Contains(MetaType.anime);
 
     private bool IsAnilistOrMal =>
         string.Equals(_config?.AnimeService, "Anilist", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(_config?.AnimeService, "MyAnimeList", StringComparison.OrdinalIgnoreCase);
-
-    // Inverted toggles: the user-facing "on" means the disable-flag is off.
-    private bool ManageEntry { get => !_flags.HideManageEntry; set => _flags.HideManageEntry = !value; }
-    private bool AutoTrack { get => !_flags.DisableAutoTrack; set => _flags.DisableAutoTrack = !value; }
 
     private string Origin => Env.ApiBaseUrl.TrimEnd('/');
     private string ManifestUrl => string.IsNullOrEmpty(_config?.InstallConfig)
@@ -330,9 +177,6 @@
         ? "stremio://" + u[(u.IndexOf("://", StringComparison.Ordinal) + 3)..] : "#";
     private string StremioWebLink => string.IsNullOrEmpty(ManifestUrl)
         ? "#" : $"https://web.stremio.com/#/addons?addon={Uri.EscapeDataString(ManifestUrl)}";
-
-    private DebridProviderDto? SelectedProvider =>
-        _catalog.Providers.FirstOrDefault(p => p.Id == _debridProvider) ?? _catalog.Providers.FirstOrDefault();
 
     private sealed record CatalogRowSpec(string Label, Func<bool> Visible,
         Func<bool> GetEnable, Action<bool> SetEnable, Func<bool> GetDiscover, Action<bool> SetDiscover);
@@ -357,6 +201,10 @@
         // logged-in user to /login. OnInitializedAsync runs again once interactive.
         if (!RendererInfo.IsInteractive) return;
 
+        // Re-render when media types hydrate / change (the anime-only cards gate on
+        // State.EnabledMediaTypes), e.g. the header chooser flips anime off.
+        State.Changed += OnStateChanged;
+
         // Make sure the stored credential is hydrated; bounce to login if absent.
         if (string.IsNullOrEmpty(State.StreamConfig))
         {
@@ -366,9 +214,6 @@
         if (string.IsNullOrEmpty(State.StreamConfig)) { Nav.NavigateTo("/login"); return; }
 
         await ReloadAsync();
-        _catalog = await Api.StreamCatalogAsync();
-        _debridProvider = _catalog.Providers.FirstOrDefault()?.Id ?? "";
-        foreach (var a in _catalog.Addons) _debridAddons.Add(a.Id!);
         _loading = false;
     }
 
@@ -450,62 +295,6 @@
         _saving = false;
     }
 
-    private void ToggleDebridAddon(string id, bool on)
-    {
-        if (on) _debridAddons.Add(id); else _debridAddons.Remove(id);
-    }
-
-    private async Task AddDebridAsync()
-    {
-        if (string.IsNullOrWhiteSpace(_debridKey)) { _debridStatus = "Paste your API key first."; return; }
-        _debridBusy = true; _debridStatus = null;
-        var result = await Api.AddDebridAddonsAsync(new DebridSetupRequest
-        {
-            Provider = _debridProvider,
-            ApiKey = _debridKey.Trim(),
-            Addons = _debridAddons.ToList(),
-        });
-        if (!string.IsNullOrEmpty(result.Error))
-        {
-            _debridStatus = "Couldn't set up debrid addons: " + result.Error;
-        }
-        else
-        {
-            _debridStatus = $"Added {result.Added.Count} addon(s)" + (result.Skipped.Count > 0 ? $", {result.Skipped.Count} skipped." : ".");
-            if (result.Added.Count > 0) _debridKey = "";
-            await ReloadAsync();
-        }
-        _debridBusy = false;
-    }
-
-    private async Task AddAddonAsync()
-    {
-        var url = _addonInput.Trim();
-        if (string.IsNullOrEmpty(url)) return;
-        _addonBusy = true; _addonStatus = null;
-        var result = await Api.AddStreamAddonAsync(url);
-        if (result is { Added: true }) { _addonInput = ""; await ReloadAsync(); }
-        else _addonStatus = "Couldn't add that addon — check the manifest URL.";
-        _addonBusy = false;
-    }
-
-    private async Task RemoveAddonAsync(string url)
-    {
-        if (await Api.RemoveStreamAddonAsync(url)) await ReloadAsync();
-    }
-
-    private async Task MoveAddonAsync(int index, int delta)
-    {
-        if (_config is null) return;
-        var urls = _config.StreamAddons.Select(a => a.Url!).ToList();
-        var target = index + delta;
-        if (target < 0 || target >= urls.Count) return;
-        (urls[index], urls[target]) = (urls[target], urls[index]);
-        // Reload on any server result (true = changed, false = no-op); only a null
-        // (failed request) is left alone so the move isn't silently reverted unseen.
-        if (await Api.ReorderStreamAddonsAsync(urls) is not null) await ReloadAsync();
-    }
-
     private async Task CopyManifestAsync()
     {
         try
@@ -518,8 +307,11 @@
         catch { /* clipboard blocked */ }
     }
 
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
     public async ValueTask DisposeAsync()
     {
+        State.Changed -= OnStateChanged;
         if (_js is not null)
         {
             try { await _js.InvokeVoidAsync("setConfigPage", false); } catch { }
