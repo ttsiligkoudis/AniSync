@@ -97,10 +97,10 @@ public sealed class AniSyncApi : IAniSyncApi
     }
 
     public async Task<TraktUserStatsDto?> TraktStatsAsync(CancellationToken ct = default)
-    {
-        var resp = await GetOrDefault<TraktStatsEnvelope>("Home/TraktStatsData", ct);
-        return resp is { Success: true } ? resp.Stats : null;
-    }
+        // /api/v1/me/trakt-stats (UserApiController) — the web's Home/TraktStatsData
+        // isn't reachable here (its UI controller is filtered out of the Blazor host),
+        // which is why the Trakt stats row never appeared. 404 → null → row hidden.
+        => await GetOrDefault<TraktUserStatsDto>("api/v1/me/trakt-stats", ct);
 
     public async Task<IReadOnlyList<MetaDto>> ContinueWatchingAsync(int limit = 15, CancellationToken ct = default)
     {

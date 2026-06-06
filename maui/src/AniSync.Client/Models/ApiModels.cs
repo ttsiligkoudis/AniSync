@@ -85,8 +85,6 @@ public sealed class AnilistUserStatsDto
     public double? MeanScore { get; set; }
 }
 
-public sealed class TraktStatsEnvelope { public bool Success { get; set; } public TraktUserStatsDto? Stats { get; set; } }
-
 public sealed class TraktUserStatsDto
 {
     public int MoviesWatched { get; set; }
