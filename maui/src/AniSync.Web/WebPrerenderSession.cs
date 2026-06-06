@@ -33,10 +33,10 @@ public sealed class WebPrerenderSession : IPrerenderSession
         {
             // Prerender: the request carries the HttpOnly anisync_uid cookie when signed in.
             var ctx = _http.HttpContext;
-            var loggedIn = ctx is not null && !string.IsNullOrEmpty(ctx.Request.Cookies[UidCookieName]);
-            if (loggedIn)
+            var uid = ctx?.Request.Cookies[UidCookieName];
+            if (!string.IsNullOrEmpty(uid))
             {
-                // Carry the verdict to the interactive circuit. We persist only when signed-in: a
+                // Carry the signed-in verdict to the interactive circuit. We persist only when signed-in: a
                 // missing cookie stays "unknown" so the interactive localStorage read can still find a
                 // credential (e.g. a session created before this cookie existed) without a wrong commit.
                 _persist.RegisterOnPersisting(() =>
@@ -45,6 +45,23 @@ public sealed class WebPrerenderSession : IPrerenderSession
                     return Task.CompletedTask;
                 });
                 state.HydrateSession(true, "");
+
+                // Seed the actual config credential from the cookie's UID so prerender-time API calls
+                // authenticate (X-AniSync-Config) and pages can render real user content on first paint
+                // instead of a skeleton. A v5 credential is just [0x05][uid]; the server resolves it to the
+                // user's DB row by UID — identical to the header the interactive client sends from
+                // localStorage. This is server-side ONLY: we deliberately do NOT persist it into the page
+                // (the UID stays HttpOnly; the interactive circuit re-reads the real credential from
+                // localStorage via MainLayout). We also leave ConfigHydrated untouched so the dashboard /
+                // chrome keep their existing prerender behaviour — only pages that read StreamConfig
+                // directly (Library, Account) opt into prerendered content.
+                try
+                {
+                    var cred = AnimeList.Utils.EncodeV5Config(uid);
+                    if (!string.IsNullOrEmpty(cred))
+                        state.SetStreamConfig(cred);
+                }
+                catch { /* malformed cookie → leave config unseeded; pages fall back to their skeleton */ }
             }
         }
         else if (_persist.TryTakeFromJson<bool>(PersistKey, out var loggedIn) && loggedIn)
