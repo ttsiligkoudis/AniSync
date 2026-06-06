@@ -89,6 +89,11 @@
     // The page the link/re-link redirect returns to — /account here, /configure when
     // hosted on the Stremio-addon page (matches the original's currentPath threading).
     [Parameter] public string ReturnUrl { get; set; } = "/account";
+    // Whether anime is one of the user's enabled media types. Drives which sync targets
+    // are offered (anime trackers vs Trakt-only). Supplied by the host page from the
+    // client's real selection (AppState) — the server config can't be trusted for this
+    // on the Blazor head (its self-call can't see the media-type cookie). Defaults true.
+    [Parameter] public bool AnimeEnabled { get; set; } = true;
 
     private string? _busy;
     private bool _kitsuOpen;
@@ -96,10 +101,9 @@
     // Which providers are offered as sync targets depends on the enabled modes:
     // the anime trackers (Kitsu / AniList / MAL) only track anime, while Trakt
     // tracks anime, movies and series. So anime enabled → all four; video-only →
-    // Trakt only. Default to all when nothing's chosen.
+    // Trakt only.
     private string[] AllServices =>
-        (Config?.EnabledMediaTypes.Count is null or 0)
-        || Config!.EnabledMediaTypes.Contains("anime", StringComparer.OrdinalIgnoreCase)
+        AnimeEnabled
             ? new[] { "Kitsu", "Anilist", "MyAnimeList", "Trakt" }
             : new[] { "Trakt" };
 

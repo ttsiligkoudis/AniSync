@@ -40,7 +40,7 @@ else
 
     @if (_config is not null)
     {
-        <LinkedAccountsSection Config="_config" OnReload="ReloadAsync" />
+        <LinkedAccountsSection Config="_config" OnReload="ReloadAsync" AnimeEnabled="AnimeEnabled" />
 
         <StreamsModal Flags="_flags" Config="_config" OnDirty="MarkDirty" OnReload="ReloadAsync" OnReorder="OnAddonReorderPending" />
 
