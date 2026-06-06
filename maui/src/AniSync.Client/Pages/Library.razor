@@ -4,6 +4,7 @@
 @inject AppState State
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject IPrerenderSession Prerender
 
 @* Library — port of Views/Library/Index.cshtml. Status tabs (Watching /
    Completed / Planning / Paused / Dropped / Rewatching) over /api/v1/me/list
@@ -17,32 +18,11 @@
 <PageTitle>@_pageTitle</PageTitle>
 
 <section>
-    @if (!State.ConfigHydrated)
-    {
-        @* Credential not resolved yet (prerender / pre-hydration). Render a neutral skeleton
-           rather than the "Sign in" prompt — gating on the empty StreamConfig alone flashed
-           "Sign in" on every refresh until localStorage hydration committed the real session.
-           Mirrors the dashboard, which gates its content on ConfigHydrated for the same reason. *@
-        <h1 class="dashboard-section-title">Library</h1>
-        <div class="library-grid">
-            @for (var i = 0; i < 12; i++)
-            {
-                <div class="library-card library-card-skeleton">
-                    <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
-                    <span class="library-card-skeleton-line"></span>
-                    <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
-                </div>
-            }
-        </div>
-    }
-    else if (string.IsNullOrEmpty(State.StreamConfig))
-    {
-        <h1 class="dashboard-section-title">Library</h1>
-        <p class="hint-text">
-            <a href="/login">Sign in</a> to see your tracked library here.
-        </p>
-    }
-    else
+    @* Content shows as soon as we have a credential — seeded server-side from the anisync_uid cookie
+       during prerender, replayed on the interactive remount (_replayed), or hydrated from localStorage.
+       Only once we KNOW there's no credential (ConfigHydrated && none) do we show "Sign in"; before
+       that we render a neutral skeleton rather than flashing the signed-out prompt. *@
+    @if (_replayed || !string.IsNullOrEmpty(State.StreamConfig))
     {
         @* List-type tabs lead the page. Each is an anchor — clicking navigates with
            the selected list. The active genre flows through so switching from
@@ -105,6 +85,27 @@
             {
                 <PosterGrid Items="_items" Variant="grid" VideoLinks="@(!IsAnime)"
                             EmptyMessage="@_emptyMessage" />
+            }
+        </div>
+    }
+    else if (State.ConfigHydrated)
+    {
+        <h1 class="dashboard-section-title">Library</h1>
+        <p class="hint-text">
+            <a href="/login">Sign in</a> to see your tracked library here.
+        </p>
+    }
+    else
+    {
+        <h1 class="dashboard-section-title">Library</h1>
+        <div class="library-grid">
+            @for (var i = 0; i < 12; i++)
+            {
+                <div class="library-card library-card-skeleton">
+                    <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
+                    <span class="library-card-skeleton-line"></span>
+                    <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                </div>
             }
         </div>
     }
@@ -193,6 +194,25 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        var key = LibraryKey();
+
+        // Interactive remount after a prerender: replay the list the prerender stashed (keyed by this
+        // exact query) instead of refetching, so a logged-in refresh doesn't flash content → skeleton →
+        // content. Consumed once; a later client-side navigation (different query, or nothing stashed)
+        // falls through to a normal load.
+        if (RendererInfo.IsInteractive && !_replayed
+            && Prerender.TryReplay<PersistedLibrary?>(key, out var snap) && snap is not null)
+        {
+            _replayedKey = key;
+            RestoreLibrary(snap);
+            return;
+        }
+
+        // Already replayed this exact query — don't let a parent (layout) re-render after the credential
+        // hydrates re-invoke OnParametersSet and refetch over the replayed list (that would re-introduce
+        // the flash). A real client-side navigation changes the key and falls through to a fresh load.
+        if (_replayed && _replayedKey == key) return;
+
         // A ?type= deep-link (dashboard "View all · Series" etc.) overrides the active media
         // mode + persists it; the surface then follows State.MediaType. SetMediaType fires
         // Changed → OnStateChanged → Refresh, so return here to avoid loading twice.
@@ -204,6 +224,37 @@
             return;
         }
         await Refresh();
+    }
+
+    // ── Prerender → interactive replay (web only; no-op on native) ──────────────────────────────
+    private bool _replayed;
+    private string? _replayedKey;
+
+    // Keyed by the exact query so a stashed list is never replayed onto a different tab/filter.
+    private string LibraryKey() => $"lib:{Type}:{List}:{Search}:{Genre}";
+
+    private sealed record PersistedLibrary(
+        List<MetaDto> Items, MetaType Surface, string Status,
+        string SearchInput, string GenreInput, bool HasSearch, bool HasGenre,
+        string EmptyMessage, string PageTitle);
+
+    private PersistedLibrary SnapshotLibrary() => new(
+        _items.ToList(), _surfaceMediaType, _status,
+        _searchInput, _genreInput, _hasSearch, _hasGenre, _emptyMessage, _pageTitle);
+
+    private void RestoreLibrary(PersistedLibrary snap)
+    {
+        _items = snap.Items;
+        _surfaceMediaType = snap.Surface;
+        _status = snap.Status;
+        _searchInput = snap.SearchInput;
+        _genreInput = snap.GenreInput;
+        _hasSearch = snap.HasSearch;
+        _hasGenre = snap.HasGenre;
+        _emptyMessage = snap.EmptyMessage;
+        _pageTitle = snap.PageTitle;
+        _loading = false;
+        _replayed = true;
     }
 
     private async Task Refresh()
@@ -255,6 +306,11 @@
         _emptyMessage = BuildEmptyMessage();
         _loading = false;
         StateHasChanged();
+
+        // Prerender (cookie-seeded credential): stash this list so the interactive remount replays it
+        // instead of refetching. Web-only; no-op on native and on the interactive pass.
+        if (!RendererInfo.IsInteractive)
+            Prerender.Persist<PersistedLibrary>(LibraryKey(), RendererInfo.IsInteractive, SnapshotLibrary);
     }
 
     // ── Filter-bar submit + tab / clear hrefs (genre rides every tab + the clear link). ──

@@ -5,6 +5,7 @@
 @inject IAppEnvironment Env
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject IPrerenderSession Prerender
 @implements IAsyncDisposable
 
 @* Account — Blazor port of Configure.cshtml (page title "Account"). Identity
@@ -115,17 +116,31 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        // localStorage (the credential) is unreadable during prerender — wait for
-        // interactive so a logged-in user isn't shown the logged-out surface.
-        // Re-runs interactively.
-        if (!RendererInfo.IsInteractive) return;
+        if (RendererInfo.IsInteractive)
+        {
+            // Re-render when media types hydrate / change (the anime-only Preferences card
+            // gates on State.EnabledMediaTypes), e.g. the header chooser flips anime off.
+            State.Changed += OnStateChanged;
 
-        // Re-render when media types hydrate / change (the anime-only Preferences card
-        // gates on State.EnabledMediaTypes), e.g. the header chooser flips anime off.
-        State.Changed += OnStateChanged;
+            // Replay the config the prerender stashed (cookie-seeded credential → real cards) instead
+            // of re-reading localStorage + refetching, so a logged-in refresh doesn't flash the
+            // loading skeleton. Falls through to the normal load when there's nothing to replay
+            // (anonymous, or a client-side navigation).
+            if (Prerender.TryReplay<PersistedAccount?>(PersistKey, out var snap) && snap is { Config: not null })
+            {
+                RestoreFrom(snap);
+                _loading = false;
+                return;
+            }
+        }
 
+        // Resolve the credential: seeded server-side during prerender (from the anisync_uid cookie),
+        // else read from localStorage on the interactive pass. With no credential during prerender
+        // (anonymous / no cookie) stay on the loading skeleton and let the interactive pass resolve it —
+        // don't commit the login surface server-side (a localStorage-only session would flash it).
         if (string.IsNullOrEmpty(State.StreamConfig))
         {
+            if (!RendererInfo.IsInteractive) return;
             var saved = await Store.GetAsync(ISecureStore.ConfigKey);
             if (!string.IsNullOrEmpty(saved)) State.SetStreamConfig(saved);
         }
@@ -136,6 +151,29 @@ else
         }
 
         _loading = false;
+
+        // Prerender (credential seeded): stash the loaded config so the interactive remount replays it.
+        if (!RendererInfo.IsInteractive && _config is not null)
+            Prerender.Persist<PersistedAccount>(PersistKey, RendererInfo.IsInteractive, Snapshot);
+    }
+
+    // Carries the prerendered config across to the interactive circuit (web only; no-op on native).
+    private const string PersistKey = "account";
+    private sealed record PersistedAccount(ConfigStateDto? Config);
+    private PersistedAccount Snapshot() => new(_config);
+
+    // Reinstate the config + re-derive the flag bytes exactly as ReloadAsync does after a fetch,
+    // so the interactive first render matches the prerendered cards.
+    private void RestoreFrom(PersistedAccount snap)
+    {
+        _config = snap.Config;
+        _pendingAddonOrder = null;
+        if (_config is not null)
+        {
+            _flags = ConfigFlags.Decode(_config.Flags1, _config.Flags2, _config.Flags3);
+            (_savedF1, _savedF2, _savedF3) = (_config.Flags1, _config.Flags2, _config.Flags3);
+            _dirty = false;
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
