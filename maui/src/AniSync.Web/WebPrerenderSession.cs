@@ -2,6 +2,7 @@ using System.Linq;
 using AniSync.Client.Services;
 using AniSync.Client.Models;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Authorization;
 
 namespace AniSync.Web;
 
@@ -22,11 +23,43 @@ public sealed class WebPrerenderSession : IPrerenderSession
 
     private readonly IHttpContextAccessor _http;
     private readonly PersistentComponentState _persist;
+    private readonly AuthenticationStateProvider _auth;
 
-    public WebPrerenderSession(IHttpContextAccessor http, PersistentComponentState persist)
+    public WebPrerenderSession(IHttpContextAccessor http, PersistentComponentState persist, AuthenticationStateProvider auth)
     {
         _http = http;
         _persist = persist;
+        _auth = auth;
+    }
+
+    /// <summary>
+    /// Resolve the v5 credential from the signed-in uid without touching the client: on prerender from
+    /// the request's anisync_uid cookie (HttpContext present); on the interactive circuit (no HttpContext)
+    /// from AuthenticationStateProvider, which the AniSyncUid scheme populated at connection time. Returns
+    /// null when there's no session or anything goes wrong, so MainLayout safely falls back to localStorage.
+    /// </summary>
+    public async Task<string?> ResolveCredentialAsync()
+    {
+        try
+        {
+            // Prerender / any real HTTP request: the HttpOnly cookie is right here.
+            var uid = _http.HttpContext?.Request.Cookies[UidCookieName];
+
+            // Interactive circuit: no HttpContext, but the connection was authenticated → read the claim.
+            if (string.IsNullOrEmpty(uid))
+            {
+                var authState = await _auth.GetAuthenticationStateAsync();
+                uid = authState.User.FindFirst(UidAuthenticationHandler.UidClaimType)?.Value;
+            }
+
+            if (string.IsNullOrEmpty(uid)) return null;
+            var cred = AnimeList.Utils.EncodeV5Config(uid);
+            return string.IsNullOrEmpty(cred) ? null : cred;
+        }
+        catch
+        {
+            return null; // never throw into MainLayout's startup path — fall back to localStorage
+        }
     }
 
     public void Bootstrap(AppState state, bool isInteractive)

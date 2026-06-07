@@ -19,11 +19,11 @@
          manifest stays at a stable (unfingerprinted) URL so its scope is fixed. -->
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="@Assets["icons/icon-192.png"]" />
-    <HeadOutlet @rendermode="InteractiveServerNoPrerender" />
+    <HeadOutlet @rendermode="InteractiveServer" />
 </head>
 
 <body>
-    <Routes @rendermode="InteractiveServerNoPrerender" />
+    <Routes @rendermode="InteractiveServer" />
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <!-- Shared shell behaviour (theme toggle, back button, mobile "More" sheet). -->
@@ -46,15 +46,3 @@
 </body>
 
 </html>
-
-@code {
-    // Prerendering is disabled app-wide. With InteractiveServer prerender ON, every component ran
-    // twice — a static server pass, then a fresh interactive remount that re-rendered (and reloaded
-    // every poster <img>) on top of the prerendered DOM. That double pass, diffed against client-only
-    // state (credential + media-type in localStorage) that the server can't see, is what produced the
-    // recurring content→skeleton→content re-flash, stale-mode flash, and double fetches across pages.
-    // Rendering once, after the circuit connects, removes that whole class. The cost is a brief loading
-    // shell until the circuit is up; the localStorage hydration that follows is still gated per page.
-    private static readonly IComponentRenderMode InteractiveServerNoPrerender =
-        new InteractiveServerRenderMode(prerender: false);
-}
