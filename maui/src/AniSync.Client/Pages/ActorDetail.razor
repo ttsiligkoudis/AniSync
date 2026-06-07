@@ -1,9 +1,12 @@
 @page "/discover/actor/tmdb/{TmdbId:int}"
+@page "/discover/actor/{Slug}"
 @inject IAniSyncApi Api
 @inject IPrerenderSession Prerender
 
 @* Actor filmography — port of Views/Discover/ActorDetail.cshtml. Movies + series
-   credits (Trakt-backed) as poster grids that link into the video detail pages. *@
+   credits (Trakt-backed) as poster grids that link into the video detail pages.
+   Reached two ways: the /discover/actors directory links by TMDB id (tmdb/{id}, bridged to a Trakt slug
+   server-side), and the video detail cast cards link by Trakt slug ({slug}, e.g. "ray-lui-443355"). *@
 
 <PageTitle>@Title · AniSync</PageTitle>
 
@@ -67,7 +70,9 @@
 </section>
 
 @code {
+    // Exactly one is set per route: TmdbId from /discover/actor/tmdb/{id}, Slug from /discover/actor/{slug}.
     [Parameter] public int TmdbId { get; set; }
+    [Parameter] public string? Slug { get; set; }
 
     private ActorCreditsResponse? _credits;
     private bool _loading = true;
@@ -92,7 +97,10 @@
         if (_appliedKey == key) return;   // already loaded/replayed this exact view; ignore redundant re-renders
 
         _loading = true;
-        _credits = await Api.ActorCreditsAsync(TmdbId);
+        // Slug route → look up the Trakt person directly; tmdb route → bridge the id to a slug server-side.
+        _credits = string.IsNullOrEmpty(Slug)
+            ? await Api.ActorCreditsAsync(TmdbId)
+            : await Api.ActorCreditsBySlugAsync(Slug);
         _loading = false;
 
         _appliedKey = key;
@@ -102,7 +110,7 @@
     }
 
     private string? _appliedKey;
-    private string PersistKey() => $"actor:{TmdbId}";
+    private string PersistKey() => $"actor:{(string.IsNullOrEmpty(Slug) ? "tmdb" + TmdbId : Slug)}";
 
     private sealed record PersistedActor(ActorCreditsResponse? Credits);
 

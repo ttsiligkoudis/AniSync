@@ -451,6 +451,9 @@ public sealed class AniSyncApi : IAniSyncApi
     public Task<ActorCreditsResponse?> ActorCreditsAsync(int tmdbId, CancellationToken ct = default)
         => GetOrDefault<ActorCreditsResponse>($"api/v1/actors/tmdb/{tmdbId}", ct);
 
+    public Task<ActorCreditsResponse?> ActorCreditsBySlugAsync(string slug, CancellationToken ct = default)
+        => GetOrDefault<ActorCreditsResponse>($"api/v1/actors/{Uri.EscapeDataString(slug)}", ct);
+
     public async Task<IReadOnlyList<VideoModeDto>> VideoModesAsync(CancellationToken ct = default)
     {
         var resp = await GetOrDefault<VideoModesResponse>("api/v1/discover/video-modes", ct);
