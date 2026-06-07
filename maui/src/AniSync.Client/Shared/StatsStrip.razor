@@ -1,6 +1,7 @@
 @implements IDisposable
 @inject IAniSyncApi Api
 @inject AppState State
+@inject IJSRuntime JS
 
 @* "Your stats" panel — port of the stats-section in Index.cshtml. Anime row sources from
    AniList, the movies/series row from Trakt; group labels show only when both are present
@@ -29,7 +30,8 @@
                         <span class="dashboard-section-link-muted">via AniList</span>
                         @* Info popover (click-driven in the web via inline JS; markup
                            rendered here for parity. Click-driven via Blazor (toggles .is-open, which the
-                           CSS reveals); the refresh link re-fetches the AniList stats. *@
+                           CSS reveals); the refresh link force-refetches the AniList stats + re-primes the
+                           24 h cache. *@
                         <span class="dashboard-stats-info @(_infoOpen ? "is-open" : "")">
                             <button class="dashboard-stats-info-btn"
                                     type="button"
@@ -207,29 +209,66 @@
         // above, so the strip stays hidden anyway).
         if (!State.LoggedIn) { _loading = false; return; }
 
-        // Independent fetches — a missing Trakt/AniList link just drops that row. The component
-        // renders the skeleton on its first pass (while this awaits), then fills on completion.
-        var anime = Api.AnilistStatsAsync();
-        var trakt = Api.TraktStatsAsync();
-        await Task.WhenAll(anime, trakt);
-        _anime = anime.Result;
-        _trakt = trakt.Result;
+        // AniList stats are cached client-side for 24 h — the server deliberately doesn't cache them
+        // (AnilistService.GetUserStatsAsync), so a fresh cache entry skips the AniList round-trip on every
+        // dashboard load; the "refresh your stats" link force-refetches + re-primes it. Trakt has no cache.
+        var traktTask = Api.TraktStatsAsync();
+        _anime = await ReadCachedAnimeStatsAsync() ?? await FetchAndCacheAnimeStatsAsync();
+        _trakt = await traktTask;
         _loading = false;
     }
 
     private void OnFilterChanged() => StateHasChanged();
 
-    // "refresh your stats" link in the popover — re-fetch the AniList stats (the server re-queries
-    // AniList; after the user clicks "Update Stats" there this picks up the recomputed numbers). Closes
-    // the popover and guards against double-clicks while the fetch is in flight.
+    // "refresh your stats" link in the popover — force a fresh AniList fetch and re-prime the 24 h cache
+    // (after the user clicks "Update Stats" on AniList this picks up the recomputed numbers). Closes the
+    // popover and guards against double-clicks while the fetch is in flight.
     private async Task RefreshAnimeStatsAsync()
     {
         if (_refreshing) return;
         _refreshing = true;
         _infoOpen = false;
         StateHasChanged();
-        try { _anime = await Api.AnilistStatsAsync(); }
+        try { _anime = await FetchAndCacheAnimeStatsAsync(); }
         finally { _refreshing = false; StateHasChanged(); }
+    }
+
+    // ── AniList stats client cache (24 h, localStorage) ──────────────────────────────────────────────
+    private const string AnimeStatsCacheKey = "anisync.stats.anilist";
+    private static readonly long StatsTtlMs = (long)TimeSpan.FromHours(24).TotalMilliseconds;
+    private sealed record AnimeStatsCache(long Ts, AnilistUserStatsDto? Stats);
+
+    // Return the cached stats when they're under 24 h old; null (→ fetch) on miss/stale/parse error, or
+    // when JS isn't available. Cleared on auth transitions by /auth/complete so a new user starts fresh.
+    private async Task<AnilistUserStatsDto?> ReadCachedAnimeStatsAsync()
+    {
+        try
+        {
+            var raw = await JS.InvokeAsync<string?>("localStorage.getItem", AnimeStatsCacheKey);
+            if (string.IsNullOrEmpty(raw)) return null;
+            var entry = System.Text.Json.JsonSerializer.Deserialize<AnimeStatsCache>(raw);
+            if (entry?.Stats is null) return null;
+            var age = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - entry.Ts;
+            return age >= 0 && age < StatsTtlMs ? entry.Stats : null;   // stale / clock skew → refetch
+        }
+        catch { return null; }
+    }
+
+    // Fetch from the server (which queries AniList) and stamp the result into the 24 h cache.
+    private async Task<AnilistUserStatsDto?> FetchAndCacheAnimeStatsAsync()
+    {
+        var stats = await Api.AnilistStatsAsync();
+        if (stats is not null)
+        {
+            try
+            {
+                var json = System.Text.Json.JsonSerializer.Serialize(
+                    new AnimeStatsCache(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), stats));
+                await JS.InvokeVoidAsync("localStorage.setItem", AnimeStatsCacheKey, json);
+            }
+            catch { /* storage blocked → just skip caching */ }
+        }
+        return stats;
     }
 
     public void Dispose() => State.Changed -= OnFilterChanged;

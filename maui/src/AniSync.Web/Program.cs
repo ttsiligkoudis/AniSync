@@ -452,8 +452,9 @@ app.MapGet("/auth/complete", async (HttpContext ctx, ITokenService tokenService,
     // server-side from the HttpOnly anisync_uid cookie (WebSecureStore → ResolveCredentialAsync),
     // so XSS can't lift it. This bridge now only shows the themed screen and lands in the app; the
     // login/logout cookie was already set by AuthController / Auth/Logout before we got here. We also
-    // best-effort scrub any legacy 'anisync.config' a pre-Phase-2 client may still have stored.
-    var op = "localStorage.removeItem('anisync.config');";
+    // best-effort scrub any legacy 'anisync.config' a pre-Phase-2 client may still have stored, and drop
+    // the 24 h AniList stats cache so a fresh login / different user doesn't see the previous one's stats.
+    var op = "localStorage.removeItem('anisync.config');localStorage.removeItem('anisync.stats.anilist');";
     var nav = System.Text.Json.JsonSerializer.Serialize(returnUrl);
 
     // Dark, themed loading screen instead of the browser's blank white page — this
