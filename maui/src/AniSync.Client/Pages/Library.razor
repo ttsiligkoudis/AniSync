@@ -71,7 +71,10 @@
         </form>
 
         <div id="library-results-pane">
-            @if (_loading)
+            @* Skeleton only when there's nothing to show. On a reload we keep the current PosterGrid
+               mounted (items aren't cleared until the new ones arrive in Load) so the posters don't
+               blank then re-flash — @key on the cards preserves the ones that carry over. *@
+            @if (_loading && _items.Count == 0)
             {
                 <div class="library-grid">
                     @for (var i = 0; i < 12; i++)
@@ -284,7 +287,9 @@
     private async Task Load()
     {
         _loading = true;
-        _items = Array.Empty<MetaDto>();
+        // Don't clear _items here — keep the current grid mounted during the fetch so the posters
+        // don't blank then re-flash on a reload. The fetch below replaces _items once it returns
+        // (the skeleton only shows when _items is empty, i.e. the very first load).
         StateHasChanged();
 
         if (IsAnime)
