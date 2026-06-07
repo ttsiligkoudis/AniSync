@@ -427,9 +427,11 @@
 
     private async void OnStateChanged()
     {
-        // The media-type switch (or a ?type= persist) changed the surface — re-resolve the
-        // tabs + reload against the new list. Other changes (e.g. login) just refresh chrome.
-        if (_surfaceMediaType != State.MediaType)
+        // Reload only on a genuine media-type switch, and only once media types have hydrated — the
+        // cascade of hydration Changed events (config credential, media-type prefs) fires while
+        // State.MediaType may still be the transient default, and reloading on that would refetch the
+        // already-shown list (the "results render twice" double) or briefly load the wrong surface.
+        if (State.MediaTypesHydrated && _surfaceMediaType != State.MediaType)
         {
             _surfaceMediaType = State.MediaType;
             _traktConfigured = null;   // re-derive per surface (anime path ignores it)
