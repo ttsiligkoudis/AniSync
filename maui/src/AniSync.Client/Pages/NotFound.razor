@@ -1,0 +1,7 @@
+@page "/not-found"
+
+@* Target of the web head's UseStatusCodePagesWithReExecute("/not-found") — any unhandled 4xx/5xx route
+   miss re-executes here (the original status code is preserved on the response). Renders the shared 404
+   view, the same one the Blazor router shows for an unmatched client-side navigation. *@
+
+<NotFoundView />
