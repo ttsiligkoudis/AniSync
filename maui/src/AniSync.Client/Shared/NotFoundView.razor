@@ -1,0 +1,16 @@
+@* Shared 404 content. Rendered by the router's <NotFound> (a client-side nav to an unmatched route) and
+   by Pages/NotFound.razor at /not-found (the server's UseStatusCodePagesWithReExecute target for route
+   misses), so both paths show the same on-brand page instead of a bare "Page not found" line. Mirrors the
+   original MVC NotFound view: distinct headline + a browse-anime CTA. *@
+
+<PageTitle>Page not found · AniSync</PageTitle>
+
+<section class="not-found-page">
+    <p class="not-found-code" aria-hidden="true">404</p>
+    <h1 class="page-title">Page not found</h1>
+    <p class="library-empty">We couldn't find that page — it may have moved, or the link might be broken.</p>
+    <div class="not-found-actions">
+        <a class="btn-primary-action btn-login" href="/">Back to dashboard</a>
+        <a class="btn-secondary-action" href="/discover">Browse anime</a>
+    </div>
+</section>
