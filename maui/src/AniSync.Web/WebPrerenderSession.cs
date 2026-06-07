@@ -72,8 +72,8 @@ public sealed class WebPrerenderSession : IPrerenderSession
             if (!string.IsNullOrEmpty(uid))
             {
                 // Carry the signed-in verdict to the interactive circuit. We persist only when signed-in: a
-                // missing cookie stays "unknown" so the interactive localStorage read can still find a
-                // credential (e.g. a session created before this cookie existed) without a wrong commit.
+                // missing cookie stays "unknown" so the interactive credential resolution can still find one
+                // (native secure store; or a stale session) without a wrong commit.
                 _persist.RegisterOnPersisting(() =>
                 {
                     _persist.PersistAsJson(PersistKey, true);
@@ -84,12 +84,12 @@ public sealed class WebPrerenderSession : IPrerenderSession
                 // Seed the actual config credential from the cookie's UID so prerender-time API calls
                 // authenticate (X-AniSync-Config) and pages can render real user content on first paint
                 // instead of a skeleton. A v5 credential is just [0x05][uid]; the server resolves it to the
-                // user's DB row by UID — identical to the header the interactive client sends from
-                // localStorage. This is server-side ONLY: we deliberately do NOT persist it into the page
-                // (the UID stays HttpOnly; the interactive circuit re-reads the real credential from
-                // localStorage via MainLayout). We also leave ConfigHydrated untouched so the dashboard /
-                // chrome keep their existing prerender behaviour — only pages that read StreamConfig
-                // directly (Library, Account) opt into prerendered content.
+                // user's DB row by UID. This is server-side ONLY: we deliberately do NOT persist it into the
+                // page (the UID stays HttpOnly; the interactive circuit re-derives the credential from the
+                // cookie via WebSecureStore.ResolveCredentialAsync, never localStorage). We also leave
+                // ConfigHydrated untouched so the dashboard / chrome keep their existing prerender behaviour
+                // — only pages that read StreamConfig directly (Account / Configure / Advanced) opt into
+                // prerendered content + replay.
                 try
                 {
                     var cred = AnimeList.Utils.EncodeV5Config(uid);
@@ -107,8 +107,9 @@ public sealed class WebPrerenderSession : IPrerenderSession
         }
         else
         {
-            // Interactive: render the same signed-in chrome the prerender committed (no flash). The
-            // real config + connected label are filled in by MainLayout's localStorage hydration.
+            // Interactive: render the same signed-in chrome the prerender committed (no flash). The real
+            // config is re-derived from the cookie (WebSecureStore) and the connected label comes from
+            // /me/linked, both via MainLayout.
             if (_persist.TryTakeFromJson<bool>(PersistKey, out var loggedIn) && loggedIn)
                 state.HydrateSession(true, "");
 
