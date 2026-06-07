@@ -985,11 +985,15 @@ namespace AnimeList.Controllers
                 // the flag bits.
                 var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
                 var hideAdult = configuration?.showAdultContent != true;
+                // Honour "Group anime seasons" so Continue watching uses native per-cour ids
+                // (anilist:/mal:/kitsu:) when it's off — was defaulting to grouped IMDb (tt) ids because
+                // GetAnimeListAsync's groupSeasons defaults to true. Mirrors the List endpoint below.
+                var groupSeasons = configuration?.enableSeasonGrouping == true;
                 var metas = tokenData.anime_service switch
                 {
-                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, ListType.Current, hideAdult: hideAdult),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Current, hideAdult: hideAdult),
-                    _ => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Current, hideAdult: hideAdult),
+                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideAdult: hideAdult),
+                    _ => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideAdult: hideAdult),
                 };
 
                 return new JsonResult(new ContinueWatchingResponse(
@@ -1053,9 +1057,9 @@ namespace AnimeList.Controllers
                 {
                     var single = tokenData.anime_service switch
                     {
-                        AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, hideAdult: hideAdult),
-                        AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, hideAdult: hideAdult),
-                        _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, hideAdult: hideAdult),
+                        AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideAdult: hideAdult),
+                        AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideAdult: hideAdult),
+                        _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideAdult: hideAdult),
                     };
                     metas = single?.ToList() ?? new List<Meta>();
                 }
