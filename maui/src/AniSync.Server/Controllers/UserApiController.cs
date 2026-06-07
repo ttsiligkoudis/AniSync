@@ -989,16 +989,12 @@ namespace AnimeList.Controllers
                 // (anilist:/mal:/kitsu:) when it's off — was defaulting to grouped IMDb (tt) ids because
                 // GetAnimeListAsync's groupSeasons defaults to true. Mirrors the List endpoint below.
                 var groupSeasons = configuration?.enableSeasonGrouping == true;
-                // Cache the user's Current list (per-user, 10-min TTL, keyed by service + list + grouping)
-                // so repeated Home visits don't re-hit the tracker each time. GetOrFetchAsync no-ops the
-                // cache for anonymous users; user edits already call _listCache.Invalidate to keep it fresh.
-                var metas = await _listCache.GetOrFetchAsync(tokenData, ListType.Current, groupSeasons, async () =>
-                    (tokenData.anime_service switch
-                    {
-                        AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideAdult: hideAdult),
-                        AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideAdult: hideAdult),
-                        _ => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideAdult: hideAdult),
-                    }) ?? new List<Meta>());
+                var metas = tokenData.anime_service switch
+                {
+                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideAdult: hideAdult),
+                    _ => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideAdult: hideAdult),
+                };
 
                 return new JsonResult(new ContinueWatchingResponse(
                     Primary: tokenData.anime_service.ToString(),
