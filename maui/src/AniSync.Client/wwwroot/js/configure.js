@@ -216,3 +216,24 @@ export function bindAddonReorder(list, dotnet) {
         method: 'OnAddonReorder',
     });
 }
+
+// Danger-zone uid mutations (regenerate / sign-out-everywhere / delete). POSTed so a top-level GET
+// (<img>/link) can't trigger them, with the same-origin X-Requested-With proof the server's
+// CsrfOrAjaxFilter accepts (a cross-origin page can't set that header without a CORS preflight these
+// routes refuse). credentials:'same-origin' sends the anisync_uid cookie so the server can resolve and
+// rewrite/clear it on the response; on success we reload to returnUrl so the circuit re-derives the
+// credential from the (new/absent) cookie. Returns false on failure so the caller can show a status.
+export async function postAuth(url, returnUrl) {
+    try {
+        const r = await fetch(url, {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        });
+        if (!r.ok) return false;
+        window.location.assign(returnUrl);
+        return true;
+    } catch {
+        return false;
+    }
+}

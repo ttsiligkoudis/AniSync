@@ -476,16 +476,20 @@ app.MapGet("/auth/complete", async (HttpContext ctx, ITokenService tokenService,
     return Results.Content(html, "text/html");
 });
 
-// Danger-zone uid mutations run as browser navigations (not circuit API calls): the circuit's
-// loopback HttpClient can't carry a rewritten/cleared anisync_uid cookie back to the browser, so
-// these full-page GETs (mirroring /Auth/Logout) are where Set-Cookie actually reaches it. Credential
-// secrecy is unaffected — the new uid stays in the HttpOnly cookie, never the page or localStorage.
-app.MapGet("/auth/regenerate", async (HttpContext ctx, ITokenService tokenService, IConfigStore configStore) =>
-{
-    var returnUrl = ctx.Request.Query["returnUrl"].ToString();
-    if (string.IsNullOrEmpty(returnUrl) || !returnUrl.StartsWith('/') || returnUrl.StartsWith("//"))
-        returnUrl = "/advanced";
+// Danger-zone uid mutations. These run as same-origin POST fetches from the real browser page (not the
+// circuit's loopback HttpClient, which can't carry a rewritten/cleared anisync_uid cookie back to the
+// browser) so Set-Cookie actually reaches it; the client reloads afterward and the circuit re-derives
+// the credential from the (new/absent) cookie. Credential secrecy is unaffected — the uid stays in the
+// HttpOnly cookie, never the page. CSRF: POST (so a GET <img>/link can't trigger them) + the same
+// X-Requested-With same-origin proof CsrfOrAjaxFilter uses (a cross-origin page can't set that header
+// without a CORS preflight these routes refuse, and SameSite=Lax wouldn't send the cookie cross-site
+// anyway). Minimal-API endpoints don't run the MVC CsrfOrAjaxFilter, so the check is inline here.
+static bool IsSameOriginAjax(HttpContext ctx) =>
+    string.Equals(ctx.Request.Headers["X-Requested-With"].ToString(), "XMLHttpRequest", StringComparison.Ordinal);
 
+app.MapPost("/auth/regenerate", async (HttpContext ctx, ITokenService tokenService, IConfigStore configStore) =>
+{
+    if (!IsSameOriginAjax(ctx)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     var (_, uid) = await tokenService.ResolveCurrentAsync(configStore);
     if (!string.IsNullOrEmpty(uid))
     {
@@ -493,24 +497,30 @@ app.MapGet("/auth/regenerate", async (HttpContext ctx, ITokenService tokenServic
         if (!string.IsNullOrEmpty(newUid))
             tokenService.SetPrimaryUidCookie(newUid); // session AccessToken carries no uid; only the cookie needs rewriting
     }
-    return Results.Redirect(returnUrl);
+    return Results.NoContent();
 });
 
-// Rotate the uid (kills every existing URL/credential everywhere) then sign THIS browser out too —
-// reuse /Auth/Logout for the session + cookie teardown and its themed bridge.
-app.MapGet("/auth/signout-everywhere", async (HttpContext ctx, ITokenService tokenService, IConfigStore configStore) =>
+// Rotate the uid (kills every existing URL/credential everywhere) then sign THIS browser out:
+// RemoveCachedUser resolves the token from the session blob (not the rotated uid), so it still clears
+// the in-memory cache + session + uid cookie.
+app.MapPost("/auth/signout-everywhere", async (HttpContext ctx, ITokenService tokenService, IConfigStore configStore) =>
 {
+    if (!IsSameOriginAjax(ctx)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     var (_, uid) = await tokenService.ResolveCurrentAsync(configStore);
     if (!string.IsNullOrEmpty(uid)) await configStore.RotateUidAsync(uid);
-    return Results.Redirect("/Auth/Logout?returnUrl=/");
+    await tokenService.RemoveCachedUser();
+    return Results.NoContent();
 });
 
-// Delete the config row then sign this browser out (cookie + session cleared by /Auth/Logout).
-app.MapGet("/auth/delete", async (HttpContext ctx, ITokenService tokenService, IConfigStore configStore) =>
+// Delete the config row then sign this browser out. RemoveCachedUser runs first (the session still holds
+// the token blob, so it resolves and clears session + cookie) before the row is gone.
+app.MapPost("/auth/delete", async (HttpContext ctx, ITokenService tokenService, IConfigStore configStore) =>
 {
+    if (!IsSameOriginAjax(ctx)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     var (_, uid) = await tokenService.ResolveCurrentAsync(configStore);
+    await tokenService.RemoveCachedUser();
     if (!string.IsNullOrEmpty(uid)) await configStore.DeleteAsync(uid);
-    return Results.Redirect("/Auth/Logout?returnUrl=/");
+    return Results.NoContent();
 });
 
 // Blazor UI.
