@@ -113,6 +113,25 @@ namespace AnimeList.Controllers
             }
         }
 
+        // The user's "Group anime seasons" preference, from their stored config. Trakt-primary accounts
+        // always group (no per-cour anime tracker, so the franchise-level IMDb id is the only sensible
+        // target); anonymous → ungrouped. Mirrors DiscoverController's groupSeasons computation.
+        private async Task<bool> ResolveSeasonGroupingAsync()
+        {
+            try
+            {
+                var (token, uid) = await _tokenService.ResolveCurrentAsync(_configStore);
+                if (token?.anime_service == AnimeService.Trakt) return true;
+                if (string.IsNullOrEmpty(uid)) return false;
+                var cfg = await GetConfigByUidAsync(uid, _configStore);
+                return cfg?.enableSeasonGrouping == true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         /// <summary>
         /// Cross-service id resolution. Pass any prefixed id (<c>tt…</c>, <c>mal:N</c>,
         /// <c>kitsu:N</c>, <c>anilist:N</c>, <c>tmdb:N</c>) and get back the full mapping
@@ -672,22 +691,31 @@ namespace AnimeList.Controllers
                 var hasSearch = !string.IsNullOrWhiteSpace(search);
                 var listForCall = hasSearch ? ListType.Search : listType.Value;
 
+                // Honour the user's "Group anime seasons" preference (enableSeasonGrouping; Trakt-primary
+                // accounts always group — they have no per-cour tracker). When OFF, anime come back with
+                // native per-cour ids (anilist:/mal:/kitsu:) instead of franchise-level IMDb ids — matching
+                // the original DiscoverController, which the port had dropped (defaulting to grouped, so the
+                // dashboard returned tt ids regardless of the setting). Search is always ungrouped.
+                var groupSeasons = await ResolveSeasonGroupingAsync();
+                var groupSeasonsForCall = !hasSearch && groupSeasons;
+
                 // Only the FIRST page feeds the dashboard tiles — cache that, keyed on the
                 // list type (NOT the page), and only when non-empty. Deep pagination (the
                 // Discover page's infinite scroll) is served live, never cached. Search is
                 // never cached (varied + relevance-ranked); season is folded into the key so
-                // two Seasonal windows ("Spring 2026" vs "Winter 2026") can't collide.
-                // Mirrors the original's dashboard-shelf cache.
+                // two Seasonal windows ("Spring 2026" vs "Winter 2026") can't collide. The grouping flag
+                // is in the key too, so the grouped / ungrouped variants stay separate (each still shared
+                // across users with that setting). Mirrors the original's dashboard-shelf cache.
                 var isFirstPage = string.IsNullOrEmpty(skip) || skip == "0";
-                var cacheKey = $"discover:{kind?.ToLowerInvariant()}:{service}:{genre}:{season}:{sort}:{hideAdult}";
+                var cacheKey = $"discover:{kind?.ToLowerInvariant()}:{service}:{genre}:{season}:{sort}:{hideAdult}:{groupSeasonsForCall}";
                 if (!hasSearch && isFirstPage && _discoverCache.TryGetValue(cacheKey, out List<Meta> cached) && cached is { Count: > 0 })
                     return new JsonResult(new MetaListResponse(cached));
 
                 var metas = service switch
                 {
-                    AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, listForCall, skip, genre: genre, search: search, sort: sort, season: season, hideAdult: hideAdult),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, listForCall, skip, genre: genre, search: search, sort: sort, season: season, hideAdult: hideAdult),
-                    _ => await _anilistService.GetAnimeListAsync(null, listForCall, skip, genre: genre, search: search, sort: sort, season: season, hideAdult: hideAdult),
+                    AnimeService.Kitsu => await _kitsuService.GetAnimeListAsync(null, listForCall, skip, genre: genre, search: search, sort: sort, season: season, groupSeasons: groupSeasonsForCall, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(null, listForCall, skip, genre: genre, search: search, sort: sort, season: season, groupSeasons: groupSeasonsForCall, hideAdult: hideAdult),
+                    _ => await _anilistService.GetAnimeListAsync(null, listForCall, skip, genre: genre, search: search, sort: sort, season: season, groupSeasons: groupSeasonsForCall, hideAdult: hideAdult),
                 };
 
                 // Relevance re-rank for search — the same 0.4 Jaccard threshold the web
