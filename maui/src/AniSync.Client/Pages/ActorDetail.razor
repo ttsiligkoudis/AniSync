@@ -25,7 +25,23 @@
 
     @if (_loading)
     {
-        <p class="hint-text">Loading…</p>
+        @* Skeleton mirroring the loaded layout (Movies + Series poster groups) instead of a bare
+           "Loading…" line — same idiom as the other poster pages (StaffDetail / StudioDetail). *@
+        @foreach (var group in new[] { "Movies", "Series" })
+        {
+            <section class="discover-group">
+                <h2 class="discover-group-title">@group</h2>
+                <div class="library-grid">
+                    @for (var i = 0; i < 12; i++)
+                    {
+                        <div class="library-card library-card-skeleton">
+                            <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
+                            <span class="library-card-skeleton-line"></span>
+                        </div>
+                    }
+                </div>
+            </section>
+        }
     }
     else if (_credits is null || (_credits.Movies.Count == 0 && _credits.Series.Count == 0))
     {
