@@ -20,32 +20,21 @@
    pick up its column gap (var(--space-5)) — same as Discover. A wrapping <section> would collapse
    them into one flex child and the page would render with no spacing between the filter bar and grid. *@
 
-@* Gate on ConfigHydrated (the credential read on the interactive pass) — NOT prerendered. The grid is
-   only rendered once the credential is known, so it loads once interactively instead of prerendering
-   live posters and re-flashing them on hydration. Until then a neutral skeleton shows (prerender +
-   pre-hydration); only when we KNOW there's no credential do we show "Sign in". *@
-    @if (!State.ConfigHydrated)
-    {
-        <h1 class="dashboard-section-title">Library</h1>
-        <div class="library-grid">
-            @for (var i = 0; i < 12; i++)
-            {
-                <div class="library-card library-card-skeleton">
-                    <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
-                    <span class="library-card-skeleton-line"></span>
-                    <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
-                </div>
-            }
-        </div>
-    }
-    else if (string.IsNullOrEmpty(State.StreamConfig))
+@* Render the signed-in layout (tabs + filter + grid) as soon as we KNOW the user is signed in — on the
+   web head that's from the first prerendered byte (the anisync_uid cookie is server-visible, so Bootstrap
+   seeds the session + credential) and it stays true across the interactive remount (verdict bridged via
+   PersistentComponentState), so the tabs never blink in. The grid itself holds a skeleton until the data
+   loads on the interactive pass — we still don't fetch posters during prerender (that was the re-flash).
+   Only a RESOLVED-anonymous visitor (ConfigHydrated, no credential) sees "Sign in"; the bare tab-less
+   skeleton is just the brief unknown window (native pre-hydration, or before the session resolves). *@
+    @if (State.ConfigHydrated && string.IsNullOrEmpty(State.StreamConfig))
     {
         <h1 class="dashboard-section-title">Library</h1>
         <p class="hint-text">
             <a href="/login">Sign in</a> to see your tracked library here.
         </p>
     }
-    else
+    else if (State.LoggedIn || !string.IsNullOrEmpty(State.StreamConfig))
     {
         @* List-type tabs lead the page. Each is an anchor — clicking navigates with
            the selected list. The active genre flows through so switching from
@@ -91,7 +80,9 @@
         </form>
 
         <div id="library-results-pane">
-            @if (_loading)
+            @* Skeleton until the first load lands (_loaded) — covers prerender + the pre-fetch interactive
+               window — and again whenever a tab/filter switch is loading. *@
+            @if (_loading || !_loaded)
             {
                 <div class="library-grid">
                     @for (var i = 0; i < 12; i++)
@@ -108,6 +99,22 @@
             {
                 <PosterGrid Items="_items" Variant="grid" VideoLinks="@(!IsAnime)"
                             EmptyMessage="@_emptyMessage" />
+            }
+        </div>
+    }
+    else
+    {
+        @* Unknown sign-in state (native pre-hydration, or before the web session resolves) — neutral,
+           tab-less skeleton until LoggedIn / the credential settles one way or the other. *@
+        <h1 class="dashboard-section-title">Library</h1>
+        <div class="library-grid">
+            @for (var i = 0; i < 12; i++)
+            {
+                <div class="library-card library-card-skeleton">
+                    <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
+                    <span class="library-card-skeleton-line"></span>
+                    <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                </div>
             }
         </div>
     }
@@ -211,19 +218,20 @@
 
     private async Task Refresh()
     {
-        // Gate on ConfigHydrated (set once the credential is read on the interactive pass) so the grid
-        // is NOT fetched/rendered during prerender — the page shows its skeleton there and loads once,
-        // interactively. Prerendering the live grid then re-rendering it on hydration reloaded every
-        // poster. ConfigHydrated is false during prerender, so this returns; the load runs after the
-        // credential resolves.
-        if (!State.ConfigHydrated || string.IsNullOrEmpty(State.StreamConfig)) return;
-
+        // Compute the surface state (active tab, filter inputs, title) FIRST so the tabs + filter bar
+        // render correctly on prerender even though the grid load is deferred — otherwise a deep-linked
+        // tab would paint "Watching" active on prerender then jump to the real tab on the interactive load.
         _status = ParseStatus(List);
         _hasSearch = !string.IsNullOrWhiteSpace(Search);
         _hasGenre = IsAnime && !string.IsNullOrWhiteSpace(Genre);
         _searchInput = Search ?? "";
         _genreInput = IsAnime ? (Genre ?? "") : "";
         _pageTitle = BuildTitle();
+
+        // Don't fetch during prerender (no poster re-flash) or without a credential — the grid stays on
+        // its skeleton; the load runs on the interactive pass once ConfigHydrated (kicked from
+        // OnStateChanged when the credential resolves).
+        if (!State.ConfigHydrated || string.IsNullOrEmpty(State.StreamConfig)) return;
 
         await Load();
     }
