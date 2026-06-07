@@ -22,7 +22,7 @@
                 </svg>
             </button>
             <h2 class="dash-modal-title" id="dash-modal-title">Customize dashboard</h2>
-            <p class="dash-modal-subtitle">Drag to reorder sections and choose what shows. Synced to your account.</p>
+            <p class="dash-modal-subtitle">Drag to reorder sections and choose what shows. @(State.LoggedIn ? "Synced to your account." : "Saved on this device.")</p>
             <ul class="dash-modal-list" @ref="_listRef">
                 @foreach (var entry in _draft.Where(e => _present.Contains(e.Key)))
                 {
@@ -113,8 +113,22 @@
     {
         _open = false;
         State.SetDashLayout(_draft);
-        // Persist to the account so the layout follows the user across devices (best-effort).
-        if (State.LoggedIn) await Api.SaveDashboardLayoutAsync(DashboardLayout.ToJson(_draft));
+        var json = DashboardLayout.ToJson(_draft);
+        // Persist (best-effort): signed-in → the account (follows across devices); anonymous →
+        // localStorage so a logged-out visitor's layout still survives a reload.
+        if (State.LoggedIn)
+        {
+            await Api.SaveDashboardLayoutAsync(json);
+        }
+        else
+        {
+            try
+            {
+                var js = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/dashboard.js");
+                await js.InvokeVoidAsync("setLayout", json);
+            }
+            catch { /* private mode / no JS — layout stays for this session only */ }
+        }
     }
 
     private void Reset() => _draft = DashboardLayout.Default();

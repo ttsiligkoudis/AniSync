@@ -7,3 +7,13 @@
 export function setDashPage(on) {
     document.body.classList.toggle('dash-page', !!on);
 }
+
+// Anonymous dashboard layout (the Customize modal's reorder/hide). Signed-in users persist to their
+// account instead; this localStorage copy lets a logged-out visitor's customisation survive a reload.
+const LAYOUT_KEY = 'anisync.dashLayout';
+export function getLayout() {
+    try { return localStorage.getItem(LAYOUT_KEY); } catch (_) { return null; }
+}
+export function setLayout(json) {
+    try { localStorage.setItem(LAYOUT_KEY, json); } catch (_) { /* private mode */ }
+}
