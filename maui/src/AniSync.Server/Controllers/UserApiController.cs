@@ -977,47 +977,13 @@ namespace AnimeList.Controllers
                 if (string.IsNullOrEmpty(tokenData?.access_token))
                     return Unauthorized(new ApiError("config has no primary token"));
 
-                // 18+ gate from the user's site preferences. Honored on the
-                // external API surface too so a programmatic client respects
-                // the same toggle the web app does. ResolvedConfig is the raw
-                // header string; ResolveConfigAsync decodes it (v3 inline or
-                // v5 store-backed) into the Configuration object that carries
-                // the flag bits.
+                // The shelf is the same Watching set as the /library Current grid, just capped for a
+                // scroll row — so it shares the exact merged fan-out (primary + linked secondaries, with
+                // the user's season-grouping / hide-unaired / 18+ prefs applied) via GetMergedUserListAsync.
+                // ResolvedConfig is the raw header string; ResolveConfigAsync decodes it (v3 inline or v5
+                // store-backed) into the Configuration that carries the flag bits.
                 var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
-                var hideAdult = configuration?.showAdultContent != true;
-                // Honour "Hide unaired anime from Watching" — Continue watching reads the Current/Watching
-                // list, the one list the flag applies to, so an unaired title the user added stays off the
-                // shelf the same way it does in the library. Mirrors the List endpoint below.
-                var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
-                // Honour "Group anime seasons" so Continue watching uses native per-cour ids
-                // (anilist:/mal:/kitsu:) when it's off — was defaulting to grouped IMDb (tt) ids because
-                // GetAnimeListAsync's groupSeasons defaults to true. Mirrors the List endpoint below.
-                var groupSeasons = configuration?.enableSeasonGrouping == true;
-
-                // Fan out to the primary + every healthy linked secondary (deduped), exactly like the
-                // /library List endpoint and the MVC dashboard's ContinueWatchingData — so a
-                // Currently-Watching title the user tracks only on a linked AniList/MAL/Kitsu surfaces on
-                // the shelf the same way it does in the library, instead of going missing because it isn't
-                // on their primary. Falls back to the primary only when the uid can't be resolved (v3
-                // inline config).
-                var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
-                List<Meta> metas;
-                if (!string.IsNullOrEmpty(uid))
-                {
-                    metas = await _mergedListService.GetMergedListAsync(
-                        tokenData, uid, ListType.Current,
-                        genre: null, groupSeasons: groupSeasons,
-                        hideUnreleased: hideUnreleased, hideAdult: hideAdult) ?? [];
-                }
-                else
-                {
-                    metas = (tokenData.anime_service switch
-                    {
-                        AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                        AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                        _ => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                    }) ?? [];
-                }
+                var metas = await GetMergedUserListAsync(tokenData, configuration, ListType.Current);
 
                 return new JsonResult(new ContinueWatchingResponse(
                     Primary: tokenData.anime_service.ToString(),
@@ -1028,6 +994,38 @@ namespace AnimeList.Controllers
                 _logger.LogError(ex, "API ContinueWatching failed.");
                 return StatusCode(500, new ApiError("continue-watching lookup failed"));
             }
+        }
+
+        /// <summary>
+        /// The one user-list fetch behind both the dashboard Continue watching shelf
+        /// (<see cref="ContinueWatching"/>) and the /library grid (<see cref="List"/>): fan out to the
+        /// primary + every healthy linked secondary (deduped) via <see cref="IMergedListService"/> — the
+        /// same merge the MVC <c>LibraryController</c>/dashboard use — so every list surface shows the same
+        /// entries. Season-grouping / hide-unaired / 18+ all come from the resolved <paramref
+        /// name="configuration"/> so the surfaces can't filter differently. Falls back to the primary
+        /// service alone only when the uid can't be resolved (v3 inline config, no linked secondaries to
+        /// merge anyway). The callers post-process: the shelf caps the result, the grid sorts/searches it.
+        /// </summary>
+        private async Task<List<Meta>> GetMergedUserListAsync(
+            TokenData tokenData, Configuration configuration, ListType listType, string genre = null)
+        {
+            var groupSeasons = configuration?.enableSeasonGrouping == true;
+            var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
+            var hideAdult = configuration?.showAdultContent != true;
+
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+            if (!string.IsNullOrEmpty(uid))
+            {
+                return await _mergedListService.GetMergedListAsync(
+                    tokenData, uid, listType, genre, groupSeasons, hideUnreleased, hideAdult) ?? [];
+            }
+
+            return (tokenData.anime_service switch
+            {
+                AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, genre: genre, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, genre: genre, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, genre: genre, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+            }) ?? [];
         }
 
         /// <summary>
@@ -1059,33 +1057,12 @@ namespace AnimeList.Controllers
                     _ => ListType.Current,
                 };
 
+                // Same merged fan-out the dashboard Continue watching shelf uses (see
+                // GetMergedUserListAsync) — primary + linked secondaries, deduped, with the user's
+                // season-grouping / hide-unaired / 18+ prefs applied — so the library grid and the shelf
+                // never drift. genre is an in-list discover filter threaded straight through.
                 var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
-                var hideAdult = configuration?.showAdultContent != true;
-                var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
-                var groupSeasons = configuration?.enableSeasonGrouping == true;
-
-                // Fan out to the primary + every healthy linked secondary (deduped) so the library
-                // surfaces anime the user tracks on a linked AniList/MAL/Kitsu too — porting the MVC
-                // LibraryController.Page (MergedListService is shared with the dashboard shelf). Falls
-                // back to the primary service only when the uid can't be resolved (v3 inline config).
-                var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
-                List<Meta> metas;
-                if (!string.IsNullOrEmpty(uid))
-                {
-                    var merged = await _mergedListService.GetMergedListAsync(
-                        tokenData, uid, listType, genre, groupSeasons, hideUnreleased, hideAdult);
-                    metas = merged?.ToList() ?? new List<Meta>();
-                }
-                else
-                {
-                    var single = tokenData.anime_service switch
-                    {
-                        AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideAdult: hideAdult),
-                        AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideAdult: hideAdult),
-                        _ => await _kitsuService.GetAnimeListAsync(tokenData, listType, groupSeasons: groupSeasons, hideAdult: hideAdult),
-                    };
-                    metas = single?.ToList() ?? new List<Meta>();
-                }
+                var metas = await GetMergedUserListAsync(tokenData, configuration, listType, genre);
 
                 // Search → relevance-ranked (ScoreMatch >= 0.4); otherwise alphabetical. Mirrors
                 // LibraryController.Page so the API and the MVC view agree.
