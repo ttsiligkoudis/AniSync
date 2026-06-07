@@ -739,9 +739,11 @@ namespace AnimeList.Controllers
             {
                 var hasSearch = !string.IsNullOrWhiteSpace(search);
                 var hasGenre = !string.IsNullOrWhiteSpace(genre);
-                // Only the bare mode browse feeds the dashboard tiles / caches; a genre or
-                // search filter is varied, so those bypass the first-page cache and serve live.
-                var cacheable = !hasSearch && !hasGenre;
+                // Only the bare, PUBLIC mode browse feeds the dashboard tiles / shared cache. A genre or
+                // search filter is varied, and "recommended" ("For You") is per-user — both bypass the
+                // first-page cache and serve live. Caching recommended here would be a cross-user leak: its
+                // cache key carries no uid, so one user's recommendations would be served to everyone else.
+                var cacheable = !hasSearch && !hasGenre && mode != "recommended";
                 var isFirstPage = string.IsNullOrEmpty(skip) || skip == "0";
                 var cacheKey = $"discvideo:{type}:{mode}:{limit}";
                 if (cacheable && isFirstPage && _discoverCache.TryGetValue(cacheKey, out List<Meta> cachedVideo) && cachedVideo is { Count: > 0 })
