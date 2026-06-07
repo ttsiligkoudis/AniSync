@@ -985,15 +985,19 @@ namespace AnimeList.Controllers
                 // the flag bits.
                 var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
                 var hideAdult = configuration?.showAdultContent != true;
+                // Honour "Hide unaired anime from Watching" — Continue watching reads the Current/Watching
+                // list, the one list the flag applies to, so an unaired title the user added stays off the
+                // shelf the same way it does in the library. Mirrors the List endpoint below.
+                var hideUnreleased = configuration?.hideUnreleasedFromWatching == true;
                 // Honour "Group anime seasons" so Continue watching uses native per-cour ids
                 // (anilist:/mal:/kitsu:) when it's off — was defaulting to grouped IMDb (tt) ids because
                 // GetAnimeListAsync's groupSeasons defaults to true. Mirrors the List endpoint below.
                 var groupSeasons = configuration?.enableSeasonGrouping == true;
                 var metas = tokenData.anime_service switch
                 {
-                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideAdult: hideAdult),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideAdult: hideAdult),
-                    _ => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideAdult: hideAdult),
+                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    _ => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
                 };
 
                 return new JsonResult(new ContinueWatchingResponse(
