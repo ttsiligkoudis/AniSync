@@ -151,6 +151,7 @@
     private bool _hasSearch;
     private bool _hasGenre;
     private bool _loading;
+    private bool _loaded;   // a successful Load() has populated the grid for the current view
     private IReadOnlyList<MetaDto> _items = Array.Empty<MetaDto>();
     private string _pageTitle = "Library · AniSync";
     private string _emptyMessage = "";
@@ -261,6 +262,7 @@
 
         _emptyMessage = BuildEmptyMessage();
         _loading = false;
+        _loaded = true;
         StateHasChanged();
     }
 
@@ -376,14 +378,22 @@
 
     private async void OnStateChanged()
     {
-        // Reload only on a genuine media-type switch, and only once media types have hydrated — the
-        // cascade of hydration Changed events (config credential, media-type prefs) fires while
-        // State.MediaType may still be the transient default, and reloading on that would refetch the
-        // already-shown list (the "results render twice" double) or briefly load the wrong surface.
+        // Reload on a genuine media-type switch (once media types have hydrated — the cascade of
+        // hydration Changed events fires while State.MediaType may still be the transient default, and
+        // reloading on that would refetch the already-shown list or briefly load the wrong surface).
         if (State.MediaTypesHydrated && _surfaceMediaType != State.MediaType)
         {
             _surfaceMediaType = State.MediaType;
             _traktConfigured = null;   // re-derive per surface (anime path ignores it)
+            await InvokeAsync(Refresh);
+        }
+        // First load once the credential resolves. The initial Refresh (from OnParametersSet) early-
+        // returns while ConfigHydrated is still false on the prerender/initial pass; when MainLayout
+        // flips it true this Changed event must kick the load — otherwise the pills render over an empty
+        // grid that only fills after a manual Search (Discover avoids this via its _appliedKey trigger).
+        // Guarded by _loaded so it fires exactly once, and mirrors Refresh's own gate.
+        else if (!_loaded && State.MediaTypesHydrated && State.ConfigHydrated && !string.IsNullOrEmpty(State.StreamConfig))
+        {
             await InvokeAsync(Refresh);
         }
         else
