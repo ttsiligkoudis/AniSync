@@ -28,14 +28,15 @@
                     <span class="dashboard-section-actions stats-group-actions">
                         <span class="dashboard-section-link-muted">via AniList</span>
                         @* Info popover (click-driven in the web via inline JS; markup
-                           rendered here for parity — the toggle has no Blazor wiring). *@
-                        <span class="dashboard-stats-info">
+                           rendered here for parity. Click-driven via Blazor (toggles .is-open, which the
+                           CSS reveals); the refresh link re-fetches the AniList stats. *@
+                        <span class="dashboard-stats-info @(_infoOpen ? "is-open" : "")">
                             <button class="dashboard-stats-info-btn"
                                     type="button"
                                     aria-label="About these stats"
-                                    aria-expanded="false"
+                                    aria-expanded="@(_infoOpen ? "true" : "false")"
                                     aria-controls="dashboardStatsInfoTooltip"
-                                    data-stats-info-toggle>
+                                    @onclick="() => _infoOpen = !_infoOpen">
                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <circle cx="12" cy="12" r="10"></circle>
                                     <line x1="12" y1="16" x2="12" y2="12"></line>
@@ -48,7 +49,7 @@
                                 immediate refresh, click "Update Stats" on
                                 <a href="https://anilist.co/settings/lists" target="_blank" rel="noopener noreferrer">AniList's list settings</a>
                                 and then
-                                <a href="#" data-stats-refresh-link>refresh your stats</a>.
+                                <a href="#" @onclick="RefreshAnimeStatsAsync" @onclick:preventDefault>refresh your stats</a>.
                             </span>
                         </span>
                     </span>
@@ -169,6 +170,11 @@
     private TraktUserStatsDto? _trakt;
     private bool _loading = true;
 
+    // Stats-info popover open state (the web used inline JS; this is the Blazor-native toggle — the CSS
+    // reveals the tooltip via .dashboard-stats-info.is-open).
+    private bool _infoOpen;
+    private bool _refreshing;
+
     // While loading we don't yet know which trackers returned data, so predict the groups
     // from the enabled media types (anime → AniList row, movies/series → Trakt row). Stats are
     // login-gated (they come from linked accounts), so an anonymous visitor shows no skeleton.
@@ -212,6 +218,19 @@
     }
 
     private void OnFilterChanged() => StateHasChanged();
+
+    // "refresh your stats" link in the popover — re-fetch the AniList stats (the server re-queries
+    // AniList; after the user clicks "Update Stats" there this picks up the recomputed numbers). Closes
+    // the popover and guards against double-clicks while the fetch is in flight.
+    private async Task RefreshAnimeStatsAsync()
+    {
+        if (_refreshing) return;
+        _refreshing = true;
+        _infoOpen = false;
+        StateHasChanged();
+        try { _anime = await Api.AnilistStatsAsync(); }
+        finally { _refreshing = false; StateHasChanged(); }
+    }
 
     public void Dispose() => State.Changed -= OnFilterChanged;
 }
