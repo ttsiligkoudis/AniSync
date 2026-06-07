@@ -79,6 +79,32 @@ namespace AnimeList.Controllers
                 return StatusCode(500, new ApiError("lookup failed"));
             }
         }
+
+        /// <summary>A person's filmography keyed by their Trakt slug (e.g. "ray-lui-443355") — the form
+        /// the video detail cast cards link with. The /actors/tmdb/{id} sibling just bridges a TMDB id to
+        /// this same slug lookup first. Two path segments ("actors/{slug}") vs the tmdb route's three, so
+        /// they don't collide.</summary>
+        [HttpGet("actors/{slug}")]
+        [ProducesResponseType(typeof(ActorCreditsResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> ActorBySlug(string slug)
+        {
+            if (string.IsNullOrWhiteSpace(slug))
+                return new JsonResult(new ActorCreditsResponse(slug, null, null, [], []));
+            try
+            {
+                var (name, image, items) = await _trakt.GetPersonCreditsAsync(slug);
+                var metas = items.ToVideoMetas();
+                return new JsonResult(new ActorCreditsResponse(
+                    slug, name, image,
+                    metas.Where(m => m.type == MetaType.movie.ToString()).ToList(),
+                    metas.Where(m => m.type == MetaType.series.ToString()).ToList()));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API ActorBySlug failed (slug={Slug}).", slug);
+                return StatusCode(500, new ApiError("lookup failed"));
+            }
+        }
     }
 
     /// <summary>One page of the actor directory.</summary>

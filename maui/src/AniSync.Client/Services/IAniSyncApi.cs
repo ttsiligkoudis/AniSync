@@ -31,6 +31,8 @@ public interface IAniSyncApi
     Task<StaffMediaResponse> StaffMediaAsync(int staffId, string? skip = null, CancellationToken ct = default);
     Task<ActorsListResponse> ActorsAsync(int page = 1, string? search = null, CancellationToken ct = default);
     Task<ActorCreditsResponse?> ActorCreditsAsync(int tmdbId, CancellationToken ct = default);
+    /// <summary>Filmography by Trakt person slug (e.g. "ray-lui-443355") — what the video detail cast cards link with.</summary>
+    Task<ActorCreditsResponse?> ActorCreditsBySlugAsync(string slug, CancellationToken ct = default);
     /// <summary>The movies/series Discover mode pills (server-authoritative, Trakt-gated) — /api/v1/discover/video-modes.</summary>
     Task<IReadOnlyList<VideoModeDto>> VideoModesAsync(CancellationToken ct = default);
     Task<SeasonStatsResponse?> SeasonStatsAsync(CancellationToken ct = default);
