@@ -52,20 +52,13 @@
         try
         {
             // Hydrate the config credential once at startup so the dashboard, Library and Watch pages
-            // authenticate without a trip through Settings. On the web head the credential is derived
-            // server-side from the authenticated anisync_uid (no localStorage round-trip, so no credential
-            // skeleton, and it never leaves the server). ResolveCredentialAsync returns null on native and
-            // for web sessions it can't resolve, so we fall back to the stored credential.
+            // authenticate without a trip through Settings. The store abstracts the source: on the web
+            // head it's derived server-side from the authenticated anisync_uid cookie (no localStorage, so
+            // no credential skeleton and nothing XSS-readable); on native it's the secure-stored credential.
             if (string.IsNullOrEmpty(State.StreamConfig))
             {
-                var derived = await PrerenderSession.ResolveCredentialAsync();
-                if (!string.IsNullOrEmpty(derived))
-                    State.SetStreamConfig(derived);
-                else
-                {
-                    var saved = await Store.GetAsync(ISecureStore.ConfigKey);
-                    if (!string.IsNullOrEmpty(saved)) State.SetStreamConfig(saved);
-                }
+                var saved = await Store.GetAsync(ISecureStore.ConfigKey);
+                if (!string.IsNullOrEmpty(saved)) State.SetStreamConfig(saved);
             }
 
             await HydrateMediaTypesAsync();

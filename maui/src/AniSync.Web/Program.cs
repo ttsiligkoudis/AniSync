@@ -448,9 +448,12 @@ app.MapGet("/auth/complete", async (HttpContext ctx, ITokenService tokenService,
         ? AnimeList.Utils.EncodeV5Config(uid)
         : null;
 
-    var op = string.IsNullOrEmpty(segment)
-        ? "localStorage.removeItem('anisync.config');"
-        : $"localStorage.setItem('anisync.config', {System.Text.Json.JsonSerializer.Serialize(segment)});";
+    // Phase 2: the credential is NEVER written to localStorage — the web circuit derives it
+    // server-side from the HttpOnly anisync_uid cookie (WebSecureStore → ResolveCredentialAsync),
+    // so XSS can't lift it. This bridge now only shows the themed screen and lands in the app; the
+    // login/logout cookie was already set by AuthController / Auth/Logout before we got here. We also
+    // best-effort scrub any legacy 'anisync.config' a pre-Phase-2 client may still have stored.
+    var op = "localStorage.removeItem('anisync.config');";
     var nav = System.Text.Json.JsonSerializer.Serialize(returnUrl);
 
     // Dark, themed loading screen instead of the browser's blank white page — this
@@ -471,6 +474,43 @@ app.MapGet("/auth/complete", async (HttpContext ctx, ITokenService tokenService,
         $"<script>try{{{op}}}catch(e){{}}location.replace({nav});</script>" +
         $"<noscript>Done. <a href=\"{System.Net.WebUtility.HtmlEncode(returnUrl)}\">Continue</a>.</noscript></body></html>";
     return Results.Content(html, "text/html");
+});
+
+// Danger-zone uid mutations run as browser navigations (not circuit API calls): the circuit's
+// loopback HttpClient can't carry a rewritten/cleared anisync_uid cookie back to the browser, so
+// these full-page GETs (mirroring /Auth/Logout) are where Set-Cookie actually reaches it. Credential
+// secrecy is unaffected — the new uid stays in the HttpOnly cookie, never the page or localStorage.
+app.MapGet("/auth/regenerate", async (HttpContext ctx, ITokenService tokenService, IConfigStore configStore) =>
+{
+    var returnUrl = ctx.Request.Query["returnUrl"].ToString();
+    if (string.IsNullOrEmpty(returnUrl) || !returnUrl.StartsWith('/') || returnUrl.StartsWith("//"))
+        returnUrl = "/advanced";
+
+    var (_, uid) = await tokenService.ResolveCurrentAsync(configStore);
+    if (!string.IsNullOrEmpty(uid))
+    {
+        var newUid = await configStore.RotateUidAsync(uid);
+        if (!string.IsNullOrEmpty(newUid))
+            tokenService.SetPrimaryUidCookie(newUid); // session AccessToken carries no uid; only the cookie needs rewriting
+    }
+    return Results.Redirect(returnUrl);
+});
+
+// Rotate the uid (kills every existing URL/credential everywhere) then sign THIS browser out too —
+// reuse /Auth/Logout for the session + cookie teardown and its themed bridge.
+app.MapGet("/auth/signout-everywhere", async (HttpContext ctx, ITokenService tokenService, IConfigStore configStore) =>
+{
+    var (_, uid) = await tokenService.ResolveCurrentAsync(configStore);
+    if (!string.IsNullOrEmpty(uid)) await configStore.RotateUidAsync(uid);
+    return Results.Redirect("/Auth/Logout?returnUrl=/");
+});
+
+// Delete the config row then sign this browser out (cookie + session cleared by /Auth/Logout).
+app.MapGet("/auth/delete", async (HttpContext ctx, ITokenService tokenService, IConfigStore configStore) =>
+{
+    var (_, uid) = await tokenService.ResolveCurrentAsync(configStore);
+    if (!string.IsNullOrEmpty(uid)) await configStore.DeleteAsync(uid);
+    return Results.Redirect("/Auth/Logout?returnUrl=/");
 });
 
 // Blazor UI.

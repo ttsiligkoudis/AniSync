@@ -274,6 +274,13 @@
     private async Task DeleteAsync()
     {
         if (!await Confirm("Delete your configuration and sign out? Old install URLs stop working.")) return;
+        if (!Env.IsNative)
+        {
+            // Web: delete + clear the anisync_uid cookie on a real browser response (the circuit's
+            // loopback API can't), then sign out. Mirrors Logout's server hand-off.
+            Nav.NavigateTo($"{Env.ApiBaseUrl.TrimEnd('/')}/auth/delete", forceLoad: true);
+            return;
+        }
         if (await Api.DeleteConfigAsync()) await SignOutLocalAsync();
         else _dangerStatus = "Delete failed.";
     }
@@ -281,6 +288,13 @@
     private async Task RegenerateAsync()
     {
         if (!await Confirm("Issue a new install URL? Every existing install/API link using the old URL stops working immediately.")) return;
+        if (!Env.IsNative)
+        {
+            // Web: rotate via a browser round-trip so the rewritten anisync_uid cookie reaches the
+            // browser, then land back here — the circuit re-derives the new credential from the cookie.
+            Nav.NavigateTo($"{Env.ApiBaseUrl.TrimEnd('/')}/auth/regenerate?returnUrl=/advanced", forceLoad: true);
+            return;
+        }
         var result = await Api.RegenerateUidAsync();
         if (result is { Config: { Length: > 0 } cfg })
         {
@@ -295,6 +309,11 @@
     private async Task SignOutEverywhereAsync()
     {
         if (!await Confirm("Sign out on every device? The old install URL stops working everywhere.")) return;
+        if (!Env.IsNative)
+        {
+            Nav.NavigateTo($"{Env.ApiBaseUrl.TrimEnd('/')}/auth/signout-everywhere", forceLoad: true);
+            return;
+        }
         if (await Api.SignOutEverywhereAsync()) await SignOutLocalAsync();
         else _dangerStatus = "Sign-out failed.";
     }
