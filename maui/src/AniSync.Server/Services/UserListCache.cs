@@ -1,131 +1,52 @@
 using AnimeList.Models;
 using AnimeList.Services.Interfaces;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace AnimeList.Services
 {
+    /// <summary>
+    /// NOTE: no longer caches lists (see <see cref="IUserListCache"/>). The in-memory list cache + its
+    /// GetOrFetchAsync read path were removed; all that's left is the edit hook below. Kept under the old
+    /// name/interface so the existing <see cref="Invalidate"/> call sites (UserApiController /
+    /// MetaController / SyncService) don't churn.
+    /// </summary>
     public class UserListCache : IUserListCache
     {
-        private readonly IMemoryCache _cache;
         private readonly IWatchingCacheStore _watchingCache;
         private readonly IConfigStore _configStore;
         private readonly ILogger<UserListCache> _logger;
 
-        // 10 minutes — long enough that a Home → Library → Home navigation cycle
-        // is essentially free, short enough that out-of-band writes (scrobble
-        // webhooks from another device, edits the user made through the AniList
-        // website directly, etc.) can't sit stale forever. User-initiated saves
-        // through this app's UI invalidate explicitly so the TTL only really
-        // bounds cross-channel staleness.
-        private static readonly TimeSpan Ttl = TimeSpan.FromMinutes(10);
-
-        // The six per-user list types the dashboard + library pages read.
-        // Trending/Seasonal/Airing/Search are deliberately excluded — Trending
-        // and friends aren't user-scoped (they belong in a different cache if
-        // we ever add one), Search is query-shaped and unbounded.
-        private static readonly ListType[] CachedListTypes =
-        [
-            ListType.Current,
-            ListType.Completed,
-            ListType.Planning,
-            ListType.Paused,
-            ListType.Dropped,
-            ListType.Repeating,
-        ];
-
         public UserListCache(
-            IMemoryCache cache,
             IWatchingCacheStore watchingCache,
             IConfigStore configStore,
             ILogger<UserListCache> logger)
         {
-            _cache = cache;
             _watchingCache = watchingCache;
             _configStore = configStore;
             _logger = logger;
         }
 
-        public async Task<List<Meta>> GetOrFetchAsync(TokenData token, ListType listType,
-            bool groupSeasons, Func<Task<List<Meta>>> fetcher, bool bypassCache = false)
-        {
-            var userKey = GetUserKey(token);
-            // Skip the cache for anonymous users (no stable id) and for list types
-            // outside the cached set (search results, public catalogs). The caller
-            // gets the unwrapped fetcher result, so callers don't have to branch.
-            if (userKey == null || Array.IndexOf(CachedListTypes, listType) < 0)
-                return await fetcher() ?? [];
-
-            var key = BuildKey(token.anime_service, userKey, listType, groupSeasons);
-
-            if (bypassCache)
-            {
-                _cache.Remove(key);
-            }
-            else if (_cache.TryGetValue<List<Meta>>(key, out var cached) && cached != null)
-            {
-                return cached;
-            }
-
-            var fresh = await fetcher() ?? [];
-            _cache.Set(key, fresh, Ttl);
-            return fresh;
-        }
-
+        // Called on every in-app list edit (save / delete / bulk-save / linked-secondary fan-out). Marks
+        // this user's persistent watching cache stale so the next episode-dispatcher pass re-fetches their
+        // "Watching" set instead of using the pre-edit snapshot. Fire-and-forget + best-effort: a missed
+        // mark is self-correcting via the daily backstop refresh.
         public void Invalidate(TokenData token)
         {
-            var userKey = GetUserKey(token);
-            if (userKey == null) return;
-
-            // 12 removes per user (6 list types × 2 group-seasons states). Cheaper
-            // than tracking per-user key sets and avoids any threading subtleties
-            // around invalidation racing the next read.
-            foreach (var lt in CachedListTypes)
-            {
-                _cache.Remove(BuildKey(token.anime_service, userKey, lt, true));
-                _cache.Remove(BuildKey(token.anime_service, userKey, lt, false));
-            }
-
-            // Fire-and-forget the persistent watching-cache invalidation so the
-            // next episode dispatcher pass re-fetches this user's list instead
-            // of using the snapshot from before this edit. Best-effort: a missed
-            // mark is self-correcting (the daily backstop refresh catches up).
+            if (token == null || token.anonymousUser) return;
             _ = MarkWatchingStaleAsync(token);
-
-            _logger.LogDebug("UserListCache invalidated for {Service}:{UserKey}.",
-                token.anime_service, userKey);
         }
 
         private async Task MarkWatchingStaleAsync(TokenData token)
         {
             try
             {
-                if (token == null || token.anonymousUser) return;
                 var (uid, _) = await _configStore.FindUidByIdentityAsync(token);
                 if (!string.IsNullOrEmpty(uid))
-                {
                     await _watchingCache.MarkStaleAsync(uid);
-                }
             }
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "WatchingCacheStore.MarkStaleAsync failed (best-effort)");
             }
         }
-
-        // Identity preference order matches what each service exposes after auth:
-        // AniList + MAL surface user_id from the OAuth /me lookup, Kitsu carries
-        // username (its REST API keys lists off username, not numeric id). Falling
-        // back to username covers cases where user_id is null but username is
-        // present. Returning null means "don't cache" — anonymous Kitsu has neither.
-        private static string GetUserKey(TokenData token)
-        {
-            if (token == null || token.anonymousUser) return null;
-            if (!string.IsNullOrEmpty(token.user_id)) return "id:" + token.user_id;
-            if (!string.IsNullOrEmpty(token.username)) return "u:" + token.username;
-            return null;
-        }
-
-        private static string BuildKey(AnimeService svc, string userKey, ListType lt, bool groupSeasons) =>
-            $"userlist:{(int)svc}:{userKey}:{(int)lt}:{(groupSeasons ? 1 : 0)}";
     }
 }
