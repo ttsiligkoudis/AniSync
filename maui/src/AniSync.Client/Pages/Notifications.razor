@@ -69,7 +69,10 @@
 
 @if (_loading)
 {
-    <div class="notif-page-loader">Loading…</div>
+    <div class="page-loader" role="status" aria-live="polite">
+        <span class="page-loader-spinner" aria-hidden="true"></span>
+        <span class="sr-only">Loading…</span>
+    </div>
 }
 else if (_items.Count == 0)
 {
@@ -124,7 +127,9 @@ else
            DOM once we've reached the last page. *@
         @if (!_done)
         {
-            <div class="notif-page-loader" hidden="@(!_paging)">Loading…</div>
+            <div class="paginator-loader" hidden="@(!_paging)" aria-hidden="true">
+                <div class="paginator-loader-spinner"></div>
+            </div>
             <div class="notif-page-sentinel" @ref="_sentinel" aria-hidden="true"></div>
         }
     </div>
