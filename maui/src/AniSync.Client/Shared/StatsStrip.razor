@@ -197,6 +197,10 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // No account → no per-user stats; skip the /me/* calls entirely (the groups are LoggedIn-gated
+        // above, so the strip stays hidden anyway).
+        if (!State.LoggedIn) { _loading = false; return; }
+
         // Independent fetches — a missing Trakt/AniList link just drops that row. The component
         // renders the skeleton on its first pass (while this awaits), then fills on completion.
         var anime = Api.AnilistStatsAsync();

@@ -123,12 +123,17 @@ else
 
 @if (_animeEnabled)
 {
-    <DashboardShelf Title="@($"Continue watching{_animeSuffix}")"
-                    MediaType="anime"
-                    DashSection="anime-continue"
-                    SkeletonCount="6"
-                    ViewAllHref="/library?list=current&type=anime"
-                    Fetch="@(() => Api.ContinueWatchingAsync())" />
+    @* Continue watching is the user's own progress — only render (and fetch) it when signed in, so a
+       logged-out visitor doesn't briefly see the shelf skeleton before it self-hides on an empty fetch. *@
+    @if (State.LoggedIn)
+    {
+        <DashboardShelf Title="@($"Continue watching{_animeSuffix}")"
+                        MediaType="anime"
+                        DashSection="anime-continue"
+                        SkeletonCount="6"
+                        ViewAllHref="/library?list=current&type=anime"
+                        Fetch="@(() => Api.ContinueWatchingAsync())" />
+    }
 
     <DashboardShelf Title="@($"New Episodes Today{_animeSuffix}")"
                     MediaType="anime"
@@ -435,8 +440,24 @@ else
             return;
         }
 
-        // Anonymous / no stored config → no saved layout; the default order stands.
-        State.MarkDashLayoutResolved();
+        // Anonymous → read the layout the Customize modal saved to localStorage so a logged-out
+        // visitor's reorder/hide survives a reload; default order stands when nothing's stored. The
+        // shelves keep their skeleton until this resolves (gated on DashLayoutLoaded), so they paint
+        // once in the saved order rather than flashing the default then reordering.
+        _layoutLoaded = true;
+        try
+        {
+            _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/dashboard.js");
+            var json = await _js.InvokeAsync<string>("getLayout");
+            if (!string.IsNullOrWhiteSpace(json))
+                State.SetDashLayout(DashboardLayout.Merge(json));
+            else
+                State.MarkDashLayoutResolved();
+        }
+        catch
+        {
+            State.MarkDashLayoutResolved();
+        }
     }
 
     private async void OnStateChanged()
