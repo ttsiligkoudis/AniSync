@@ -32,6 +32,22 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+// Authenticate the HttpOnly anisync_uid cookie into HttpContext.User (presence-only; see
+// UidAuthenticationHandler). This is what lets the interactive circuit learn the signed-in uid via
+// AuthenticationStateProvider — so the web head derives the X-AniSync-Config credential server-side
+// instead of round-tripping localStorage. Additive: no endpoint requires authorization, so existing
+// (header-authenticated) API + addon routes are unaffected.
+builder.Services.AddAuthentication(o =>
+    {
+        o.DefaultAuthenticateScheme = UidAuthenticationHandler.SchemeName;
+        o.DefaultChallengeScheme = UidAuthenticationHandler.SchemeName;
+    })
+    .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, UidAuthenticationHandler>(
+        UidAuthenticationHandler.SchemeName, null);
+// Surfaces AuthenticationState as a cascading parameter and backs the server AuthenticationStateProvider
+// the circuit reads at connection time (no <CascadingAuthenticationState> wrapper needed).
+builder.Services.AddCascadingAuthenticationState();
+
 // ---- Shared client registrations (identical on both heads) ----
 builder.Services.AddScoped<AppState>();                 // session/nav/media-type/config state
 builder.Services.AddHttpContextAccessor();              // idempotent; WebPrerenderSession reads the anisync_uid cookie
@@ -348,6 +364,7 @@ app.UseRateLimiter();
 app.UseCors();                 // activates [EnableCors("AddonCors")] endpoints
 app.UseSession();
 app.UseAntiforgery();          // required by Blazor interactive components
+app.UseAuthentication();       // populates HttpContext.User from the anisync_uid cookie (AniSyncUid scheme)
 app.UseAuthorization();
 
 // Swagger UI at /api/docs; raw spec at /api/swagger/v1/swagger.json.
