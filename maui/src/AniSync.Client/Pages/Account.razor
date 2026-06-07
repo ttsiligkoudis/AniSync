@@ -135,7 +135,8 @@ else
         }
 
         // Resolve the credential: seeded server-side during prerender (from the anisync_uid cookie),
-        // else read from localStorage on the interactive pass. With no credential during prerender
+        // else resolved from the store on the interactive pass (cookie-derived on web; secure-store on
+        // native — never localStorage). With no credential during prerender
         // (anonymous / no cookie) stay on the loading skeleton and let the interactive pass resolve it —
         // don't commit the login surface server-side (a localStorage-only session would flash it).
         if (string.IsNullOrEmpty(State.StreamConfig))

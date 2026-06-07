@@ -36,17 +36,18 @@
         // Cookie-backed prerender: when the server can see the anisync_uid session cookie, render the
         // signed-in chrome from the first paint (and bridge that verdict to the interactive circuit via
         // PersistentComponentState) so a signed-in user never sees the signed-out chrome flash. No-op on
-        // native and when no cookie is present (then the localStorage hydration below decides).
+        // native and when no cookie is present (then the store-backed hydration below decides — the
+        // credential is cookie-derived on web, secure-store on native).
         PrerenderSession.Bootstrap(State, RendererInfo.IsInteractive);
     }
 
     protected override async Task OnInitializedAsync()
     {
-        // Prerender has no JS / localStorage, so it can't know whether a config credential is
-        // stored. Leave the session + media types un-hydrated there so the chrome renders
-        // neutral (no Sign in / Disconnect, no signed-out dashboard) rather than committing the
-        // signed-out state and flashing it to a signed-in user. Everything hydrates on the
-        // interactive pass below, where localStorage is readable.
+        // Prerender has no JS, so media-type prefs (localStorage) and the connected-services label
+        // can't be read there. Leave them un-hydrated so the chrome renders neutral rather than
+        // committing a wrong state and flashing it. (The signed-in verdict + credential ARE known on
+        // prerender via Bootstrap's cookie read above; this deferral is about the JS-backed bits.)
+        // They hydrate on the interactive pass below.
         if (!RendererInfo.IsInteractive) return;
 
         try

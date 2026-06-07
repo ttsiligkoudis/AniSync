@@ -40,14 +40,14 @@ public interface IPrerenderSession
     /// Web only: resolve the X-AniSync-Config credential from the server-side session identity — the
     /// authenticated <c>anisync_uid</c> (from the request cookie during prerender, or from
     /// AuthenticationStateProvider on the interactive circuit). Returns the v5 credential so the web head
-    /// never has to round-trip localStorage to authenticate API calls, removing the credential skeleton.
-    /// Returns null on native, or when no session can be resolved — the caller then falls back to the
-    /// stored credential (MainLayout's localStorage read), so this is always safe to call.
+    /// authenticates API calls without the credential ever living in localStorage (removing the credential
+    /// skeleton and keeping it out of XSS reach). This is the source WebSecureStore returns for the config
+    /// key. Returns null on native and when no session can be resolved, so it's always safe to call.
     /// </summary>
     Task<string?> ResolveCredentialAsync();
 }
 
-/// <summary>No-op (native / fallback): the normal localStorage hydration drives session state.</summary>
+/// <summary>No-op (native / fallback): the secure-store hydration in MainLayout drives session state.</summary>
 public sealed class NoOpPrerenderSession : IPrerenderSession
 {
     public void Bootstrap(AppState state, bool isInteractive) { }
