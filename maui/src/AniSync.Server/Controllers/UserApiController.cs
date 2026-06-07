@@ -985,9 +985,17 @@ namespace AnimeList.Controllers
                 var configuration = await ResolveConfigAsync(resolvedConfig, _configStore);
                 var metas = await GetMergedUserListAsync(tokenData, configuration, ListType.Current);
 
+                // Sort alphabetically (same comparer the /library Current grid uses) BEFORE the cap, so the
+                // shelf shows the same first-N titles the top of the library does — not an arbitrary 15 in
+                // the tracker's native list order.
+                var items = metas
+                    .OrderBy(m => m.name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                    .Take(limit)
+                    .ToList();
+
                 return new JsonResult(new ContinueWatchingResponse(
                     Primary: tokenData.anime_service.ToString(),
-                    Items: metas.Take(limit).ToList()));
+                    Items: items));
             }
             catch (Exception ex)
             {
