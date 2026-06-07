@@ -192,13 +192,11 @@ else
     private DotNetObjectReference<Discover>? _selfRef;
     private int _observerId;
     private MetaType _surfaceMediaType;
-    private bool _hydrated;
     private MetaType? _pendingPersistType;
 
     protected override void OnInitialized()
     {
         _surfaceMediaType = State.MediaType;
-        _hydrated = State.MediaTypesHydrated;
         State.Changed += OnStateChanged;
     }
 
@@ -457,12 +455,16 @@ else
 
     private async void OnStateChanged()
     {
-        var surfaceChanged = _surfaceMediaType != State.MediaType;
-        var justHydrated = !_hydrated && State.MediaTypesHydrated;
         _surfaceMediaType = State.MediaType;
-        _hydrated = State.MediaTypesHydrated;
-        if (surfaceChanged || justHydrated) await InvokeAsync(Refresh);
-        else await InvokeAsync(StateHasChanged);   // unrelated change (e.g. login) — refresh chrome only
+        // Reload ONLY when the resulting view actually changes — the key includes the active media
+        // type, so a real switch changes it. After a replay or the initial load, the cascade of
+        // hydration Changed events (config credential, media-type prefs) leaves the key unchanged and
+        // must NOT refetch the same grid — that was the "results render twice" double. _appliedKey is
+        // null until the first load, so the first hydration still kicks it off.
+        if (State.MediaTypesHydrated && _appliedKey != DiscoverKey())
+            await InvokeAsync(Refresh);
+        else
+            await InvokeAsync(StateHasChanged);   // unrelated change (e.g. login) — refresh chrome only
     }
 
     private async Task EnsureVideoModesAsync()
