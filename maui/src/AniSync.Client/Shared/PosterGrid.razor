@@ -24,7 +24,10 @@
                 ? (meta.Episodes is int totalEps && totalEps > 0 ? $"{meta.Progress!.Value} / {totalEps}" : $"Ep {meta.Progress!.Value}")
                 : null;
 
-            <a class="library-card" href="@detailHref" title="@meta.Name"
+            @* @key by the stable meta id so Blazor matches each card to the prerendered DOM on the
+               interactive transition and preserves it — without it the cards (and their <img>) get
+               recreated on hydration, which reloads every poster (the "results blink once"). *@
+            <a class="library-card" @key="@meta.Id" href="@detailHref" title="@meta.Name"
                data-meta-id="@meta.Id" data-meta-name="@meta.Name"
                data-meta-status="@(string.IsNullOrEmpty(meta.EntryStatus) ? null : meta.EntryStatus)"
                data-meta-progress="@(meta.Progress?.ToString())"
