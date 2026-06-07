@@ -276,9 +276,11 @@
         if (!await Confirm("Delete your configuration and sign out? Old install URLs stop working.")) return;
         if (!Env.IsNative)
         {
-            // Web: delete + clear the anisync_uid cookie on a real browser response (the circuit's
-            // loopback API can't), then sign out. Mirrors Logout's server hand-off.
-            Nav.NavigateTo($"{Env.ApiBaseUrl.TrimEnd('/')}/auth/delete", forceLoad: true);
+            // Web: same-origin POST so the server clears the anisync_uid cookie on a real browser
+            // response (the circuit's loopback API can't), then reload signed-out. postAuth navigates
+            // on success; we only land here on failure.
+            if (!await (await Module()).InvokeAsync<bool>("postAuth", $"{Env.ApiBaseUrl.TrimEnd('/')}/auth/delete", "/"))
+                _dangerStatus = "Delete failed.";
             return;
         }
         if (await Api.DeleteConfigAsync()) await SignOutLocalAsync();
@@ -290,9 +292,10 @@
         if (!await Confirm("Issue a new install URL? Every existing install/API link using the old URL stops working immediately.")) return;
         if (!Env.IsNative)
         {
-            // Web: rotate via a browser round-trip so the rewritten anisync_uid cookie reaches the
-            // browser, then land back here — the circuit re-derives the new credential from the cookie.
-            Nav.NavigateTo($"{Env.ApiBaseUrl.TrimEnd('/')}/auth/regenerate?returnUrl=/advanced", forceLoad: true);
+            // Web: same-origin POST rotates the uid + rewrites the cookie on a real browser response,
+            // then reloads /advanced — the circuit re-derives the new credential from the cookie.
+            if (!await (await Module()).InvokeAsync<bool>("postAuth", $"{Env.ApiBaseUrl.TrimEnd('/')}/auth/regenerate", "/advanced"))
+                _dangerStatus = "Regenerate failed.";
             return;
         }
         var result = await Api.RegenerateUidAsync();
@@ -311,7 +314,10 @@
         if (!await Confirm("Sign out on every device? The old install URL stops working everywhere.")) return;
         if (!Env.IsNative)
         {
-            Nav.NavigateTo($"{Env.ApiBaseUrl.TrimEnd('/')}/auth/signout-everywhere", forceLoad: true);
+            // Web: same-origin POST rotates the uid everywhere + clears this browser's cookie, then
+            // reloads signed-out.
+            if (!await (await Module()).InvokeAsync<bool>("postAuth", $"{Env.ApiBaseUrl.TrimEnd('/')}/auth/signout-everywhere", "/"))
+                _dangerStatus = "Sign-out failed.";
             return;
         }
         if (await Api.SignOutEverywhereAsync()) await SignOutLocalAsync();
