@@ -1023,10 +1023,11 @@ else
         var cat = (l.Category ?? "").ToLowerInvariant();
         if (cat.Contains("studio") && l.AnilistId is long sid) return $"/discover/studio/{sid}";
         if (cat.Contains("tag")) return $"/discover/tag/{Uri.EscapeDataString(l.Name ?? "")}";
-        if (l.AnilistId is long pid && (cat.Contains("staff") || cat.Contains("director")
-            || cat.Contains("composer") || cat.Contains("producer") || cat.Contains("music")
-            || cat.Contains("creator") || cat.Contains("author") || cat.Contains("voice")))
-            return $"/discover/staff/{pid}";
+        // Every other chip carrying an AniList id is a PERSON credit — director / writer / composer /
+        // artist / producer / staff / voice actor (the server's StaffRoleToCategory maps roles to varied
+        // labels like "writer" and "Artist"). Route them all to our staff page rather than enumerating
+        // each role — enumerating is what sent "writer" credits out to anilist.co.
+        if (l.AnilistId is long pid) return $"/discover/staff/{pid}";
         return string.IsNullOrEmpty(l.Url) ? "#" : l.Url!;
     }
 
