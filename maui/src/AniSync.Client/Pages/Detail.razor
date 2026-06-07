@@ -577,6 +577,20 @@ else
         else
         {
             await LoadAnimeAsync();
+            // No explicit ?type= and the anime lookup returned nothing for a Cinemeta-style id (tt.../
+            // tmdb:) → it isn't an anime-mapped title, so it's a movie/series. The original server
+            // resolved type from the id (MetaController.MediaTypeFor: an unmapped tt id falls through to
+            // video); replicate that by retrying the video path here. Cinemeta needs the right kind, so
+            // try series then movie. (Anime with tt ids ARE mapped, so they load on the anime path above
+            // and never reach this fallback.)
+            if (_meta is null && string.IsNullOrEmpty(_typeQuery)
+                && (Id.StartsWith("tt", StringComparison.Ordinal) || Id.StartsWith("tmdb:", StringComparison.Ordinal)))
+            {
+                _typeQuery = "series";
+                await LoadVideoAsync();
+                if (_meta is null) { _typeQuery = "movie"; await LoadVideoAsync(); }
+                if (_meta is null) _typeQuery = null;   // give up → the neutral "couldn't load this title"
+            }
         }
 
         _seasons = _episodes.Select(e => e.Season > 0 ? e.Season : 1).Distinct().OrderBy(s => s).ToList();
@@ -595,7 +609,10 @@ else
 
     // Per-page-instance key (type + id) — only one detail page prerenders per request, but keying by
     // the title keeps a stale snapshot from ever being replayed onto a different one.
-    private string PersistKey() => $"detail:{_typeQuery}:{Id}";
+    // Keyed on the URL's ?type= (read fresh, not _typeQuery — which the anime→video fallback may mutate)
+    // + the id, so the prerender and interactive passes compute the SAME key and the replay matches even
+    // when the type was resolved during load. The snapshot carries the resolved type (restored below).
+    private string PersistKey() => $"detail:{QueryValue("type")}:{Id}";
 
     // Best-effort replay: a deserialise hiccup falls back to a normal load (the skeleton), never a
     // broken page.
@@ -619,7 +636,8 @@ else
         DetailStateDto? State,
         AnimeSourceLinksDto? Links,
         List<VideoCastDto> VideoCast,
-        string? Certification);
+        string? Certification,
+        string? TypeQuery);
 
     private PersistedDetail Snapshot() => new(
         _meta,
@@ -632,12 +650,16 @@ else
         _state,
         _sourceLinks,
         _videoCast.ToList(),
-        _certification);
+        _certification,
+        _typeQuery);
 
     // Reinstate the loaded data and re-derive everything exactly as the load path does, so the
     // interactive first render is identical to the prerendered DOM (no flash).
     private void RestoreFrom(PersistedDetail snap)
     {
+        // Reinstate the type the load RESOLVED (the anime→video fallback may have changed it from the
+        // URL's ?type=), so IsVideo / the chips / the rendering branch match the prerendered DOM.
+        _typeQuery = snap.TypeQuery;
         _meta = snap.Meta;
         _episodes = snap.Episodes;
         _streams = snap.Streams;
