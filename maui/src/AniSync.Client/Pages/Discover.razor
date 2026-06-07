@@ -334,11 +334,10 @@ else
 
     private async Task ReloadGridAsync()
     {
+        _items.Clear();
+        _seenIds.Clear();
         _done = false;
         _loading = true;
-        // Skeleton shows only while the grid is empty (render guard). Don't clear the current posters
-        // before the fetch — keep them mounted so a reload doesn't blank then re-flash every image; the
-        // fresh page-1 results are swapped in inside LoadPageAsync once they arrive.
         StateHasChanged();
         await LoadPageAsync(initial: true);
     }
@@ -356,9 +355,7 @@ else
         _loading = true;
         if (!initial) StateHasChanged();   // reveal the inline loader for page 2+
 
-        // initial → always page 1 (skip null); the current items are still present (kept mounted) and
-        // get replaced after the fetch below. Pagination (non-initial) skips past what's loaded.
-        var skip = (!initial && _items.Count > 0) ? _items.Count.ToString() : null;
+        var skip = _items.Count > 0 ? _items.Count.ToString() : null;
         IReadOnlyList<MetaDto> page;
         try
         {
@@ -391,14 +388,6 @@ else
         catch
         {
             page = Array.Empty<MetaDto>();
-        }
-
-        // A reload swaps page 1 in now (after the fetch) rather than blanking first, so the old grid
-        // stays mounted until here — @key then preserves the cards/posters that carry over.
-        if (initial)
-        {
-            _items.Clear();
-            _seenIds.Clear();
         }
 
         // Dedupe by id — a provider that ignores skip (e.g. Kitsu's seasonal endpoint) would
