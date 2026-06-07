@@ -993,16 +993,35 @@ namespace AnimeList.Controllers
                 // (anilist:/mal:/kitsu:) when it's off — was defaulting to grouped IMDb (tt) ids because
                 // GetAnimeListAsync's groupSeasons defaults to true. Mirrors the List endpoint below.
                 var groupSeasons = configuration?.enableSeasonGrouping == true;
-                var metas = tokenData.anime_service switch
+
+                // Fan out to the primary + every healthy linked secondary (deduped), exactly like the
+                // /library List endpoint and the MVC dashboard's ContinueWatchingData — so a
+                // Currently-Watching title the user tracks only on a linked AniList/MAL/Kitsu surfaces on
+                // the shelf the same way it does in the library, instead of going missing because it isn't
+                // on their primary. Falls back to the primary only when the uid can't be resolved (v3
+                // inline config).
+                var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+                List<Meta> metas;
+                if (!string.IsNullOrEmpty(uid))
                 {
-                    AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                    AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                    _ => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
-                };
+                    metas = await _mergedListService.GetMergedListAsync(
+                        tokenData, uid, ListType.Current,
+                        genre: null, groupSeasons: groupSeasons,
+                        hideUnreleased: hideUnreleased, hideAdult: hideAdult) ?? [];
+                }
+                else
+                {
+                    metas = (tokenData.anime_service switch
+                    {
+                        AnimeService.Anilist => await _anilistService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                        AnimeService.MyAnimeList => await _malService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                        _ => await _kitsuService.GetAnimeListAsync(tokenData, ListType.Current, groupSeasons: groupSeasons, hideUnreleased: hideUnreleased, hideAdult: hideAdult),
+                    }) ?? [];
+                }
 
                 return new JsonResult(new ContinueWatchingResponse(
                     Primary: tokenData.anime_service.ToString(),
-                    Items: (metas ?? []).Take(limit).ToList()));
+                    Items: metas.Take(limit).ToList()));
             }
             catch (Exception ex)
             {
