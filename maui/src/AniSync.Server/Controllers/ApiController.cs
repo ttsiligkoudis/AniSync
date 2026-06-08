@@ -566,7 +566,7 @@ namespace AnimeList.Controllers
         /// type so the client can append ?type= for video.
         /// </summary>
         [HttpGet("suggest")]
-        public async Task<IActionResult> Suggest(string title, int limit = 8)
+        public async Task<IActionResult> Suggest(string title, int limit = 8, string types = null)
         {
             if (string.IsNullOrWhiteSpace(title))
                 return new JsonResult(new { query = title, matches = Array.Empty<object>() });
@@ -585,7 +585,13 @@ namespace AnimeList.Controllers
             }
             catch { /* no or corrupt session — fall through to defaults */ }
 
-            var enabled = await AnimeList.Services.MediaTypePreference.ResolveEnabledAsync(HttpContext, uid, _configStore);
+            // The SPA header passes its enabled set explicitly (?types=anime,movie,series) — its
+            // selection lives in the browser/AppState, not necessarily a cookie this API call carries, the
+            // same way Discover already forwards ?type=. Fall back to the cookie/account resolution (the SSR
+            // pages + legacy site-search.js path) when the param is absent so both surfaces keep working.
+            var enabled = AnimeList.Services.MediaTypePreference.ParseEnabledCsv(types);
+            if (enabled.Count == 0)
+                enabled = await AnimeList.Services.MediaTypePreference.ResolveEnabledAsync(HttpContext, uid, _configStore);
 
             // (id, name, poster, type, score). Built per source, merged at the end.
             var scored = new List<(string Id, string Name, string Poster, string Type, double Score)>();

@@ -128,6 +128,14 @@ namespace AnimeList.Services
         public static MetaType? ParseType(string raw) => Parse(raw);
 
         /// <summary>
+        /// Parses a CSV of media-type names ("anime,movie,series") into the enabled set — deduped,
+        /// display-ordered, invalid tokens dropped, empty when blank. Lets an SPA/API client pass its
+        /// enabled set explicitly (the header selection lives in the browser, not necessarily a cookie the
+        /// API call carries) instead of relying on the cookie/account resolution the SSR pages use.
+        /// </summary>
+        public static List<MetaType> ParseEnabledCsv(string csv) => ParseCsv(csv);
+
+        /// <summary>
         /// Persists <paramref name="type"/> as the active mode in the same cookie
         /// media-type.js writes (root path, 1y, Lax) so a type-carrying deep-link
         /// sticks across subsequent navigation on the surface — the active mode is
