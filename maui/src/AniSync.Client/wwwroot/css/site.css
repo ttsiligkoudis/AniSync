@@ -8249,18 +8249,14 @@ ol.anime-detail-episodes-busy {
 }
 
 .notif-panel {
-    /* Fixed + portaled to <body> by notifications.js so the panel escapes the
-       .site-header stacking context (sticky + z-index:60). Authored inside the
-       header, its z-index would otherwise resolve *within* that context and be
-       capped at the header's level, letting the watch-page video player paint
-       over it — position:fixed alone does NOT escape an ancestor stacking
-       context for paint order, only reparenting does. JS sets top/right on open
-       to anchor the panel directly below the bell button; the values below are
-       an off-screen-safe default until that runs. The mobile media query
-       overrides both. */
-    position: fixed;
-    top: 56px;
-    right: 16px;
+    /* Anchored directly under the bell: the panel renders inside .notif-bell (position:relative) in the
+       Blazor port — unlike the old web app, which portaled it to <body> via notifications.js and set
+       top/right in JS — so absolute positioning off the bell drops it in the right place with no script.
+       right:0 aligns the panel's right edge to the bell so a 360px panel opens leftward under it. The
+       mobile media query below switches back to position:fixed to pin it near-full-width. */
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
     width: 360px;
     max-height: 55vh;
     background: var(--surface);
@@ -8277,12 +8273,15 @@ ol.anime-detail-episodes-busy {
 @media (max-width: 600px) {
     /* On narrow viewports pin the panel near-full-width so it doesn't
        clip the screen edge — the header cluster sits flush right so a
-       360px panel would overshoot the viewport without this. Height
-       capped well short of the viewport so the panel reads as a
-       dropdown the user scrolls within, not a takeover sheet — the
-       page behind stays visible and the user can dismiss by tapping
-       outside. */
+       360px panel would overshoot the viewport without this. Fixed +
+       left/right insets make it viewport-relative again (the desktop
+       rule above is absolute, anchored to the small bell, which can't
+       stretch full-width). Height capped well short of the viewport so
+       the panel reads as a dropdown the user scrolls within, not a
+       takeover sheet — the page behind stays visible and the user can
+       dismiss by tapping outside. */
     .notif-panel {
+        position: fixed;
         top: 56px;
         right: 8px;
         left: 8px;
