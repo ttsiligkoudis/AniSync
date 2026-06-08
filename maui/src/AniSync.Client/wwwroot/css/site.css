@@ -1680,7 +1680,11 @@ body.modal-open {
     transform: translateZ(0);
     width: 100%;
     background: var(--bg);
-    padding-top: 0.5rem;
+    /* Add the top safe-area inset so the sticky header clears the status bar / notch when the webview
+       draws edge-to-edge (MAUI Android/iOS, installed PWA). The header background fills the inset and its
+       content sits below it; env() is 0 on desktop/regular browser tabs, so this is a no-op there. Without
+       it the logo + nav render under the Android status bar and aren't tappable. */
+    padding-top: calc(0.5rem + env(safe-area-inset-top, 0px));
     padding-bottom: 0.5rem;
     margin-bottom: 0.5rem;
 }
