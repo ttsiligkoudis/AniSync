@@ -1,8 +1,8 @@
 using Android.App;
 using Android.Content.PM;
 using Android.OS;
-using Android.Views;
 using AndroidX.Core.View;
+using AView = Android.Views.View;
 
 namespace AniSync;
 
@@ -33,11 +33,14 @@ public class MainActivity : MauiAppCompatActivity
     // Pads the host view by the status + navigation bar insets so the BlazorWebView never underlaps them.
     private sealed class SystemBarInsetsListener : Java.Lang.Object, IOnApplyWindowInsetsListener
     {
-        public WindowInsetsCompat OnApplyWindowInsets(View v, WindowInsetsCompat insets)
+        public WindowInsetsCompat OnApplyWindowInsets(AView? v, WindowInsetsCompat? insets)
         {
-            var bars = insets.GetInsets(WindowInsetsCompat.Type.SystemBars());
-            v.SetPadding(bars.Left, bars.Top, bars.Right, bars.Bottom);
-            return insets;
+            if (v is not null && insets is not null)
+            {
+                var bars = insets.GetInsets(WindowInsetsCompat.Type.SystemBars());
+                v.SetPadding(bars.Left, bars.Top, bars.Right, bars.Bottom);
+            }
+            return insets!;
         }
     }
 }
