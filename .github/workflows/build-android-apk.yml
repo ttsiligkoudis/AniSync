@@ -55,13 +55,40 @@ jobs:
       - name: Restore MAUI workloads
         run: dotnet workload restore maui/src/AniSync.Maui/AniSync.Maui.csproj
 
-      # Release build emits a debug-key-signed APK (installable for sideloading) — no release keystore
-      # needed. AndroidPackageFormat=apk forces a single universal APK rather than an AAB.
+      # Decode the signing keystore from secrets when configured. With a stable keystore, every build shares
+      # one signature so the app updates in place (no uninstall). Without the secret it falls back to the
+      # ephemeral debug key (still installs, but conflicts across builds — the original problem).
+      - name: Decode signing keystore (if configured)
+        id: keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/anisync.jks"
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::ANDROID_KEYSTORE_BASE64 secret not set — building with the ephemeral debug key. Installs will conflict across builds until a stable keystore is configured."
+          fi
+
+      # AndroidPackageFormat=apk forces a single universal APK (not an AAB). When a keystore is configured we
+      # release-sign with it (passwords passed via env: refs so they never hit the command line / logs);
+      # otherwise the Release build auto-signs with the debug key.
       - name: Build signed APK
-        run: >
-          dotnet build maui/src/AniSync.Maui/AniSync.Maui.csproj
-          -c Release -f net10.0-android
-          -p:AndroidPackageFormat=apk
+        env:
+          STOREPASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEYPASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -e
+          ARGS="-c Release -f net10.0-android -p:AndroidPackageFormat=apk"
+          if [ "${{ steps.keystore.outputs.configured }}" = "true" ]; then
+            ARGS="$ARGS -p:AndroidKeyStore=true \
+              -p:AndroidSigningKeyStore=$RUNNER_TEMP/anisync.jks \
+              -p:AndroidSigningKeyAlias=${{ secrets.ANDROID_KEY_ALIAS }} \
+              -p:AndroidSigningStorePass=env:STOREPASS \
+              -p:AndroidSigningKeyPass=env:KEYPASS"
+          fi
+          dotnet build maui/src/AniSync.Maui/AniSync.Maui.csproj $ARGS
 
       # Friendly, stable filename for the download.
       - name: Stage APK
@@ -88,5 +115,5 @@ jobs:
           prerelease: true
           files: out/anisync.apk
           body: |
-            Latest AniSync Android build — debug-key signed, for sideloading (uninstall any prior build first
-            if Android reports a signature conflict). Built from commit ${{ github.sha }}.
+            Latest AniSync Android build, for sideloading. If Android reports a signature conflict on
+            install, uninstall the previously installed build first. Built from commit ${{ github.sha }}.
