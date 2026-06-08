@@ -1,6 +1,7 @@
 using Android.App;
 using Android.Content.PM;
 using Android.OS;
+using AndroidX.Activity;
 using AndroidX.Core.View;
 using AView = Android.Views.View;
 
@@ -33,6 +34,11 @@ public class MainActivity : MauiAppCompatActivity
 
         // Initial paint follows the system theme; the web app's JS theme bridge takes over once it hydrates.
         AndroidSystemBars.Apply(this, IsSystemDark());
+
+        // Hardware/gesture back → in-app history. Registered on the AndroidX dispatcher (not the deprecated
+        // OnBackPressed override) so it ALSO fires under Android 13+ predictive back, which bypasses
+        // OnBackPressed — the likely reason back was closing the app outright.
+        OnBackPressedDispatcher.AddCallback(this, new WebViewBackCallback(this));
     }
 
     // UiMode / orientation are in this activity's ConfigChanges, so these land here without a recreate.
@@ -42,17 +48,27 @@ public class MainActivity : MauiAppCompatActivity
         AndroidSystemBars.Reapply(this);
     }
 
-    // System back button: navigate back through the in-app (SPA) history like the header's back control,
-    // and only fall through to the default (leave/close the app) when there's nothing to go back to — i.e.
-    // on the first screen. Blazor's pushState navigations register in the WebView's back-forward list, so
-    // CanGoBack/GoBack drive the same history the in-app back button does.
-    public override void OnBackPressed()
+    // Back button → navigate back through the in-app (SPA) history like the header's back control, falling
+    // through to the system default (leave the app) only on the first screen. Blazor's pushState
+    // navigations register in the WebView's back-forward list, so CanGoBack/GoBack drive the same history
+    // the in-app back button does.
+    private sealed class WebViewBackCallback : OnBackPressedCallback
     {
-        var webView = FindWebView(FindViewById(Android.Resource.Id.Content));
-        if (webView is not null && webView.CanGoBack())
-            webView.GoBack();
-        else
-            base.OnBackPressed();
+        private readonly MainActivity _activity;
+        public WebViewBackCallback(MainActivity activity) : base(true) => _activity = activity;
+
+        public override void HandleOnBackPressed()
+        {
+            var webView = FindWebView(_activity.FindViewById(Android.Resource.Id.Content));
+            if (webView is not null && webView.CanGoBack())
+            {
+                webView.GoBack();
+                return;
+            }
+            // Nothing to go back to → disable this handler and let the dispatcher run the default (exit).
+            Enabled = false;
+            _activity.OnBackPressedDispatcher.OnBackPressed();
+        }
     }
 
     private static Android.Webkit.WebView? FindWebView(AView? view)
