@@ -23,16 +23,16 @@
         })();
     </script>
 
-    <!-- Boot screen shown until Blazor mounts into #app. Logo-only on the themed background (var(--bg))
-         so it's visually identical to the native splash — one continuous screen, no second "loading" page.
-         .app-boot is fixed/full-screen (covers any flash); scoped here so it can't override the themed
-         body background. -->
+    <!-- Boot screen shown until Blazor mounts into #app. Fixed dark (matching the native splash) rather
+         than theme-coloured: the logo art has a dark panel baked in, so on a light background it shows as a
+         black square. Keeping the boot dark makes the two startup frames (native splash + this) identical
+         and lets the logo blend; the app then paints in the user's theme once it mounts. -->
     <style>
         #app { min-height: 100vh; }
         .app-boot {
             position: fixed; inset: 0;
             display: flex; align-items: center; justify-content: center;
-            background: var(--bg);
+            background: #0A0A0A;
         }
         .app-boot img { width: 150px; height: 150px; }
     </style>
