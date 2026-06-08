@@ -13,12 +13,17 @@ public class MainActivity : MauiAppCompatActivity
     {
         base.OnCreate(savedInstanceState);
 
-        // Android 15 (API 35) enforces edge-to-edge, so the BlazorWebView draws under the status and
-        // navigation bars. The WebView does NOT reliably surface env(safe-area-inset-*) to CSS, so the
-        // header rendered behind — and untappable under — the status bar. Pad the content root by the
-        // system-bar insets so the whole webview sits inside the safe area; this works across API levels
-        // (insets are 0 pre-35 where the system already insets us) and keeps the CSS env() values at 0 so
-        // there's no double inset. iOS still relies on the env() padding in site.css.
+        // Draw edge-to-edge on every Android version (API 35 already forces it). This makes the inset
+        // handling consistent: without it, versions that still auto-inset content below the status bar PLUS
+        // our SystemBarInsetsListener padding produced a DOUBLE gap under the bar (seen on a real device,
+        // not the API-35 emulator). With the system no longer insetting us, our listener is the single
+        // source of the inset.
+        if (Window is not null)
+            WindowCompat.SetDecorFitsSystemWindows(Window, false);
+
+        // API 35 enforces edge-to-edge, so the BlazorWebView draws under the status/navigation bars and the
+        // WebView doesn't surface env(safe-area-inset-*) to CSS. Pad the content root by the system-bar
+        // insets so the header/bottom-nav sit inside the safe area.
         var content = FindViewById(Android.Resource.Id.Content);
         if (content is not null)
         {
@@ -26,18 +31,42 @@ public class MainActivity : MauiAppCompatActivity
             ViewCompat.RequestApplyInsets(content);
         }
 
-        // Initial paint follows the system theme so the first frame (before the webview hydrates) isn't
-        // wrong; once the web app loads, its JS theme bridge calls IPlatformChrome.SetTheme to reflect the
-        // actual in-app theme (including a manual override of the OS).
+        // Initial paint follows the system theme; the web app's JS theme bridge takes over once it hydrates.
         AndroidSystemBars.Apply(this, IsSystemDark());
     }
 
     // UiMode / orientation are in this activity's ConfigChanges, so these land here without a recreate.
-    // Re-apply the last theme (not the system one) so a rotation can't revert a manual in-app override.
     public override void OnConfigurationChanged(Android.Content.Res.Configuration newConfig)
     {
         base.OnConfigurationChanged(newConfig);
         AndroidSystemBars.Reapply(this);
+    }
+
+    // System back button: navigate back through the in-app (SPA) history like the header's back control,
+    // and only fall through to the default (leave/close the app) when there's nothing to go back to — i.e.
+    // on the first screen. Blazor's pushState navigations register in the WebView's back-forward list, so
+    // CanGoBack/GoBack drive the same history the in-app back button does.
+    public override void OnBackPressed()
+    {
+        var webView = FindWebView(FindViewById(Android.Resource.Id.Content));
+        if (webView is not null && webView.CanGoBack())
+            webView.GoBack();
+        else
+            base.OnBackPressed();
+    }
+
+    private static Android.Webkit.WebView? FindWebView(AView? view)
+    {
+        if (view is Android.Webkit.WebView web) return web;
+        if (view is Android.Views.ViewGroup group)
+        {
+            for (var i = 0; i < group.ChildCount; i++)
+            {
+                var found = FindWebView(group.GetChildAt(i));
+                if (found is not null) return found;
+            }
+        }
+        return null;
     }
 
     private bool IsSystemDark()
