@@ -43,7 +43,8 @@
                     {
                         <a class="notif-item @(n.IsRead ? "" : "notif-item-unread")"
                            href="@(string.IsNullOrEmpty(n.LinkPath) ? "#" : n.LinkPath)"
-                           data-notif-id="@n.Id">
+                           data-notif-id="@n.Id"
+                           @onclick="() => OnNotifClick(n)" @onclick:preventDefault="true">
                             @if (!string.IsNullOrEmpty(n.ThumbnailUrl))
                             {
                                 <img class="notif-thumb" src="@n.ThumbnailUrl" alt="" loading="lazy" onerror="this.remove()" />
@@ -135,7 +136,13 @@
     }
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
-        => _ = InvokeAsync(RefreshCountAsync);
+        => _ = InvokeAsync(async () =>
+        {
+            // Navigating away (a notification link, "View all", or anywhere else) should dismiss the
+            // open panel — it isn't relevant to the page the user just landed on.
+            if (_open) { _open = false; StateHasChanged(); }
+            await RefreshCountAsync();
+        });
 
     private async Task Toggle()
     {
@@ -148,6 +155,27 @@
             // Opening the panel is a good moment to re-sync the badge too.
             await RefreshCountAsync();
         }
+    }
+
+    // Clicking a row marks just that notification read (the panel never did this — only "Mark all read"
+    // touched the store), closes the panel, then follows the deep link. We handle the nav in code
+    // (@onclick:preventDefault on the anchor) so the read is recorded before we leave, and so a link back
+    // to the page the user is already on still closes the panel (LocationChanged wouldn't fire there).
+    private async Task OnNotifClick(NotificationDto n)
+    {
+        _open = false;
+        if (!n.IsRead)
+        {
+            // Optimistic: clear the unread style + drop the badge now; the per-navigation RefreshCountAsync
+            // re-syncs from the server regardless, so a failed POST self-heals.
+            n.ReadAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            if (_count > 0) _count--;
+            try { await Api.MarkNotificationReadAsync(n.Id); }
+            catch { /* best-effort — badge re-syncs on the next poll / navigation */ }
+        }
+
+        if (!string.IsNullOrEmpty(n.LinkPath))
+            Nav.NavigateTo(n.LinkPath);
     }
 
     private async Task MarkAllRead()
