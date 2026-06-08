@@ -1,6 +1,7 @@
 @inject IAniSyncApi Api
 @inject NavigationManager Nav
-@implements IDisposable
+@inject IJSRuntime JS
+@implements IAsyncDisposable
 
 @*
     Global search typeahead — Blazor port of wwwroot/js/site-search.js. Same
@@ -8,7 +9,7 @@
     broken-image placeholder styling carry over), but the debounce, fetch and
     render are C# instead of vanilla JS.
 *@
-<div class="site-search" role="combobox" aria-expanded="@(_open ? "true" : "false")">
+<div class="site-search" role="combobox" aria-expanded="@(_open ? "true" : "false")" @ref="_root">
     <div class="site-search-input-wrap">
         <input class="site-search-input"
                type="search"
@@ -71,6 +72,25 @@
     private List<SuggestMatch> _results = new();
     private readonly HashSet<string> _broken = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _cts;
+    private ElementReference _root;
+    private IJSObjectReference? _dismiss;
+    private DotNetObjectReference<SearchBox>? _selfRef;
+    private int _dismissId;
+    private bool _navHooked;
+
+    protected override void OnInitialized()
+    {
+        // Close the results on navigation (e.g. clicking a result) — only on the interactive pass so we
+        // don't double-subscribe across the prerender + interactive OnInitialized runs.
+        if (RendererInfo.IsInteractive && !_navHooked)
+        {
+            _navHooked = true;
+            Nav.LocationChanged += OnLocationChanged;
+        }
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => _ = InvokeAsync(CloseResultsAsync);
 
     private async Task OnInput(ChangeEventArgs e)
     {
@@ -80,7 +100,7 @@
         _cts?.Cancel();
         if (_query.Trim().Length < MinChars)
         {
-            _open = false;
+            await CloseResultsAsync();
             _results = new();
             return;
         }
@@ -88,6 +108,8 @@
         _cts = new CancellationTokenSource();
         var token = _cts.Token;
         _open = true;
+        // Arm outside-press dismissal while the dropdown is open.
+        await RegisterDismissAsync();
         _loading = true;
         try
         {
@@ -125,5 +147,49 @@
             : $"/meta/{Uri.EscapeDataString(m.Id)}";
     }
 
-    public void Dispose() => _cts?.Cancel();
+    // Hide the results dropdown and tear down the outside-press listener. Used on navigation, when the
+    // query drops below the minimum, and on an outside press.
+    private async Task CloseResultsAsync()
+    {
+        await UnregisterDismissAsync();
+        if (_open)
+        {
+            _open = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RegisterDismissAsync()
+    {
+        if (_dismissId != 0) return; // already armed — don't stack document listeners
+        try
+        {
+            _dismiss ??= await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/AniSync.Client/js/outside-click.js");
+            _selfRef ??= DotNetObjectReference.Create(this);
+            _dismissId = await _dismiss.InvokeAsync<int>("register", _root, _selfRef);
+        }
+        catch { /* interop unavailable (prerender) — results still close on nav / query change */ }
+    }
+
+    private async Task UnregisterDismissAsync()
+    {
+        if (_dismiss is not null && _dismissId != 0)
+        {
+            try { await _dismiss.InvokeVoidAsync("unregister", _dismissId); } catch { }
+            _dismissId = 0;
+        }
+    }
+
+    [JSInvokable]
+    public Task OnOutsideClick() => CloseResultsAsync();
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts?.Cancel();
+        if (_navHooked) Nav.LocationChanged -= OnLocationChanged;
+        await UnregisterDismissAsync();
+        _selfRef?.Dispose();
+        if (_dismiss is not null) { try { await _dismiss.DisposeAsync(); } catch { } }
+    }
 }
