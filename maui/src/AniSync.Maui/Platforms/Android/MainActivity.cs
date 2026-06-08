@@ -9,11 +9,6 @@ namespace AniSync;
 [Activity(Theme = "@style/Maui.SplashTheme", MainLauncher = true, ConfigurationChanges = ConfigChanges.ScreenSize | ConfigChanges.Orientation | ConfigChanges.UiMode | ConfigChanges.ScreenLayout | ConfigChanges.SmallestScreenSize | ConfigChanges.Density)]
 public class MainActivity : MauiAppCompatActivity
 {
-    // App chrome background, matching the web app's --bg token for each theme so the inset strips behind
-    // the edge-to-edge status/nav bars blend with the header instead of showing a stray band.
-    private const string DarkBg = "#0A0A0A";
-    private const string LightBg = "#FFFFFF";
-
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
@@ -31,40 +26,23 @@ public class MainActivity : MauiAppCompatActivity
             ViewCompat.RequestApplyInsets(content);
         }
 
-        ApplyChromeTheme();
+        // Initial paint follows the system theme so the first frame (before the webview hydrates) isn't
+        // wrong; once the web app loads, its JS theme bridge calls IPlatformChrome.SetTheme to reflect the
+        // actual in-app theme (including a manual override of the OS).
+        AndroidSystemBars.Apply(this, IsSystemDark());
     }
 
-    // UiMode is in this activity's ConfigChanges, so a system light/dark switch lands here (no recreate) —
-    // re-tint the bars + inset strips to match.
+    // UiMode / orientation are in this activity's ConfigChanges, so these land here without a recreate.
+    // Re-apply the last theme (not the system one) so a rotation can't revert a manual in-app override.
     public override void OnConfigurationChanged(Android.Content.Res.Configuration newConfig)
     {
         base.OnConfigurationChanged(newConfig);
-        ApplyChromeTheme();
+        AndroidSystemBars.Reapply(this);
     }
 
-    // Paint the inset strips behind the status/nav bars to the app's --bg for the resolved theme, and set
-    // the bar icon contrast to match, so the system icons stay visible and the gap blends with the chrome.
-    // The webview follows prefers-color-scheme, so the system UI mode is the right signal here. (A manual
-    // in-app theme toggle that overrides the OS won't re-tint the native bars until relaunch — acceptable;
-    // the common case is system-driven, and this fixes the "dark icons invisible on a dark gap" bug.)
-    private void ApplyChromeTheme()
-    {
-        var content = FindViewById(Android.Resource.Id.Content);
-        if (content is null || Window is null) return;
-
-        var night = (Resources?.Configuration?.UiMode & Android.Content.Res.UiMode.NightMask)
-                    == Android.Content.Res.UiMode.NightYes;
-
-        content.SetBackgroundColor(Android.Graphics.Color.ParseColor(night ? DarkBg : LightBg));
-
-        var controller = WindowCompat.GetInsetsController(Window, content);
-        if (controller is not null)
-        {
-            // "Light bars" == dark icons (for a light background). So day → dark icons, night → light icons.
-            controller.AppearanceLightStatusBars = !night;
-            controller.AppearanceLightNavigationBars = !night;
-        }
-    }
+    private bool IsSystemDark()
+        => (Resources?.Configuration?.UiMode & Android.Content.Res.UiMode.NightMask)
+           == Android.Content.Res.UiMode.NightYes;
 
     // Pads the host view by the status + navigation bar insets so the BlazorWebView never underlaps them.
     private sealed class SystemBarInsetsListener : Java.Lang.Object, IOnApplyWindowInsetsListener

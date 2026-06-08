@@ -62,6 +62,14 @@ public static class MauiProgram
         // URI-scheme wiring the callback needs.
         builder.Services.AddSingleton<INativeAuth, MauiNativeAuth>();
 
+        // Native system-bar tinting (status/nav) so the OS bars follow the in-app light/dark theme.
+        // Android-only; other MAUI targets (Windows/iOS/mac) use the no-op.
+#if ANDROID
+        builder.Services.AddSingleton<IPlatformChrome, AndroidPlatformChrome>();
+#else
+        builder.Services.AddSingleton<IPlatformChrome, NoOpPlatformChrome>();
+#endif
+
         // ---- LibVLCSharp: software-decodes HEVC/AC3/EAC3/DTS/TrueHD (the audio-codec fix) ----
         Core.Initialize();
         builder.Services.AddSingleton(_ => new LibVLC());
