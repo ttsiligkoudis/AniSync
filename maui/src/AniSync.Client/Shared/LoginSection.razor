@@ -163,6 +163,11 @@
         if (string.IsNullOrEmpty(config)) { _error = "Sign-in failed or was cancelled."; return; }
         await Store.SetAsync(ISecureStore.ConfigKey, config);
         State.SetStreamConfig(config);
-        Nav.NavigateTo(ReturnUrl);
+        // forceLoad so the whole app re-bootstraps with the credential present — same as the web login's
+        // server redirect (a full page load) and the Ctrl+F5 that fixes it manually. A soft SPA nav only
+        // fires State.Changed, which updates the header but leaves MainLayout's one-shot session hydration
+        // (LoggedIn/HasSession + the connected-services label) and the dashboard shelves (they fetch once in
+        // OnInitializedAsync, not on Changed) stuck in their signed-out state until a reload.
+        Nav.NavigateTo(ReturnUrl, forceLoad: true);
     }
 }
