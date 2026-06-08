@@ -51,7 +51,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- App Icon — AniSync logo on the app's dark chrome (#0A0A0A == --bg). -->
+    <!-- App Icon — AniSync logo on the app's dark chrome (#0A0A0A, the dark background color). -->
     <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.png" Color="#0A0A0A" />
 
     <!-- Splash Screen — same logo, centered on the dark chrome (replaces the .NET bot/purple default). -->
