@@ -16,7 +16,7 @@ on:
       - completed
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: build-apk-${{ github.ref }}
@@ -63,9 +63,30 @@ jobs:
           -c Release -f net10.0-android
           -p:AndroidPackageFormat=apk
 
+      # Friendly, stable filename for the download.
+      - name: Stage APK
+        run: |
+          mkdir -p out
+          cp maui/src/AniSync.Maui/bin/Release/net10.0-android/*-Signed.apk out/anisync.apk
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: anisync-android-apk
-          path: maui/src/AniSync.Maui/bin/Release/net10.0-android/*-Signed.apk
+          path: out/anisync.apk
           if-no-files-found: error
+
+      # Publish to a rolling prerelease so the APK is a DIRECT download (release assets aren't zipped, unlike
+      # workflow artifacts) at a stable URL, and installs straight from the phone browser:
+      #   https://github.com/ttsiligkoudis/AniSync/releases/download/android-latest/anisync.apk
+      # The tag is moved to the current commit and the asset replaced on every build.
+      - name: Publish APK to rolling release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          name: AniSync Android (latest)
+          prerelease: true
+          files: out/anisync.apk
+          body: |
+            Latest AniSync Android build — debug-key signed, for sideloading (uninstall any prior build first
+            if Android reports a signature conflict). Built from commit ${{ github.sha }}.
