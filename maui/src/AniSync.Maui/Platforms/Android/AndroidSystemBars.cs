@@ -24,7 +24,17 @@ internal static class AndroidSystemBars
         var content = activity.FindViewById(Android.Resource.Id.Content);
         if (window is null || content is null) return;
 
-        content.SetBackgroundColor(Android.Graphics.Color.ParseColor(dark ? DarkBg : LightBg));
+        var color = Android.Graphics.Color.ParseColor(dark ? DarkBg : LightBg);
+        content.SetBackgroundColor(color);
+        // Under Android 15 edge-to-edge the status/nav bars are transparent (SetStatusBarColor is ignored),
+        // so the strips behind them show the WINDOW background — which otherwise stays the splash theme's
+        // dark even when the app is light. Paint the window background to the theme colour so the strips
+        // match. SetStatusBar/NavigationBarColor are kept for pre-35 devices where they still apply.
+        window.SetBackgroundDrawable(new Android.Graphics.Drawables.ColorDrawable(color));
+#pragma warning disable CA1422 // deprecated on API 35 (no-op there); still honoured on older devices
+        window.SetStatusBarColor(color);
+        window.SetNavigationBarColor(color);
+#pragma warning restore CA1422
 
         var controller = WindowCompat.GetInsetsController(window, content);
         if (controller is not null)
