@@ -11,26 +11,30 @@
     <link rel="stylesheet" href="AniSync.Maui.styles.css" />
     <link rel="icon" href="data:,">
 
-    <!-- Branded boot screen shown until Blazor mounts into #app, replacing the bare "Loading…" text.
-         Inline so it paints instantly (before site.css resolves) and blends with the dark native splash.
-         Scope the dark fill to .app-boot ONLY — setting it on body would override site.css's themed
-         `body { background: var(--bg) }` (this <style> wins by source order) and force a dark page in light
-         theme. .app-boot is fixed/full-screen so it covers any flash on its own. -->
+    <!-- Stamp the saved theme on <html> before first paint so the boot screen (and the app) match the
+         user's light/dark choice instead of flashing dark. Same localStorage key chrome.js uses; chrome.js
+         re-applies later (idempotent). Falls back to prefers-color-scheme when nothing is saved. -->
+    <script>
+        (function () {
+            try {
+                var t = localStorage.getItem('anisync-theme');
+                if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+            } catch (e) { /* storage blocked — CSS prefers-color-scheme decides */ }
+        })();
+    </script>
+
+    <!-- Boot screen shown until Blazor mounts into #app. Logo-only on the themed background (var(--bg))
+         so it's visually identical to the native splash — one continuous screen, no second "loading" page.
+         .app-boot is fixed/full-screen (covers any flash); scoped here so it can't override the themed
+         body background. -->
     <style>
         #app { min-height: 100vh; }
         .app-boot {
             position: fixed; inset: 0;
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            gap: 1.5rem; background: #0A0A0A;
+            display: flex; align-items: center; justify-content: center;
+            background: var(--bg);
         }
-        .app-boot img { width: 84px; height: 84px; }
-        .app-boot-spinner {
-            width: 26px; height: 26px; border-radius: 50%;
-            border: 3px solid rgba(255, 255, 255, 0.14);
-            border-top-color: #8b5cf6;
-            animation: app-boot-spin 0.8s linear infinite;
-        }
-        @keyframes app-boot-spin { to { transform: rotate(360deg); } }
+        .app-boot img { width: 128px; height: 128px; }
     </style>
 </head>
 
@@ -41,7 +45,6 @@
     <div id="app">
         <div class="app-boot">
             <img src="_content/AniSync.Client/img/logo-192.png" alt="AniSync" />
-            <div class="app-boot-spinner" role="status" aria-label="Loading"></div>
         </div>
     </div>
 
