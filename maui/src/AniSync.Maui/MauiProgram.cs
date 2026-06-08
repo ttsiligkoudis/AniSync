@@ -71,8 +71,23 @@ public static class MauiProgram
 #endif
 
         // ---- LibVLCSharp: software-decodes HEVC/AC3/EAC3/DTS/TrueHD (the audio-codec fix) ----
-        Core.Initialize();
-        builder.Services.AddSingleton(_ => new LibVLC());
+        // Guarded so a native-load failure — e.g. a Release APK that didn't bundle lib/<abi>/libc++_shared.so
+        // for the device's ABI — degrades to "video playback unavailable" instead of hard-crashing the app
+        // at launch (the reported Poco F7 crash). Browsing + list tracking stay usable; only the VLC-backed
+        // Watch page is affected, and it now fails with a clear message instead of taking the process down.
+        var vlcReady = false;
+        try
+        {
+            Core.Initialize();
+            vlcReady = true;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"LibVLCSharp Core.Initialize failed — VLC playback disabled: {ex}");
+        }
+        builder.Services.AddSingleton(_ => vlcReady
+            ? new LibVLC()
+            : throw new InvalidOperationException("LibVLC native libraries failed to load on this device/build."));
         builder.Services.AddSingleton<IMediaPlayer, VlcMediaPlayer>();
 
         return builder.Build();
