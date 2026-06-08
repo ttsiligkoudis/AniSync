@@ -1,13 +1,19 @@
 name: Build Android APK
 
-# Builds a signed, installable universal APK (all ABIs, incl. arm64-v8a for the Poco F7) and uploads it as
-# a workflow artifact you can download and sideload. Runs on demand (Actions tab → Run workflow) and on
-# every push to a claude/** branch so a fresh APK is ready after each change.
+# Builds a signed, installable universal APK (all ABIs, incl. arm64-v8a for the Poco F7) from MASTER and
+# uploads it as a workflow artifact you can download and sideload.
+#
+# Triggered after the "Fly Deploy" workflow finishes successfully: Fly Deploy auto-merges the claude/**
+# branch into master (via gh pr merge) and deploys, so chaining off its completion means the APK is built
+# from the same merged master that was just deployed. We use workflow_run rather than `push: master`
+# because Fly Deploy's merge runs under GITHUB_TOKEN, and GITHUB_TOKEN pushes don't fire push triggers.
+# For workflow_run events the checkout defaults to master's latest = the merged state. Also runs on demand.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - 'claude/**'
+  workflow_run:
+    workflows: ["Fly Deploy"]
+    types:
+      - completed
 
 permissions:
   contents: read
@@ -18,6 +24,9 @@ concurrency:
 
 jobs:
   build-apk:
+    # Only build when the deploy succeeded (or on a manual run) — no point shipping an APK from a master
+    # that failed to deploy.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
