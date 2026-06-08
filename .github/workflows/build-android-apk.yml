@@ -1,0 +1,62 @@
+name: Build Android APK
+
+# Builds a signed, installable universal APK (all ABIs, incl. arm64-v8a for the Poco F7) and uploads it as
+# a workflow artifact you can download and sideload. Runs on demand (Actions tab → Run workflow) and on
+# every push to a claude/** branch so a fresh APK is ready after each change.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'claude/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # .NET 10 MAUI Android requires JDK 17.
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: microsoft
+          java-version: '17'
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Best-effort: ensure the Android 15 (API 35) platform .NET 10 compiles against is present. The
+      # ubuntu runner usually ships it; continue-on-error so a path/already-installed case doesn't fail
+      # the run (a genuinely missing platform surfaces in the build step below).
+      - name: Ensure Android SDK platform 35
+        continue-on-error: true
+        run: ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+
+      # Installs exactly the workloads the MAUI project needs (maui-android) by reading the csproj.
+      - name: Restore MAUI workloads
+        run: dotnet workload restore maui/src/AniSync.Maui/AniSync.Maui.csproj
+
+      # Release build emits a debug-key-signed APK (installable for sideloading) — no release keystore
+      # needed. AndroidPackageFormat=apk forces a single universal APK rather than an AAB.
+      - name: Build signed APK
+        run: >
+          dotnet build maui/src/AniSync.Maui/AniSync.Maui.csproj
+          -c Release -f net10.0-android
+          -p:AndroidPackageFormat=apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: anisync-android-apk
+          path: maui/src/AniSync.Maui/bin/Release/net10.0-android/*-Signed.apk
+          if-no-files-found: error
