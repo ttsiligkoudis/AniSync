@@ -1,5 +1,6 @@
 @inject IAniSyncApi Api
 @inject NavigationManager Nav
+@inject AppState State
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
@@ -114,7 +115,10 @@
         try
         {
             await Task.Delay(DebounceMs, token);
-            var matches = await Api.SuggestAsync(_query.Trim(), Limit, token);
+            // Span the user's enabled media types (anime/movies/series), matching the header selection —
+            // the server defaults to anime-only without this.
+            var types = string.Join(",", State.EnabledMediaTypes);
+            var matches = await Api.SuggestAsync(_query.Trim(), Limit, types, token);
             if (token.IsCancellationRequested) return;
             _results = matches.ToList();
             _broken.Clear();

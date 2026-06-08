@@ -11,7 +11,7 @@ namespace AniSync.Client.Services;
 public interface IAniSyncApi
 {
     // Search + discovery
-    Task<IReadOnlyList<SuggestMatch>> SuggestAsync(string title, int limit = 8, CancellationToken ct = default);
+    Task<IReadOnlyList<SuggestMatch>> SuggestAsync(string title, int limit = 8, string? types = null, CancellationToken ct = default);
     /// <summary>Relevance-ranked best-match resolver — /api/v1/match (header search "Enter to open top result").</summary>
     Task<IReadOnlyList<MatchResult>> MatchAsync(string title, int limit = 8, CancellationToken ct = default);
     Task<IReadOnlyList<MetaDto>> DiscoverAsync(string kind, string? genre = null, string? skip = null, string? season = null, string? search = null, CancellationToken ct = default);

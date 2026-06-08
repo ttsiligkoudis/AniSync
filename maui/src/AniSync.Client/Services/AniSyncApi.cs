@@ -51,11 +51,14 @@ public sealed class AniSyncApi : IAniSyncApi
             _http.BaseAddress = new Uri(_env.ApiBaseUrl);
     }
 
-    public async Task<IReadOnlyList<SuggestMatch>> SuggestAsync(string title, int limit = 8, CancellationToken ct = default)
+    public async Task<IReadOnlyList<SuggestMatch>> SuggestAsync(string title, int limit = 8, string? types = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(title)) return Array.Empty<SuggestMatch>();
-        var resp = await GetOrDefault<SuggestResponse>(
-            $"api/v1/suggest?title={Uri.EscapeDataString(title)}&limit={limit}", ct);
+        // Forward the header's enabled media types so search spans the same set the user picked
+        // (anime + movies + series), not just anime — the server falls back to cookie/account when absent.
+        var url = $"api/v1/suggest?title={Uri.EscapeDataString(title)}&limit={limit}";
+        if (!string.IsNullOrWhiteSpace(types)) url += $"&types={Uri.EscapeDataString(types)}";
+        var resp = await GetOrDefault<SuggestResponse>(url, ct);
         return resp?.Matches ?? new();
     }
 
