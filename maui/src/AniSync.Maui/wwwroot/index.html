@@ -12,9 +12,11 @@
     <link rel="icon" href="data:,">
 
     <!-- Branded boot screen shown until Blazor mounts into #app, replacing the bare "Loading…" text.
-         Inline so it paints instantly (before site.css resolves) and blends with the dark native splash. -->
+         Inline so it paints instantly (before site.css resolves) and blends with the dark native splash.
+         Scope the dark fill to .app-boot ONLY — setting it on body would override site.css's themed
+         `body { background: var(--bg) }` (this <style> wins by source order) and force a dark page in light
+         theme. .app-boot is fixed/full-screen so it covers any flash on its own. -->
     <style>
-        html, body { margin: 0; background: #0A0A0A; }
         #app { min-height: 100vh; }
         .app-boot {
             position: fixed; inset: 0;
