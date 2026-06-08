@@ -91,7 +91,7 @@
     }
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
-        => _ = InvokeAsync(CloseResultsAsync);
+        => _ = InvokeAsync(() => CloseResultsAsync(clearText: true));
 
     private async Task OnInput(ChangeEventArgs e)
     {
@@ -151,16 +151,26 @@
             : $"/meta/{Uri.EscapeDataString(m.Id)}";
     }
 
-    // Hide the results dropdown and tear down the outside-press listener. Used on navigation, when the
-    // query drops below the minimum, and on an outside press.
-    private async Task CloseResultsAsync()
+    // Hide the results dropdown and tear down the outside-press listener. clearText also wipes the query
+    // box — used when the user abandons the search (clicks away / navigates) so it doesn't hold stale text;
+    // the "typed below the minimum" path keeps clearText:false since the user is mid-edit.
+    private async Task CloseResultsAsync(bool clearText = false)
     {
         await UnregisterDismissAsync();
-        if (_open)
+        var changed = false;
+        if (clearText)
         {
-            _open = false;
-            StateHasChanged();
+            // Cancel any in-flight debounce so a late response can't repopulate the just-cleared results.
+            _cts?.Cancel();
+            if (_query.Length > 0 || _results.Count > 0)
+            {
+                _query = "";
+                _results = new();
+                changed = true;
+            }
         }
+        if (_open) { _open = false; changed = true; }
+        if (changed) StateHasChanged();
     }
 
     private async Task RegisterDismissAsync()
@@ -186,7 +196,7 @@
     }
 
     [JSInvokable]
-    public Task OnOutsideClick() => CloseResultsAsync();
+    public Task OnOutsideClick() => CloseResultsAsync(clearText: true);
 
     public async ValueTask DisposeAsync()
     {
