@@ -3,7 +3,7 @@
     <color name="colorPrimary">#512BD4</color>
     <color name="colorPrimaryDark">#2B0B98</color>
     <color name="colorAccent">#2B0B98</color>
-    <!-- Native splash background. Light here (default), dark in values-night/colors.xml — Android swaps
-         them by system theme, so the splash matches light/dark like the app's --bg. -->
+    <!-- Native splash background: light here (default), dark in values-night/colors.xml. Android swaps
+         them by system theme so the splash matches the app's light/dark background. -->
     <color name="splash_background">#FFFFFF</color>
 </resources>
