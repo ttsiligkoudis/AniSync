@@ -80,6 +80,8 @@ builder.Services.AddHttpClient<IAniSyncApi, AniSyncApi>()
 builder.Services.AddScoped<IAppEnvironment, WebAppEnvironment>();
 builder.Services.AddScoped<IMediaPlayer, Html5MediaPlayer>();
 builder.Services.AddScoped<ISecureStore, WebSecureStore>();
+// No OS system bars to tint on the web — the browser/PWA handles its own chrome (theme-color meta).
+builder.Services.AddScoped<IPlatformChrome, NoOpPlatformChrome>();
 // Web sign-in is the server redirect flow — the Login page uses /Auth/* anchors.
 builder.Services.AddScoped<INativeAuth, NoopNativeAuth>();
 

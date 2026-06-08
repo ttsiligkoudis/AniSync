@@ -1,11 +1,12 @@
 @inherits LayoutComponentBase
-@implements IDisposable
+@implements IAsyncDisposable
 @inject NavigationManager Nav
 @inject AppState State
 @inject ISecureStore Store
 @inject IAniSyncApi Api
 @inject IJSRuntime JS
 @inject IPrerenderSession PrerenderSession
+@inject IPlatformChrome PlatformChrome
 
 @* Shared chrome for every page — composed to match _Layout.cshtml's body
    order exactly: drawer (+ backdrop), site header, fixed media-type switch,
@@ -149,14 +150,42 @@
         _ => service,
     };
 
+    // Bridge the web app's resolved theme to the native host so it can re-tint the OS system bars when the
+    // user toggles light/dark (or the system theme changes). Web + non-Android heads get a no-op
+    // IPlatformChrome, so this is native-only in effect. Wired after first interactive render (needs JS).
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !RendererInfo.IsInteractive) return;
+        try
+        {
+            _themeBridge = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/AniSync.Client/js/theme-bridge.js");
+            _themeRef = DotNetObjectReference.Create(this);
+            await _themeBridge.InvokeVoidAsync("register", _themeRef);
+        }
+        catch { /* no JS (prerender) — native bars fall back to the system theme set in MainActivity */ }
+    }
+
+    [JSInvokable]
+    public void OnThemeChanged(bool dark) => PlatformChrome.SetTheme(dark);
+
+    private IJSObjectReference? _themeBridge;
+    private DotNetObjectReference<MainLayout>? _themeRef;
+
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
         => StateHasChanged();
 
     private void OnStateChanged() => StateHasChanged();
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         Nav.LocationChanged -= OnLocationChanged;
         State.Changed -= OnStateChanged;
+        if (_themeBridge is not null)
+        {
+            try { await _themeBridge.InvokeVoidAsync("unregister"); } catch { }
+            try { await _themeBridge.DisposeAsync(); } catch { }
+        }
+        _themeRef?.Dispose();
     }
 }
