@@ -63,12 +63,19 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
                 _player.EndReached += (_, _) => request.OnEnded();
             }
 
-            // Hand the configured player to a native page on the UI thread.
+            // A libVLC playback error (expired/blocked debrid link, undecodable stream) should tear the
+            // session down cleanly rather than leave audio running behind a dead page.
+            _player.EncounteredError += (_, _) => _ = StopAsync();
+
+            // Hand the configured player to a native page on the UI thread. Only Play() AFTER the page is
+            // actually presented — otherwise a failure to present would leave audio playing with no visible
+            // video surface (the "frozen screen + background sound" symptom).
             await MainThread.InvokeOnMainThreadAsync(async () =>
             {
+                var nav = Application.Current?.Windows.FirstOrDefault()?.Page?.Navigation
+                    ?? throw new InvalidOperationException("No navigation host available to present the player.");
                 var page = new VlcPlayerPage(_player, request.Title);
-                var nav = Application.Current?.Windows.FirstOrDefault()?.Page?.Navigation;
-                if (nav is not null) await nav.PushModalAsync(page);
+                await nav.PushModalAsync(page);
                 _player.Play();
             });
         }
