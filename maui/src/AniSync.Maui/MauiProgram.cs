@@ -21,14 +21,22 @@ public static class MauiProgram
         builder.Services.AddMauiBlazorWebView();
 
 #if ANDROID
-        // Make the Android WebView transparent the moment its handler creates it. Chromium paints the
-        // document white before the page's CSS background renders, which flashes white on cold start /
-        // resume (most visible in dark mode). Transparent lets the dark window/content background show
-        // through until the page paints. Done via the handler mapper so it applies at creation — earlier
-        // and more reliably than tinting the view after layout.
+        // Paint the Android WebView's background to the THEME colour the moment its handler creates it.
+        // Chromium renders the document white before the page's CSS background paints, flashing white on
+        // cold start / resume / app-switch (obvious in dark mode); transparent didn't mask it, so use an
+        // opaque themed colour. Night mode is forced to the in-app theme (MainApplication), so the device
+        // config here reflects the app's light/dark choice.
         Microsoft.AspNetCore.Components.WebView.Maui.BlazorWebViewHandler.BlazorWebViewMapper.AppendToMapping(
-            "TransparentWebViewBackground",
-            (handler, view) => handler.PlatformView.SetBackgroundColor(Android.Graphics.Color.Transparent));
+            "ThemedWebViewBackground",
+            (handler, view) =>
+            {
+                var ctx = handler.PlatformView.Context;
+                var night = ctx is not null
+                    && (ctx.Resources!.Configuration!.UiMode & Android.Content.Res.UiMode.NightMask)
+                       == Android.Content.Res.UiMode.NightYes;
+                handler.PlatformView.SetBackgroundColor(
+                    Android.Graphics.Color.ParseColor(night ? "#0A0A0A" : "#FFFFFF"));
+            });
 #endif
 
 #if DEBUG
