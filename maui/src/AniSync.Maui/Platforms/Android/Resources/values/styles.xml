@@ -1,14 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Theme-aware window background so the launch + resume window-animation frame matches the system
-         theme instead of flashing white in dark mode. Inherits MAUI's generated themes and overrides only
-         android:windowBackground; the splash theme also routes the post-splash theme to ours so the same
-         applies after the splash (e.g. on resume). -->
-    <style name="AniSync.MainTheme" parent="Maui.MainTheme">
-        <item name="android:windowBackground">@color/window_background</item>
-    </style>
+         theme instead of flashing white in dark mode. The activity keeps this theme throughout (MAUI
+         doesn't switch to a separate post-splash theme), so overriding android:windowBackground here covers
+         both launch and resume. With the splash Color transparent, the splash background also falls back to
+         this, giving a theme-following splash. -->
     <style name="AniSync.SplashTheme" parent="Maui.SplashTheme">
         <item name="android:windowBackground">@color/window_background</item>
-        <item name="postSplashScreenTheme">@style/AniSync.MainTheme</item>
     </style>
 </resources>
