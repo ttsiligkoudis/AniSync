@@ -900,7 +900,19 @@
 
         if (Env.SupportsNativePlayback)
         {
-            await Player.PlayAsync(request);
+            try
+            {
+                await Player.PlayAsync(request);
+            }
+            catch (Exception ex)
+            {
+                // Native (LibVLC) playback failed to start — surface the fallback panel (Retry / Open
+                // externally / try another source) instead of letting the exception crash the whole app.
+                Console.Error.WriteLine($"Native PlayAsync failed: {ex}");
+                _playingUrl = null;
+                _fallbackReason = "native-error";
+                StateHasChanged();
+            }
         }
         else
         {
