@@ -54,10 +54,11 @@
     <!-- App Icon — AniSync logo on the app's dark chrome (#0A0A0A, the dark background color). -->
     <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.png" Color="#0A0A0A" />
 
-    <!-- Native splash: logo-less (splash.png is transparent) so the OS cold-start splash is just the dark
-         brand colour — the logo appears only on the HTML boot screen, so the user sees one splash, not two.
-         (Android 12+ always shows a system splash; it can't be removed, only made blank.) -->
-    <MauiSplashScreen Include="Resources\Splash\splash.png" Color="#0A0A0A" BaseSize="128,128" />
+    <!-- Native splash: the transparent logo on a TRANSPARENT background (Color #00FFFFFF = alpha 0). With no
+         baked background colour, Android's system splash falls back to the device window background, which
+         follows the system light/dark theme — so the splash is theme-based, and there's no dark square
+         behind the logo (that square came from a baked opaque Color). -->
+    <MauiSplashScreen Include="Resources\Splash\splash.png" Color="#00FFFFFF" BaseSize="128,128" />
 
     <!-- Images -->
     <MauiImage Include="Resources\Images\*" />
