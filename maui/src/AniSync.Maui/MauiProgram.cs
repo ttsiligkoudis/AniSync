@@ -20,6 +20,17 @@ public static class MauiProgram
 
         builder.Services.AddMauiBlazorWebView();
 
+#if ANDROID
+        // Make the Android WebView transparent the moment its handler creates it. Chromium paints the
+        // document white before the page's CSS background renders, which flashes white on cold start /
+        // resume (most visible in dark mode). Transparent lets the dark window/content background show
+        // through until the page paints. Done via the handler mapper so it applies at creation — earlier
+        // and more reliably than tinting the view after layout.
+        Microsoft.AspNetCore.Components.WebView.Maui.BlazorWebViewHandler.BlazorWebViewMapper.AppendToMapping(
+            "TransparentWebViewBackground",
+            (handler, view) => handler.PlatformView.SetBackgroundColor(Android.Graphics.Color.Transparent));
+#endif
+
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
         builder.Logging.AddDebug();
