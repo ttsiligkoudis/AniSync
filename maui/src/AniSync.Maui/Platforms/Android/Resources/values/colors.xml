@@ -3,4 +3,7 @@
     <color name="colorPrimary">#512BD4</color>
     <color name="colorPrimaryDark">#2B0B98</color>
     <color name="colorAccent">#2B0B98</color>
+    <!-- Window background, theme-aware (dark in values-night/). Used by the launch/resume window animation
+         frame so dark mode doesn't flash white before the app paints. -->
+    <color name="window_background">#FFFFFF</color>
 </resources>
