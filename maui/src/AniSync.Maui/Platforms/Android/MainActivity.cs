@@ -3,7 +3,6 @@ using Android.Content.PM;
 using Android.OS;
 using AndroidX.Activity;
 using AndroidX.Core.View;
-using AView = Android.Views.View;
 
 namespace AniSync;
 
@@ -22,15 +21,10 @@ public class MainActivity : MauiAppCompatActivity
         if (Window is not null)
             WindowCompat.SetDecorFitsSystemWindows(Window, false);
 
-        // API 35 enforces edge-to-edge, so the BlazorWebView draws under the status/navigation bars and the
-        // WebView doesn't surface env(safe-area-inset-*) to CSS. Pad the content root by the system-bar
-        // insets so the header/bottom-nav sit inside the safe area.
-        var content = FindViewById(Android.Resource.Id.Content);
-        if (content is not null)
-        {
-            ViewCompat.SetOnApplyWindowInsetsListener(content, new SystemBarInsetsListener(this));
-            ViewCompat.RequestApplyInsets(content);
-        }
+        // Edge-to-edge: the WebView fills behind the status/navigation bars, and the web CSS
+        // (env(safe-area-inset-*) on the header + bottom nav) provides the inset. We deliberately do NOT
+        // also pad the content view natively — the Poco F7's WebView reports env() too, so padding here
+        // produced a DOUBLE gap under the status bar. CSS env() is the single source of the inset.
 
         // Initial paint follows the system theme; the web app's JS theme bridge takes over once it hydrates.
         AndroidSystemBars.Apply(this, IsSystemDark());
@@ -82,24 +76,4 @@ public class MainActivity : MauiAppCompatActivity
     private bool IsSystemDark()
         => (Resources?.Configuration?.UiMode & Android.Content.Res.UiMode.NightMask)
            == Android.Content.Res.UiMode.NightYes;
-
-    // Pads the host view by the status + navigation bar insets so the BlazorWebView never underlaps them,
-    // and re-asserts the themed surface colours — this fires once the WebView is attached, so it's where
-    // the WebView background actually gets painted (it may not exist yet in OnCreate).
-    private sealed class SystemBarInsetsListener : Java.Lang.Object, IOnApplyWindowInsetsListener
-    {
-        private readonly Activity _activity;
-        public SystemBarInsetsListener(Activity activity) => _activity = activity;
-
-        public WindowInsetsCompat OnApplyWindowInsets(AView? v, WindowInsetsCompat? insets)
-        {
-            if (v is not null && insets is not null)
-            {
-                var bars = insets.GetInsets(WindowInsetsCompat.Type.SystemBars());
-                v.SetPadding(bars.Left, bars.Top, bars.Right, bars.Bottom);
-            }
-            AndroidSystemBars.Reapply(_activity);
-            return insets!;
-        }
-    }
 }
