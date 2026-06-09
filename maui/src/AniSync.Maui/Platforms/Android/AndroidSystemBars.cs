@@ -1,5 +1,6 @@
 using Android.App;
 using AndroidX.Core.View;
+using AView = Android.Views.View;
 
 namespace AniSync;
 
@@ -26,6 +27,9 @@ internal static class AndroidSystemBars
 
         var color = Android.Graphics.Color.ParseColor(dark ? DarkBg : LightBg);
         content.SetBackgroundColor(color);
+        // The BlazorWebView surface defaults to WHITE, so it flashes white on launch/resume (before the page
+        // repaints) — jarring in dark mode. Paint it the theme colour so any pre-paint frame matches.
+        FindWebView(content)?.SetBackgroundColor(color);
         // Under Android 15 edge-to-edge the status/nav bars are transparent (SetStatusBarColor is ignored),
         // so the strips behind them show the WINDOW background — which otherwise stays the splash theme's
         // dark even when the app is light. Paint the window background to the theme colour so the strips
@@ -45,6 +49,22 @@ internal static class AndroidSystemBars
         }
     }
 
-    // Re-apply the last theme (used on config changes that don't recreate the activity, e.g. rotation).
+    // Re-apply the last theme (used on config changes that don't recreate the activity, e.g. rotation, and
+    // on resume to re-assert the surface colours before a repaint).
     public static void Reapply(Activity activity) => Apply(activity, _lastDark);
+
+    // Depth-first search for the BlazorWebView's underlying Android WebView in the view tree.
+    public static Android.Webkit.WebView? FindWebView(AView? view)
+    {
+        if (view is Android.Webkit.WebView web) return web;
+        if (view is Android.Views.ViewGroup group)
+        {
+            for (var i = 0; i < group.ChildCount; i++)
+            {
+                var found = FindWebView(group.GetChildAt(i));
+                if (found is not null) return found;
+            }
+        }
+        return null;
+    }
 }

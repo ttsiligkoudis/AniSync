@@ -28,7 +28,7 @@ public class MainActivity : MauiAppCompatActivity
         var content = FindViewById(Android.Resource.Id.Content);
         if (content is not null)
         {
-            ViewCompat.SetOnApplyWindowInsetsListener(content, new SystemBarInsetsListener());
+            ViewCompat.SetOnApplyWindowInsetsListener(content, new SystemBarInsetsListener(this));
             ViewCompat.RequestApplyInsets(content);
         }
 
@@ -48,6 +48,14 @@ public class MainActivity : MauiAppCompatActivity
         AndroidSystemBars.Reapply(this);
     }
 
+    // Re-assert the themed surface colours on resume so a backgrounded → foregrounded transition doesn't
+    // flash the WebView's default white before it repaints.
+    protected override void OnResume()
+    {
+        base.OnResume();
+        AndroidSystemBars.Reapply(this);
+    }
+
     // Back button → navigate back through the in-app (SPA) history like the header's back control, falling
     // through to the system default (leave the app) only on the first screen. Blazor's pushState
     // navigations register in the WebView's back-forward list, so CanGoBack/GoBack drive the same history
@@ -59,7 +67,7 @@ public class MainActivity : MauiAppCompatActivity
 
         public override void HandleOnBackPressed()
         {
-            var webView = FindWebView(_activity.FindViewById(Android.Resource.Id.Content));
+            var webView = AndroidSystemBars.FindWebView(_activity.FindViewById(Android.Resource.Id.Content));
             if (webView is not null && webView.CanGoBack())
             {
                 webView.GoBack();
@@ -71,27 +79,18 @@ public class MainActivity : MauiAppCompatActivity
         }
     }
 
-    private static Android.Webkit.WebView? FindWebView(AView? view)
-    {
-        if (view is Android.Webkit.WebView web) return web;
-        if (view is Android.Views.ViewGroup group)
-        {
-            for (var i = 0; i < group.ChildCount; i++)
-            {
-                var found = FindWebView(group.GetChildAt(i));
-                if (found is not null) return found;
-            }
-        }
-        return null;
-    }
-
     private bool IsSystemDark()
         => (Resources?.Configuration?.UiMode & Android.Content.Res.UiMode.NightMask)
            == Android.Content.Res.UiMode.NightYes;
 
-    // Pads the host view by the status + navigation bar insets so the BlazorWebView never underlaps them.
+    // Pads the host view by the status + navigation bar insets so the BlazorWebView never underlaps them,
+    // and re-asserts the themed surface colours — this fires once the WebView is attached, so it's where
+    // the WebView background actually gets painted (it may not exist yet in OnCreate).
     private sealed class SystemBarInsetsListener : Java.Lang.Object, IOnApplyWindowInsetsListener
     {
+        private readonly Activity _activity;
+        public SystemBarInsetsListener(Activity activity) => _activity = activity;
+
         public WindowInsetsCompat OnApplyWindowInsets(AView? v, WindowInsetsCompat? insets)
         {
             if (v is not null && insets is not null)
@@ -99,6 +98,7 @@ public class MainActivity : MauiAppCompatActivity
                 var bars = insets.GetInsets(WindowInsetsCompat.Type.SystemBars());
                 v.SetPadding(bars.Left, bars.Top, bars.Right, bars.Bottom);
             }
+            AndroidSystemBars.Reapply(_activity);
             return insets!;
         }
     }
