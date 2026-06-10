@@ -13,14 +13,31 @@ namespace AniSync.Maui;
 /// reveal), a compact top bar (back + title), a centre transport (rewind 10s · play/pause · forward 30s), a
 /// seek bar with time labels, and a slim bottom action row opening in-page bottom-sheets for Subtitles
 /// (Stremio-style language/track/options columns), Audio Tracks, Playback Speed and Video scaling — each
-/// driving the LibVLC <see cref="MediaPlayer"/> directly (the page already owns it; no player-seam change).
-/// Controls auto-hide after a few seconds; playback pauses if the app is backgrounded (Home).
+/// driving the LibVLC <see cref="MediaPlayer"/> directly. All control glyphs come from the bundled Material
+/// Icons font so they're uniform in size. Controls auto-hide after a few seconds; playback pauses when the
+/// app is backgrounded (Home).
 /// </summary>
 public sealed class VlcPlayerPage : ContentPage
 {
     private static readonly Color Accent = Color.FromArgb("#8B5CF6");   // purple seek/selection accent
     private static readonly Color Scrim = Color.FromRgba(0, 0, 0, 150); // bar background
     private static readonly Color SheetBg = Color.FromArgb("#15151B");  // bottom-sheet panel
+
+    // Material Icons codepoints (font registered as "MaterialIcons" in MauiProgram).
+    private const string IconFont = "MaterialIcons";
+    private const string IcBack = "";      // chevron_left
+    private const string IcReplay10 = "";  // replay_10
+    private const string IcPlay = "";      // play_arrow
+    private const string IcPause = "";     // pause
+    private const string IcForward30 = ""; // forward_30
+    private const string IcSubtitles = ""; // subtitles
+    private const string IcAudio = "";     // volume_up
+    private const string IcSpeed = "";     // speed
+    private const string IcAspect = "";    // aspect_ratio
+    private const string IcClose = "";     // close
+    private const string IcRemove = "";    // remove
+    private const string IcAdd = "";       // add
+    private const string IcCheck = "";     // check
 
     private readonly MediaPlayer _player;
     private readonly Slider _seek;
@@ -35,7 +52,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     private bool _seeking;
     private ScaleMode _scaleMode = ScaleMode.Fit;
-    private string? _subLang;                       // selected language column in the subtitle sheet
+    private string? _subLang;                        // selected language column in the subtitle sheet
     private Microsoft.Maui.Controls.Window? _window; // for the background-pause hook
 
     private enum ScaleMode { Fit, SixteenNine, FourThree, Fill }
@@ -54,8 +71,8 @@ public sealed class VlcPlayerPage : ContentPage
             HorizontalOptions = LayoutOptions.Fill,
         };
 
-        // ── Top bar (compact): back (‹) + title ─────────────────────────────────
-        var back = GlyphButton("‹", 28, 40);
+        // ── Top bar (compact): back + title ─────────────────────────────────────
+        var back = GlyphButton(IcBack, 28, 44);
         back.Clicked += async (_, _) => await CloseAsync();
 
         var titleLabel = new Label
@@ -79,19 +96,19 @@ public sealed class VlcPlayerPage : ContentPage
         topBar.Add(back, 0, 0);
         topBar.Add(titleLabel, 1, 0);
 
-        // ── Centre transport: rewind 10s · play/pause · forward 30s ─────────────
-        var rewind = GlyphButton("◀◀", 22, 56);
+        // ── Centre transport: rewind 10s · play/pause · forward 30s (uniform size) ─
+        var rewind = GlyphButton(IcReplay10, 32, 60);
         rewind.Clicked += (_, _) => Nudge(-10_000);
 
-        _playPause = GlyphButton("❚❚", 30, 68);
+        _playPause = GlyphButton(IcPause, 32, 60);
         _playPause.Clicked += (_, _) => TogglePlay();
 
-        var forward = GlyphButton("▶▶", 22, 56);
+        var forward = GlyphButton(IcForward30, 32, 60);
         forward.Clicked += (_, _) => Nudge(+30_000);
 
         var transport = new HorizontalStackLayout
         {
-            Spacing = 30,
+            Spacing = 34,
             HorizontalOptions = LayoutOptions.Center,
             VerticalOptions = LayoutOptions.Center,
             Children = { rewind, _playPause, forward },
@@ -130,19 +147,19 @@ public sealed class VlcPlayerPage : ContentPage
         seekRow.Add(_seek, 1, 0);
         seekRow.Add(_duration, 2, 0);
 
-        // ── Action row (slim): Subtitles · Audio · Speed · Scaling ──────────────
+        // ── Action row (slim, icon + label inline): Subtitles · Audio · Speed · Scaling ─
         var actionRow = new Grid
         {
             ColumnDefinitions =
             {
                 new(GridLength.Star), new(GridLength.Star), new(GridLength.Star), new(GridLength.Star),
             },
-            Padding = new Thickness(8, 2, 8, 4),
+            Padding = new Thickness(6, 2, 6, 4),
         };
-        actionRow.Add(ActionButton("CC", "Subtitles", OpenSubtitleSheet), 0, 0);
-        actionRow.Add(ActionButton("♪", "Audio", OpenAudioSheet), 1, 0);
-        actionRow.Add(ActionButton("»", "Speed", OpenSpeedSheet), 2, 0);
-        actionRow.Add(ActionButton("⤢", "Scaling", OpenScalingSheet), 3, 0);
+        actionRow.Add(ActionButton(IcSubtitles, "Subtitles", OpenSubtitleSheet), 0, 0);
+        actionRow.Add(ActionButton(IcAudio, "Audio", OpenAudioSheet), 1, 0);
+        actionRow.Add(ActionButton(IcSpeed, "Speed", OpenSpeedSheet), 2, 0);
+        actionRow.Add(ActionButton(IcAspect, "Scaling", OpenScalingSheet), 3, 0);
 
         var bottom = new VerticalStackLayout
         {
@@ -170,7 +187,7 @@ public sealed class VlcPlayerPage : ContentPage
             HorizontalOptions = LayoutOptions.Start,
             VerticalOptions = LayoutOptions.Center,
         };
-        var sheetClose = GlyphButton("✕", 16, 36);
+        var sheetClose = GlyphButton(IcClose, 22, 40);
         sheetClose.Clicked += (_, _) => CloseSheet();
 
         var sheetHeader = new Grid
@@ -225,8 +242,8 @@ public sealed class VlcPlayerPage : ContentPage
         // Keep the UI in sync (libVLC raises these on its own thread → marshal to the UI thread).
         _player.PositionChanged += OnPositionChanged;
         _player.LengthChanged += OnLengthChanged;
-        _player.Playing += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = "❚❚"; RestartHideTimer(); });
-        _player.Paused += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = "▶"; StopHideTimer(); });
+        _player.Playing += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPause; RestartHideTimer(); });
+        _player.Paused += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPlay; StopHideTimer(); });
 
         // Stop + release when the user backs out of (or closes) the player.
         NavigatedFrom += (_, _) => { try { _player.Stop(); } catch { /* already stopped */ } };
@@ -237,6 +254,9 @@ public sealed class VlcPlayerPage : ContentPage
     {
         base.OnAppearing();
         SetImmersive(true);
+        // Hiding the bars doesn't survive the modal-present + forced rotation on some OEMs, so re-assert once
+        // the transition settles (MainActivity also re-applies on config change / resume).
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(350), () => SetImmersive(true));
         _window = Application.Current?.Windows.FirstOrDefault();
         if (_window is not null) _window.Stopped += OnWindowStopped;
         RestartHideTimer();
@@ -360,7 +380,8 @@ public sealed class VlcPlayerPage : ContentPage
         };
         var check = new Label
         {
-            Text = selected ? "✓" : "",
+            Text = selected ? IcCheck : "",
+            FontFamily = IconFont,
             TextColor = Accent,
             FontSize = 16,
             VerticalOptions = LayoutOptions.Center,
@@ -572,9 +593,9 @@ public sealed class VlcPlayerPage : ContentPage
             catch { }
         }
 
-        var minus = GlyphButton("−", 22, 40);
+        var minus = GlyphButton(IcRemove, 22, 40);
         minus.Clicked += (_, _) => Adjust(-100_000); // −0.1s
-        var plus = GlyphButton("+", 22, 40);
+        var plus = GlyphButton(IcAdd, 22, 40);
         plus.Clicked += (_, _) => Adjust(+100_000);   // +0.1s
 
         var caption = new Label
@@ -638,6 +659,7 @@ public sealed class VlcPlayerPage : ContentPage
     private static Button GlyphButton(string glyph, double fontSize, double size) => new()
     {
         Text = glyph,
+        FontFamily = IconFont,
         FontSize = fontSize,
         TextColor = Colors.White,
         BackgroundColor = Colors.Transparent,
@@ -655,17 +677,19 @@ public sealed class VlcPlayerPage : ContentPage
         VerticalOptions = LayoutOptions.Center,
     };
 
-    private View ActionButton(string glyph, string label, Action onTap)
+    // Inline icon + label (icon on the left) — keeps the action row to a single short line.
+    private View ActionButton(string icon, string label, Action onTap)
     {
-        var stack = new VerticalStackLayout
+        var stack = new HorizontalStackLayout
         {
-            Spacing = 1,
+            Spacing = 6,
             HorizontalOptions = LayoutOptions.Center,
-            Padding = new Thickness(4, 4),
+            VerticalOptions = LayoutOptions.Center,
+            Padding = new Thickness(6, 4),
             Children =
             {
-                new Label { Text = glyph, FontSize = 16, FontAttributes = FontAttributes.Bold, TextColor = Colors.White, HorizontalOptions = LayoutOptions.Center },
-                new Label { Text = label, FontSize = 10, TextColor = Color.FromRgba(255, 255, 255, 200), HorizontalOptions = LayoutOptions.Center },
+                new Label { Text = icon, FontFamily = IconFont, FontSize = 18, TextColor = Colors.White, VerticalOptions = LayoutOptions.Center },
+                new Label { Text = label, FontSize = 13, TextColor = Colors.White, VerticalOptions = LayoutOptions.Center },
             },
         };
         var tap = new TapGestureRecognizer();

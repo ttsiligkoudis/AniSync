@@ -31,16 +31,24 @@ internal static class AndroidImmersive
             ?.Show(WindowInsetsCompat.Type.SystemBars());
     }
 
-    // Re-assert the hidden bars (called on resume / config change while the player is open).
+    // Re-assert the hidden bars (called on resume / config change while the player is open). Posted to the
+    // decor view so it runs AFTER the current layout/transition pass — hiding the bars mid-rotation or
+    // mid-modal-present doesn't stick on some OEMs, leaving the status bar visible.
     public static void Apply(Activity activity)
     {
         if (!Active) return;
-        var window = activity.Window;
-        if (window is null) return;
-        var controller = WindowCompat.GetInsetsController(window, window.DecorView);
-        if (controller is null) return;
-        controller.SystemBarsBehavior = WindowInsetsControllerCompat.BehaviorShowTransientBarsBySwipe;
-        controller.Hide(WindowInsetsCompat.Type.SystemBars());
+        var decor = activity.Window?.DecorView;
+        if (decor is null) return;
+        decor.Post(() =>
+        {
+            if (!Active) return;
+            var window = activity.Window;
+            if (window is null) return;
+            var controller = WindowCompat.GetInsetsController(window, window.DecorView);
+            if (controller is null) return;
+            controller.SystemBarsBehavior = WindowInsetsControllerCompat.BehaviorShowTransientBarsBySwipe;
+            controller.Hide(WindowInsetsCompat.Type.SystemBars());
+        });
     }
 
     private static void SetCutout(Activity activity, bool intoCutout)

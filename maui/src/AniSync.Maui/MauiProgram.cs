@@ -21,6 +21,8 @@ public static class MauiProgram
             .ConfigureFonts(fonts =>
             {
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
+                // Material Icons — uniform-size player control glyphs (Stremio-style chrome).
+                fonts.AddFont("MaterialIcons-Regular.ttf", "MaterialIcons");
             });
 
         builder.Services.AddMauiBlazorWebView();
