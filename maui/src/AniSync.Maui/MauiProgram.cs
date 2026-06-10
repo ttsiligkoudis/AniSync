@@ -2,6 +2,7 @@ using System.Net.Http;
 using Microsoft.Extensions.Logging;
 using AniSync.Client.Services;
 using AniSync.Maui;
+using LibVLCSharp.MAUI;
 using LibVLCSharp.Shared;
 
 namespace AniSync;
@@ -13,6 +14,10 @@ public static class MauiProgram
         var builder = MauiApp.CreateBuilder();
         builder
             .UseMauiApp<App>()
+            // Registers the LibVLCSharp.MAUI VideoView handler. Without this, presenting the player page
+            // throws HandlerNotFoundException for VideoView (the debrid-playback crash): audio started but
+            // the video view couldn't be created.
+            .UseLibVLCSharp()
             .ConfigureFonts(fonts =>
             {
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
