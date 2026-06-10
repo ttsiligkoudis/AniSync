@@ -25,7 +25,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     // Bump on each player change so we can confirm which APK is actually installed (shown faintly in the top
     // bar). Temporary aid while iterating on the native player — remove once the layout is finalised.
-    private const string BuildTag = "fs3";
+    private const string BuildTag = "fs4";
 
     // Material Icons codepoints (font registered as "MaterialIcons" in MauiProgram).
     private const string IconFont = "MaterialIcons";
@@ -61,7 +61,7 @@ public sealed class VlcPlayerPage : ContentPage
     private string? _subLang;                        // selected language column in the subtitle sheet
     private Microsoft.Maui.Controls.Window? _window; // for the background-pause hook
 
-    private enum ScaleMode { Fit, SixteenNine, FourThree, Fill }
+    private enum ScaleMode { Fit, Crop, Fill, SixteenNine, FourThree }
 
     public VlcPlayerPage(MediaPlayer player, string title)
     {
@@ -515,9 +515,10 @@ public sealed class VlcPlayerPage : ContentPage
         var rows = new[]
         {
             Row("Fit", _scaleMode == ScaleMode.Fit, () => ApplyScale(ScaleMode.Fit)),
+            Row("Crop", _scaleMode == ScaleMode.Crop, () => ApplyScale(ScaleMode.Crop)),
+            Row("Fill", _scaleMode == ScaleMode.Fill, () => ApplyScale(ScaleMode.Fill)),
             Row("16:9", _scaleMode == ScaleMode.SixteenNine, () => ApplyScale(ScaleMode.SixteenNine)),
             Row("4:3", _scaleMode == ScaleMode.FourThree, () => ApplyScale(ScaleMode.FourThree)),
-            Row("Fill", _scaleMode == ScaleMode.Fill, () => ApplyScale(ScaleMode.Fill)),
         };
         OpenSheet("Video scaling", ScrollList(rows));
     }
@@ -527,32 +528,51 @@ public sealed class VlcPlayerPage : ContentPage
         _scaleMode = mode;
         try
         {
+            // Aspect and crop are independent VLC knobs — always reset both so modes don't stack.
             switch (mode)
             {
                 case ScaleMode.Fit:
                     _player.AspectRatio = null;
-                    _player.Scale = 0;       // auto-fit to the view
+                    _player.CropGeometry = null;
+                    break;
+                case ScaleMode.Crop:
+                    // Stremio's "Περικοπή": zoom until the screen is covered, trimming the overflow edges —
+                    // no distortion. Cropping the source to the screen's aspect ratio does exactly that.
+                    _player.AspectRatio = null;
+                    _player.CropGeometry = SurfaceRatio();
+                    break;
+                case ScaleMode.Fill:
+                    // Stremio's "Επέκταση": stretch the picture to the screen's aspect (may distort).
+                    _player.AspectRatio = SurfaceRatio();
+                    _player.CropGeometry = null;
                     break;
                 case ScaleMode.SixteenNine:
                     _player.AspectRatio = "16:9";
-                    _player.Scale = 0;
+                    _player.CropGeometry = null;
                     break;
                 case ScaleMode.FourThree:
                     _player.AspectRatio = "4:3";
-                    _player.Scale = 0;
-                    break;
-                case ScaleMode.Fill:
-                    // Force the display aspect so the picture crops/stretches to fill the screen.
-                    var d = DeviceDisplay.Current.MainDisplayInfo;
-                    var w = (int)Math.Max(d.Width, d.Height);
-                    var h = (int)Math.Min(d.Width, d.Height);
-                    _player.AspectRatio = h > 0 ? $"{w}:{h}" : null;
-                    _player.Scale = 0;
+                    _player.CropGeometry = null;
                     break;
             }
+            _player.Scale = 0; // auto-fit to the view
         }
         catch { /* not ready */ }
         CloseSheet();
+    }
+
+    // Ratio of the actual video surface, so Crop/Fill cover exactly the screen we draw on (including the
+    // cutout area). Falls back to the physical display ratio if the native view hasn't been laid out yet.
+    private string? SurfaceRatio()
+    {
+#if ANDROID
+        if (_videoView.Handler?.PlatformView is global::Android.Views.View v && v.Width > 0 && v.Height > 0)
+            return $"{v.Width}:{v.Height}";
+#endif
+        var d = DeviceDisplay.Current.MainDisplayInfo;
+        var w = (int)Math.Max(d.Width, d.Height);
+        var h = (int)Math.Min(d.Width, d.Height);
+        return h > 0 ? $"{w}:{h}" : null;
     }
 
     // ── Subtitles: Stremio-style language · tracks · options columns ────────────
