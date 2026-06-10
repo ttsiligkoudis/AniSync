@@ -10,6 +10,10 @@ reliable than trial-and-error. Prefer the native/framework-supported API
 over manual workarounds once the search surfaces one.
 
 Concrete example from this repo: the player modal not drawing under the
-display cutout was solved by MAUI 10's `ContentPage.SafeAreaEdges =
-SafeAreaRegions.None`, not by manually consuming Android window insets
-(which broke the layout). A quick search would have found this immediately.
+display cutout needed BOTH MAUI 10's `ContentPage.SafeAreaEdges =
+SafeAreaEdges.None` (stops MAUI's own safe-area padding) AND
+`LayoutInDisplayCutoutMode.ShortEdges` set on the modal's OWN window —
+since .NET 9 MAUI hosts modal pages in a DialogFragment whose
+`Dialog.Window` is separate from the Activity window, so activity-window
+flags never reach it. Manually consuming window insets on the decor broke
+the layout outright. Searches surfaced both halves immediately.
