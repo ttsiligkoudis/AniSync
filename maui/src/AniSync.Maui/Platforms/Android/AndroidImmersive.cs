@@ -1,6 +1,5 @@
 using Android.App;
 using Android.OS;
-using Android.Runtime;
 using Android.Views;
 using AndroidX.Core.View;
 
@@ -49,52 +48,37 @@ internal static class AndroidImmersive
             if (!Active) return;
             var window = activity.Window;
             if (window is null) return;
-            // HyperOS/MIUI keep showing the status bar with WindowInsetsController.Hide alone even on Android
-            // 15. The legacy FULLSCREEN window flag is still honoured there and reliably hides it, so set both.
-#pragma warning disable CA1422
-            window.AddFlags(WindowManagerFlags.Fullscreen);
-            // Belt-and-suspenders for the navigation bar / gesture pill: the legacy immersive-sticky
-            // SystemUiVisibility flags, which some OEM skins honour when the modern controller doesn't.
-            window.DecorView.SystemUiVisibility = (StatusBarVisibility)(
-                SystemUiFlags.LayoutStable | SystemUiFlags.LayoutHideNavigation | SystemUiFlags.LayoutFullscreen |
-                SystemUiFlags.HideNavigation | SystemUiFlags.Fullscreen | SystemUiFlags.ImmersiveSticky);
-#pragma warning restore CA1422
-            var controller = WindowCompat.GetInsetsController(window, window.DecorView);
-            if (controller is null) return;
-            controller.SystemBarsBehavior = WindowInsetsControllerCompat.BehaviorShowTransientBarsBySwipe;
-            controller.Hide(WindowInsetsCompat.Type.SystemBars());
+            HideBars(window);
+            // The player page is presented modally, and since .NET 9 MAUI hosts modals in a DialogFragment
+            // with its OWN window — none of the activity-window treatment above reaches it. Give the dialog
+            // window the exact same treatment (cutout opt-in included, or the video surface is inset on the
+            // notch side: off-centre Fit, Crop/Fill stopping at the notch edge).
+            if (TopModalWindow(activity) is { } modal)
+            {
+                SetCutout(modal, intoCutout: true);
+                HideBars(modal);
+            }
         });
     }
 
-    // Target the window that actually HOSTS a given view. MAUI presents modal pages in their own hosting
-    // window, so flags set on the Activity window (Apply, above) never reach the modal — but
-    // ViewCompat.GetWindowInsetsController resolves the controller for the view's attached window, and setting
-    // SystemUiVisibility on that window's decor (view.RootView) covers the legacy path. This is what makes the
-    // player modal go truly fullscreen.
+    // Same as Apply but resolved from the player page's own platform view (called on Loaded / OnAppearing,
+    // when MainActivity isn't in the loop). Walks the context chain back to the activity, then treats the
+    // top-most modal dialog window; falls back to the view-based insets controller if none is found.
     public static void ApplyToView(global::Android.Views.View? view)
     {
         if (!Active || view is null) return;
         view.Post(() =>
         {
             if (!Active) return;
-            var root = view.RootView ?? view;
-            // The modal window also needs its own cutout opt-in (SetCutout only reaches the Activity window),
-            // otherwise the video surface is inset on the notch side and the picture sits off-centre. The
-            // decor view of a window carries WindowManager.LayoutParams, so patch them in place.
-            if (Build.VERSION.SdkInt >= BuildVersionCodes.P &&
-                root.LayoutParameters is WindowManagerLayoutParams wlp &&
-                wlp.LayoutInDisplayCutoutMode != LayoutInDisplayCutoutMode.ShortEdges)
+            var modal = FindActivity(view.Context) is { } activity ? TopModalWindow(activity) : null;
+            if (modal is not null)
             {
-                try
-                {
-                    wlp.LayoutInDisplayCutoutMode = LayoutInDisplayCutoutMode.ShortEdges;
-                    var svc = view.Context?.GetSystemService(global::Android.Content.Context.WindowService);
-                    svc?.JavaCast<IWindowManager>()?.UpdateViewLayout(root, wlp);
-                }
-                catch { /* not a window decor, or update rejected — keep the bars fix regardless */ }
+                SetCutout(modal, intoCutout: true);
+                HideBars(modal);
+                return;
             }
 #pragma warning disable CA1422
-            root.SystemUiVisibility = (StatusBarVisibility)(
+            (view.RootView ?? view).SystemUiVisibility = (StatusBarVisibility)(
                 SystemUiFlags.LayoutStable | SystemUiFlags.LayoutHideNavigation | SystemUiFlags.LayoutFullscreen |
                 SystemUiFlags.HideNavigation | SystemUiFlags.Fullscreen | SystemUiFlags.ImmersiveSticky);
 #pragma warning restore CA1422
@@ -105,14 +89,67 @@ internal static class AndroidImmersive
         });
     }
 
+    // HyperOS/MIUI keep showing the status bar with WindowInsetsController.Hide alone even on Android 15.
+    // The legacy FULLSCREEN window flag is still honoured there and reliably hides it, so set both. The
+    // legacy immersive-sticky SystemUiVisibility flags cover the navigation bar / gesture pill on OEM skins
+    // that ignore the modern controller.
+    private static void HideBars(global::Android.Views.Window window)
+    {
+#pragma warning disable CA1422
+        window.AddFlags(WindowManagerFlags.Fullscreen);
+        window.DecorView.SystemUiVisibility = (StatusBarVisibility)(
+            SystemUiFlags.LayoutStable | SystemUiFlags.LayoutHideNavigation | SystemUiFlags.LayoutFullscreen |
+            SystemUiFlags.HideNavigation | SystemUiFlags.Fullscreen | SystemUiFlags.ImmersiveSticky);
+#pragma warning restore CA1422
+        var controller = WindowCompat.GetInsetsController(window, window.DecorView);
+        if (controller is null) return;
+        controller.SystemBarsBehavior = WindowInsetsControllerCompat.BehaviorShowTransientBarsBySwipe;
+        controller.Hide(WindowInsetsCompat.Type.SystemBars());
+    }
+
+    // The window of the top-most modal page: since .NET 9, MAUI shows modals as DialogFragments on the
+    // activity's fragment manager, so the last one with a live dialog window is the page on screen.
+    private static global::Android.Views.Window? TopModalWindow(Activity activity)
+    {
+        if (activity is not AndroidX.AppCompat.App.AppCompatActivity ac) return null;
+        global::Android.Views.Window? top = null;
+        try
+        {
+            foreach (var f in ac.SupportFragmentManager.Fragments)
+            {
+                if (f is AndroidX.Fragment.App.DialogFragment df && df.Dialog?.Window is { } w)
+                    top = w;
+                if (!f.IsAdded) continue;
+                foreach (var cf in f.ChildFragmentManager.Fragments)
+                    if (cf is AndroidX.Fragment.App.DialogFragment cdf && cdf.Dialog?.Window is { } cw)
+                        top = cw;
+            }
+        }
+        catch { /* fragment manager mid-transaction — caller falls back to the view path */ }
+        return top;
+    }
+
+    private static Activity? FindActivity(global::Android.Content.Context? context)
+    {
+        while (context is global::Android.Content.ContextWrapper wrapper)
+        {
+            if (wrapper is Activity activity) return activity;
+            context = wrapper.BaseContext;
+        }
+        return null;
+    }
+
     private static void SetCutout(Activity activity, bool intoCutout)
+        => SetCutout(activity.Window, intoCutout);
+
+    private static void SetCutout(global::Android.Views.Window? window, bool intoCutout)
     {
         if (Build.VERSION.SdkInt < BuildVersionCodes.P) return;
-        var attrs = activity.Window?.Attributes;
+        var attrs = window?.Attributes;
         if (attrs is null) return;
         attrs.LayoutInDisplayCutoutMode = intoCutout
             ? LayoutInDisplayCutoutMode.ShortEdges
             : LayoutInDisplayCutoutMode.Default;
-        activity.Window!.Attributes = attrs;
+        window!.Attributes = attrs;
     }
 }
