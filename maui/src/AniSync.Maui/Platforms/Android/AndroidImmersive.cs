@@ -1,5 +1,6 @@
 using Android.App;
 using Android.OS;
+using Android.Runtime;
 using Android.Views;
 using AndroidX.Core.View;
 
@@ -77,6 +78,21 @@ internal static class AndroidImmersive
         {
             if (!Active) return;
             var root = view.RootView ?? view;
+            // The modal window also needs its own cutout opt-in (SetCutout only reaches the Activity window),
+            // otherwise the video surface is inset on the notch side and the picture sits off-centre. The
+            // decor view of a window carries WindowManager.LayoutParams, so patch them in place.
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.P &&
+                root.LayoutParameters is WindowManagerLayoutParams wlp &&
+                wlp.LayoutInDisplayCutoutMode != LayoutInDisplayCutoutMode.ShortEdges)
+            {
+                try
+                {
+                    wlp.LayoutInDisplayCutoutMode = LayoutInDisplayCutoutMode.ShortEdges;
+                    var svc = view.Context?.GetSystemService(global::Android.Content.Context.WindowService);
+                    svc?.JavaCast<IWindowManager>()?.UpdateViewLayout(root, wlp);
+                }
+                catch { /* not a window decor, or update rejected — keep the bars fix regardless */ }
+            }
 #pragma warning disable CA1422
             root.SystemUiVisibility = (StatusBarVisibility)(
                 SystemUiFlags.LayoutStable | SystemUiFlags.LayoutHideNavigation | SystemUiFlags.LayoutFullscreen |
