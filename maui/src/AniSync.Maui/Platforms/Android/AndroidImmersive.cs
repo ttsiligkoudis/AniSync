@@ -54,11 +54,19 @@ internal static class AndroidImmersive
             // window the exact same treatment (cutout opt-in included, or the video surface is inset on the
             // notch side: off-centre Fit, Crop/Fill stopping at the notch edge).
             if (TopModalWindow(activity) is { } modal)
-            {
-                SetCutout(modal, intoCutout: true);
-                HideBars(modal);
-            }
+                TreatModalWindow(modal);
         });
+    }
+
+    // Dialog-type windows are normally never laid out into the display cutout regardless of cutout mode —
+    // LAYOUT_NO_LIMITS is the documented escape hatch that lets a window extend beyond the screen's "safe"
+    // limits, cutout included. Combined with a MATCH_PARENT layout this makes the modal truly edge-to-edge.
+    private static void TreatModalWindow(global::Android.Views.Window modal)
+    {
+        SetCutout(modal, intoCutout: true);
+        modal.AddFlags(WindowManagerFlags.LayoutNoLimits);
+        modal.SetLayout(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent);
+        HideBars(modal);
     }
 
     // Same as Apply but resolved from the player page's own platform view (called on Loaded / OnAppearing,
@@ -73,8 +81,7 @@ internal static class AndroidImmersive
             var modal = FindActivity(view.Context) is { } activity ? TopModalWindow(activity) : null;
             if (modal is not null)
             {
-                SetCutout(modal, intoCutout: true);
-                HideBars(modal);
+                TreatModalWindow(modal);
                 return;
             }
 #pragma warning disable CA1422
@@ -127,6 +134,47 @@ internal static class AndroidImmersive
         }
         catch { /* fragment manager mid-transaction — caller falls back to the view path */ }
         return top;
+    }
+
+    // Compact on-screen diagnostics: which windows we found, their cutout mode/flags, and where the page's
+    // view actually sits versus the physical display — to pinpoint WHERE the notch-side inset is applied.
+    public static string Describe(global::Android.Views.View? view)
+    {
+        try
+        {
+            if (view is null) return "view=null";
+            var sb = new System.Text.StringBuilder();
+            var activity = FindActivity(view.Context);
+            sb.Append(activity is null ? "act:no" : "act:ok");
+            var modal = activity is null ? null : TopModalWindow(activity);
+            if (modal?.Attributes is { } ma)
+                sb.Append($" modal:cut={(int)ma.LayoutInDisplayCutoutMode},fl=0x{(long)ma.Flags:X},{ma.Width}x{ma.Height},g={(int)ma.Gravity}");
+            else
+                sb.Append(" modal:none");
+            var root = view.RootView;
+            if (root is not null)
+            {
+                var rl = new int[2];
+                root.GetLocationOnScreen(rl);
+                sb.Append($" root:{root.GetType().Name}@{rl[0]},{rl[1]} {root.Width}x{root.Height}");
+                if (root.LayoutParameters is WindowManagerLayoutParams wlp)
+                    sb.Append($" wlp:cut={(int)wlp.LayoutInDisplayCutoutMode},fl=0x{(long)wlp.Flags:X}");
+            }
+            var vl = new int[2];
+            view.GetLocationOnScreen(vl);
+            sb.Append($" view@{vl[0]},{vl[1]} {view.Width}x{view.Height}");
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.R && activity?.WindowManager?.CurrentWindowMetrics.Bounds is { } b)
+                sb.Append($" disp:{b.Width()}x{b.Height()}");
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.P && view.RootWindowInsets?.DisplayCutout is { } dc)
+                sb.Append($" dcut:l{dc.SafeInsetLeft},t{dc.SafeInsetTop},r{dc.SafeInsetRight},b{dc.SafeInsetBottom}");
+            else
+                sb.Append(" dcut:none");
+            return sb.ToString();
+        }
+        catch (System.Exception ex)
+        {
+            return "dbg-err:" + ex.GetType().Name;
+        }
     }
 
     private static Activity? FindActivity(global::Android.Content.Context? context)

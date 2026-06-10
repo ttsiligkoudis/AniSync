@@ -25,7 +25,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     // Bump on each player change so we can confirm which APK is actually installed (shown faintly in the top
     // bar). Temporary aid while iterating on the native player — remove once the layout is finalised.
-    private const string BuildTag = "fs8";
+    private const string BuildTag = "fs9";
 
     // Material Icons codepoints (font registered as "MaterialIcons" in MauiProgram).
     private const string IconFont = "MaterialIcons";
@@ -56,6 +56,7 @@ public sealed class VlcPlayerPage : ContentPage
     private readonly ContentView _sheetContent;
     private readonly IDispatcherTimer _hideTimer;
 
+    private readonly Label _debug;
     private bool _seeking;
     private ScaleMode _scaleMode = ScaleMode.Fit;
     private string? _subLang;                        // selected language column in the subtitle sheet
@@ -250,6 +251,19 @@ public sealed class VlcPlayerPage : ContentPage
         _root.Add(_videoView, 0, 0);
         _root.Add(_controls, 0, 0);
         _root.Add(_sheetOverlay, 0, 0);
+        // Temporary fs9 diagnostics: window/inset state overlaid on the video to localise the notch inset.
+        _debug = new Label
+        {
+            TextColor = Colors.Yellow,
+            BackgroundColor = Color.FromRgba(0, 0, 0, 140),
+            FontSize = 10,
+            LineBreakMode = LineBreakMode.WordWrap,
+            VerticalOptions = LayoutOptions.End,
+            HorizontalOptions = LayoutOptions.Fill,
+            InputTransparent = true,
+            Margin = new Thickness(0, 0, 0, 90),
+        };
+        _root.Add(_debug, 0, 0);
         _root.GestureRecognizers.Add(tap);
         Content = _root;
 
@@ -297,7 +311,15 @@ public sealed class VlcPlayerPage : ContentPage
     {
 #if ANDROID
         if (Handler?.PlatformView is global::Android.Views.View v)
+        {
             AndroidImmersive.ApplyToView(v);
+            // Snapshot the window state AFTER the treatment above has been posted + run.
+            Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(700), () =>
+            {
+                if (Handler?.PlatformView is global::Android.Views.View v2)
+                    _debug.Text = $"{BuildTag} {AndroidImmersive.Describe(v2)}";
+            });
+        }
 #endif
     }
 
