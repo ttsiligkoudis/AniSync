@@ -40,6 +40,8 @@ public class MainActivity : MauiAppCompatActivity
     {
         base.OnConfigurationChanged(newConfig);
         AndroidSystemBars.Reapply(this);
+        // A forced rotation into landscape clears the immersive flags, so re-hide the bars if a player is open.
+        AndroidImmersive.Apply(this);
     }
 
     // Re-assert the themed surface colours on resume so a backgrounded → foregrounded transition doesn't
@@ -48,6 +50,7 @@ public class MainActivity : MauiAppCompatActivity
     {
         base.OnResume();
         AndroidSystemBars.Reapply(this);
+        AndroidImmersive.Apply(this);
     }
 
     // Back button → navigate back through the in-app (SPA) history like the header's back control, falling
