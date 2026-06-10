@@ -866,6 +866,24 @@
         return null;
     }
 
+    // Title shown in the native player chrome (Stremio-style): "{series} · {S/E} · {episode title}".
+    // Falls back to the plain episode label when the series name or an episode title is missing, and
+    // collapses any duplicate segments (e.g. when the episode has no distinct name).
+    private string PlayerTitle()
+    {
+        var series = _meta?.Name;
+        if (string.IsNullOrEmpty(series)) return _title;
+
+        var parts = new List<string> { series, _seasonLabel };
+        if (!string.IsNullOrEmpty(_episodeLabel)
+            && _episodeLabel != _seasonLabel
+            && _episodeLabel != $"Episode {Episode}")
+        {
+            parts.Add(_episodeLabel);
+        }
+        return string.Join(" · ", parts);
+    }
+
     // ── Play / mark-watched / scrobble ─────────────────────────────────────────
     private async Task PlayAsync(EpisodeStreamDto s)
     {
@@ -896,7 +914,7 @@
         var resume = await ReadResumeAsync();
         var request = new PlaybackRequest(
             Url: s.Url!,
-            Title: _title,
+            Title: PlayerTitle(),
             ResumeSeconds: resume,
             Subtitles: _subtitles,
             OnProgress: OnProgress,
@@ -1019,7 +1037,7 @@
             // hand-off). Resolve first so MediaFusion IP-bound URLs work.
             var nativeUrl = await Api.ResolveStreamAsync(s.Url!) ?? s.Url!;
             var resume = await ReadResumeAsync();
-            await Player.PlayAsync(new PlaybackRequest(nativeUrl, _title, resume, _subtitles, OnProgress, OnEnded));
+            await Player.PlayAsync(new PlaybackRequest(nativeUrl, PlayerTitle(), resume, _subtitles, OnProgress, OnEnded));
             _playingUrl = s.Url;
             StateHasChanged();
             return;
