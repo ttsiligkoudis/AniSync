@@ -102,7 +102,30 @@ internal static class AndroidImmersive
             if (controller is null) return;
             controller.SystemBarsBehavior = WindowInsetsControllerCompat.BehaviorShowTransientBarsBySwipe;
             controller.Hide(WindowInsetsCompat.Type.SystemBars());
+
+            // The picture was still boxed away from the notch because the layout inset for the cutout (and the
+            // now-hidden bars) is applied during layout, independent of the window flags above. Consume the
+            // insets on both the window decor and the page content so the video surface truly spans every
+            // pixel — centring Fit and letting Crop/Fill reach the screen edges, notch included.
+            ConsumeInsets(root);
+            ConsumeInsets(view);
         });
+    }
+
+    private static void ConsumeInsets(global::Android.Views.View v)
+    {
+#pragma warning disable CA1422 // FitsSystemWindows: still the lever that opts a view out of inset padding
+        v.SetFitsSystemWindows(false);
+#pragma warning restore CA1422
+        ViewCompat.SetOnApplyWindowInsetsListener(v, new ConsumeInsetsListener());
+        ViewCompat.RequestApplyInsets(v);
+    }
+
+    // Reports "no insets" to children so nothing is padded away from the cutout / system-bar regions.
+    private sealed class ConsumeInsetsListener : Java.Lang.Object, IOnApplyWindowInsetsListener
+    {
+        public WindowInsetsCompat OnApplyWindowInsets(global::Android.Views.View v, WindowInsetsCompat insets)
+            => WindowInsetsCompat.Consumed;
     }
 
     private static void SetCutout(Activity activity, bool intoCutout)
