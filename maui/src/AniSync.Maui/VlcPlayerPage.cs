@@ -25,7 +25,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     // Bump on each player change so we can confirm which APK is actually installed (shown faintly in the top
     // bar). Temporary aid while iterating on the native player — remove once the layout is finalised.
-    private const string BuildTag = "fs2";
+    private const string BuildTag = "fs3";
 
     // Material Icons codepoints (font registered as "MaterialIcons" in MauiProgram).
     private const string IconFont = "MaterialIcons";
@@ -263,6 +263,9 @@ public sealed class VlcPlayerPage : ContentPage
 
         // Stop + release when the user backs out of (or closes) the player.
         NavigatedFrom += (_, _) => { try { _player.Stop(); } catch { /* already stopped */ } };
+
+        // Re-assert immersive once the page's native view is attached to its (modal) window.
+        Loaded += (_, _) => ApplyImmersiveToView();
     }
 
     // ── Lifecycle: force landscape + immersive while open; pause on background ──
@@ -270,9 +273,10 @@ public sealed class VlcPlayerPage : ContentPage
     {
         base.OnAppearing();
         SetImmersive(true);
+        ApplyImmersiveToView();
         // Hiding the bars doesn't survive the modal-present + forced rotation on some OEMs, so re-assert once
         // the transition settles (MainActivity also re-applies on config change / resume).
-        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(350), () => SetImmersive(true));
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(350), () => { SetImmersive(true); ApplyImmersiveToView(); });
         _window = Application.Current?.Windows.FirstOrDefault();
         if (_window is not null)
         {
@@ -280,6 +284,17 @@ public sealed class VlcPlayerPage : ContentPage
             _window.Resumed += OnWindowResumed;
         }
         RestartHideTimer();
+    }
+
+    // Target the player view's OWN hosting window for immersive. MAUI presents the modal in a separate window,
+    // so flags on the Activity window (SetImmersive) never reach it — this resolves the right window from the
+    // view itself. This is the lever that actually hides the bars over the modal.
+    private void ApplyImmersiveToView()
+    {
+#if ANDROID
+        if (Handler?.PlatformView is global::Android.Views.View v)
+            AndroidImmersive.ApplyToView(v);
+#endif
     }
 
     protected override void OnDisappearing()
