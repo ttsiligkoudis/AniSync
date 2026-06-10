@@ -1,3 +1,4 @@
+@page "/meta/{Id}/watch"
 @page "/meta/{Id}/watch/{Episode:int}"
 @page "/meta/{Id}/watch/{Season:int}/{Episode:int}"
 @implements IAsyncDisposable
@@ -533,6 +534,9 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        // /meta/{id}/watch (no episode segment) is the movie shape — episode defaults to 1,
+        // mirroring the MVC route's `int episode = 1` (video movies link here with ?type=movie).
+        if (Episode <= 0) Episode = 1;
         // Reset per-episode state (a Prev/Next nav re-enters this with new params).
         _playingUrl = null;
         _marked = false;
