@@ -53,6 +53,15 @@ public class MainActivity : MauiAppCompatActivity
         AndroidImmersive.Apply(this);
     }
 
+    // THE place to (re)assert immersive: HyperOS/MIUI (and stock Android) re-show the system bars whenever the
+    // window gains focus — presenting the player modal, finishing the forced rotation, or returning from
+    // background. Re-hiding here is what makes immersive actually stick.
+    public override void OnWindowFocusChanged(bool hasFocus)
+    {
+        base.OnWindowFocusChanged(hasFocus);
+        if (hasFocus) AndroidImmersive.Apply(this);
+    }
+
     // Back button → navigate back through the in-app (SPA) history like the header's back control, falling
     // through to the system default (leave the app) only on the first screen. Blazor's pushState
     // navigations register in the WebView's back-forward list, so CanGoBack/GoBack drive the same history

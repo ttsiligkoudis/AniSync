@@ -10,7 +10,7 @@ namespace AniSync.Maui;
 /// surface renders outside the WebView DOM.
 ///
 /// The chrome copies the Stremio mobile player: forced-landscape + immersive (system bars hidden, swipe to
-/// reveal), a compact top bar (back + title), a centre transport (rewind 10s · play/pause · forward 30s), a
+/// reveal), a compact top bar (back + title), a centre transport (rewind 30s · play/pause · forward 30s), a
 /// seek bar with time labels, and a slim bottom action row opening in-page bottom-sheets for Subtitles
 /// (Stremio-style language/track/options columns), Audio Tracks, Playback Speed and Video scaling — each
 /// driving the LibVLC <see cref="MediaPlayer"/> directly. All control glyphs come from the bundled Material
@@ -26,7 +26,7 @@ public sealed class VlcPlayerPage : ContentPage
     // Material Icons codepoints (font registered as "MaterialIcons" in MauiProgram).
     private const string IconFont = "MaterialIcons";
     private const string IcBack = "";      // chevron_left
-    private const string IcReplay10 = "";  // replay_10
+    private const string IcReplay30 = "";  // replay_30
     private const string IcPlay = "";      // play_arrow
     private const string IcPause = "";     // pause
     private const string IcForward30 = ""; // forward_30
@@ -40,6 +40,7 @@ public sealed class VlcPlayerPage : ContentPage
     private const string IcCheck = "";     // check
 
     private readonly MediaPlayer _player;
+    private readonly VideoView _videoView;
     private readonly Slider _seek;
     private readonly Button _playPause;
     private readonly Label _position;
@@ -64,7 +65,7 @@ public sealed class VlcPlayerPage : ContentPage
         BackgroundColor = Colors.Black;
         NavigationPage.SetHasNavigationBar(this, false);
 
-        var video = new VideoView
+        _videoView = new VideoView
         {
             MediaPlayer = player,
             VerticalOptions = LayoutOptions.Fill,
@@ -96,9 +97,9 @@ public sealed class VlcPlayerPage : ContentPage
         topBar.Add(back, 0, 0);
         topBar.Add(titleLabel, 1, 0);
 
-        // ── Centre transport: rewind 10s · play/pause · forward 30s (uniform size) ─
-        var rewind = GlyphButton(IcReplay10, 32, 60);
-        rewind.Clicked += (_, _) => Nudge(-10_000);
+        // ── Centre transport: rewind 30s · play/pause · forward 30s (uniform size) ─
+        var rewind = GlyphButton(IcReplay30, 32, 60);
+        rewind.Clicked += (_, _) => Nudge(-30_000);
 
         _playPause = GlyphButton(IcPause, 32, 60);
         _playPause.Clicked += (_, _) => TogglePlay();
@@ -227,7 +228,7 @@ public sealed class VlcPlayerPage : ContentPage
         tap.Tapped += (_, _) => ToggleControls();
 
         var root = new Grid();
-        root.Add(video, 0, 0);
+        root.Add(_videoView, 0, 0);
         root.Add(_controls, 0, 0);
         root.Add(_sheetOverlay, 0, 0);
         root.GestureRecognizers.Add(tap);
@@ -258,14 +259,23 @@ public sealed class VlcPlayerPage : ContentPage
         // the transition settles (MainActivity also re-applies on config change / resume).
         Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(350), () => SetImmersive(true));
         _window = Application.Current?.Windows.FirstOrDefault();
-        if (_window is not null) _window.Stopped += OnWindowStopped;
+        if (_window is not null)
+        {
+            _window.Stopped += OnWindowStopped;
+            _window.Resumed += OnWindowResumed;
+        }
         RestartHideTimer();
     }
 
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
-        if (_window is not null) { _window.Stopped -= OnWindowStopped; _window = null; }
+        if (_window is not null)
+        {
+            _window.Stopped -= OnWindowStopped;
+            _window.Resumed -= OnWindowResumed;
+            _window = null;
+        }
         StopHideTimer();
         SetImmersive(false);
     }
@@ -274,6 +284,18 @@ public sealed class VlcPlayerPage : ContentPage
     private void OnWindowStopped(object? sender, EventArgs e)
     {
         try { if (_player.IsPlaying) _player.SetPause(true); } catch { /* not ready */ }
+    }
+
+    // Returning from background: the native video surface was destroyed while away, so the MediaPlayer is
+    // still bound to a dead surface — playback resumes with audio but a black frame. Re-bind the VideoView to
+    // the player so libVLC re-attaches to the freshly recreated surface and the picture comes back. Delayed so
+    // the surface exists by the time we re-bind.
+    private void OnWindowResumed(object? sender, EventArgs e)
+    {
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(200), () =>
+        {
+            try { _videoView.MediaPlayer = null; _videoView.MediaPlayer = _player; } catch { /* not ready */ }
+        });
     }
 
     private static void SetImmersive(bool on)
