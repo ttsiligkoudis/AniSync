@@ -566,11 +566,23 @@
         // anisync.autoSkip in the original).
         _autoSkip = await Store.GetAsync("pref:autoskip") is "1";
 
-        var metaTask = Api.AnimeAsync(Id);
-        var epsTask = Api.EpisodesAsync(Id);
-        await Task.WhenAll(metaTask, epsTask);
-        _meta = metaTask.Result;
-        _episodes = epsTask.Result;
+        // Video shapes (?type=movie/series) read the Cinemeta/Trakt video meta — AnimeAsync only knows
+        // anime ids, so movies/series got no name ("Back") and generic "Episode N" labels. Mirrors the MVC
+        // split (AnimeWatch vs VideoWatch); VideoMetaResponse.Episodes is empty for movies by design.
+        if (_type is "movie" or "series")
+        {
+            var video = await Api.VideoAsync(_type, Id);
+            _meta = video?.Meta;
+            _episodes = video?.Episodes ?? Array.Empty<EpisodeInfoDto>();
+        }
+        else
+        {
+            var metaTask = Api.AnimeAsync(Id);
+            var epsTask = Api.EpisodesAsync(Id);
+            await Task.WhenAll(metaTask, epsTask);
+            _meta = metaTask.Result;
+            _episodes = epsTask.Result;
+        }
 
         // S{n} · E{ep} when the title actually spans multiple seasons, else
         // "Episode {ep}" — mirrors Watch.cshtml's seasonLabel.
@@ -581,6 +593,21 @@
         _episodeLabel = $"Episode {Episode}";
         _metaDate = null;
         _metaThumbnail = null;
+
+        // Movies collapse to a single streamable unit — title the page with the movie's name instead of a
+        // synthetic "Episode 1", and skip the episode-row/prev-next machinery (mirrors MVC's VideoWatch,
+        // which synthesised one Video named after the movie).
+        if (_type == "movie")
+        {
+            _episodeLabel = _title = string.IsNullOrEmpty(_meta?.Name) ? "Movie" : _meta!.Name;
+            _seasonLabel = "Movie";
+            if (_meta?.Year is int year) _metaDate = year.ToString();
+            _metaThumbnail = _meta?.Poster ?? _meta?.Background;
+            _prev = _next = null;
+            _subtitles = await Api.SubtitlesAsync(Id, Episode, null);
+            await LoadSourcesAsync(useCache: true);
+            return;
+        }
 
         // Prev/next within the same season ordering.
         var ordered = _episodes.Where(e => (e.Season > 0 ? e.Season : 1) == season).OrderBy(e => e.Episode).ToList();
