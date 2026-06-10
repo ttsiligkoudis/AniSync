@@ -25,7 +25,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     // Bump on each player change so we can confirm which APK is actually installed (shown faintly in the top
     // bar). Temporary aid while iterating on the native player — remove once the layout is finalised.
-    private const string BuildTag = "fs9";
+    private const string BuildTag = "fs10";
 
     // Material Icons codepoints (font registered as "MaterialIcons" in MauiProgram).
     private const string IconFont = "MaterialIcons";
@@ -247,7 +247,10 @@ public sealed class VlcPlayerPage : ContentPage
         var tap = new TapGestureRecognizer();
         tap.Tapped += (_, _) => ToggleControls();
 
-        _root = new Grid();
+        // SafeAreaEdges=None on the PAGE alone isn't enough: MAUI 10 also applies safe-area insets at the
+        // layout level, and fs9's diagnostics showed the root Grid padding its children 152px away from the
+        // notch (the page view spanned the full 2772px display while the content started at x=152).
+        _root = new Grid { SafeAreaEdges = SafeAreaEdges.None };
         _root.Add(_videoView, 0, 0);
         _root.Add(_controls, 0, 0);
         _root.Add(_sheetOverlay, 0, 0);
