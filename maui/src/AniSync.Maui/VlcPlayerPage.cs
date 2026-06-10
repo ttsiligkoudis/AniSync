@@ -25,7 +25,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     // Bump on each player change so we can confirm which APK is actually installed (shown faintly in the top
     // bar). Temporary aid while iterating on the native player — remove once the layout is finalised.
-    private const string BuildTag = "fs10";
+    private const string BuildTag = "fs11";
 
     // Material Icons codepoints (font registered as "MaterialIcons" in MauiProgram).
     private const string IconFont = "MaterialIcons";
@@ -56,7 +56,6 @@ public sealed class VlcPlayerPage : ContentPage
     private readonly ContentView _sheetContent;
     private readonly IDispatcherTimer _hideTimer;
 
-    private readonly Label _debug;
     private bool _seeking;
     private ScaleMode _scaleMode = ScaleMode.Fit;
     private string? _subLang;                        // selected language column in the subtitle sheet
@@ -132,6 +131,9 @@ public sealed class VlcPlayerPage : ContentPage
             Spacing = 34,
             HorizontalOptions = LayoutOptions.Center,
             VerticalOptions = LayoutOptions.Center,
+            // Centred mid-screen, nowhere near the cutout — consuming the notch inset here would only
+            // shift the buttons off-centre.
+            SafeAreaEdges = SafeAreaEdges.None,
             Children = { rewind, _playPause, forward },
         };
 
@@ -191,9 +193,13 @@ public sealed class VlcPlayerPage : ContentPage
             Children = { seekRow, actionRow },
         };
 
+        // None on the wrapper so the safe-area insets flow DOWN to the individual bars: each bar then pads
+        // its own content away from the notch while its scrim background still bleeds to the screen edge
+        // (safe-area is applied as padding, and backgrounds cover the padding area). Stremio looks the same.
         _controls = new Grid
         {
             RowDefinitions = { new(GridLength.Auto), new(GridLength.Star), new(GridLength.Auto) },
+            SafeAreaEdges = SafeAreaEdges.None,
         };
         _controls.Add(topBar, 0, 0);
         _controls.Add(transport, 0, 1);
@@ -239,7 +245,9 @@ public sealed class VlcPlayerPage : ContentPage
         backdropTap.Tapped += (_, _) => CloseSheet();
         backdrop.GestureRecognizers.Add(backdropTap);
 
-        _sheetOverlay = new Grid { IsVisible = false };
+        // None so the dimmed backdrop covers the whole screen; the sheet panel itself keeps the default
+        // safe-area behaviour, so its rows stay clear of the notch while its background spans full width.
+        _sheetOverlay = new Grid { IsVisible = false, SafeAreaEdges = SafeAreaEdges.None };
         _sheetOverlay.Add(backdrop);
         _sheetOverlay.Add(sheetPanel);
 
@@ -254,19 +262,6 @@ public sealed class VlcPlayerPage : ContentPage
         _root.Add(_videoView, 0, 0);
         _root.Add(_controls, 0, 0);
         _root.Add(_sheetOverlay, 0, 0);
-        // Temporary fs9 diagnostics: window/inset state overlaid on the video to localise the notch inset.
-        _debug = new Label
-        {
-            TextColor = Colors.Yellow,
-            BackgroundColor = Color.FromRgba(0, 0, 0, 140),
-            FontSize = 10,
-            LineBreakMode = LineBreakMode.WordWrap,
-            VerticalOptions = LayoutOptions.End,
-            HorizontalOptions = LayoutOptions.Fill,
-            InputTransparent = true,
-            Margin = new Thickness(0, 0, 0, 90),
-        };
-        _root.Add(_debug, 0, 0);
         _root.GestureRecognizers.Add(tap);
         Content = _root;
 
@@ -314,15 +309,7 @@ public sealed class VlcPlayerPage : ContentPage
     {
 #if ANDROID
         if (Handler?.PlatformView is global::Android.Views.View v)
-        {
             AndroidImmersive.ApplyToView(v);
-            // Snapshot the window state AFTER the treatment above has been posted + run.
-            Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(700), () =>
-            {
-                if (Handler?.PlatformView is global::Android.Views.View v2)
-                    _debug.Text = $"{BuildTag} {AndroidImmersive.Describe(v2)}";
-            });
-        }
 #endif
     }
 
