@@ -25,7 +25,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     // Bump on each player change so we can confirm which APK is actually installed (shown faintly in the top
     // bar). Temporary aid while iterating on the native player — remove once the layout is finalised.
-    private const string BuildTag = "fs6";
+    private const string BuildTag = "fs7";
 
     // Material Icons codepoints (font registered as "MaterialIcons" in MauiProgram).
     private const string IconFont = "MaterialIcons";
@@ -72,7 +72,7 @@ public sealed class VlcPlayerPage : ContentPage
         // Let the video bleed under the notch / system-bar regions (MAUI 10 safe-area control). Without this,
         // MAUI pads the page away from the display cutout, so Fit sits off-centre and Crop/Fill stop at the
         // notch edge. The on-screen controls carry their own padding so they stay clear of the cutout.
-        SafeAreaEdges = SafeAreaRegions.None;
+        SafeAreaEdges = SafeAreaEdges.None;
 
         _videoView = new VideoView
         {
