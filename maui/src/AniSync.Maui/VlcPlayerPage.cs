@@ -1,9 +1,6 @@
 using LibVLCSharp.Shared;
 using LibVLCSharp.MAUI;
 using Microsoft.Maui.Controls.Shapes;
-#if ANDROID
-using AndroidX.Core.View;
-#endif
 
 namespace AniSync.Maui;
 
@@ -12,16 +9,17 @@ namespace AniSync.Maui;
 /// that <see cref="VlcMediaPlayer"/> built. Pushed modally over the BlazorWebView shell so the native video
 /// surface renders outside the WebView DOM.
 ///
-/// The chrome copies the Stremio mobile player: forced-landscape + immersive, a top bar (back + title), a
-/// centre transport (rewind 10s · play/pause · forward 30s), a seek bar with time labels, and a bottom action
-/// row opening in-page bottom-sheets for Subtitles, Audio Tracks, Playback Speed and Video scaling — each
+/// The chrome copies the Stremio mobile player: forced-landscape + immersive (system bars hidden, swipe to
+/// reveal), a compact top bar (back + title), a centre transport (rewind 10s · play/pause · forward 30s), a
+/// seek bar with time labels, and a slim bottom action row opening in-page bottom-sheets for Subtitles
+/// (Stremio-style language/track/options columns), Audio Tracks, Playback Speed and Video scaling — each
 /// driving the LibVLC <see cref="MediaPlayer"/> directly (the page already owns it; no player-seam change).
-/// Controls auto-hide after a few seconds of inactivity (kept visible while paused or a sheet is open).
+/// Controls auto-hide after a few seconds; playback pauses if the app is backgrounded (Home).
 /// </summary>
 public sealed class VlcPlayerPage : ContentPage
 {
     private static readonly Color Accent = Color.FromArgb("#8B5CF6");   // purple seek/selection accent
-    private static readonly Color Scrim = Color.FromRgba(0, 0, 0, 150); // gradient-ish bar background
+    private static readonly Color Scrim = Color.FromRgba(0, 0, 0, 150); // bar background
     private static readonly Color SheetBg = Color.FromArgb("#15151B");  // bottom-sheet panel
 
     private readonly MediaPlayer _player;
@@ -32,12 +30,13 @@ public sealed class VlcPlayerPage : ContentPage
     private readonly Grid _controls;
     private readonly Grid _sheetOverlay;
     private readonly Label _sheetTitle;
-    private readonly VerticalStackLayout _sheetItems;
-    private readonly ContentView _sheetExtra;
+    private readonly ContentView _sheetContent;
     private readonly IDispatcherTimer _hideTimer;
 
     private bool _seeking;
     private ScaleMode _scaleMode = ScaleMode.Fit;
+    private string? _subLang;                       // selected language column in the subtitle sheet
+    private Microsoft.Maui.Controls.Window? _window; // for the background-pause hook
 
     private enum ScaleMode { Fit, SixteenNine, FourThree, Fill }
 
@@ -55,15 +54,15 @@ public sealed class VlcPlayerPage : ContentPage
             HorizontalOptions = LayoutOptions.Fill,
         };
 
-        // ── Top bar: back (‹) + title ───────────────────────────────────────────
-        var back = GlyphButton("‹", 30);
+        // ── Top bar (compact): back (‹) + title ─────────────────────────────────
+        var back = GlyphButton("‹", 28, 40);
         back.Clicked += async (_, _) => await CloseAsync();
 
         var titleLabel = new Label
         {
             Text = title,
             TextColor = Colors.White,
-            FontSize = 16,
+            FontSize = 15,
             FontAttributes = FontAttributes.Bold,
             VerticalOptions = LayoutOptions.Center,
             LineBreakMode = LineBreakMode.TailTruncation,
@@ -73,7 +72,7 @@ public sealed class VlcPlayerPage : ContentPage
         var topBar = new Grid
         {
             ColumnDefinitions = { new(GridLength.Auto), new(GridLength.Star) },
-            Padding = new Thickness(8, 8, 16, 8),
+            Padding = new Thickness(4, 0, 12, 0),
             BackgroundColor = Scrim,
             VerticalOptions = LayoutOptions.Start,
         };
@@ -81,18 +80,18 @@ public sealed class VlcPlayerPage : ContentPage
         topBar.Add(titleLabel, 1, 0);
 
         // ── Centre transport: rewind 10s · play/pause · forward 30s ─────────────
-        var rewind = GlyphButton("⏪", 30);
+        var rewind = GlyphButton("◀◀", 22, 56);
         rewind.Clicked += (_, _) => Nudge(-10_000);
 
-        _playPause = GlyphButton("⏸", 40);
+        _playPause = GlyphButton("❚❚", 30, 68);
         _playPause.Clicked += (_, _) => TogglePlay();
 
-        var forward = GlyphButton("⏩", 30);
+        var forward = GlyphButton("▶▶", 22, 56);
         forward.Clicked += (_, _) => Nudge(+30_000);
 
         var transport = new HorizontalStackLayout
         {
-            Spacing = 28,
+            Spacing = 30,
             HorizontalOptions = LayoutOptions.Center,
             VerticalOptions = LayoutOptions.Center,
             Children = { rewind, _playPause, forward },
@@ -125,32 +124,32 @@ public sealed class VlcPlayerPage : ContentPage
         {
             ColumnDefinitions = { new(GridLength.Auto), new(GridLength.Star), new(GridLength.Auto) },
             ColumnSpacing = 10,
-            Padding = new Thickness(16, 0),
+            Padding = new Thickness(14, 0),
         };
         seekRow.Add(_position, 0, 0);
         seekRow.Add(_seek, 1, 0);
         seekRow.Add(_duration, 2, 0);
 
-        // ── Action row: Subtitles · Audio · Speed · Scaling ─────────────────────
+        // ── Action row (slim): Subtitles · Audio · Speed · Scaling ──────────────
         var actionRow = new Grid
         {
             ColumnDefinitions =
             {
                 new(GridLength.Star), new(GridLength.Star), new(GridLength.Star), new(GridLength.Star),
             },
-            Padding = new Thickness(8, 4, 8, 12),
+            Padding = new Thickness(8, 2, 8, 4),
         };
-        actionRow.Add(ActionButton("💬", "Subtitles", OpenSubtitleSheet), 0, 0);
-        actionRow.Add(ActionButton("🔊", "Audio", OpenAudioSheet), 1, 0);
-        actionRow.Add(ActionButton("⏱", "Speed", OpenSpeedSheet), 2, 0);
-        actionRow.Add(ActionButton("🔳", "Scaling", OpenScalingSheet), 3, 0);
+        actionRow.Add(ActionButton("CC", "Subtitles", OpenSubtitleSheet), 0, 0);
+        actionRow.Add(ActionButton("♪", "Audio", OpenAudioSheet), 1, 0);
+        actionRow.Add(ActionButton("»", "Speed", OpenSpeedSheet), 2, 0);
+        actionRow.Add(ActionButton("⤢", "Scaling", OpenScalingSheet), 3, 0);
 
         var bottom = new VerticalStackLayout
         {
-            Spacing = 6,
+            Spacing = 2,
             BackgroundColor = Scrim,
             VerticalOptions = LayoutOptions.End,
-            Padding = new Thickness(0, 8, 0, 0),
+            Padding = new Thickness(0, 4, 0, 4),
             Children = { seekRow, actionRow },
         };
 
@@ -171,36 +170,27 @@ public sealed class VlcPlayerPage : ContentPage
             HorizontalOptions = LayoutOptions.Start,
             VerticalOptions = LayoutOptions.Center,
         };
-        var sheetClose = GlyphButton("✕", 18);
+        var sheetClose = GlyphButton("✕", 16, 36);
         sheetClose.Clicked += (_, _) => CloseSheet();
 
         var sheetHeader = new Grid
         {
             ColumnDefinitions = { new(GridLength.Star), new(GridLength.Auto) },
-            Padding = new Thickness(16, 8, 8, 4),
+            Padding = new Thickness(16, 6, 8, 2),
         };
         sheetHeader.Add(_sheetTitle, 0, 0);
         sheetHeader.Add(sheetClose, 1, 0);
 
-        _sheetItems = new VerticalStackLayout { Spacing = 2 };
-        _sheetExtra = new ContentView { Padding = new Thickness(16, 4, 16, 0) };
+        _sheetContent = new ContentView();
 
-        var sheetBody = new VerticalStackLayout
-        {
-            Children =
-            {
-                sheetHeader,
-                new ScrollView { Content = _sheetItems, MaximumHeightRequest = 260 },
-                _sheetExtra,
-            },
-        };
+        var sheetBody = new VerticalStackLayout { Children = { sheetHeader, _sheetContent } };
 
         var sheetPanel = new Border
         {
             BackgroundColor = SheetBg,
             Stroke = Colors.Transparent,
             StrokeShape = new RoundRectangle { CornerRadius = new CornerRadius(18, 18, 0, 0) },
-            Padding = new Thickness(0, 4, 0, 16),
+            Padding = new Thickness(0, 4, 0, 14),
             VerticalOptions = LayoutOptions.End,
             HorizontalOptions = LayoutOptions.Fill,
             Content = sheetBody,
@@ -235,26 +225,35 @@ public sealed class VlcPlayerPage : ContentPage
         // Keep the UI in sync (libVLC raises these on its own thread → marshal to the UI thread).
         _player.PositionChanged += OnPositionChanged;
         _player.LengthChanged += OnLengthChanged;
-        _player.Playing += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = "⏸"; RestartHideTimer(); });
+        _player.Playing += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = "❚❚"; RestartHideTimer(); });
         _player.Paused += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = "▶"; StopHideTimer(); });
 
         // Stop + release when the user backs out of (or closes) the player.
         NavigatedFrom += (_, _) => { try { _player.Stop(); } catch { /* already stopped */ } };
     }
 
-    // ── Lifecycle: force landscape + immersive while open; restore on close ─────
+    // ── Lifecycle: force landscape + immersive while open; pause on background ──
     protected override void OnAppearing()
     {
         base.OnAppearing();
         SetImmersive(true);
+        _window = Application.Current?.Windows.FirstOrDefault();
+        if (_window is not null) _window.Stopped += OnWindowStopped;
         RestartHideTimer();
     }
 
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
+        if (_window is not null) { _window.Stopped -= OnWindowStopped; _window = null; }
         StopHideTimer();
         SetImmersive(false);
+    }
+
+    // App backgrounded (Home / recents) → pause so audio doesn't keep playing behind an inactive app.
+    private void OnWindowStopped(object? sender, EventArgs e)
+    {
+        try { if (_player.IsPlaying) _player.SetPause(true); } catch { /* not ready */ }
     }
 
     private static void SetImmersive(bool on)
@@ -262,24 +261,15 @@ public sealed class VlcPlayerPage : ContentPage
 #if ANDROID
         var activity = Platform.CurrentActivity;
         if (activity is null) return;
-
-        activity.RequestedOrientation = on
-            ? Android.Content.PM.ScreenOrientation.SensorLandscape
-            : Android.Content.PM.ScreenOrientation.Unspecified;
-
-        var window = activity.Window;
-        if (window is null) return;
-        var controller = WindowCompat.GetInsetsController(window, window.DecorView);
-        if (controller is null) return;
-
         if (on)
         {
-            controller.SystemBarsBehavior = WindowInsetsControllerCompat.BehaviorShowTransientBarsBySwipe;
-            controller.Hide(WindowInsetsCompat.Type.SystemBars());
+            activity.RequestedOrientation = Android.Content.PM.ScreenOrientation.SensorLandscape;
+            AndroidImmersive.Enter(activity);
         }
         else
         {
-            controller.Show(WindowInsetsCompat.Type.SystemBars());
+            AndroidImmersive.Exit(activity);
+            activity.RequestedOrientation = Android.Content.PM.ScreenOrientation.Unspecified;
         }
 #endif
     }
@@ -341,13 +331,10 @@ public sealed class VlcPlayerPage : ContentPage
     private void StopHideTimer() => _hideTimer.Stop();
 
     // ── Bottom sheets ───────────────────────────────────────────────────────────
-    private void OpenSheet(string title, IEnumerable<SheetItem> items, View? extra = null)
+    private void OpenSheet(string title, View content)
     {
         _sheetTitle.Text = title;
-        _sheetItems.Clear();
-        foreach (var item in items)
-            _sheetItems.Add(BuildSheetRow(item));
-        _sheetExtra.Content = extra;
+        _sheetContent.Content = content;
         _sheetOverlay.IsVisible = true;
         _controls.IsVisible = true;
         StopHideTimer();
@@ -359,12 +346,13 @@ public sealed class VlcPlayerPage : ContentPage
         ShowControls();
     }
 
-    private View BuildSheetRow(SheetItem item)
+    // A single tappable list row with a selection check. onTap decides whether to close the sheet.
+    private View Row(string text, bool selected, Action onTap)
     {
         var label = new Label
         {
-            Text = item.Label,
-            TextColor = item.Selected ? Accent : Colors.White,
+            Text = text,
+            TextColor = selected ? Accent : Colors.White,
             FontSize = 15,
             VerticalOptions = LayoutOptions.Center,
             HorizontalOptions = LayoutOptions.Fill,
@@ -372,7 +360,7 @@ public sealed class VlcPlayerPage : ContentPage
         };
         var check = new Label
         {
-            Text = item.Selected ? "✓" : "",
+            Text = selected ? "✓" : "",
             TextColor = Accent,
             FontSize = 16,
             VerticalOptions = LayoutOptions.Center,
@@ -381,15 +369,22 @@ public sealed class VlcPlayerPage : ContentPage
         var row = new Grid
         {
             ColumnDefinitions = { new(GridLength.Star), new(GridLength.Auto) },
-            Padding = new Thickness(16, 12),
+            Padding = new Thickness(16, 11),
         };
         row.Add(label, 0, 0);
         row.Add(check, 1, 0);
 
         var tap = new TapGestureRecognizer();
-        tap.Tapped += (_, _) => item.OnTap();
+        tap.Tapped += (_, _) => onTap();
         row.GestureRecognizers.Add(tap);
         return row;
+    }
+
+    private static ScrollView ScrollList(IEnumerable<View> rows)
+    {
+        var stack = new VerticalStackLayout { Spacing = 0 };
+        foreach (var r in rows) stack.Add(r);
+        return new ScrollView { Content = stack, MaximumHeightRequest = 240 };
     }
 
     private void OpenSpeedSheet()
@@ -397,132 +392,48 @@ public sealed class VlcPlayerPage : ContentPage
         float current;
         try { current = _player.Rate; } catch { current = 1f; }
 
-        var items = new[] { 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f }.Select(rate =>
-            new SheetItem(
+        var rows = new[] { 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f }.Select(rate =>
+            Row(
                 rate == 1.0f ? "Normal (1.0×)" : $"{rate:0.##}×",
                 Math.Abs(current - rate) < 0.001f,
-                () => { try { _player.SetRate(rate); } catch { } OpenSpeedSheet(); }));
+                () => { try { _player.SetRate(rate); } catch { } CloseSheet(); }));
 
-        OpenSheet("Playback Speed", items);
+        OpenSheet("Playback Speed", ScrollList(rows));
     }
 
     private void OpenAudioSheet()
     {
-        var items = new List<SheetItem>();
+        var rows = new List<View>();
         try
         {
             var current = _player.AudioTrack;
             foreach (var t in _player.AudioTrackDescription)
             {
                 var id = t.Id;
-                items.Add(new SheetItem(
+                rows.Add(Row(
                     string.IsNullOrWhiteSpace(t.Name) ? $"Track {id}" : t.Name,
                     id == current,
-                    () => { try { _player.SetAudioTrack(id); } catch { } OpenAudioSheet(); }));
+                    () => { try { _player.SetAudioTrack(id); } catch { } CloseSheet(); }));
             }
         }
         catch { /* tracks not parsed yet */ }
 
-        if (items.Count == 0)
-            items.Add(new SheetItem("No audio tracks", false, () => { }));
+        if (rows.Count == 0)
+            rows.Add(Row("No audio tracks", false, CloseSheet));
 
-        OpenSheet("Audio Tracks", items);
-    }
-
-    private void OpenSubtitleSheet()
-    {
-        var items = new List<SheetItem>();
-        var currentSpu = 0;
-        try { currentSpu = _player.Spu; } catch { }
-
-        // Explicit "Off" entry (libVLC disables SPU with id -1).
-        items.Add(new SheetItem("Off", currentSpu == -1,
-            () => { try { _player.SetSpu(-1); } catch { } OpenSubtitleSheet(); }));
-
-        try
-        {
-            foreach (var t in _player.SpuDescription)
-            {
-                var id = t.Id;
-                if (id == -1) continue; // already shown as "Off"
-                items.Add(new SheetItem(
-                    string.IsNullOrWhiteSpace(t.Name) ? $"Track {id}" : t.Name,
-                    id == currentSpu,
-                    () => { try { _player.SetSpu(id); } catch { } OpenSubtitleSheet(); }));
-            }
-        }
-        catch { /* tracks not parsed yet */ }
-
-        OpenSheet("Subtitles", items, BuildSubtitleDelayRow());
-    }
-
-    private View BuildSubtitleDelayRow()
-    {
-        long delayUs;
-        try { delayUs = _player.SpuDelay; } catch { delayUs = 0; }
-
-        var value = new Label
-        {
-            Text = FormatDelay(delayUs),
-            TextColor = Colors.White,
-            FontSize = 15,
-            HorizontalOptions = LayoutOptions.Center,
-            VerticalOptions = LayoutOptions.Center,
-            WidthRequest = 80,
-            HorizontalTextAlignment = TextAlignment.Center,
-        };
-
-        void Adjust(long stepUs)
-        {
-            try
-            {
-                var next = _player.SpuDelay + stepUs;
-                _player.SetSpuDelay(next);
-                value.Text = FormatDelay(next);
-            }
-            catch { }
-        }
-
-        var minus = GlyphButton("−", 22);
-        minus.Clicked += (_, _) => Adjust(-100_000); // −0.1s
-        var plus = GlyphButton("+", 22);
-        plus.Clicked += (_, _) => Adjust(+100_000);   // +0.1s
-
-        var caption = new Label
-        {
-            Text = "Subtitle delay",
-            TextColor = Color.FromRgba(255, 255, 255, 160),
-            FontSize = 13,
-            VerticalOptions = LayoutOptions.Center,
-            HorizontalOptions = LayoutOptions.Start,
-        };
-
-        var row = new Grid
-        {
-            ColumnDefinitions =
-            {
-                new(GridLength.Star), new(GridLength.Auto), new(GridLength.Auto), new(GridLength.Auto),
-            },
-            ColumnSpacing = 4,
-            Padding = new Thickness(0, 8, 0, 0),
-        };
-        row.Add(caption, 0, 0);
-        row.Add(minus, 1, 0);
-        row.Add(value, 2, 0);
-        row.Add(plus, 3, 0);
-        return row;
+        OpenSheet("Audio Tracks", ScrollList(rows));
     }
 
     private void OpenScalingSheet()
     {
-        var items = new[]
+        var rows = new[]
         {
-            new SheetItem("Fit", _scaleMode == ScaleMode.Fit, () => ApplyScale(ScaleMode.Fit)),
-            new SheetItem("16:9", _scaleMode == ScaleMode.SixteenNine, () => ApplyScale(ScaleMode.SixteenNine)),
-            new SheetItem("4:3", _scaleMode == ScaleMode.FourThree, () => ApplyScale(ScaleMode.FourThree)),
-            new SheetItem("Fill", _scaleMode == ScaleMode.Fill, () => ApplyScale(ScaleMode.Fill)),
+            Row("Fit", _scaleMode == ScaleMode.Fit, () => ApplyScale(ScaleMode.Fit)),
+            Row("16:9", _scaleMode == ScaleMode.SixteenNine, () => ApplyScale(ScaleMode.SixteenNine)),
+            Row("4:3", _scaleMode == ScaleMode.FourThree, () => ApplyScale(ScaleMode.FourThree)),
+            Row("Fill", _scaleMode == ScaleMode.Fill, () => ApplyScale(ScaleMode.Fill)),
         };
-        OpenSheet("Video scaling", items);
+        OpenSheet("Video scaling", ScrollList(rows));
     }
 
     private void ApplyScale(ScaleMode mode)
@@ -555,7 +466,146 @@ public sealed class VlcPlayerPage : ContentPage
             }
         }
         catch { /* not ready */ }
-        OpenScalingSheet();
+        CloseSheet();
+    }
+
+    // ── Subtitles: Stremio-style language · tracks · options columns ────────────
+    private void OpenSubtitleSheet()
+    {
+        var tracks = new List<(int Id, string Name)>();
+        try
+        {
+            foreach (var t in _player.SpuDescription)
+                if (t.Id != -1)
+                    tracks.Add((t.Id, string.IsNullOrWhiteSpace(t.Name) ? $"Track {t.Id}" : t.Name));
+        }
+        catch { /* tracks not parsed yet */ }
+
+        int currentSpu;
+        try { currentSpu = _player.Spu; } catch { currentSpu = -1; }
+
+        var langs = tracks.Select(t => LangOf(t.Name)).Distinct().ToList();
+
+        // Default the selected language column to the current track's language, else the first available.
+        if (_subLang is null || !langs.Contains(_subLang))
+        {
+            var cur = tracks.FirstOrDefault(t => t.Id == currentSpu);
+            _subLang = cur.Name is not null ? LangOf(cur.Name) : langs.FirstOrDefault();
+        }
+
+        // Left column: "Off" + one entry per language. Selecting a language just re-filters (keeps the sheet
+        // open); selecting "Off" disables subtitles and closes.
+        var langRows = new List<View>
+        {
+            Row("Off", currentSpu == -1, () => { try { _player.SetSpu(-1); } catch { } CloseSheet(); }),
+        };
+        foreach (var lang in langs)
+        {
+            var l = lang;
+            langRows.Add(Row(l, l == _subLang, () => { _subLang = l; OpenSubtitleSheet(); }));
+        }
+
+        // Middle column: tracks in the selected language. Selecting one applies + closes.
+        var trackRows = tracks
+            .Where(t => LangOf(t.Name) == _subLang)
+            .Select(t =>
+            {
+                var id = t.Id;
+                return Row(t.Name, id == currentSpu, () => { try { _player.SetSpu(id); } catch { } CloseSheet(); });
+            })
+            .ToList();
+        if (trackRows.Count == 0)
+            trackRows.Add(Row(tracks.Count == 0 ? "No subtitles available" : "—", false, () => { }));
+
+        var grid = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new() { Width = new GridLength(1.1, GridUnitType.Star) }, // languages
+                new() { Width = new GridLength(1.6, GridUnitType.Star) }, // tracks
+                new() { Width = new GridLength(1.3, GridUnitType.Star) }, // options
+            },
+            ColumnSpacing = 8,
+            Padding = new Thickness(8, 0, 8, 0),
+        };
+        grid.Add(Column("Language", ScrollList(langRows)), 0, 0);
+        grid.Add(Column("Track", ScrollList(trackRows)), 1, 0);
+        grid.Add(Column("Options", BuildSubtitleOptions()), 2, 0);
+
+        OpenSheet("Subtitles", grid);
+    }
+
+    private View Column(string heading, View body)
+    {
+        var head = new Label
+        {
+            Text = heading,
+            TextColor = Color.FromRgba(255, 255, 255, 150),
+            FontSize = 12,
+            FontAttributes = FontAttributes.Bold,
+            Padding = new Thickness(16, 4, 8, 4),
+        };
+        return new VerticalStackLayout { Spacing = 0, Children = { head, body } };
+    }
+
+    // Right column: subtitle delay (the only subtitle property LibVLCSharp exposes at runtime; size/offset
+    // have no clean runtime API). −/+ adjust in 0.1s steps and DON'T close the sheet.
+    private View BuildSubtitleOptions()
+    {
+        long delayUs;
+        try { delayUs = _player.SpuDelay; } catch { delayUs = 0; }
+
+        var value = new Label
+        {
+            Text = FormatDelay(delayUs),
+            TextColor = Colors.White,
+            FontSize = 15,
+            HorizontalOptions = LayoutOptions.Center,
+            VerticalOptions = LayoutOptions.Center,
+            WidthRequest = 72,
+            HorizontalTextAlignment = TextAlignment.Center,
+        };
+
+        void Adjust(long stepUs)
+        {
+            try { var next = _player.SpuDelay + stepUs; _player.SetSpuDelay(next); value.Text = FormatDelay(next); }
+            catch { }
+        }
+
+        var minus = GlyphButton("−", 22, 40);
+        minus.Clicked += (_, _) => Adjust(-100_000); // −0.1s
+        var plus = GlyphButton("+", 22, 40);
+        plus.Clicked += (_, _) => Adjust(+100_000);   // +0.1s
+
+        var caption = new Label
+        {
+            Text = "Delay",
+            TextColor = Colors.White,
+            FontSize = 14,
+            HorizontalOptions = LayoutOptions.Center,
+        };
+        var stepper = new HorizontalStackLayout
+        {
+            Spacing = 4,
+            HorizontalOptions = LayoutOptions.Center,
+            Children = { minus, value, plus },
+        };
+        return new VerticalStackLayout
+        {
+            Spacing = 6,
+            Padding = new Thickness(8, 8, 8, 0),
+            Children = { caption, stepper },
+        };
+    }
+
+    // Extract the language label from a libVLC SPU track name, e.g. "English (SDH) - [English]" → "English".
+    private static string LangOf(string name)
+    {
+        var open = name.LastIndexOf('[');
+        var close = name.LastIndexOf(']');
+        if (open >= 0 && close > open) return name.Substring(open + 1, close - open - 1).Trim();
+        var cut = name.IndexOfAny(new[] { '(', '-' });
+        return (cut > 0 ? name[..cut] : name).Trim();
     }
 
     // ── Event marshalling + formatting ──────────────────────────────────────────
@@ -585,7 +635,7 @@ public sealed class VlcPlayerPage : ContentPage
     }
 
     // ── Small UI factories ──────────────────────────────────────────────────────
-    private static Button GlyphButton(string glyph, double fontSize) => new()
+    private static Button GlyphButton(string glyph, double fontSize, double size) => new()
     {
         Text = glyph,
         FontSize = fontSize,
@@ -593,8 +643,8 @@ public sealed class VlcPlayerPage : ContentPage
         BackgroundColor = Colors.Transparent,
         BorderWidth = 0,
         Padding = new Thickness(0),
-        MinimumWidthRequest = 48,
-        MinimumHeightRequest = 48,
+        WidthRequest = size,
+        HeightRequest = size,
     };
 
     private static Label TimeLabel(string text) => new()
@@ -609,13 +659,13 @@ public sealed class VlcPlayerPage : ContentPage
     {
         var stack = new VerticalStackLayout
         {
-            Spacing = 2,
+            Spacing = 1,
             HorizontalOptions = LayoutOptions.Center,
-            Padding = new Thickness(4, 6),
+            Padding = new Thickness(4, 4),
             Children =
             {
-                new Label { Text = glyph, FontSize = 18, TextColor = Colors.White, HorizontalOptions = LayoutOptions.Center },
-                new Label { Text = label, FontSize = 11, TextColor = Color.FromRgba(255, 255, 255, 200), HorizontalOptions = LayoutOptions.Center },
+                new Label { Text = glyph, FontSize = 16, FontAttributes = FontAttributes.Bold, TextColor = Colors.White, HorizontalOptions = LayoutOptions.Center },
+                new Label { Text = label, FontSize = 10, TextColor = Color.FromRgba(255, 255, 255, 200), HorizontalOptions = LayoutOptions.Center },
             },
         };
         var tap = new TapGestureRecognizer();
@@ -623,6 +673,4 @@ public sealed class VlcPlayerPage : ContentPage
         stack.GestureRecognizers.Add(tap);
         return stack;
     }
-
-    private sealed record SheetItem(string Label, bool Selected, Action OnTap);
 }
