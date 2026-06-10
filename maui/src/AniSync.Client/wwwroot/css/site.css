@@ -8286,7 +8286,11 @@ ol.anime-detail-episodes-busy {
        dismiss by tapping outside. */
     .notif-panel {
         position: fixed;
-        top: 56px;
+        /* 56px is the header height; add the top safe-area inset so the panel clears the header on notched
+           devices / edge-to-edge webviews (the header itself is pushed down by that inset — see .site-header).
+           Without it the panel pins to the screen top and covers the header instead of dropping below the bell.
+           env() is 0 in a regular browser tab, so the 56px offset is unchanged there. */
+        top: calc(56px + env(safe-area-inset-top, 0px));
         right: 8px;
         left: 8px;
         width: auto;
