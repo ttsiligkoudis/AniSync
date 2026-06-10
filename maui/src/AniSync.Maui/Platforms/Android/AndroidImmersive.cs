@@ -65,6 +65,30 @@ internal static class AndroidImmersive
         });
     }
 
+    // Target the window that actually HOSTS a given view. MAUI presents modal pages in their own hosting
+    // window, so flags set on the Activity window (Apply, above) never reach the modal — but
+    // ViewCompat.GetWindowInsetsController resolves the controller for the view's attached window, and setting
+    // SystemUiVisibility on that window's decor (view.RootView) covers the legacy path. This is what makes the
+    // player modal go truly fullscreen.
+    public static void ApplyToView(global::Android.Views.View? view)
+    {
+        if (!Active || view is null) return;
+        view.Post(() =>
+        {
+            if (!Active) return;
+            var root = view.RootView ?? view;
+#pragma warning disable CA1422
+            root.SystemUiVisibility = (StatusBarVisibility)(
+                SystemUiFlags.LayoutStable | SystemUiFlags.LayoutHideNavigation | SystemUiFlags.LayoutFullscreen |
+                SystemUiFlags.HideNavigation | SystemUiFlags.Fullscreen | SystemUiFlags.ImmersiveSticky);
+#pragma warning restore CA1422
+            var controller = ViewCompat.GetWindowInsetsController(view);
+            if (controller is null) return;
+            controller.SystemBarsBehavior = WindowInsetsControllerCompat.BehaviorShowTransientBarsBySwipe;
+            controller.Hide(WindowInsetsCompat.Type.SystemBars());
+        });
+    }
+
     private static void SetCutout(Activity activity, bool intoCutout)
     {
         if (Build.VERSION.SdkInt < BuildVersionCodes.P) return;
