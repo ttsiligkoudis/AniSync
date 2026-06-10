@@ -40,7 +40,8 @@ public sealed class VlcPlayerPage : ContentPage
     private const string IcCheck = "";     // check
 
     private readonly MediaPlayer _player;
-    private readonly VideoView _videoView;
+    private VideoView _videoView;
+    private readonly Grid _root;
     private readonly Slider _seek;
     private readonly Button _playPause;
     private readonly Label _position;
@@ -227,12 +228,12 @@ public sealed class VlcPlayerPage : ContentPage
         var tap = new TapGestureRecognizer();
         tap.Tapped += (_, _) => ToggleControls();
 
-        var root = new Grid();
-        root.Add(_videoView, 0, 0);
-        root.Add(_controls, 0, 0);
-        root.Add(_sheetOverlay, 0, 0);
-        root.GestureRecognizers.Add(tap);
-        Content = root;
+        _root = new Grid();
+        _root.Add(_videoView, 0, 0);
+        _root.Add(_controls, 0, 0);
+        _root.Add(_sheetOverlay, 0, 0);
+        _root.GestureRecognizers.Add(tap);
+        Content = _root;
 
         // Auto-hide the chrome after a few seconds of inactivity.
         _hideTimer = Dispatcher.CreateTimer();
@@ -286,15 +287,28 @@ public sealed class VlcPlayerPage : ContentPage
         try { if (_player.IsPlaying) _player.SetPause(true); } catch { /* not ready */ }
     }
 
-    // Returning from background: the native video surface was destroyed while away, so the MediaPlayer is
-    // still bound to a dead surface — playback resumes with audio but a black frame. Re-bind the VideoView to
-    // the player so libVLC re-attaches to the freshly recreated surface and the picture comes back. Delayed so
-    // the surface exists by the time we re-bind.
+    // Returning from background: the native video surface was destroyed while away, so the MediaPlayer is left
+    // bound to a dead surface — playback resumes with audio but a black frame. Re-binding the same VideoView
+    // isn't enough (its handler keeps the stale surface), so swap in a FRESH VideoView: its handler creates a
+    // new live surface and attaches the player to it, bringing the picture back. Delayed so the new surface is
+    // ready before we attach.
     private void OnWindowResumed(object? sender, EventArgs e)
     {
-        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(200), () =>
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(250), () =>
         {
-            try { _videoView.MediaPlayer = null; _videoView.MediaPlayer = _player; } catch { /* not ready */ }
+            try
+            {
+                _root.Remove(_videoView);
+                var fresh = new VideoView
+                {
+                    VerticalOptions = LayoutOptions.Fill,
+                    HorizontalOptions = LayoutOptions.Fill,
+                };
+                _root.Children.Insert(0, fresh); // behind the controls + sheet overlay
+                fresh.MediaPlayer = _player;
+                _videoView = fresh;
+            }
+            catch { /* not ready */ }
         });
     }
 

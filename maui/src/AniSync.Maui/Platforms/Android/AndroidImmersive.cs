@@ -27,6 +27,9 @@ internal static class AndroidImmersive
         SetCutout(activity, intoCutout: false);
         var window = activity.Window;
         if (window is null) return;
+#pragma warning disable CA1422 // FLAG_FULLSCREEN deprecated, but still honoured (and needed on MIUI/HyperOS)
+        window.ClearFlags(WindowManagerFlags.Fullscreen);
+#pragma warning restore CA1422
         WindowCompat.GetInsetsController(window, window.DecorView)
             ?.Show(WindowInsetsCompat.Type.SystemBars());
     }
@@ -44,6 +47,11 @@ internal static class AndroidImmersive
             if (!Active) return;
             var window = activity.Window;
             if (window is null) return;
+            // HyperOS/MIUI keep showing the status bar with WindowInsetsController.Hide alone even on Android
+            // 15. The legacy FULLSCREEN window flag is still honoured there and reliably hides it, so set both.
+#pragma warning disable CA1422
+            window.AddFlags(WindowManagerFlags.Fullscreen);
+#pragma warning restore CA1422
             var controller = WindowCompat.GetInsetsController(window, window.DecorView);
             if (controller is null) return;
             controller.SystemBarsBehavior = WindowInsetsControllerCompat.BehaviorShowTransientBarsBySwipe;
