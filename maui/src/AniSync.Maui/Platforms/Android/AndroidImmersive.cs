@@ -29,6 +29,7 @@ internal static class AndroidImmersive
         if (window is null) return;
 #pragma warning disable CA1422 // FLAG_FULLSCREEN deprecated, but still honoured (and needed on MIUI/HyperOS)
         window.ClearFlags(WindowManagerFlags.Fullscreen);
+        window.DecorView.SystemUiVisibility = (StatusBarVisibility)SystemUiFlags.Visible;
 #pragma warning restore CA1422
         WindowCompat.GetInsetsController(window, window.DecorView)
             ?.Show(WindowInsetsCompat.Type.SystemBars());
@@ -51,6 +52,11 @@ internal static class AndroidImmersive
             // 15. The legacy FULLSCREEN window flag is still honoured there and reliably hides it, so set both.
 #pragma warning disable CA1422
             window.AddFlags(WindowManagerFlags.Fullscreen);
+            // Belt-and-suspenders for the navigation bar / gesture pill: the legacy immersive-sticky
+            // SystemUiVisibility flags, which some OEM skins honour when the modern controller doesn't.
+            window.DecorView.SystemUiVisibility = (StatusBarVisibility)(
+                SystemUiFlags.LayoutStable | SystemUiFlags.LayoutHideNavigation | SystemUiFlags.LayoutFullscreen |
+                SystemUiFlags.HideNavigation | SystemUiFlags.Fullscreen | SystemUiFlags.ImmersiveSticky);
 #pragma warning restore CA1422
             var controller = WindowCompat.GetInsetsController(window, window.DecorView);
             if (controller is null) return;

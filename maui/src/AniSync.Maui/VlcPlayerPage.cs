@@ -23,6 +23,10 @@ public sealed class VlcPlayerPage : ContentPage
     private static readonly Color Scrim = Color.FromRgba(0, 0, 0, 150); // bar background
     private static readonly Color SheetBg = Color.FromArgb("#15151B");  // bottom-sheet panel
 
+    // Bump on each player change so we can confirm which APK is actually installed (shown faintly in the top
+    // bar). Temporary aid while iterating on the native player — remove once the layout is finalised.
+    private const string BuildTag = "fs2";
+
     // Material Icons codepoints (font registered as "MaterialIcons" in MauiProgram).
     private const string IconFont = "MaterialIcons";
     private const string IcBack = "";      // chevron_left
@@ -88,15 +92,25 @@ public sealed class VlcPlayerPage : ContentPage
             HorizontalOptions = LayoutOptions.Fill,
         };
 
+        var buildLabel = new Label
+        {
+            Text = BuildTag,
+            TextColor = Color.FromRgba(255, 255, 255, 90),
+            FontSize = 11,
+            VerticalOptions = LayoutOptions.Center,
+            HorizontalOptions = LayoutOptions.End,
+        };
+
         var topBar = new Grid
         {
-            ColumnDefinitions = { new(GridLength.Auto), new(GridLength.Star) },
+            ColumnDefinitions = { new(GridLength.Auto), new(GridLength.Star), new(GridLength.Auto) },
             Padding = new Thickness(4, 0, 12, 0),
             BackgroundColor = Scrim,
             VerticalOptions = LayoutOptions.Start,
         };
         topBar.Add(back, 0, 0);
         topBar.Add(titleLabel, 1, 0);
+        topBar.Add(buildLabel, 2, 0);
 
         // ── Centre transport: rewind 30s · play/pause · forward 30s (uniform size) ─
         var rewind = GlyphButton(IcReplay30, 32, 60);
