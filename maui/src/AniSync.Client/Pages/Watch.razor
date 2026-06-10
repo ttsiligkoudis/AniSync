@@ -46,6 +46,10 @@
     </p>
 </section>
 
+@* On MAUI the video plays full-screen in the native LibVLC player (not inline), so this whole inline player
+   panel is hidden — it can't host the native video surface and would just be a misleading static poster. *@
+@if (!Env.SupportsNativePlayback)
+{
 <section class="watch-player-wrap">
     <div class="watch-player">
         @if (_playingUrl is not null && !Env.SupportsNativePlayback)
@@ -135,6 +139,7 @@
         </div>
     }
 </section>
+}
 
 @* iOS Files hand-off toast — surfaced after an external .m3u download on iOS
    Safari (the original gated this on window.AniSyncToast; the replica has no

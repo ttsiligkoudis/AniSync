@@ -41,7 +41,10 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             if (request.ResumeSeconds is > 0)
                 media.AddOption($":start-time={(int)request.ResumeSeconds.Value}");
 
-            _player = new MediaPlayer(media) { EnableHardwareDecoding = true };
+            // Software decoding (hardware OFF): some chipsets' HEVC/10-bit hardware decoders corrupt the
+            // picture into green/blocky artifacts. Software decode is the whole reason for LibVLC here, so
+            // prefer correctness over the small CPU cost.
+            _player = new MediaPlayer(media) { EnableHardwareDecoding = false };
 
             // Attach external subtitle tracks (debrid/OpenSubtitles URLs).
             if (request.Subtitles is { Count: > 0 })
