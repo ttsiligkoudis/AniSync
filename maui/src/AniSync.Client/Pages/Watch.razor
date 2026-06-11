@@ -573,7 +573,7 @@
         {
             var video = await Api.VideoAsync(_type, Id);
             _meta = video?.Meta;
-            _episodes = video?.Episodes ?? Array.Empty<EpisodeInfoDto>();
+            _episodes = (IReadOnlyList<EpisodeInfoDto>?)video?.Episodes ?? Array.Empty<EpisodeInfoDto>();
         }
         else
         {
