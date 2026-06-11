@@ -366,6 +366,8 @@ builder.Services.AddSingleton<IUserListCache, UserListCache>();
 builder.Services.AddSingleton<INotificationStore, NotificationStore>();
 builder.Services.AddSingleton<IHiddenEntryStore, HiddenEntryStore>();
 builder.Services.AddSingleton<IWatchingCacheStore, WatchingCacheStore>();
+// Excludes Trakt "series" entries that the user already tracks as anime (Calendar + series notifications).
+builder.Services.AddSingleton<ITrackedAnimeImdbResolver, TrackedAnimeImdbResolver>();
 builder.Services.AddSingleton<IPushSubscriptionStore, PushSubscriptionStore>();
 builder.Services.AddSingleton<IPushNotificationService, PushNotificationService>();
 builder.Services.AddSingleton<IAnimeScheduleService, AnimeScheduleService>();

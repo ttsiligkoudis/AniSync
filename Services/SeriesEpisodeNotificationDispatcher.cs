@@ -30,17 +30,20 @@ namespace AnimeList.Services
         private readonly ITraktService _trakt;
         private readonly INotificationStore _notifications;
         private readonly IPushNotificationService _push;
+        private readonly ITrackedAnimeImdbResolver _trackedAnimeImdb;
         private readonly ILogger<SeriesEpisodeNotificationDispatcher> _logger;
 
         public SeriesEpisodeNotificationDispatcher(
             ITraktService trakt,
             INotificationStore notifications,
             IPushNotificationService push,
+            ITrackedAnimeImdbResolver trackedAnimeImdb,
             ILogger<SeriesEpisodeNotificationDispatcher> logger)
         {
             _trakt = trakt;
             _notifications = notifications;
             _push = push;
+            _trackedAnimeImdb = trackedAnimeImdb;
             _logger = logger;
         }
 
@@ -59,6 +62,11 @@ namespace AnimeList.Services
                 .Where(i => i.Type == "series" && !string.IsNullOrEmpty(i.ImdbId))
                 .Select(i => i.ImdbId)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (eligible.Count == 0) return 0;
+
+            // Don't notify for shows the user already tracks as anime — the anime episode dispatcher
+            // covers those from the AniList schedule, so a Trakt copy would be a duplicate bell row.
+            eligible.ExceptWith(await _trackedAnimeImdb.GetTrackedAnimeImdbIdsAsync(uid, ct));
             if (eligible.Count == 0) return 0;
 
             var startDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1));
