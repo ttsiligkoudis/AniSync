@@ -30,6 +30,7 @@ namespace AnimeList.Controllers
         private readonly IAnimeMappingService _mapping;
         private readonly IAnilistFallback _anilist;
         private readonly ITraktService _trakt;
+        private readonly ITrackedAnimeImdbResolver _trackedAnimeImdb;
         private readonly ILogger<CalendarController> _logger;
 
         public CalendarController(
@@ -39,6 +40,7 @@ namespace AnimeList.Controllers
             IAnimeMappingService mapping,
             IAnilistFallback anilist,
             ITraktService trakt,
+            ITrackedAnimeImdbResolver trackedAnimeImdb,
             ILogger<CalendarController> logger)
         {
             _tokenService = tokenService;
@@ -47,6 +49,7 @@ namespace AnimeList.Controllers
             _mapping = mapping;
             _anilist = anilist;
             _trakt = trakt;
+            _trackedAnimeImdb = trackedAnimeImdb;
             _logger = logger;
         }
 
@@ -238,6 +241,12 @@ namespace AnimeList.Controllers
                 .Where(i => i.Type == "series" && !string.IsNullOrEmpty(i.ImdbId))
                 .Select(i => i.ImdbId)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (eligible.Count == 0) return;
+
+            // Drop shows the user already tracks as anime (AddAnimeAsync surfaces those from the AniList
+            // schedule) so the same title doesn't appear twice — once as the Trakt umbrella, once as the
+            // anime cour.
+            eligible.ExceptWith(await _trackedAnimeImdb.GetTrackedAnimeImdbIdsAsync(uid));
             if (eligible.Count == 0) return;
 
             var calendar = await _trakt.GetMyShowsCalendarAsync(uid, weekStart, days);
