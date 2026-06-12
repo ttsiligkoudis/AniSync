@@ -44,31 +44,47 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             // Software decoding (hardware OFF): some chipsets' HEVC/10-bit hardware decoders corrupt the
             // picture into green/blocky artifacts. Software decode is the whole reason for LibVLC here, so
             // prefer correctness over the small CPU cost.
-            _player = new MediaPlayer(media) { EnableHardwareDecoding = false };
+            var player = new MediaPlayer(media) { EnableHardwareDecoding = false };
+            _player = player;
 
-            // Attach external subtitle tracks (debrid/OpenSubtitles URLs).
+            // Attach external subtitle tracks (debrid/OpenSubtitles URLs). Only well-formed absolute
+            // http(s) slaves — a relative or non-http URL makes libVLC fall through to the SMB access
+            // module ("smb2_parse_url failed") and can crash the demux mid-playback. A single bad slave
+            // must never sink playback, so guard each AddSlave individually.
             if (request.Subtitles is { Count: > 0 })
             {
                 foreach (var sub in request.Subtitles)
-                    _player.AddSlave(MediaSlaveType.Subtitle, sub.Url, select: false);
+                {
+                    if (!Uri.TryCreate(sub.Url, UriKind.Absolute, out var subUri)
+                        || (subUri.Scheme != Uri.UriSchemeHttp && subUri.Scheme != Uri.UriSchemeHttps))
+                        continue;
+                    try { player.AddSlave(MediaSlaveType.Subtitle, sub.Url, select: false); }
+                    catch { /* skip an unparseable slave rather than fail the session */ }
+                }
             }
 
             // Report progress + completion back to the Watch page (it owns resume
             // persistence + scrobble). libVLC raises these on its own thread; the
             // page's handlers marshal back to the renderer (InvokeAsync / NavigateTo).
+            // Capture the player instance (not the _player field) and swallow faults:
+            // a callback that fires after Stop/Dispose, or a renderer that's been torn
+            // down, would otherwise throw on libVLC's native thread and crash the app.
             if (request.OnProgress is not null)
             {
-                _player.TimeChanged += (_, e) =>
-                    request.OnProgress(e.Time / 1000.0, _player!.Length / 1000.0);
+                player.TimeChanged += (_, e) =>
+                {
+                    try { request.OnProgress(e.Time / 1000.0, player.Length / 1000.0); }
+                    catch { /* player stopped / renderer gone */ }
+                };
             }
             if (request.OnEnded is not null)
             {
-                _player.EndReached += (_, _) => request.OnEnded();
+                player.EndReached += (_, _) => { try { request.OnEnded(); } catch { /* renderer gone */ } };
             }
 
             // A libVLC playback error (expired/blocked debrid link, undecodable stream) should tear the
             // session down cleanly rather than leave audio running behind a dead page.
-            _player.EncounteredError += (_, _) => _ = StopAsync();
+            player.EncounteredError += (_, _) => _ = StopAsync();
 
             // Hand the configured player to a native page on the UI thread. Only Play() AFTER the page is
             // actually presented — otherwise a failure to present would leave audio playing with no visible
@@ -77,9 +93,9 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             {
                 var nav = Application.Current?.Windows.FirstOrDefault()?.Page?.Navigation
                     ?? throw new InvalidOperationException("No navigation host available to present the player.");
-                var page = new VlcPlayerPage(_player, request.Title);
+                var page = new VlcPlayerPage(player, request.Title);
                 await nav.PushModalAsync(page);
-                _player.Play();
+                player.Play();
             });
         }
         catch
