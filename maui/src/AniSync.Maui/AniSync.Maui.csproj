@@ -22,6 +22,12 @@
     <EnableDefaultCssItems>false</EnableDefaultCssItems>
     <Nullable>enable</Nullable>
 
+    <!-- Ship a single APK covering BOTH 32-bit (armeabi-v7a) and 64-bit (arm64-v8a) ARM. Budget Realtek-based
+         Google TV sets (e.g. the TCL P635 / A18 / A28 family) are 32-bit ARM, so an arm64-only APK fails to
+         install there with a bare "app not installed". x86/x64 are emulator-only — dropping them also keeps
+         the LibVLC-heavy APK smaller (helps install on low-storage TVs). -->
+    <RuntimeIdentifiers Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">android-arm64;android-arm</RuntimeIdentifiers>
+
     <!-- Enable XAML source generation for faster build times and improved performance.
          This generates C# code from XAML at compile time instead of runtime inflation.
          To disable, remove this line.
