@@ -519,12 +519,17 @@ window.anisyncWatch = (function () {
         function timeoutPromise(ms, message) {
             return new Promise(function (_, reject) { setTimeout(function () { reject(new Error(message)); }, ms); });
         }
-        async function tryImport(specifiers, timeoutMs) {
+        // validate (optional): given the loaded module, return true if it's usable. Lets us fall through to
+        // the next CDN when a build imports fine but is broken at runtime (e.g. an esm.sh bundle that
+        // mistranspiles a class's base so `new` throws "Class constructor … cannot be invoked without 'new'").
+        async function tryImport(specifiers, timeoutMs, validate) {
             timeoutMs = timeoutMs || 6000;
             for (var k = 0; k < specifiers.length; k++) {
                 var spec = specifiers[k];
                 try {
-                    return await Promise.race([import(spec), timeoutPromise(timeoutMs, 'import timeout: ' + spec)]);
+                    var mod = await Promise.race([import(spec), timeoutPromise(timeoutMs, 'import timeout: ' + spec)]);
+                    if (!validate || validate(mod)) return mod;
+                    console.warn('module loaded but failed validation, trying next CDN:', spec);
                 } catch (e) { console.warn('module load attempt failed:', spec, e && e.message); }
             }
             return null;
@@ -537,7 +542,15 @@ window.anisyncWatch = (function () {
                     'https://esm.sh/matroska-subtitles?target=esnext',
                     'https://esm.run/matroska-subtitles',
                     'https://cdn.skypack.dev/matroska-subtitles',
-                ]),
+                ], 6000, function (m) {
+                    // The SubtitleParser must actually be constructible — some bundles transpile its
+                    // Writable base inconsistently, so `new Parser()` throws. Test-construct a throwaway and
+                    // reject this build if it can't, so the next CDN is tried.
+                    var P = m && (m.SubtitleParser || (m.default && m.default.SubtitleParser) || m.default);
+                    if (typeof P !== 'function') return false;
+                    try { new P(); return true; }
+                    catch (e) { console.warn('matroska SubtitleParser not constructible from this build:', e && e.message); return false; }
+                }),
                 tryImport([
                     // Pinned 1.7.17: newer jassub enables useLocalFonts +
                     // WebCodecs paths that break in our setup (postMessage a
