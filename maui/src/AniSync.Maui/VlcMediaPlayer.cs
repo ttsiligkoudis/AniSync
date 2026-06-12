@@ -50,7 +50,10 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             // Attach external subtitle tracks (debrid/OpenSubtitles URLs). Only well-formed absolute
             // http(s) slaves — a relative or non-http URL makes libVLC fall through to the SMB access
             // module ("smb2_parse_url failed") and can crash the demux mid-playback. A single bad slave
-            // must never sink playback, so guard each AddSlave individually.
+            // must never sink playback, so guard each AddSlave individually. We keep the display label of
+            // each slave we actually attached (in order) so the player page can show the real language —
+            // libVLC can't carry a language on a slave, so it would otherwise label them by codec.
+            var slaveLabels = new List<string>();
             if (request.Subtitles is { Count: > 0 })
             {
                 foreach (var sub in request.Subtitles)
@@ -58,7 +61,11 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
                     if (!Uri.TryCreate(sub.Url, UriKind.Absolute, out var subUri)
                         || (subUri.Scheme != Uri.UriSchemeHttp && subUri.Scheme != Uri.UriSchemeHttps))
                         continue;
-                    try { player.AddSlave(MediaSlaveType.Subtitle, sub.Url, select: false); }
+                    try
+                    {
+                        player.AddSlave(MediaSlaveType.Subtitle, sub.Url, select: false);
+                        slaveLabels.Add(string.IsNullOrWhiteSpace(sub.Label) ? (sub.Language ?? "Subtitle") : sub.Label);
+                    }
                     catch { /* skip an unparseable slave rather than fail the session */ }
                 }
             }
@@ -93,7 +100,7 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             {
                 var nav = Application.Current?.Windows.FirstOrDefault()?.Page?.Navigation
                     ?? throw new InvalidOperationException("No navigation host available to present the player.");
-                var page = new VlcPlayerPage(player, request.Title);
+                var page = new VlcPlayerPage(player, request.Title, slaveLabels);
                 await nav.PushModalAsync(page);
                 player.Play();
             });

@@ -25,7 +25,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     // Bump on each player change so we can confirm which APK is actually installed (shown faintly in the top
     // bar). Temporary aid while iterating on the native player — remove once the layout is finalised.
-    private const string BuildTag = "fs16";
+    private const string BuildTag = "fs17";
 
     // Material Icons codepoints (font registered as "MaterialIcons" in MauiProgram).
     private const string IconFont = "MaterialIcons";
@@ -48,6 +48,7 @@ public sealed class VlcPlayerPage : ContentPage
     private readonly Grid _root;
     private readonly Slider _seek;
     private readonly Button _playPause;
+    private readonly View _transport;          // centre rewind/play/forward — hidden while the spinner is up
     private readonly Label _position;
     private readonly Label _duration;
     private readonly Grid _controls;
@@ -56,6 +57,15 @@ public sealed class VlcPlayerPage : ContentPage
     private readonly ContentView _sheetContent;
     private readonly IDispatcherTimer _hideTimer;
 
+    // Buffering / connecting overlay (spinner + title) shown until the first frame decodes and whenever the
+    // stream re-buffers, so a debrid link that's slow to start no longer looks like a frozen black screen.
+    private readonly Grid _loading;
+    private readonly ActivityIndicator _spinner;
+
+    // Display labels for the external subtitle slaves we attached, in add order. libVLC can't carry a
+    // language on a slave so it labels them by codec ("SRT"); these restore the real language in the sheet.
+    private readonly IReadOnlyList<string> _slaveLabels;
+
     private bool _seeking;
     private ScaleMode _scaleMode = ScaleMode.Fit;
     private string? _subLang;                        // selected language column in the subtitle sheet
@@ -63,9 +73,10 @@ public sealed class VlcPlayerPage : ContentPage
 
     private enum ScaleMode { Fit, Crop, Fill, SixteenNine, FourThree }
 
-    public VlcPlayerPage(MediaPlayer player, string title)
+    public VlcPlayerPage(MediaPlayer player, string title, IReadOnlyList<string>? slaveLabels = null)
     {
         _player = player;
+        _slaveLabels = slaveLabels ?? Array.Empty<string>();
         Title = title;
         BackgroundColor = Colors.Black;
         NavigationPage.SetHasNavigationBar(this, false);
@@ -126,9 +137,10 @@ public sealed class VlcPlayerPage : ContentPage
         var forward = GlyphButton(IcForward30, 32, 60);
         forward.Clicked += (_, _) => Nudge(+30_000);
 
-        var transport = new HorizontalStackLayout
+        _transport = new HorizontalStackLayout
         {
             Spacing = 34,
+            IsVisible = false,   // playback opens on the spinner; revealed once we're buffering-complete / playing
             HorizontalOptions = LayoutOptions.Center,
             VerticalOptions = LayoutOptions.Center,
             // Centred mid-screen, nowhere near the cutout — consuming the notch inset here would only
@@ -202,7 +214,7 @@ public sealed class VlcPlayerPage : ContentPage
             SafeAreaEdges = SafeAreaEdges.None,
         };
         _controls.Add(topBar, 0, 0);
-        _controls.Add(transport, 0, 1);
+        _controls.Add(_transport, 0, 1);
         _controls.Add(bottom, 0, 2);
 
         // ── Bottom-sheet overlay (hidden until a menu opens) ────────────────────
@@ -251,6 +263,38 @@ public sealed class VlcPlayerPage : ContentPage
         _sheetOverlay.Add(backdrop);
         _sheetOverlay.Add(sheetPanel);
 
+        // ── Buffering / connecting overlay (centre spinner + title) ─────────────
+        _spinner = new ActivityIndicator
+        {
+            IsRunning = true,
+            Color = Accent,
+            WidthRequest = 48,
+            HeightRequest = 48,
+            HorizontalOptions = LayoutOptions.Center,
+        };
+        var loadingTitle = new Label
+        {
+            Text = title,
+            TextColor = Colors.White,
+            FontSize = 15,
+            FontAttributes = FontAttributes.Bold,
+            HorizontalTextAlignment = TextAlignment.Center,
+            LineBreakMode = LineBreakMode.TailTruncation,
+            MaxLines = 2,
+        };
+        var loadingCol = new VerticalStackLayout
+        {
+            Spacing = 16,
+            Padding = new Thickness(40, 0),
+            HorizontalOptions = LayoutOptions.Center,
+            VerticalOptions = LayoutOptions.Center,
+            Children = { _spinner, loadingTitle },
+        };
+        // InputTransparent so a tap still reaches the root (toggling the chrome) while it's up. Visible from
+        // the start — playback begins black, so the spinner is the only "we're working on it" signal.
+        _loading = new Grid { InputTransparent = true, SafeAreaEdges = SafeAreaEdges.None };
+        _loading.Add(loadingCol);
+
         // ── Compose: video, then controls, then the sheet on top ───────────────
         var tap = new TapGestureRecognizer();
         tap.Tapped += (_, _) => ToggleControls();
@@ -261,6 +305,7 @@ public sealed class VlcPlayerPage : ContentPage
         _root = new Grid { SafeAreaEdges = SafeAreaEdges.None };
         _root.Add(_videoView, 0, 0);
         _root.Add(_controls, 0, 0);
+        _root.Add(_loading, 0, 0);     // over the video, under the controls' tap target + the sheet
         _root.Add(_sheetOverlay, 0, 0);
         _root.GestureRecognizers.Add(tap);
         Content = _root;
@@ -274,8 +319,10 @@ public sealed class VlcPlayerPage : ContentPage
         // Keep the UI in sync (libVLC raises these on its own thread → marshal to the UI thread).
         _player.PositionChanged += OnPositionChanged;
         _player.LengthChanged += OnLengthChanged;
-        _player.Playing += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPause; RestartHideTimer(); });
+        _player.Playing += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPause; SetLoading(false); RestartHideTimer(); });
         _player.Paused += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPlay; StopHideTimer(); });
+        // Buffering climbs 0→100 on connect and re-fires on a re-buffer; show the spinner until it's full.
+        _player.Buffering += (_, e) => Dispatcher.Dispatch(() => SetLoading(e.Cache < 100f));
 
         // Stop + release when the user backs out of (or closes) the player.
         NavigatedFrom += (_, _) => { try { _player.Stop(); } catch { /* already stopped */ } };
@@ -430,6 +477,16 @@ public sealed class VlcPlayerPage : ContentPage
     }
 
     private void StopHideTimer() => _hideTimer.Stop();
+
+    // Toggle the connecting/buffering overlay. The spinner is stopped when hidden so it doesn't animate
+    // off-screen (and burn cycles) during playback.
+    private void SetLoading(bool on)
+    {
+        _loading.IsVisible = on;
+        _spinner.IsRunning = on;
+        // Hide the centre transport while the spinner is up so the play/pause glyph doesn't sit under it.
+        _transport.IsVisible = !on;
+    }
 
     // ── Bottom sheets ───────────────────────────────────────────────────────────
     private void OpenSheet(string title, View content)
@@ -603,6 +660,23 @@ public sealed class VlcPlayerPage : ContentPage
         }
         catch { /* tracks not parsed yet */ }
 
+        // Our external OpenSubtitles slaves are appended after any embedded tracks, in the order we added
+        // them — they carry no language metadata, so libVLC labels them by codec ("SRT"). Restore the real
+        // language we knew from the source list so the Language column reads "English" instead of "SRT".
+        if (_slaveLabels.Count > 0 && tracks.Count >= _slaveLabels.Count)
+        {
+            var firstSlave = tracks.Count - _slaveLabels.Count;
+            for (var i = 0; i < _slaveLabels.Count; i++)
+            {
+                var label = _slaveLabels[i];
+                // Only replace an uninformative codec label ("SRT", "Track 3", …) — never clobber a track
+                // that libVLC already gave a real language (which also guards against an off-by-one if a
+                // slave silently failed to load and isn't actually in this list).
+                if (!string.IsNullOrWhiteSpace(label) && IsCodecLabel(tracks[firstSlave + i].Name))
+                    tracks[firstSlave + i] = (tracks[firstSlave + i].Id, label);
+            }
+        }
+
         int currentSpu;
         try { currentSpu = _player.Spu; } catch { currentSpu = -1; }
 
@@ -718,6 +792,22 @@ public sealed class VlcPlayerPage : ContentPage
             Padding = new Thickness(8, 8, 8, 0),
             Children = { caption, stepper },
         };
+    }
+
+    // True when a track name carries no language — just a container/codec token ("SRT", "ASS", "WebVTT", …)
+    // or a generic "Track N". Used to decide whether it's safe to substitute a known language label.
+    private static readonly HashSet<string> CodecLabels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "srt", "ass", "ssa", "vtt", "webvtt", "subrip", "sub", "subtitle", "subtitles",
+        "pgs", "hdmv_pgs", "dvbsub", "dvb", "teletext", "mov_text", "text", "tx3g", "cc",
+    };
+
+    private static bool IsCodecLabel(string name)
+    {
+        var n = (name ?? "").Trim();
+        return n.Length == 0
+            || CodecLabels.Contains(n)
+            || n.StartsWith("Track ", StringComparison.OrdinalIgnoreCase);
     }
 
     // Extract the language label from a libVLC SPU track name, e.g. "English (SDH) - [English]" → "English".
