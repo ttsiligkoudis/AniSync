@@ -70,7 +70,7 @@ else
     }
     else
     {
-        <LoginSection SelectedService="@_selectedService" ReturnUrl="/" AllowAnonymous="false" />
+        <LoginSection SelectedService="@_selectedService" ReturnUrl="@LoginReturnUrl" AllowAnonymous="false" />
     }
 }
 
@@ -80,6 +80,15 @@ else
 }
 
 @code {
+    // Where to land after sign-in. Defaults home, but the TV-pairing /link page sends users
+    // here with ?returnUrl=/link?code=… so they bounce back and confirm once signed in. Only
+    // same-app relative paths are honoured (no open-redirect to an external URL).
+    [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+    private string LoginReturnUrl =>
+        !string.IsNullOrEmpty(ReturnUrl) && ReturnUrl.StartsWith('/') && !ReturnUrl.StartsWith("//")
+            ? ReturnUrl
+            : "/";
+
     private bool _loading = true;
     private ConfigStateDto? _config;
     private ConfigFlags _flags = new();

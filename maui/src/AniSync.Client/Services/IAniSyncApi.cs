@@ -104,6 +104,20 @@ public interface IAniSyncApi
     // Auth (which sign-in providers the backend can start)
     Task<AuthProvidersDto> AuthProvidersAsync(CancellationToken ct = default);
 
+    // TV "sign in with your phone" QR device-pairing flow
+    /// <summary>Starts a device pairing — POST /api/v1/auth/device/start. Returns the QR + codes
+    /// the TV shows, or null on failure.</summary>
+    Task<DeviceStartResponse?> StartDeviceLoginAsync(CancellationToken ct = default);
+    /// <summary>Polls a pairing — POST /api/v1/auth/device/poll. Status is pending/approved/expired;
+    /// on approved the Config is the credential to store. Null on a transient network error.</summary>
+    Task<DevicePollResponse?> PollDeviceLoginAsync(string deviceCode, CancellationToken ct = default);
+    /// <summary>Phone-side: validates a scanned code and reports whether this browser is signed in —
+    /// GET /api/v1/auth/device/context.</summary>
+    Task<DeviceContextResponse?> DeviceContextAsync(string code, CancellationToken ct = default);
+    /// <summary>Phone-side: binds the signed-in account to the TV's code — POST /api/v1/auth/device/approve.
+    /// Returns true on success; false if not signed in or the code is invalid/expired.</summary>
+    Task<bool> ApproveDeviceAsync(string code, CancellationToken ct = default);
+
     // Configure / account / advanced (header-authed; stored v5 configs only)
     Task<ConfigStateDto?> GetConfigAsync(CancellationToken ct = default);
     Task<SaveFlagsResult?> SaveFlagsAsync(byte flags1, byte flags2, byte flags3, CancellationToken ct = default);

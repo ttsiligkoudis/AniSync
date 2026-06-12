@@ -7,6 +7,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Pure-managed QR generation (no System.Drawing) for the TV "sign in with your
+         phone" flow — renders the /link pairing URL as a PNG the TV displays. -->
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Shared client RCL (committed) replaces the template's generated shared project. -->
     <ProjectReference Include="..\AniSync.Client\AniSync.Client.csproj" />
 

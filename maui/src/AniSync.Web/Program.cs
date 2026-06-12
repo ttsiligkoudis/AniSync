@@ -302,6 +302,8 @@ builder.Services.AddSingleton<IFillerListService, FillerListService>();
 builder.Services.AddSingleton<IUserListCache, UserListCache>();
 // One-time codes bridging native (MAUI) OAuth logins back to the app via anisync://.
 builder.Services.AddSingleton<INativeAuthCodeStore, NativeAuthCodeStore>();
+// Rendezvous for the TV "scan a QR on your phone" sign-in (device-authorization flow).
+builder.Services.AddSingleton<IDevicePairingStore, DevicePairingStore>();
 
 // Episode-release notification stack.
 builder.Services.AddSingleton<INotificationStore, NotificationStore>();
@@ -438,6 +440,98 @@ app.MapPost("/api/v1/auth/native/kitsu", async (NativeKitsuBody body, ITokenServ
     return Results.Json(new { config = AnimeList.Utils.EncodeV5Config(uid) });
 });
 
+// --- TV QR device pairing (RFC 8628-style; the flow Netflix / Stremio use) -------------
+// The TV can't easily type credentials with a remote, so it shows a QR. The user scans it
+// on their phone, signs in there, confirms, and the TV's poll then yields the config.
+//   start   → TV mints a pairing, shows the QR + short code, begins polling
+//   approve → phone (signed in, authenticated by its X-AniSync-Config header) binds its
+//             account to the short code
+//   poll    → TV exchanges its secret device_code for the config once approved
+//   context → the /link page checks the code is real and whether the caller is signed in
+
+// The public origin to bake into the QR's /link URL. Honour an explicit override (handy
+// behind a CDN/custom domain) and otherwise trust the incoming request's host — for the
+// native TV app that request hits anisync.fly.dev directly, so Host is already correct.
+static string DevicePublicOrigin(HttpContext ctx, IConfiguration cfg)
+{
+    var configured = cfg["PublicBaseUrl"];
+    if (!string.IsNullOrWhiteSpace(configured)) return configured.TrimEnd('/');
+    return $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+}
+
+static string DeviceQrPngDataUri(string payload)
+{
+    using var generator = new QRCoder.QRCodeGenerator();
+    using var data = generator.CreateQrCode(payload, QRCoder.QRCodeGenerator.ECCLevel.M);
+    // PngByteQRCode is pure-managed (no System.Drawing) so it renders fine on the Linux Fly host.
+    var png = new QRCoder.PngByteQRCode(data).GetGraphic(8);
+    return "data:image/png;base64," + Convert.ToBase64String(png);
+}
+
+app.MapPost("/api/v1/auth/device/start", (HttpContext ctx, IDevicePairingStore pairing, IConfiguration cfg) =>
+{
+    // 10 minutes — generous enough for the user to find their phone, scan, and sign in.
+    var ticket = pairing.Create(TimeSpan.FromMinutes(10));
+    var origin = DevicePublicOrigin(ctx, cfg);
+    var verificationUri = $"{origin}/link";
+    var complete = $"{verificationUri}?code={ticket.UserCode}";
+    return Results.Json(new
+    {
+        deviceCode = ticket.DeviceCode,
+        userCode = ticket.UserCode,
+        verificationUri,
+        verificationUriComplete = complete,
+        qrPng = DeviceQrPngDataUri(complete),
+        interval = 5,
+        expiresIn = (int)(ticket.Expires - DateTime.UtcNow).TotalSeconds,
+    });
+});
+
+app.MapPost("/api/v1/auth/device/poll", (DevicePollBody body, IDevicePairingStore pairing) =>
+{
+    if (string.IsNullOrWhiteSpace(body?.DeviceCode))
+        return Results.BadRequest(new { error = "device code required" });
+    var outcome = pairing.Poll(body.DeviceCode);
+    return outcome.Status switch
+    {
+        DevicePairingStatus.Approved => Results.Json(new { status = "approved", config = AnimeList.Utils.EncodeV5Config(outcome.Uid) }),
+        DevicePairingStatus.Pending => Results.Json(new { status = "pending" }),
+        _ => Results.Json(new { status = "expired" }),
+    };
+});
+
+// The phone authenticates exactly like every /api/v1/me call: via its X-AniSync-Config
+// header (the typed client always attaches it), NOT the session cookie — the web head is
+// Blazor Server, whose server-side HttpClient can't see the browser cookie. So resolve the
+// signed-in account from the header, the same way [RequireConfig] endpoints do.
+static async Task<string> DeviceSignedInUidAsync(HttpContext ctx, ITokenService tokenService, IConfigStore configStore)
+{
+    var header = ctx.Request.Headers["X-AniSync-Config"].FirstOrDefault()?.Trim();
+    if (string.IsNullOrEmpty(header)) return null;
+    var token = await tokenService.GetAccessTokenAsync(header);
+    if (token is null || token.anonymousUser) return null;     // anonymous installs can't link a TV
+    var cfg = await AnimeList.Utils.ResolveConfigAsync(header, configStore);
+    return cfg?.tokenUid;
+}
+
+app.MapGet("/api/v1/auth/device/context", async (HttpContext ctx, string code, ITokenService tokenService, IConfigStore configStore, IDevicePairingStore pairing) =>
+{
+    var uid = await DeviceSignedInUidAsync(ctx, tokenService, configStore);
+    return Results.Json(new { valid = pairing.Exists(code), signedIn = !string.IsNullOrEmpty(uid) });
+});
+
+app.MapPost("/api/v1/auth/device/approve", async (HttpContext ctx, DeviceApproveBody body, ITokenService tokenService, IConfigStore configStore, IDevicePairingStore pairing) =>
+{
+    if (string.IsNullOrWhiteSpace(body?.Code))
+        return Results.BadRequest(new { error = "code required" });
+    var uid = await DeviceSignedInUidAsync(ctx, tokenService, configStore);
+    if (string.IsNullOrEmpty(uid))
+        return Results.Json(new { error = "not_signed_in" }, statusCode: StatusCodes.Status401Unauthorized);
+    return pairing.TryApprove(body.Code, uid)
+        ? Results.Json(new { ok = true })
+        : Results.Json(new { error = "invalid_or_expired_code" }, statusCode: StatusCodes.Status404NotFound);
+});
+
 // Auth → client config-seeding bridge. After a server-side OAuth/Kitsu login the
 // session identifies the account; resolve its UID, encode the v5 config segment
 // (the X-AniSync-Config credential the thin client sends), and hand it to the
@@ -542,3 +636,5 @@ app.Run();
 // Request bodies for the native-auth minimal APIs (bound case-insensitively from JSON).
 record NativeExchangeBody(string Code);
 record NativeKitsuBody(string Username, string Password);
+record DevicePollBody(string DeviceCode);
+record DeviceApproveBody(string Code);

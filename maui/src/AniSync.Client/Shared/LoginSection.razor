@@ -14,6 +14,14 @@
    INativeAuth path, mirroring Login.razor. *@
 
 <div class="card-section" id="loginCard">
+    @* On the TV, typing credentials with a remote is painful — lead with the phone QR
+       flow (Stremio/Netflix style) and keep the provider sign-in below as a fallback. *@
+    @if (Env.IsTv)
+    {
+        <DevicePairing />
+        <div class="device-pair-divider"><span>or sign in on this device</span></div>
+    }
+
     @if (Native.IsSupported)
     {
         @* Native head: the password grant / OAuth run through INativeAuth (no
