@@ -28,7 +28,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     // Bump on each player change so we can confirm which APK is actually installed (shown faintly in the top
     // bar). Temporary aid while iterating on the native player — remove once the layout is finalised.
-    private const string BuildTag = "fs19";
+    private const string BuildTag = "fs20";
 
     // Material Icons codepoints (font registered as "MaterialIcons" in MauiProgram).
     private const string IconFont = "MaterialIcons";
@@ -64,6 +64,10 @@ public sealed class VlcPlayerPage : ContentPage
     // stream re-buffers, so a debrid link that's slow to start no longer looks like a frozen black screen.
     private readonly Grid _loading;
     private readonly ActivityIndicator _spinner;
+
+    // Android TV / Google TV is driven by a D-pad remote — there's no tap to bring the chrome back, so we
+    // never auto-hide it there, and we move focus onto the play button so the remote has a landing spot.
+    private readonly bool _isTv = DeviceInfo.Current.Idiom == DeviceIdiom.TV;
 
     // External subtitle tracks (proxied OpenSubtitles URLs + real language labels) from the API. Shown in the
     // sheet up-front and attached to libVLC on demand when picked — they aren't pre-loaded as slaves.
@@ -307,7 +311,7 @@ public sealed class VlcPlayerPage : ContentPage
         // Keep the UI in sync (libVLC raises these on its own thread → marshal to the UI thread).
         _player.PositionChanged += OnPositionChanged;
         _player.LengthChanged += OnLengthChanged;
-        _player.Playing += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPause; SetLoading(false); RestartHideTimer(); });
+        _player.Playing += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPause; SetLoading(false); RestartHideTimer(); if (_isTv) _playPause.Focus(); });
         _player.Paused += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPlay; StopHideTimer(); });
         // Buffering climbs 0→100 on connect and re-fires on a re-buffer; show the spinner until it's full.
         _player.Buffering += (_, e) => Dispatcher.Dispatch(() => SetLoading(e.Cache < 100f));
@@ -460,7 +464,8 @@ public sealed class VlcPlayerPage : ContentPage
     private void RestartHideTimer()
     {
         _hideTimer.Stop();
-        if (_player.IsPlaying && !_sheetOverlay.IsVisible)
+        // On a TV the remote can't tap to re-summon hidden controls, so keep them up.
+        if (_player.IsPlaying && !_sheetOverlay.IsVisible && !_isTv)
             _hideTimer.Start();
     }
 

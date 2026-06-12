@@ -28,6 +28,9 @@
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <!-- Shared shell behaviour (theme toggle, back button, mobile "More" sheet). -->
     <script src="@Assets["_content/AniSync.Client/js/chrome.js"]"></script>
+    <!-- D-pad / remote spatial navigation for TV browsers (Android TV / Google TV / webOS / Tizen). Self-
+         detects TV mode and no-ops on phone + desktop. -->
+    <script src="@Assets["_content/AniSync.Client/js/tv-navigation.js"]"></script>
     <!-- ArtPlayer (large, third-party) + the 66 KB watch-player.js driver are NOT
          loaded here: they're only needed on /watch, so loading them on every page
          was dead weight + a render-blocking script + an extra third-party request.
