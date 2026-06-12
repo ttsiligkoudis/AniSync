@@ -28,7 +28,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     // Bump on each player change so we can confirm which APK is actually installed (shown faintly in the top
     // bar). Temporary aid while iterating on the native player — remove once the layout is finalised.
-    private const string BuildTag = "fs21";
+    private const string BuildTag = "fs22";
 
     // Material Icons codepoints (font registered as "MaterialIcons" in MauiProgram).
     private const string IconFont = "MaterialIcons";
@@ -489,6 +489,19 @@ public sealed class VlcPlayerPage : ContentPage
         _sheetOverlay.IsVisible = true;
         _controls.IsVisible = true;
         StopHideTimer();
+        // On TV, land the remote on the first row so the D-pad has somewhere to start.
+        if (_isTv) FocusFirstRow();
+    }
+
+    // Focus the first selectable row in the open sheet (TV only). Delayed so the sheet's native views are
+    // realized before we try to focus; best-effort — a missed focus just means the first D-pad press lands it.
+    private void FocusFirstRow()
+    {
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(80), () =>
+        {
+            try { _sheetContent.GetVisualTreeDescendants().OfType<Button>().FirstOrDefault()?.Focus(); }
+            catch { /* not realized yet */ }
+        });
     }
 
     private void CloseSheet()
@@ -500,6 +513,25 @@ public sealed class VlcPlayerPage : ContentPage
     // A single tappable list row with a selection check. onTap decides whether to close the sheet.
     private View Row(string text, bool selected, Action onTap)
     {
+        // TV: a Grid+TapGestureRecognizer isn't reachable by the D-pad, so use a Button (gets the native
+        // focus highlight + activates on OK). The check is folded into the text since a Button hosts only text.
+        if (_isTv)
+        {
+            var btn = new Button
+            {
+                Text = (selected ? "✓  " : "") + text,
+                TextColor = selected ? Accent : Colors.White,
+                BackgroundColor = Colors.Transparent,
+                BorderWidth = 0,
+                CornerRadius = 0,
+                FontSize = 16,
+                Padding = new Thickness(16, 12),
+                HorizontalOptions = LayoutOptions.Fill,
+            };
+            btn.Clicked += (_, _) => onTap();
+            return btn;
+        }
+
         var label = new Label
         {
             Text = text,

@@ -28,4 +28,5 @@ public sealed class WebAppEnvironment : IAppEnvironment
     public string ApiBaseUrl => string.IsNullOrWhiteSpace(_override) ? _nav.BaseUri : _override;
     public bool IsNative => false;
     public bool SupportsNativePlayback => false;
+    public bool IsTv => false; // browser-on-TV is out of scope and can't be detected server-side
 }

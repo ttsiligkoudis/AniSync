@@ -7,27 +7,37 @@
 @inject IJSRuntime JS
 @inject IPrerenderSession PrerenderSession
 @inject IPlatformChrome PlatformChrome
+@inject IAppEnvironment Env
 
 @* Shared chrome for every page — composed to match _Layout.cshtml's body
    order exactly: drawer (+ backdrop), site header, fixed media-type switch,
    centered .container > main, then the mobile bottom nav (+ more sheet). The
    layout persists across navigation, so we re-render it on LocationChanged and
    AppState.Changed to keep the active-nav highlight and the switch in sync. *@
-<NavDrawer />
+@if (Env.IsTv)
+{
+    @* TV (10-foot) shell: collapsible left rail + tile-first content. Gated entirely on the native
+       DeviceIdiom==TV verdict, so phones/tablets and the web app render the identical chrome below. *@
+    <TvLayout>@Body</TvLayout>
+}
+else
+{
+    <NavDrawer />
 
-<AppHeader />
+    <AppHeader />
 
-<MediaTypeModal />
+    <MediaTypeModal />
 
-<MediaTypeSwitch />
+    <MediaTypeSwitch />
 
-<div class="container">
-    <main role="main" style="min-height: 100vh;">
-        @Body
-    </main>
-</div>
+    <div class="container">
+        <main role="main" style="min-height: 100vh;">
+            @Body
+        </main>
+    </div>
 
-<BottomNav />
+    <BottomNav />
+}
 
 @code {
     protected override void OnInitialized()
