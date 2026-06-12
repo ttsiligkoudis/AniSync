@@ -426,11 +426,15 @@ app.MapPost("/api/v1/auth/native/exchange", (NativeExchangeBody body, INativeAut
 app.MapPost("/api/v1/auth/native/kitsu", async (NativeKitsuBody body, ITokenService tokenService, IConfigStore configStore) =>
 {
     if (string.IsNullOrWhiteSpace(body?.Username) || string.IsNullOrWhiteSpace(body?.Password))
-        return Results.BadRequest(new { error = "username and password required" });
-    var token = await tokenService.GetAccessTokenByCredsAsync(body.Username, body.Password, setContext: false);
-    if (token is null || string.IsNullOrEmpty(token.access_token))
-        return Results.Json(new { error = "Kitsu credentials were rejected" }, statusCode: StatusCodes.Status401Unauthorized);
-    var uid = await configStore.UpsertAsync(token);
+        return Results.BadRequest(new { error = "Enter your Kitsu username and password." });
+    var result = await tokenService.GetAccessTokenByCredsDetailedAsync(body.Username, body.Password, setContext: false);
+    if (result.Token is null || string.IsNullOrEmpty(result.Token.access_token))
+        // Forward Kitsu's real reason (bad creds / 403 / rate-limit / network) so the app
+        // can show it instead of a blanket "sign-in failed". Echo Kitsu's status when it's a
+        // client error; otherwise treat it as an upstream failure.
+        return Results.Json(new { error = result.Error ?? "Kitsu credentials were rejected" },
+            statusCode: result.StatusCode is >= 400 and < 500 ? result.StatusCode : StatusCodes.Status502BadGateway);
+    var uid = await configStore.UpsertAsync(result.Token);
     return Results.Json(new { config = AnimeList.Utils.EncodeV5Config(uid) });
 });
 

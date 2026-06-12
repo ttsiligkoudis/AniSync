@@ -142,9 +142,12 @@
         if (!el) return;
         el.focus({ preventScroll: true });
         // Centre the newly-focused element so the grid scrolls under the
-        // selection rather than the selection running off-screen.
+        // selection rather than the selection running off-screen. Use an INSTANT
+        // jump (not behavior:'smooth') — animated scrolling is visibly janky on
+        // low-powered TV boxes and lags behind fast D-pad repeats; an instant
+        // recentre feels snappier and costs nothing to animate.
         try {
-            el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+            el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' });
         } catch (_) {
             el.scrollIntoView();
         }

@@ -35,6 +35,15 @@ namespace AnimeList.Services.Interfaces
 
         #region Kitsu
         Task<TokenData> GetAccessTokenByCredsAsync(string username, string password, bool setContext = false, string userId = null);
+
+        /// <summary>
+        /// Same Kitsu password-grant sign-in as <see cref="GetAccessTokenByCredsAsync"/>, but
+        /// returns the HTTP status and a human-readable failure reason instead of collapsing
+        /// every cause (bad password, Cloudflare 403, rate-limit, network/TLS error) into a
+        /// silent null. Used by the native (MAUI/TV) login endpoint so the UI can tell the
+        /// user what actually went wrong.
+        /// </summary>
+        Task<KitsuLoginResult> GetAccessTokenByCredsDetailedAsync(string username, string password, bool setContext = false, string userId = null);
         #endregion
 
         #region MyAnimeList
@@ -53,5 +62,13 @@ namespace AnimeList.Services.Interfaces
         /// </summary>
         Task<TokenData> RefreshLinkedTokenAsync(TokenData token);
     }
+
+    /// <summary>
+    /// Outcome of a Kitsu password-grant attempt. <see cref="Token"/> is non-null only on
+    /// success; on failure <see cref="Error"/> carries a user-facing reason and
+    /// <see cref="StatusCode"/> is the Kitsu HTTP status (0 = the request never completed,
+    /// e.g. a network/TLS failure).
+    /// </summary>
+    public sealed record KitsuLoginResult(TokenData Token, int StatusCode, string Error);
 }
 

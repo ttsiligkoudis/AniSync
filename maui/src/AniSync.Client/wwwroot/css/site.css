@@ -8451,9 +8451,14 @@ ol.anime-detail-episodes-busy {
 .tv-mode button:focus,
 .tv-mode [role="button"]:focus,
 .tv-mode .library-card:focus {
-    box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.55), 0 0 24px 6px var(--accent);
-    transform: scale(1.04);
-    transition: transform 120ms ease-out;
+    /* A single tight ring instead of the former 24px blurred accent glow: a large
+       blurred box-shadow is one of the most expensive things to repaint, and it was
+       repainting on every D-pad press on a low-powered TV GPU. The 4px outline above
+       already carries the "what's selected" signal; this just adds depth. */
+    box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.55);
+    transform: scale(1.03);
+    transition: transform 100ms ease-out;
+    will-change: transform;
     position: relative;
     z-index: 5;
 }
@@ -9872,3 +9877,47 @@ body.dash-page main {
    default position:sticky;top:0 is fine inside the scrolling content; re-enable
    pointer events that the phone bar drops). */
 .tv-mode .tv-content .mt-switch-bar { pointer-events: auto; }
+
+/* ==========================================================================
+   TV PERFORMANCE OVERRIDES
+   Android TV boxes (Realtek/Amlogic SoCs) run the same Chromium WebView as a
+   phone but with a fraction of the GPU fill-rate and no reliable acceleration
+   for blur compositing. The effects below look great on a phone and tank the
+   frame rate on a TV — every blur/glow is recomposited on scroll and on each
+   D-pad move. We disable them ONLY under .tv-mode, so phone/web are untouched.
+   ========================================================================== */
+
+/* 1. backdrop-filter blur is the single biggest cost — it forces a full-screen
+   readback + blur of everything behind the element. There are ~11 across the
+   app (notification panel, every modal scrim, media-type chooser, browse
+   overlay, …). Kill them all in one shot; the panels keep their solid/translucent
+   background colour, which is plenty of separation on a TV. */
+.tv-mode *,
+.tv-mode *::before,
+.tv-mode *::after {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+/* 2. Blur/saturate filters on large images (the detail-page backdrop, hover
+   tints) are likewise expensive per-frame. Drop the blur; keep layout intact. */
+.tv-mode .anime-detail-backdrop { filter: none !important; }
+
+/* 3. Don't animate `filter` (brightness/saturate) on focus/hover — a filter
+   transition repaints the whole element every frame of the animation. Cards
+   still get the scale + ring from the focus rule above. */
+.tv-mode .library-card,
+.tv-mode .video-tile,
+.tv-mode .episode-item {
+    transition: transform 0.1s ease-out !important;
+}
+.tv-mode .library-card:hover,
+.tv-mode .video-tile:hover,
+.tv-mode .episode-item:hover { filter: none !important; }
+
+/* 4. The rail's width animation reflows the page on every focus-enter; the
+   shadow repaints with it. Keep the expand instant (snappier on a remote) and
+   drop the side shadow. */
+.tv-rail { transition: none !important; }
+.tv-rail:hover,
+.tv-rail:focus-within { box-shadow: none !important; }

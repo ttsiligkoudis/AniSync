@@ -20,9 +20,21 @@ public interface INativeAuth
     /// (Anilist / MyAnimeList / Trakt).</summary>
     Task<string?> StartOAuthAsync(string service);
 
-    /// <summary>Kitsu password-grant sign-in (no browser). Returns the config segment
-    /// or null on failure.</summary>
-    Task<string?> LoginKitsuAsync(string username, string password);
+    /// <summary>Kitsu password-grant sign-in (no browser). Returns the config segment on
+    /// success, or a user-facing failure reason — so the Login page can show why it failed
+    /// (rejected credentials vs. a network/Cloudflare/rate-limit problem) rather than a
+    /// blanket message.</summary>
+    Task<NativeAuthResult> LoginKitsuAsync(string username, string password);
+}
+
+/// <summary>
+/// Result of a native credential sign-in. <see cref="Config"/> is set on success;
+/// <see cref="Error"/> carries a user-facing reason on failure. Both null means the user
+/// cancelled (nothing to report).
+/// </summary>
+public sealed record NativeAuthResult(string? Config, string? Error)
+{
+    public bool Ok => !string.IsNullOrEmpty(Config);
 }
 
 /// <summary>Web-head default — sign-in goes through the server redirect flow, so the
@@ -31,5 +43,5 @@ public sealed class NoopNativeAuth : INativeAuth
 {
     public bool IsSupported => false;
     public Task<string?> StartOAuthAsync(string service) => Task.FromResult<string?>(null);
-    public Task<string?> LoginKitsuAsync(string username, string password) => Task.FromResult<string?>(null);
+    public Task<NativeAuthResult> LoginKitsuAsync(string username, string password) => Task.FromResult(new NativeAuthResult(null, null));
 }
