@@ -1,6 +1,7 @@
 using LibVLCSharp.Shared;
 using LibVLCSharp.MAUI;
 using Microsoft.Maui.Controls.Shapes;
+using AniSync.Client.Services;
 
 namespace AniSync.Maui;
 
@@ -25,7 +26,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     // Bump on each player change so we can confirm which APK is actually installed (shown faintly in the top
     // bar). Temporary aid while iterating on the native player — remove once the layout is finalised.
-    private const string BuildTag = "fs18";
+    private const string BuildTag = "fs19";
 
     // Material Icons codepoints (font registered as "MaterialIcons" in MauiProgram).
     private const string IconFont = "MaterialIcons";
@@ -62,9 +63,11 @@ public sealed class VlcPlayerPage : ContentPage
     private readonly Grid _loading;
     private readonly ActivityIndicator _spinner;
 
-    // Display labels for the external subtitle slaves we attached, in add order. libVLC can't carry a
-    // language on a slave so it labels them by codec ("SRT"); these restore the real language in the sheet.
-    private readonly IReadOnlyList<string> _slaveLabels;
+    // External subtitle tracks (proxied OpenSubtitles URLs + real language labels) from the API. Shown in the
+    // sheet up-front and attached to libVLC on demand when picked — they aren't pre-loaded as slaves.
+    private readonly IReadOnlyList<SubtitleTrack> _externalSubs;
+    private HashSet<int>? _embeddedSpuIds;   // SPU ids from the media file, captured before any slave is added
+    private string? _selectedExternalUrl;    // url of the external sub the user attached (drives the check)
 
     private bool _seeking;
     private ScaleMode _scaleMode = ScaleMode.Fit;
@@ -73,10 +76,10 @@ public sealed class VlcPlayerPage : ContentPage
 
     private enum ScaleMode { Fit, Crop, Fill, SixteenNine, FourThree }
 
-    public VlcPlayerPage(MediaPlayer player, string title, IReadOnlyList<string>? slaveLabels = null)
+    public VlcPlayerPage(MediaPlayer player, string title, IReadOnlyList<SubtitleTrack>? externalSubs = null)
     {
         _player = player;
-        _slaveLabels = slaveLabels ?? Array.Empty<string>();
+        _externalSubs = externalSubs ?? Array.Empty<SubtitleTrack>();
         Title = title;
         BackgroundColor = Colors.Black;
         NavigationPage.SetHasNavigationBar(this, false);
@@ -631,52 +634,63 @@ public sealed class VlcPlayerPage : ContentPage
         return h > 0 ? $"{w}:{h}" : null;
     }
 
+    // One selectable subtitle option, whether it's an in-file track or an external slave.
+    private readonly record struct SubOption(string Lang, string Track, bool Selected, Action OnPick);
+
     // ── Subtitles: Stremio-style language · tracks · options columns ────────────
     private void OpenSubtitleSheet()
     {
-        var tracks = new List<(int Id, string Name)>();
+        // Embedded (in-file) SPU tracks straight from libVLC. Capture the embedded id set on the first read —
+        // before any external slave is attached — so a slave we add on selection (which libVLC then appends
+        // to SpuDescription) isn't later mistaken for an in-file track.
+        var spu = new List<(int Id, string Name)>();
         try
         {
             foreach (var t in _player.SpuDescription)
                 if (t.Id != -1)
-                    tracks.Add((t.Id, string.IsNullOrWhiteSpace(t.Name) ? $"Track {t.Id}" : t.Name));
+                    spu.Add((t.Id, string.IsNullOrWhiteSpace(t.Name) ? $"Track {t.Id}" : t.Name));
         }
         catch { /* tracks not parsed yet */ }
-
-        // Our external OpenSubtitles slaves are appended after any embedded tracks, in the order we added
-        // them — they carry no language metadata, so libVLC labels them by codec ("SRT"). Restore the real
-        // language we knew from the source list so the Language column reads "English" instead of "SRT".
-        if (_slaveLabels.Count > 0 && tracks.Count >= _slaveLabels.Count)
-        {
-            var firstSlave = tracks.Count - _slaveLabels.Count;
-            for (var i = 0; i < _slaveLabels.Count; i++)
-            {
-                var label = _slaveLabels[i];
-                // Only replace an uninformative codec label ("SRT", "Track 3", …) — never clobber a track
-                // that libVLC already gave a real language (which also guards against an off-by-one if a
-                // slave silently failed to load and isn't actually in this list).
-                if (!string.IsNullOrWhiteSpace(label) && IsCodecLabel(tracks[firstSlave + i].Name))
-                    tracks[firstSlave + i] = (tracks[firstSlave + i].Id, label);
-            }
-        }
+        _embeddedSpuIds ??= spu.Select(t => t.Id).ToHashSet();
 
         int currentSpu;
         try { currentSpu = _player.Spu; } catch { currentSpu = -1; }
 
-        var langs = tracks.Select(t => LangOf(t.Name)).Distinct().ToList();
-
-        // Default the selected language column to the current track's language, else the first available.
-        if (_subLang is null || !langs.Contains(_subLang))
+        // Unified list: in-file tracks + the external OpenSubtitles list (from the API, which carries real
+        // languages). External subs attach on demand when picked (AddSlave select:true), so the picker shows
+        // everything available regardless of what libVLC has lazily parsed.
+        var options = new List<SubOption>();
+        foreach (var t in spu.Where(t => _embeddedSpuIds.Contains(t.Id)))
         {
-            var cur = tracks.FirstOrDefault(t => t.Id == currentSpu);
-            _subLang = cur.Name is not null ? LangOf(cur.Name) : langs.FirstOrDefault();
+            var id = t.Id;
+            options.Add(new SubOption(
+                LangOf(t.Name), t.Name,
+                _selectedExternalUrl is null && currentSpu == id,
+                () => { try { _player.SetSpu(id); } catch { } _selectedExternalUrl = null; CloseSheet(); }));
         }
+        foreach (var sub in _externalSubs)
+        {
+            var lang = FriendlyLang(sub.Language, sub.Label);
+            var track = string.IsNullOrWhiteSpace(sub.Label) ? lang : sub.Label!;
+            var url = sub.Url;
+            options.Add(new SubOption(
+                lang, track,
+                _selectedExternalUrl == url,
+                () => { try { _player.AddSlave(MediaSlaveType.Subtitle, url, select: true); } catch { } _selectedExternalUrl = url; CloseSheet(); }));
+        }
+
+        var langs = options.Select(o => o.Lang).Distinct().ToList();
+
+        // Default the selected language column to the active track's language, else the first available.
+        if (_subLang is null || !langs.Contains(_subLang))
+            _subLang = options.FirstOrDefault(o => o.Selected).Lang ?? langs.FirstOrDefault();
 
         // Left column: "Off" + one entry per language. Selecting a language just re-filters (keeps the sheet
         // open); selecting "Off" disables subtitles and closes.
         var langRows = new List<View>
         {
-            Row("Off", currentSpu == -1, () => { try { _player.SetSpu(-1); } catch { } CloseSheet(); }),
+            Row("Off", currentSpu == -1 && _selectedExternalUrl is null,
+                () => { try { _player.SetSpu(-1); } catch { } _selectedExternalUrl = null; CloseSheet(); }),
         };
         foreach (var lang in langs)
         {
@@ -685,16 +699,12 @@ public sealed class VlcPlayerPage : ContentPage
         }
 
         // Middle column: tracks in the selected language. Selecting one applies + closes.
-        var trackRows = tracks
-            .Where(t => LangOf(t.Name) == _subLang)
-            .Select(t =>
-            {
-                var id = t.Id;
-                return Row(t.Name, id == currentSpu, () => { try { _player.SetSpu(id); } catch { } CloseSheet(); });
-            })
+        var trackRows = options
+            .Where(o => o.Lang == _subLang)
+            .Select(o => Row(o.Track, o.Selected, o.OnPick))
             .ToList();
         if (trackRows.Count == 0)
-            trackRows.Add(Row(tracks.Count == 0 ? "No subtitles available" : "—", false, () => { }));
+            trackRows.Add(Row(options.Count == 0 ? "No subtitles available" : "—", false, () => { }));
 
         var grid = new Grid
         {
@@ -777,20 +787,43 @@ public sealed class VlcPlayerPage : ContentPage
         };
     }
 
-    // True when a track name carries no language — just a container/codec token ("SRT", "ASS", "WebVTT", …)
-    // or a generic "Track N". Used to decide whether it's safe to substitute a known language label.
-    private static readonly HashSet<string> CodecLabels = new(StringComparer.OrdinalIgnoreCase)
+    // Common ISO 639-1 / 639-2 subtitle language codes → display names (the API hands us a code like "en"
+    // and a label like "English 2"; the code gives the clean Language-column heading).
+    private static readonly Dictionary<string, string> LangNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "srt", "ass", "ssa", "vtt", "webvtt", "subrip", "sub", "subtitle", "subtitles",
-        "pgs", "hdmv_pgs", "dvbsub", "dvb", "teletext", "mov_text", "text", "tx3g", "cc",
+        ["en"] = "English", ["eng"] = "English",
+        ["ja"] = "Japanese", ["jpn"] = "Japanese", ["jp"] = "Japanese",
+        ["ar"] = "Arabic", ["ara"] = "Arabic",
+        ["es"] = "Spanish", ["spa"] = "Spanish",
+        ["fr"] = "French", ["fra"] = "French", ["fre"] = "French",
+        ["de"] = "German", ["deu"] = "German", ["ger"] = "German",
+        ["it"] = "Italian", ["ita"] = "Italian",
+        ["pt"] = "Portuguese", ["por"] = "Portuguese",
+        ["ru"] = "Russian", ["rus"] = "Russian",
+        ["zh"] = "Chinese", ["zho"] = "Chinese", ["chi"] = "Chinese",
+        ["ko"] = "Korean", ["kor"] = "Korean",
+        ["pl"] = "Polish", ["pol"] = "Polish",
+        ["tr"] = "Turkish", ["tur"] = "Turkish",
+        ["nl"] = "Dutch", ["nld"] = "Dutch", ["dut"] = "Dutch",
+        ["id"] = "Indonesian", ["ind"] = "Indonesian",
+        ["hi"] = "Hindi", ["hin"] = "Hindi",
+        ["th"] = "Thai", ["tha"] = "Thai",
+        ["vi"] = "Vietnamese", ["vie"] = "Vietnamese",
     };
 
-    private static bool IsCodecLabel(string name)
+    // Friendly language for the Language column: map the API's language code, fall back to the label with any
+    // trailing index stripped ("English 2" → "English"), then to the raw code.
+    private static string FriendlyLang(string? code, string? label)
     {
-        var n = (name ?? "").Trim();
-        return n.Length == 0
-            || CodecLabels.Contains(n)
-            || n.StartsWith("Track ", StringComparison.OrdinalIgnoreCase);
+        var c = (code ?? "").Trim();
+        if (c.Length > 0 && LangNames.TryGetValue(c, out var name)) return name;
+        var lbl = (label ?? "").Trim();
+        if (lbl.Length > 0)
+        {
+            var stripped = System.Text.RegularExpressions.Regex.Replace(lbl, @"\s*\d+$", "").Trim();
+            return stripped.Length > 0 ? stripped : lbl;
+        }
+        return c.Length > 0 ? c.ToUpperInvariant() : "Subtitle";
     }
 
     // Extract the language label from a libVLC SPU track name, e.g. "English (SDH) - [English]" → "English".

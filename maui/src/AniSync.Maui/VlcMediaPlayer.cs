@@ -47,28 +47,16 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             var player = new MediaPlayer(media) { EnableHardwareDecoding = false };
             _player = player;
 
-            // Attach external subtitle tracks (debrid/OpenSubtitles URLs). Only well-formed absolute
-            // http(s) slaves — a relative or non-http URL makes libVLC fall through to the SMB access
-            // module ("smb2_parse_url failed") and can crash the demux mid-playback. A single bad slave
-            // must never sink playback, so guard each AddSlave individually. We keep the display label of
-            // each slave we actually attached (in order) so the player page can show the real language —
-            // libVLC can't carry a language on a slave, so it would otherwise label them by codec.
-            var slaveLabels = new List<string>();
-            if (request.Subtitles is { Count: > 0 })
-            {
-                foreach (var sub in request.Subtitles)
-                {
-                    if (!Uri.TryCreate(sub.Url, UriKind.Absolute, out var subUri)
-                        || (subUri.Scheme != Uri.UriSchemeHttp && subUri.Scheme != Uri.UriSchemeHttps))
-                        continue;
-                    try
-                    {
-                        player.AddSlave(MediaSlaveType.Subtitle, sub.Url, select: false);
-                        slaveLabels.Add(string.IsNullOrWhiteSpace(sub.Label) ? (sub.Language ?? "Subtitle") : sub.Label);
-                    }
-                    catch { /* skip an unparseable slave rather than fail the session */ }
-                }
-            }
+            // External subtitle tracks (proxied OpenSubtitles URLs) are NOT pre-attached here: libVLC loads
+            // slaves lazily and unreliably, so most never appeared in the track list (the player showed one
+            // "SRT" while the web app listed English / Arabic / …). Hand the full list to the player page,
+            // which shows every available language up-front and attaches the one the user picks on demand
+            // (AddSlave select:true). Keep only well-formed absolute http(s) URLs — a relative or non-http
+            // slave makes libVLC fall through to the SMB access module ("smb2_parse_url failed").
+            var externalSubs = (request.Subtitles ?? Array.Empty<SubtitleTrack>())
+                .Where(s => Uri.TryCreate(s.Url, UriKind.Absolute, out var u)
+                            && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps))
+                .ToList();
 
             // Report progress + completion back to the Watch page (it owns resume
             // persistence + scrobble). libVLC raises these on its own thread; the
@@ -100,7 +88,7 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             {
                 var nav = Application.Current?.Windows.FirstOrDefault()?.Page?.Navigation
                     ?? throw new InvalidOperationException("No navigation host available to present the player.");
-                var page = new VlcPlayerPage(player, request.Title, slaveLabels);
+                var page = new VlcPlayerPage(player, request.Title, externalSubs);
                 await nav.PushModalAsync(page);
                 player.Play();
             });
