@@ -559,6 +559,10 @@
         _providerFilter = "all";
         _lastSourceUrl = null;
         _showRefresh = true;
+        // Show the source skeleton from the very first render — before the meta /
+        // episode / bootstrap awaits below resolve — so the empty "No streaming
+        // sources found" line never flashes ahead of the streams loading in.
+        _loadingSources = true;
         _type = QueryValue("type") ?? "series";
         var season = Season ?? 1;
 
@@ -663,6 +667,7 @@
             {
                 ApplyBootstrapExtras(cached);
                 _rawDebrid = cached.DebridStreams ?? new();
+                _loadingSources = false;
                 _pendingAddons = false;
                 _sourcesResolved = true;
                 RecomputeDisplay();
@@ -675,7 +680,13 @@
         _streamsLoading = true;
         StateHasChanged();
 
-        var streamSeason = _hasSeasons ? season : (int?)null;
+        // Prefer an explicit season from the /watch/{season}/{episode} route: if the
+        // user navigated to a specific season, always tell the server so it builds the
+        // right addon id (imdb:{id}:{season}:{ep}) — otherwise a single-cour entry
+        // whose episodes all carry the same season makes _hasSeasons false and the
+        // season is dropped, so the addon falls back to season 1. The multi-season
+        // heuristic only has to cover the no-season /watch/{episode} route.
+        var streamSeason = Season is int explicitSeason ? explicitSeason : (_hasSeasons ? season : (int?)null);
         var bootstrap = await Api.EpisodeStreamsBootstrapAsync(
             Id, streamSeason, Episode, _type == "movie" ? "movie" : null);
 
@@ -915,6 +926,19 @@
         return string.Join(" · ", parts);
     }
 
+    // Subtitle tracks for the native (LibVLC) player. The raw upstream OpenSubtitles
+    // URLs can be relative or non-http, which makes libVLC fall through to the SMB
+    // access module ("smb2_parse_url failed") and can crash the demux mid-playback.
+    // Route them through the same-origin SRT→VTT proxy — absolute https on the native
+    // head — so VLC always gets a valid, well-formed slave. (The web head leaves
+    // _subtitles raw; its ArtPlayer engine proxies them itself.)
+    private IReadOnlyList<SubtitleTrack> NativeSubtitles()
+        => _subtitles
+            .Select(t => t with { Url = Api.SubtitleProxyUrl(t.Url) })
+            .Where(t => Uri.TryCreate(t.Url, UriKind.Absolute, out var u)
+                        && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps))
+            .ToList();
+
     // ── Play / mark-watched / scrobble ─────────────────────────────────────────
     private async Task PlayAsync(EpisodeStreamDto s)
     {
@@ -947,7 +971,7 @@
             Url: s.Url!,
             Title: PlayerTitle(),
             ResumeSeconds: resume,
-            Subtitles: _subtitles,
+            Subtitles: Env.SupportsNativePlayback ? NativeSubtitles() : _subtitles,
             OnProgress: OnProgress,
             OnEnded: OnEnded,
             OnStreamEvent: OnStreamEvent);
@@ -1068,7 +1092,7 @@
             // hand-off). Resolve first so MediaFusion IP-bound URLs work.
             var nativeUrl = await Api.ResolveStreamAsync(s.Url!) ?? s.Url!;
             var resume = await ReadResumeAsync();
-            await Player.PlayAsync(new PlaybackRequest(nativeUrl, PlayerTitle(), resume, _subtitles, OnProgress, OnEnded));
+            await Player.PlayAsync(new PlaybackRequest(nativeUrl, PlayerTitle(), resume, NativeSubtitles(), OnProgress, OnEnded));
             _playingUrl = s.Url;
             StateHasChanged();
             return;
