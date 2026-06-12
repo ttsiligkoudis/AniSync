@@ -1,7 +1,9 @@
 using LibVLCSharp.Shared;
 using LibVLCSharp.MAUI;
 using Microsoft.Maui.Controls.Shapes;
-using AniSync.Client.Services;
+// Alias (not a namespace import) — LibVLCSharp.Shared also defines a SubtitleTrack, so a plain
+// `using AniSync.Client.Services;` makes the name ambiguous (CS0104).
+using SubtitleTrack = AniSync.Client.Services.SubtitleTrack;
 
 namespace AniSync.Maui;
 
@@ -683,7 +685,7 @@ public sealed class VlcPlayerPage : ContentPage
 
         // Default the selected language column to the active track's language, else the first available.
         if (_subLang is null || !langs.Contains(_subLang))
-            _subLang = options.FirstOrDefault(o => o.Selected).Lang ?? langs.FirstOrDefault();
+            _subLang = options.Where(o => o.Selected).Select(o => o.Lang).FirstOrDefault() ?? langs.FirstOrDefault();
 
         // Left column: "Off" + one entry per language. Selecting a language just re-filters (keeps the sheet
         // open); selecting "Off" disables subtitles and closes.

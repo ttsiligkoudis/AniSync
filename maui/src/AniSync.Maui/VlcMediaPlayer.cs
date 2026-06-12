@@ -1,5 +1,7 @@
 using AniSync.Client.Services;
 using LibVLCSharp.Shared;
+// LibVLCSharp.Shared also defines a SubtitleTrack; alias the bare name to ours to avoid CS0104.
+using SubtitleTrack = AniSync.Client.Services.SubtitleTrack;
 
 namespace AniSync.Maui;
 
