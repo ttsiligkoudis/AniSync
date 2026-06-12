@@ -25,7 +25,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     // Bump on each player change so we can confirm which APK is actually installed (shown faintly in the top
     // bar). Temporary aid while iterating on the native player — remove once the layout is finalised.
-    private const string BuildTag = "fs17";
+    private const string BuildTag = "fs18";
 
     // Material Icons codepoints (font registered as "MaterialIcons" in MauiProgram).
     private const string IconFont = "MaterialIcons";
@@ -263,7 +263,7 @@ public sealed class VlcPlayerPage : ContentPage
         _sheetOverlay.Add(backdrop);
         _sheetOverlay.Add(sheetPanel);
 
-        // ── Buffering / connecting overlay (centre spinner + title) ─────────────
+        // ── Buffering / connecting overlay (centre spinner) ─────────────────────
         _spinner = new ActivityIndicator
         {
             IsRunning = true,
@@ -271,29 +271,12 @@ public sealed class VlcPlayerPage : ContentPage
             WidthRequest = 48,
             HeightRequest = 48,
             HorizontalOptions = LayoutOptions.Center,
-        };
-        var loadingTitle = new Label
-        {
-            Text = title,
-            TextColor = Colors.White,
-            FontSize = 15,
-            FontAttributes = FontAttributes.Bold,
-            HorizontalTextAlignment = TextAlignment.Center,
-            LineBreakMode = LineBreakMode.TailTruncation,
-            MaxLines = 2,
-        };
-        var loadingCol = new VerticalStackLayout
-        {
-            Spacing = 16,
-            Padding = new Thickness(40, 0),
-            HorizontalOptions = LayoutOptions.Center,
             VerticalOptions = LayoutOptions.Center,
-            Children = { _spinner, loadingTitle },
         };
         // InputTransparent so a tap still reaches the root (toggling the chrome) while it's up. Visible from
         // the start — playback begins black, so the spinner is the only "we're working on it" signal.
         _loading = new Grid { InputTransparent = true, SafeAreaEdges = SafeAreaEdges.None };
-        _loading.Add(loadingCol);
+        _loading.Add(_spinner);
 
         // ── Compose: video, then controls, then the sheet on top ───────────────
         var tap = new TapGestureRecognizer();
