@@ -9921,3 +9921,88 @@ body.dash-page main {
 .tv-rail { transition: none !important; }
 .tv-rail:hover,
 .tv-rail:focus-within { box-shadow: none !important; }
+
+/* ==========================================================================
+   DEVICE PAIRING ("sign in with your phone" QR)
+   Used by DevicePairing (the TV login hero) and the phone-side /link page.
+   ========================================================================== */
+.device-pair {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 1rem;
+    padding: 1.25rem 0;
+}
+.device-pair-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin: 0;
+}
+.device-pair-body {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+.device-pair-qr {
+    width: 240px;
+    height: 240px;
+    border-radius: 12px;
+    background: #fff;          /* a quiet zone keeps the QR scannable on a dark UI */
+    padding: 10px;
+    image-rendering: pixelated; /* keep module edges crisp when upscaled on a TV */
+    flex: 0 0 auto;
+}
+.device-pair-steps {
+    text-align: left;
+    margin: 0;
+    padding-left: 1.2rem;
+    max-width: 22rem;
+    line-height: 1.5;
+    color: var(--text-muted, #b5b5b5);
+}
+.device-pair-steps li { margin-bottom: 0.4rem; }
+.device-pair-code {
+    margin: 0;
+    color: var(--text-muted, #b5b5b5);
+}
+.device-pair-code-value {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    color: var(--text-strong, #fff);
+}
+.device-pair-status { margin: 0; color: var(--text-muted, #b5b5b5); }
+.device-pair-error { color: var(--danger, #ff6b6b); }
+
+/* Divider between the QR hero and the fallback provider sign-in. */
+.device-pair-divider {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 1.25rem 0;
+    color: var(--text-muted, #8a8a8a);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+.device-pair-divider::before,
+.device-pair-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border, rgba(255, 255, 255, 0.12));
+}
+
+.link-card { max-width: 32rem; margin: 0 auto; text-align: center; }
+.link-card .btn-primary-action { margin-top: 1rem; }
+
+/* On the TV everything is read from the couch — go big. */
+.tv-mode .device-pair-title { font-size: 2rem; }
+.tv-mode .device-pair-qr { width: 320px; height: 320px; }
+.tv-mode .device-pair-steps { font-size: 1.15rem; max-width: 28rem; }
+.tv-mode .device-pair-code { font-size: 1.25rem; }
+.tv-mode .device-pair-code-value { font-size: 1.5rem; }
+.tv-mode .device-pair-status { font-size: 1.1rem; }

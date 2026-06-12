@@ -1,0 +1,108 @@
+@page "/link"
+@inject IAniSyncApi Api
+@inject ISecureStore Store
+@inject AppState State
+@inject NavigationManager Nav
+
+@* Phone side of the TV "sign in with your phone" flow. The TV shows a QR pointing here
+   (/link?code=XXXXXXXX). We validate the code, make sure the phone is signed in (sending
+   them through the normal /account login and back here if not), then a single Confirm
+   binds this account to the TV — the TV's next poll picks up the credential. *@
+
+<PageTitle>Connect your TV · AniSync</PageTitle>
+
+<header class="page-header">
+    <h1 class="page-title">Connect your TV</h1>
+</header>
+
+<section class="section-card link-card">
+    @switch (_state)
+    {
+        case View.Loading:
+            <p class="device-pair-status">Checking the code…</p>
+            break;
+
+        case View.Invalid:
+            <p class="device-pair-status device-pair-error" role="alert">
+                This pairing code is invalid or has expired. Start sign-in again on your TV to get a fresh code.
+            </p>
+            break;
+
+        case View.Confirm:
+            <p>Connect this AniSync account to the TV that's showing
+                <strong class="device-pair-code-value">@FormattedCode</strong>?</p>
+            <button type="button" class="btn-primary-action" disabled="@_busy" @onclick="ApproveAsync">
+                @(_busy ? "Connecting…" : "Connect TV")
+            </button>
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <p class="device-pair-status device-pair-error" role="alert">@_error</p>
+            }
+            break;
+
+        case View.Done:
+            <p class="device-pair-status">✅ Your TV is now signed in.</p>
+            <p>You can put your phone down and head back to the TV.</p>
+            break;
+    }
+</section>
+
+@code {
+    private enum View { Loading, Invalid, Confirm, Done }
+
+    [SupplyParameterFromQuery] public string? Code { get; set; }
+
+    private View _state = View.Loading;
+    private bool _busy;
+    private string? _error;
+
+    private string FormattedCode =>
+        (Code ?? "").Length == 8 ? $"{Code![..4]} {Code![4..]}" : (Code ?? "");
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Code))
+        {
+            _state = View.Invalid;
+            return;
+        }
+
+        // SecureStore / cookie-derived credential resolution needs the interactive pass.
+        if (!RendererInfo.IsInteractive) return;
+
+        // Resolve the credential the same way Account does, so DeviceContext/Approve carry
+        // the X-AniSync-Config header (that's what tells the server we're signed in).
+        if (string.IsNullOrEmpty(State.StreamConfig))
+        {
+            var saved = await Store.GetAsync(ISecureStore.ConfigKey);
+            if (!string.IsNullOrEmpty(saved)) State.SetStreamConfig(saved);
+        }
+
+        var ctx = await Api.DeviceContextAsync(Code);
+        if (ctx is null || !ctx.Valid)
+        {
+            _state = View.Invalid;
+            return;
+        }
+
+        if (!ctx.SignedIn)
+        {
+            // Not signed in on this phone yet — go log in, then come straight back here.
+            var ret = Uri.EscapeDataString($"/link?code={Code}");
+            Nav.NavigateTo($"/account?returnUrl={ret}");
+            return;
+        }
+
+        _state = View.Confirm;
+    }
+
+    private async Task ApproveAsync()
+    {
+        _busy = true;
+        _error = null;
+        var ok = await Api.ApproveDeviceAsync(Code!);
+        _busy = false;
+        if (ok) { _state = View.Done; return; }
+        _error = "Couldn't connect the TV — the code may have just expired. Start again on your TV.";
+    }
+}

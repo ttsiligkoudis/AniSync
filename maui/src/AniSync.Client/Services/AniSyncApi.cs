@@ -245,6 +245,23 @@ public sealed class AniSyncApi : IAniSyncApi
     public async Task<AuthProvidersDto> AuthProvidersAsync(CancellationToken ct = default)
         => await GetOrDefault<AuthProvidersDto>("api/v1/auth/providers", ct) ?? new();
 
+    // ── TV "sign in with your phone" device pairing ──────────────────────────
+    // start/poll run pre-login (no credential yet); attaching the config header when
+    // there isn't one is a harmless no-op. context/approve are called by the phone,
+    // which IS signed in — they ride the same X-AniSync-Config header as /api/v1/me.
+
+    public Task<DeviceStartResponse?> StartDeviceLoginAsync(CancellationToken ct = default)
+        => PostJson<object, DeviceStartResponse>("api/v1/auth/device/start", new { }, ct);
+
+    public Task<DevicePollResponse?> PollDeviceLoginAsync(string deviceCode, CancellationToken ct = default)
+        => PostJson<object, DevicePollResponse>("api/v1/auth/device/poll", new { deviceCode }, ct);
+
+    public Task<DeviceContextResponse?> DeviceContextAsync(string code, CancellationToken ct = default)
+        => GetOrDefault<DeviceContextResponse>($"api/v1/auth/device/context?code={Uri.EscapeDataString(code)}", ct);
+
+    public Task<bool> ApproveDeviceAsync(string code, CancellationToken ct = default)
+        => PostForOk<object>("api/v1/auth/device/approve", new { code }, ct);
+
     // ── Configure / account / advanced ───────────────────────────────────────
 
     public Task<ConfigStateDto?> GetConfigAsync(CancellationToken ct = default)

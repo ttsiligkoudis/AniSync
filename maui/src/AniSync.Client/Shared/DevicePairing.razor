@@ -1,0 +1,151 @@
+@inject IAniSyncApi Api
+@inject ISecureStore Store
+@inject AppState State
+@inject NavigationManager Nav
+@implements IDisposable
+
+@* TV "sign in with your phone" — the Stremio/Netflix QR flow. We ask the server for a
+   pairing, show the QR (which points the phone at /link?code=…) plus a typed fallback,
+   and poll until the phone approves. On approval we store the returned config exactly
+   like the credential paths in LoginSection and reload into the app. Scoped to TV in
+   LoginSection, but self-contained so it works anywhere it's dropped in. *@
+
+<div class="device-pair">
+    @if (_state == View.Loading)
+    {
+        <p class="device-pair-status">Preparing a sign-in code…</p>
+    }
+    else if (_state == View.Error)
+    {
+        <p class="device-pair-status device-pair-error" role="alert">@_error</p>
+        <button type="button" class="btn-primary-action" autofocus @onclick="StartAsync">Try again</button>
+    }
+    else if (_start is not null)
+    {
+        <h2 class="device-pair-title">Sign in with your phone</h2>
+        <div class="device-pair-body">
+            <img class="device-pair-qr" src="@_start.QrPng" alt="QR code to sign in" width="240" height="240" />
+            <ol class="device-pair-steps">
+                <li>Scan the code, or open <strong>@FriendlyUri</strong> on your phone.</li>
+                <li>Sign in (or you'll already be signed in), then confirm <strong>Connect TV</strong>.</li>
+                <li>This screen signs in automatically — no code to type back.</li>
+            </ol>
+        </div>
+        <p class="device-pair-code">
+            Pairing code <span class="device-pair-code-value">@FormattedUserCode</span>
+        </p>
+        <p class="device-pair-status" aria-live="polite">@_status</p>
+    }
+</div>
+
+@code {
+    private enum View { Loading, Active, Error }
+
+    private View _state = View.Loading;
+    private DeviceStartResponse? _start;
+    private string _status = "Waiting for you to sign in on your phone…";
+    private string _error = "Couldn't start phone sign-in.";
+    private CancellationTokenSource? _cts;
+
+    private string FriendlyUri =>
+        (_start?.VerificationUri ?? "").Replace("https://", "").Replace("http://", "").TrimEnd('/');
+
+    // Show the 8-char code grouped (ABCD EFGH) so it's easy to read off the TV.
+    private string FormattedUserCode
+    {
+        get
+        {
+            var c = _start?.UserCode ?? "";
+            return c.Length == 8 ? $"{c[..4]} {c[4..]}" : c;
+        }
+    }
+
+    protected override async Task OnInitializedAsync() => await StartAsync();
+
+    private async Task StartAsync()
+    {
+        StopPolling();
+        _state = View.Loading;
+        _start = null;
+        StateHasChanged();
+
+        _start = await Api.StartDeviceLoginAsync();
+        if (_start is null || string.IsNullOrEmpty(_start.DeviceCode))
+        {
+            _error = "Couldn't start phone sign-in. Check the connection and try again.";
+            _state = View.Error;
+            StateHasChanged();
+            return;
+        }
+
+        _state = View.Active;
+        _status = "Waiting for you to sign in on your phone…";
+        _cts = new CancellationTokenSource();
+        _ = PollLoopAsync(_start.DeviceCode, _start.Interval, _start.ExpiresIn, _cts.Token);
+    }
+
+    private async Task PollLoopAsync(string deviceCode, int intervalSeconds, int expiresInSeconds, CancellationToken ct)
+    {
+        var interval = TimeSpan.FromSeconds(Math.Clamp(intervalSeconds, 2, 30));
+        var deadline = DateTime.UtcNow.AddSeconds(expiresInSeconds > 0 ? expiresInSeconds : 600);
+
+        try
+        {
+            while (!ct.IsCancellationRequested && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(interval, ct);
+                if (ct.IsCancellationRequested) return;
+
+                var poll = await Api.PollDeviceLoginAsync(deviceCode, ct);
+                if (poll is null) continue; // transient network blip — keep waiting
+
+                switch (poll.Status)
+                {
+                    case "approved" when !string.IsNullOrEmpty(poll.Config):
+                        await CompleteAsync(poll.Config!);
+                        return;
+                    case "expired":
+                        await ShowExpiredAsync();
+                        return;
+                    // "pending" (and an approved-without-config edge) → keep polling
+                }
+            }
+
+            if (DateTime.UtcNow >= deadline) await ShowExpiredAsync();
+        }
+        catch (OperationCanceledException) { /* component disposed / restarted */ }
+    }
+
+    private async Task CompleteAsync(string config)
+    {
+        await Store.SetAsync(ISecureStore.ConfigKey, config);
+        // The poll loop runs off the renderer's sync context — marshal the state mutation +
+        // navigation back onto it. forceLoad so the whole app re-bootstraps with the credential
+        // present, same as the other sign-in paths in LoginSection (a soft nav leaves the
+        // one-shot session hydration stale).
+        await InvokeAsync(() =>
+        {
+            State.SetStreamConfig(config);
+            Nav.NavigateTo("/", forceLoad: true);
+        });
+    }
+
+    private async Task ShowExpiredAsync()
+    {
+        await InvokeAsync(() =>
+        {
+            _error = "This code expired. Generate a new one and scan it again.";
+            _state = View.Error;
+            StateHasChanged();
+        });
+    }
+
+    private void StopPolling()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = null;
+    }
+
+    public void Dispose() => StopPolling();
+}
