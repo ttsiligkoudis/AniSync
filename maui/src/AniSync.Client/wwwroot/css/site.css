@@ -9877,6 +9877,17 @@ body.dash-page main {
    default position:sticky;top:0 is fine inside the scrolling content; re-enable
    pointer events that the phone bar drops). */
 .tv-mode .tv-content .mt-switch-bar { pointer-events: auto; }
+/* On the TV the switch sits at the top of the content in normal flow — not the
+   phone/web sticky+fixed bar (there's no top chrome to stick under, and a remote
+   doesn't scroll-then-reach-back-up the way a thumb does). */
+.tv-mode .mt-switch-bar {
+    position: static !important;
+    top: auto !important;
+    padding-top: 0;
+}
+/* Typing into a filter with a remote is painful and adds a D-pad trap — drop the
+   episode search on TV (same rationale as the rest of the TV detail trim). */
+.tv-mode .anime-detail-episodes-filter { display: none !important; }
 
 /* ==========================================================================
    TV PERFORMANCE OVERRIDES

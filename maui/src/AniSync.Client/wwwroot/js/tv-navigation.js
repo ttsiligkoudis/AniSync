@@ -85,8 +85,28 @@
         return true;
     }
 
+    // When a modal/dialog is open, focus must stay INSIDE it — otherwise the D-pad
+    // wanders onto the elements behind the scrim (which are still in the DOM and
+    // "visible"), so a remote can never reliably land on the modal's own Continue /
+    // Close buttons, and OK activates the wrong thing. We scope all focus discovery
+    // to the topmost open dialog while one is showing.
+    var DIALOG_SEL = '[role="dialog"], .mt-modal, .watch-player-modal';
+
+    function openModal() {
+        var nodes = document.querySelectorAll(DIALOG_SEL);
+        // Last match wins — later in the DOM ≈ stacked on top.
+        for (var i = nodes.length - 1; i >= 0; i--) {
+            var el = nodes[i];
+            if (!el.hidden && !el.closest('[hidden], [aria-hidden="true"]') && isVisible(el)) {
+                return el;
+            }
+        }
+        return null;
+    }
+
     function candidates() {
-        var nodes = document.querySelectorAll(FOCUSABLE);
+        var root = openModal() || document;
+        var nodes = root.querySelectorAll(FOCUSABLE);
         var out = [];
         for (var i = 0; i < nodes.length; i++) {
             if (isVisible(nodes[i])) out.push(nodes[i]);
@@ -175,8 +195,15 @@
                     return;
                 }
             }
-            var start = (ae && ae !== document.body) ? ae : firstFocusable();
+            // If a modal is open and focus is still on something behind it, pull it
+            // into the modal first so navigation begins inside the dialog.
+            var modal = openModal();
+            var inScope = !modal || (ae && modal.contains(ae));
+            var start = inScope
+                ? ((ae && ae !== document.body) ? ae : firstFocusable())
+                : firstFocusable();
             if (!start) return;
+            if (!inScope) { e.preventDefault(); focusEl(start); return; }
             var next = pickInDirection(start, dir);
             if (next) {
                 e.preventDefault();
@@ -192,6 +219,14 @@
         }
 
         if (e.key === 'Enter' || e.key === 'OK') {
+            // With a modal open but focus still behind it, don't activate the
+            // background element — move into the dialog instead.
+            var modal = openModal();
+            if (modal && (!ae || !modal.contains(ae))) {
+                e.preventDefault();
+                focusEl(firstFocusable());
+                return;
+            }
             // Native links / buttons / form controls activate on Enter on
             // their own; only synthesise a click for click-only widgets.
             if (ae && !/^(A|BUTTON|INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) {
