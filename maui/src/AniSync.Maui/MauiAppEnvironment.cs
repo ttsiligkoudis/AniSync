@@ -13,5 +13,9 @@ public sealed class MauiAppEnvironment : IAppEnvironment
     public bool IsNative => true;
     public bool SupportsNativePlayback => true;
 
+    // Resolved once at startup from the device idiom (matches VlcPlayerPage's TV check). Drives the shared
+    // Blazor UI's TV shell. Phones/tablets report a non-TV idiom, so they keep the normal chrome.
+    public bool IsTv { get; } = DeviceInfo.Current.Idiom == DeviceIdiom.TV;
+
     public MauiAppEnvironment(string apiBaseUrl) => ApiBaseUrl = apiBaseUrl;
 }

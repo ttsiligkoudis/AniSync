@@ -23,6 +23,12 @@
 // ring + lift you can read from across the room). Back is left to the
 // platform — Android maps the remote's Back button to history navigation in
 // the TWA / WebView, and the app's own Escape handlers already close overlays.
+//
+// Activation: auto-enables when detectTv() passes (UA / capability heuristic),
+// and ALSO exposes window.anisyncTv.enable() so the native MAUI head can force
+// it on when DeviceIdiom == TV (IAppEnvironment.IsTv) — that way the C# TV
+// shell and this JS focus layer are guaranteed to agree on a real TV even if
+// the heuristic would have missed it. enable() is idempotent.
 (function () {
     'use strict';
 
@@ -52,9 +58,6 @@
         } catch (_) { /* no matchMedia — assume not a TV */ }
         return false;
     }
-
-    if (!detectTv()) return;
-    document.documentElement.classList.add('tv-mode');
 
     // --- Focusable discovery ----------------------------------------------
     var FOCUSABLE = [
@@ -153,7 +156,7 @@
         Left: 'left', Right: 'right', Up: 'up', Down: 'down'
     };
 
-    document.addEventListener('keydown', function (e) {
+    function onKeydown(e) {
         if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
         var ae = document.activeElement;
         var dir = DIRS[e.key];
@@ -193,13 +196,30 @@
                 ae.click();
             }
         }
-    });
+    }
 
     // --- Initial focus -----------------------------------------------------
     function autoFocus() {
         if (document.activeElement && document.activeElement !== document.body) return;
         focusEl(document.querySelector('[autofocus]') || firstFocusable());
     }
-    if (document.readyState !== 'loading') autoFocus();
-    else document.addEventListener('DOMContentLoaded', autoFocus);
+
+    // --- Enable (idempotent) ----------------------------------------------
+    var _enabled = false;
+    function enable() {
+        if (_enabled) return;
+        _enabled = true;
+        try { localStorage.setItem('anisync-tv', '1'); } catch (_) { /* storage blocked */ }
+        document.documentElement.classList.add('tv-mode');
+        document.addEventListener('keydown', onKeydown);
+        if (document.readyState !== 'loading') autoFocus();
+        else document.addEventListener('DOMContentLoaded', autoFocus);
+    }
+
+    // The native head can force this on (DeviceIdiom == TV) so the C# shell and
+    // the JS focus layer never disagree; autoFocus is re-exposed so the shell can
+    // re-land focus after a SPA navigation re-renders the page.
+    window.anisyncTv = { enable: enable, autoFocus: autoFocus };
+
+    if (detectTv()) enable();
 })();

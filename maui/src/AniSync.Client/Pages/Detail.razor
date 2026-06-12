@@ -4,6 +4,7 @@
 @inject AppState State
 @inject IJSRuntime JS
 @inject IPrerenderSession Prerender
+@inject IAppEnvironment Env
 
 @* Anime/title detail — port of Views/Meta/Detail.cshtml (anime path). Hero
    (backdrop + poster + score + title + info + airing status + user-state pill +
@@ -163,7 +164,8 @@ else
                 @if (_showWatchCta)
                 {
                     <div class="anime-detail-watch-next-wrap">
-                        <a class="anime-detail-watch-next" href="@_watchCtaHref" aria-label="@_watchCtaLabel">
+                        @* On TV this is the primary action — autofocus it so the remote lands on Play. *@
+                        <a class="anime-detail-watch-next" href="@_watchCtaHref" aria-label="@_watchCtaLabel" autofocus="@(Env.IsTv ? "autofocus" : null)">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
                                 <polygon points="6 4 20 12 6 20 6 4"></polygon>
                             </svg>
@@ -172,7 +174,7 @@ else
                     </div>
                 }
 
-                @if (a.Genres is { Count: > 0 })
+                @if (!Env.IsTv && a.Genres is { Count: > 0 })
                 {
                     <ul class="anime-detail-link-list anime-detail-genre-list">
                         @foreach (var g in a.Genres.Take(8))
@@ -181,7 +183,7 @@ else
                         }
                     </ul>
                 }
-                @if (_sourceChips.Count > 0)
+                @if (!Env.IsTv && _sourceChips.Count > 0)
                 {
                     <div class="anime-detail-sources" aria-label="Open on external sites">
                         @foreach (var c in _sourceChips)
@@ -237,7 +239,7 @@ else
         </section>
     }
 
-    @if (!string.IsNullOrEmpty(_trailerId))
+    @if (!Env.IsTv && !string.IsNullOrEmpty(_trailerId))
     {
         <section class="anime-detail-section">
             <h2 class="anime-detail-section-title">Trailer</h2>
@@ -393,7 +395,7 @@ else
        names come from Trakt (no headshots in its API → the initial shows through);
        clicking an actor opens their filmography. Mirrors Detail.cshtml's
        video-cast-scroll / video-cast-card. Anime uses its own (deferred) path. *@
-    @if (IsVideo && _videoCast.Count > 0)
+    @if (!Env.IsTv && IsVideo && _videoCast.Count > 0)
     {
         <section class="anime-detail-section">
             <h2 class="anime-detail-section-title">Cast</h2>
@@ -419,7 +421,7 @@ else
         </section>
     }
 
-    @if (_related.Count > 0)
+    @if (!Env.IsTv && _related.Count > 0)
     {
         <section class="anime-detail-section">
             <h2 class="anime-detail-section-title">Related</h2>
@@ -427,7 +429,7 @@ else
         </section>
     }
 
-    @if (_recommendations.Count > 0)
+    @if (!Env.IsTv && _recommendations.Count > 0)
     {
         <section class="anime-detail-section">
             <h2 class="anime-detail-section-title">Recommended</h2>
@@ -437,7 +439,7 @@ else
         </section>
     }
 
-    @if (_supplementary.Count > 0)
+    @if (!Env.IsTv && _supplementary.Count > 0)
     {
         @foreach (var group in _supplementary.GroupBy(l => string.IsNullOrEmpty(l.Category) ? "Links" : l.Category!))
         {
@@ -462,7 +464,7 @@ else
         }
     }
 
-    @if (_streams.Count > 0)
+    @if (!Env.IsTv && _streams.Count > 0)
     {
         <section class="anime-detail-section">
             <h2 class="anime-detail-section-title">Watch on</h2>

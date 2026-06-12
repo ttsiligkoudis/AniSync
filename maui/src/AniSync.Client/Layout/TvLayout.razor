@@ -1,0 +1,30 @@
+@inject IJSRuntime JS
+
+@* TV (10-foot) shell — rendered by MainLayout only when IAppEnvironment.IsTv (native, DeviceIdiom==TV).
+   A collapsible left rail + a full-width content region. The dashboard media-type filter row
+   (MediaTypeSwitch, reused) sits at the top of the content on the browse surfaces; the mode chooser
+   (MediaTypeModal, reused) is hosted here so the rail's mode button can open it. Phones/web never
+   render this — MainLayout takes the existing chrome branch — so this is purely additive. *@
+<div class="tv-shell">
+    <TvSidebar />
+    <div class="tv-content">
+        <MediaTypeSwitch />
+        @ChildContent
+    </div>
+</div>
+
+<MediaTypeModal />
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        // The C# shell was chosen from DeviceIdiom==TV; force the JS focus layer on so spatial D-pad
+        // navigation + the .tv-mode focus ring are active even if tv-navigation.js's UA/capability
+        // heuristic would have missed this set. Idempotent on the JS side.
+        try { await JS.InvokeVoidAsync("anisyncTv.enable"); }
+        catch { /* tv-navigation.js not loaded (shouldn't happen on the native host) */ }
+    }
+}

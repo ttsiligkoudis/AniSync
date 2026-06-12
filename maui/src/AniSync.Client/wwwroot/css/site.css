@@ -9786,3 +9786,89 @@ body.dash-page main {
 }
 
 .notif-page-delete:hover { background: rgba(255, 255, 255, 0.08); color: #fca5a5; }
+
+/* ============================================================================
+   TV shell (10-foot UI). The collapsible left rail + full-width content region
+   that TvLayout / TvSidebar render only when IAppEnvironment.IsTv (Android TV /
+   Google TV). Everything is scoped under .tv-shell / .tv-rail / .tv-content
+   (markup that exists only on the TV branch), so phone / desktop / web are
+   untouched. Pairs with the .tv-mode focus-ring styling above.
+   ========================================================================== */
+.tv-shell {
+    display: flex;
+    min-height: 100vh;
+    background: var(--bg);
+}
+
+/* Narrow icon rail, fixed to the left edge; expands to reveal labels when the
+   remote enters it (:focus-within) — overlaying the content rather than pushing
+   it, so the page doesn't reflow as you move in and out of the rail. */
+.tv-rail {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 88px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 1.25rem 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    z-index: 60;
+    overflow: hidden;
+    transition: width 160ms ease-out;
+}
+.tv-rail:hover,
+.tv-rail:focus-within {
+    width: 248px;
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.5);
+}
+
+.tv-rail-logo {
+    display: flex;
+    align-items: center;
+    padding: 0 22px;
+    margin-bottom: 1rem;
+    flex: 0 0 auto;
+}
+.tv-rail-logo img { width: 44px; height: 44px; flex: 0 0 auto; }
+
+.tv-rail-items { display: flex; flex-direction: column; gap: 0.25rem; flex: 1 1 auto; }
+.tv-rail-footer { display: flex; flex-direction: column; gap: 0.25rem; flex: 0 0 auto; }
+
+.tv-rail-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.85rem 26px;
+    color: var(--text-2);
+    text-decoration: none;
+    background: none;
+    border: 0;
+    font: inherit;
+    font-size: 1.05rem;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.tv-rail-icon { width: 30px; height: 30px; flex: 0 0 auto; }
+/* Labels are revealed only when the rail is expanded. */
+.tv-rail-label { opacity: 0; transition: opacity 120ms ease-out; }
+.tv-rail:hover .tv-rail-label,
+.tv-rail:focus-within .tv-rail-label { opacity: 1; }
+.tv-rail-item.active { color: var(--text-strong); }
+.tv-rail-item.active .tv-rail-icon { color: var(--accent); }
+
+/* Content region — offset by the COLLAPSED rail width (the rail overlays when it
+   expands, so content never reflows). Full-bleed with generous 10-foot padding. */
+.tv-content {
+    margin-left: 88px;
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 2rem 3vw 4rem;
+}
+
+/* The reused media-type switch flows inline at the top of the TV content (its
+   default position:sticky;top:0 is fine inside the scrolling content; re-enable
+   pointer events that the phone bar drops). */
+.tv-mode .tv-content .mt-switch-bar { pointer-events: auto; }
