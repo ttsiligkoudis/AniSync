@@ -153,8 +153,15 @@
             return;
         }
         _busy = true; _error = null;
-        var config = await Native.LoginKitsuAsync(_username.Trim(), _password);
-        await FinishNativeAsync(config);
+        var result = await Native.LoginKitsuAsync(_username.Trim(), _password);
+        if (!result.Ok)
+        {
+            _busy = false;
+            // result.Error is null only when the user cancelled; otherwise it's Kitsu's real reason.
+            _error = result.Error ?? "Sign-in failed or was cancelled.";
+            return;
+        }
+        await FinishNativeAsync(result.Config);
     }
 
     private async Task FinishNativeAsync(string? config)

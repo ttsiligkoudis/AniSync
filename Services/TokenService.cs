@@ -485,6 +485,30 @@ namespace AnimeList.Services
         #endregion Anilist
 
         #region Kitsu
+        private const string KitsuTokenUrl = "https://kitsu.io/api/oauth/token";
+
+        /// <summary>
+        /// Builds a Kitsu OAuth token request. Kitsu's docs require the body to be
+        /// <b>RFC3986</b>-percent-encoded — NOT the legacy <c>application/x-www-form-urlencoded</c>
+        /// serialization <c>FormUrlEncodedContent</c> emits ('+' for spaces, under-escaping) —
+        /// or a correct password with a space/'+'/'&amp;'/'%' is mangled and Kitsu answers
+        /// <c>invalid_grant</c>. <c>Uri.EscapeDataString</c> implements RFC3986. A User-Agent is
+        /// also set because Kitsu's Cloudflare front 403s requests without one.
+        /// </summary>
+        private static HttpRequestMessage BuildKitsuTokenRequest(IEnumerable<KeyValuePair<string, string>> fields)
+        {
+            var body = string.Join("&", fields.Select(kv =>
+                $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
+
+            var request = new HttpRequestMessage(HttpMethod.Post, KitsuTokenUrl)
+            {
+                Content = new StringContent(body, System.Text.Encoding.UTF8, "application/x-www-form-urlencoded")
+            };
+            request.Headers.UserAgent.ParseAdd("AniSync/1.0 (+https://github.com/ttsiligkoudis/AniSync)");
+            request.Headers.Accept.ParseAdd("application/json");
+            return request;
+        }
+
         public async Task<TokenData> GetAccessTokenByCredsAsync(string username, string password, bool setContext = false, string userId = null)
         {
             var context = _httpContextAccessor.HttpContext;
@@ -492,17 +516,12 @@ namespace AnimeList.Services
             if (string.IsNullOrEmpty(username))
                 return null;
 
-            var requestBody = new Dictionary<string, string>
+            var request = BuildKitsuTokenRequest(new[]
             {
-                { "grant_type", "password" },
-                { "username", username },
-                { "password", password }
-            };
-
-            var request = new HttpRequestMessage(HttpMethod.Post, "https://kitsu.io/api/oauth/token")
-            {
-                Content = new FormUrlEncodedContent(requestBody)
-            };
+                new KeyValuePair<string, string>("grant_type", "password"),
+                new KeyValuePair<string, string>("username", username),
+                new KeyValuePair<string, string>("password", password),
+            });
 
             var response = await _clientFactory.CreateClient().SendAsync(request);
             // The password is intentionally never written into TokenData. Refreshes are
@@ -522,16 +541,11 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(refreshToken)) return null;
 
-            var requestBody = new Dictionary<string, string>
+            var request = BuildKitsuTokenRequest(new[]
             {
-                { "grant_type", "refresh_token" },
-                { "refresh_token", refreshToken }
-            };
-
-            var request = new HttpRequestMessage(HttpMethod.Post, "https://kitsu.io/api/oauth/token")
-            {
-                Content = new FormUrlEncodedContent(requestBody)
-            };
+                new KeyValuePair<string, string>("grant_type", "refresh_token"),
+                new KeyValuePair<string, string>("refresh_token", refreshToken),
+            });
 
             var response = await _clientFactory.CreateClient().SendAsync(request);
             // Refresh path: never touches the session — that's reserved for the initial

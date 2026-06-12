@@ -57,24 +57,35 @@ public sealed class MauiNativeAuth : INativeAuth
         return null;
     }
 
-    public async Task<string?> LoginKitsuAsync(string username, string password)
-        => await PostForConfigAsync("/api/v1/auth/native/kitsu", new { username, password });
+    public Task<NativeAuthResult> LoginKitsuAsync(string username, string password)
+        => PostForConfigAsync("/api/v1/auth/native/kitsu", new { username, password });
 
-    private Task<string?> ExchangeAsync(string code)
-        => PostForConfigAsync("/api/v1/auth/native/exchange", new { code });
+    private async Task<string?> ExchangeAsync(string code)
+        => (await PostForConfigAsync("/api/v1/auth/native/exchange", new { code })).Config;
 
-    private async Task<string?> PostForConfigAsync(string path, object body)
+    private async Task<NativeAuthResult> PostForConfigAsync(string path, object body)
     {
         var baseUrl = _env.ApiBaseUrl.TrimEnd('/');
         try
         {
             using var resp = await _http.PostAsJsonAsync($"{baseUrl}{path}", body);
-            if (!resp.IsSuccessStatusCode) return null;
-            var dto = await resp.Content.ReadFromJsonAsync<ConfigResult>();
-            return dto?.config;
+            if (resp.IsSuccessStatusCode)
+            {
+                var dto = await resp.Content.ReadFromJsonAsync<ConfigResult>();
+                return new NativeAuthResult(dto?.config,
+                    string.IsNullOrEmpty(dto?.config) ? "The server returned an empty configuration." : null);
+            }
+            // Non-2xx: pull the server's { error } message so the user sees the real reason.
+            string? error = null;
+            try { error = (await resp.Content.ReadFromJsonAsync<ErrorResult>())?.error; } catch { /* not JSON */ }
+            return new NativeAuthResult(null, error ?? $"Sign-in failed (HTTP {(int)resp.StatusCode}).");
         }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            return new NativeAuthResult(null, $"Couldn't reach the sign-in service ({ex.GetType().Name}). Check your connection.");
+        }
     }
 
     private sealed class ConfigResult { public string? config { get; set; } }
+    private sealed class ErrorResult { public string? error { get; set; } }
 }

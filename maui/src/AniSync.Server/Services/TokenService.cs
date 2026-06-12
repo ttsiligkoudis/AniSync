@@ -485,31 +485,112 @@ namespace AnimeList.Services
         #endregion Anilist
 
         #region Kitsu
+        private const string KitsuTokenUrl = "https://kitsu.io/api/oauth/token";
+
         public async Task<TokenData> GetAccessTokenByCredsAsync(string username, string password, bool setContext = false, string userId = null)
+            => (await GetAccessTokenByCredsDetailedAsync(username, password, setContext, userId)).Token;
+
+        public async Task<KitsuLoginResult> GetAccessTokenByCredsDetailedAsync(string username, string password, bool setContext = false, string userId = null)
         {
-            var context = _httpContextAccessor.HttpContext;
+            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
+                return new KitsuLoginResult(null, 0, "Enter your Kitsu username and password.");
 
-            if (string.IsNullOrEmpty(username))
-                return null;
-
-            var requestBody = new Dictionary<string, string>
+            var request = BuildKitsuTokenRequest(new[]
             {
-                { "grant_type", "password" },
-                { "username", username },
-                { "password", password }
-            };
+                new KeyValuePair<string, string>("grant_type", "password"),
+                new KeyValuePair<string, string>("username", username),
+                new KeyValuePair<string, string>("password", password),
+            });
 
-            var request = new HttpRequestMessage(HttpMethod.Post, "https://kitsu.io/api/oauth/token")
+            HttpResponseMessage response;
+            try
             {
-                Content = new FormUrlEncodedContent(requestBody)
-            };
+                response = await _clientFactory.CreateClient().SendAsync(request);
+            }
+            catch (Exception ex)
+            {
+                // Network/TLS failure — the request never reached Kitsu. Surface it so the
+                // user can tell a connectivity problem apart from rejected credentials
+                // (the old path collapsed every cause into one opaque "failed" message).
+                return new KitsuLoginResult(null, 0,
+                    $"Couldn't reach Kitsu ({ex.GetType().Name}). Check the device's internet connection and try again.");
+            }
 
-            var response = await _clientFactory.CreateClient().SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                string body = null;
+                try { body = await response.Content.ReadAsStringAsync(); } catch { /* best effort */ }
+                return new KitsuLoginResult(null, (int)response.StatusCode, DescribeKitsuError((int)response.StatusCode, body));
+            }
+
             // The password is intentionally never written into TokenData. Refreshes are
             // driven by the refresh_token Kitsu hands back here (RefreshKitsuAccessToken
             // below); the password we just used for the password grant is dropped from
             // memory as soon as this method returns.
-            return await ParseKitsuTokenResponseAsync(response, username, userId, setContext);
+            var token = await ParseKitsuTokenResponseAsync(response, username, userId, setContext);
+            return token is null
+                ? new KitsuLoginResult(null, (int)response.StatusCode, "Kitsu accepted the request but returned no access token.")
+                : new KitsuLoginResult(token, (int)response.StatusCode, null);
+        }
+
+        /// <summary>
+        /// Builds a Kitsu OAuth token request. Two non-obvious requirements are handled here:
+        /// (1) Kitsu's docs require the body to be <b>RFC3986</b>-percent-encoded — NOT the
+        /// legacy <c>application/x-www-form-urlencoded</c> serialization <c>FormUrlEncodedContent</c>
+        /// emits (which writes '+' for spaces and under-escapes some characters). A perfectly
+        /// correct password containing a space, '+', '&amp;' or '%' would otherwise be mangled and
+        /// Kitsu answers <c>invalid_grant</c> even though the credentials are right.
+        /// <c>Uri.EscapeDataString</c> implements RFC3986, so we build the body by hand.
+        /// (2) Kitsu sits behind Cloudflare, which 403s requests with no User-Agent, so we set one.
+        /// </summary>
+        private static HttpRequestMessage BuildKitsuTokenRequest(IEnumerable<KeyValuePair<string, string>> fields)
+        {
+            var body = string.Join("&", fields.Select(kv =>
+                $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
+
+            var request = new HttpRequestMessage(HttpMethod.Post, KitsuTokenUrl)
+            {
+                Content = new StringContent(body, System.Text.Encoding.UTF8, "application/x-www-form-urlencoded")
+            };
+            request.Headers.UserAgent.ParseAdd("AniSync/1.0 (+https://github.com/ttsiligkoudis/AniSync)");
+            request.Headers.Accept.ParseAdd("application/json");
+            return request;
+        }
+
+        /// <summary>
+        /// Turns a non-2xx Kitsu token response into a human-readable, actionable message.
+        /// Kitsu/Doorkeeper returns <c>{ "error": "...", "error_description": "..." }</c>; we
+        /// prefer that text and fall back to status-specific guidance.
+        /// </summary>
+        private static string DescribeKitsuError(int status, string body)
+        {
+            var detail = ExtractKitsuErrorDescription(body);
+            return status switch
+            {
+                400 or 401 => detail is null
+                    ? "Kitsu rejected those credentials. Double-check your password, and note Kitsu may expect your account email address in the username field."
+                    : $"Kitsu rejected the sign-in: {detail}",
+                403 => "Kitsu blocked the request (403) — usually a temporary Cloudflare block. Wait a moment and try again.",
+                429 => "Too many sign-in attempts. Kitsu is rate-limiting — wait a minute and try again.",
+                >= 500 => $"Kitsu is having server problems (HTTP {status}). Try again later.",
+                _ => detail ?? $"Kitsu sign-in failed (HTTP {status}).",
+            };
+        }
+
+        private static string ExtractKitsuErrorDescription(string body)
+        {
+            if (string.IsNullOrWhiteSpace(body)) return null;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(body);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("error_description", out var desc) && desc.ValueKind == System.Text.Json.JsonValueKind.String)
+                    return desc.GetString();
+                if (root.TryGetProperty("error", out var err) && err.ValueKind == System.Text.Json.JsonValueKind.String)
+                    return err.GetString();
+            }
+            catch { /* response body wasn't JSON — fall back to status-based text */ }
+            return null;
         }
 
         /// <summary>
@@ -522,16 +603,11 @@ namespace AnimeList.Services
         {
             if (string.IsNullOrEmpty(refreshToken)) return null;
 
-            var requestBody = new Dictionary<string, string>
+            var request = BuildKitsuTokenRequest(new[]
             {
-                { "grant_type", "refresh_token" },
-                { "refresh_token", refreshToken }
-            };
-
-            var request = new HttpRequestMessage(HttpMethod.Post, "https://kitsu.io/api/oauth/token")
-            {
-                Content = new FormUrlEncodedContent(requestBody)
-            };
+                new KeyValuePair<string, string>("grant_type", "refresh_token"),
+                new KeyValuePair<string, string>("refresh_token", refreshToken),
+            });
 
             var response = await _clientFactory.CreateClient().SendAsync(request);
             // Refresh path: never touches the session — that's reserved for the initial
