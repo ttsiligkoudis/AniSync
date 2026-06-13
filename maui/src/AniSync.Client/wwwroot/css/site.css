@@ -8453,8 +8453,7 @@ ol.anime-detail-episodes-busy {
    element). box-shadow tracks each element's border-radius automatically. */
 .tv-mode a:focus,
 .tv-mode button:focus,
-.tv-mode [role="button"]:focus,
-.tv-mode .library-card:focus {
+.tv-mode [role="button"]:focus {
     outline: none;
     box-shadow:
         0 0 0 3px var(--accent),
@@ -8462,6 +8461,27 @@ ol.anime-detail-episodes-busy {
         0 10px 26px rgba(0, 0, 0, 0.55);
     transform: scale(1.06);
     transition: transform 120ms ease-out, box-shadow 120ms ease-out;
+    will-change: transform;
+    position: relative;
+    z-index: 5;
+}
+
+/* Dedicated /search page — give the reused header typeahead room to breathe. */
+.search-page {
+    max-width: 640px;
+    margin: 0.5rem auto 2rem;
+}
+.search-page .site-search { width: 100%; }
+.tv-mode .search-page { max-width: 56rem; }
+.tv-mode .search-page .site-search-input { font-size: 1.3rem; padding: 0.9rem 1.1rem; }
+
+/* Poster cards (shelves + catalogues) read as artwork — selecting one just zooms it in,
+   no accent ring. A soft drop shadow lifts it off its neighbours. */
+.tv-mode .library-card:focus {
+    outline: none;
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.65);
+    transform: scale(1.12);
+    transition: transform 120ms ease-out;
     will-change: transform;
     position: relative;
     z-index: 5;

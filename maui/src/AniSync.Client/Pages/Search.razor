@@ -1,0 +1,16 @@
+@page "/search"
+
+@* Dedicated search page — a focusable search surface for the TV rail's Search link (the D-pad
+   can't reach the header typeahead). Reuses the global SearchBox; its results link straight to
+   detail pages. Works on any head, but the rail only links here on TV. *@
+
+<PageTitle>Search · AniSync</PageTitle>
+
+<header class="page-header">
+    <h1 class="page-title">Search</h1>
+    <p class="page-subtitle">Find anime, movies &amp; series</p>
+</header>
+
+<div class="search-page">
+    <SearchBox />
+</div>
