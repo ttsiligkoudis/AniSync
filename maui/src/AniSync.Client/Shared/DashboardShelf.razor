@@ -1,11 +1,17 @@
-@implements IDisposable
+@implements IAsyncDisposable
 @inject AppState State
+@inject IJSRuntime JS
 
 @* One dashboard shelf — port of the .dashboard-section [data-shelf] blocks in
-   Index.cshtml. Async-loads its items via Fetch, shows 6 skeleton cards while
-   loading, renders the scroll-row PosterGrid when they arrive, and hides itself
-   entirely when empty (matching the web's "empty body → hide shelf" loader). A
-   shelf is also hidden when the dashboard media-type filter excludes it. *@
+   Index.cshtml. Async-loads its first page via Fetch(null), shows skeleton cards
+   while loading, renders the scroll-row PosterGrid when they arrive, and hides
+   itself entirely when empty. A shelf is also hidden when the dashboard media-type
+   filter excludes it.
+
+   When Paginated, scrolling to the end of the row pulls the next page (Fetch(skip))
+   and appends it — the same IntersectionObserver bridge the Discover grid uses, just
+   sitting at the horizontal end of the shelf. Only the first page is ever cached
+   server-side (Fetch(null)); later pages carry a skip offset and aren't cached. *@
 
 @if (_visible)
 {
@@ -45,7 +51,18 @@
             }
             else
             {
-                <PosterGrid Items="_items" Variant="scroll" VideoLinks="VideoLinks" />
+                <PosterGrid Items="_items" Variant="scroll" VideoLinks="VideoLinks">
+                    @if (Paginated && !_done)
+                    {
+                        <Trailing>
+                            @if (_loadingMore)
+                            {
+                                <div class="shelf-loader" aria-hidden="true"><div class="paginator-loader-spinner"></div></div>
+                            }
+                            <div class="shelf-sentinel" @ref="_sentinel" aria-hidden="true"></div>
+                        </Trailing>
+                    }
+                </PosterGrid>
             }
         </div>
     </section>
@@ -55,16 +72,20 @@
     [Parameter, EditorRequired] public string Title { get; set; } = "";
     [Parameter, EditorRequired] public string MediaType { get; set; } = "anime";
     [Parameter, EditorRequired] public string DashSection { get; set; } = "";
-    [Parameter, EditorRequired] public Func<Task<IReadOnlyList<MetaDto>>> Fetch { get; set; } = default!;
+    // Fetch a page: the argument is the skip offset (null = first page). Non-paginated
+    // shelves can ignore it — set Paginated=false so a second page is never requested.
+    [Parameter, EditorRequired] public Func<string?, Task<IReadOnlyList<MetaDto>>> Fetch { get; set; } = default!;
     [Parameter] public string? ViewAllHref { get; set; }
     [Parameter] public string? MutedNote { get; set; }
     [Parameter] public bool VideoLinks { get; set; }
-    // Skeleton placeholder count: discovery shelves fill the full scroll row
-    // (12, matching _PosterScrollSkeleton); Continue watching uses 6 (matching
-    // the inline skeletons in Index.cshtml).
+    // True for the discover-backed shelves (trending/popular/anticipated) whose endpoints
+    // take a skip offset. Continue-watching / airing-today / video-list are single-shot.
+    [Parameter] public bool Paginated { get; set; }
+    // Skeleton placeholder count: discovery shelves fill the full scroll row (12);
+    // Continue watching uses 6.
     [Parameter] public int SkeletonCount { get; set; } = 12;
-    // CSS flex `order` + hidden state read from the saved layout (AppState.DashLayout), applied
-    // via style/visibility rather than DOM-moving JS so it doesn't fight Blazor's renderer.
+
+    // CSS flex `order` + hidden state read from the saved layout (AppState.DashLayout).
     private int Order
     {
         get { var l = State.DashLayout; for (var i = 0; i < l.Count; i++) if (l[i].Key == DashSection) return i; return 999; }
@@ -72,10 +93,17 @@
     private bool LayoutHidden => State.DashLayout.FirstOrDefault(e => e.Key == DashSection) is { Visible: false };
 
     private bool _loading = true;
-    private IReadOnlyList<MetaDto> _items = Array.Empty<MetaDto>();
+    private bool _loadingMore;
+    private bool _done;
+    private readonly List<MetaDto> _items = new();
+    private readonly HashSet<string> _seenIds = new(StringComparer.Ordinal);
 
-    // Shown while loading (skeletons) and after load only if it returned items.
-    // Always hidden when the dashboard filter excludes this shelf's media type.
+    // Infinite-scroll interop (only wired when Paginated) — mirrors the Discover page.
+    private ElementReference _sentinel;
+    private IJSObjectReference? _scroll;
+    private DotNetObjectReference<DashboardShelf>? _selfRef;
+    private int _observerId;
+
     private bool _visible => PassesFilter && !LayoutHidden && (_loading || _items.Count > 0);
 
     private bool PassesFilter
@@ -86,11 +114,85 @@
 
     protected override async Task OnInitializedAsync()
     {
-        try { _items = await Fetch(); }
+        try
+        {
+            var first = await Fetch(null);
+            Append(first);
+            // Non-paginated shelves (and an empty first page) have nothing more to pull.
+            if (!Paginated || first.Count == 0) _done = true;
+        }
         finally { _loading = false; }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!Paginated) return;
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            try { _scroll = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/discover-scroll.js"); }
+            catch { return; }
+        }
+        if (_scroll is null) return;
+
+        // The sentinel only exists while the row is rendered with more pages to come.
+        var sentinelRendered = !_loading && !_done && _items.Count > 0;
+        if (sentinelRendered && _observerId == 0)
+        {
+            try { _observerId = await _scroll.InvokeAsync<int>("observe", _sentinel, _selfRef); } catch { }
+        }
+        else if (!sentinelRendered && _observerId != 0)
+        {
+            try { await _scroll.InvokeVoidAsync("disconnect", _observerId); } catch { }
+            _observerId = 0;
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnSentinelVisibleAsync()
+    {
+        if (!Paginated || _done || _loadingMore) return;
+        _loadingMore = true;
+        StateHasChanged();
+
+        IReadOnlyList<MetaDto> page;
+        try { page = await Fetch(_items.Count.ToString()); }
+        catch { page = Array.Empty<MetaDto>(); }
+
+        // Dedupe by id — a provider that ignores skip would otherwise repeat a page.
+        var added = Append(page);
+        if (added == 0) _done = true;
+
+        _loadingMore = false;
+        StateHasChanged();
+
+        // Re-arm so a short page that left the sentinel in view keeps pulling.
+        if (_observerId != 0 && !_done && _scroll is not null)
+        {
+            try { await _scroll.InvokeVoidAsync("reobserve", _observerId); } catch { }
+        }
+    }
+
+    private int Append(IReadOnlyList<MetaDto> page)
+    {
+        var added = 0;
+        foreach (var m in page)
+        {
+            if (string.IsNullOrEmpty(m.Id) || _seenIds.Add(m.Id)) { _items.Add(m); added++; }
+        }
+        return added;
     }
 
     private void OnFilterChanged() => StateHasChanged();
 
-    public void Dispose() => State.Changed -= OnFilterChanged;
+    public async ValueTask DisposeAsync()
+    {
+        State.Changed -= OnFilterChanged;
+        if (_scroll is not null)
+        {
+            if (_observerId != 0) { try { await _scroll.InvokeVoidAsync("disconnect", _observerId); } catch { } }
+            try { await _scroll.DisposeAsync(); } catch { }
+        }
+        _selfRef?.Dispose();
+    }
 }
