@@ -10078,6 +10078,10 @@ body.dash-page main {
    (Discover + the rail cover it) and just one more thing to D-pad past. Hide it. */
 .tv-mode [data-dash-section="browse"] { display: none !important; }
 
+/* "Your stats" strip is a dense, glanceable panel that doesn't earn its space on a
+   lean-back TV dashboard — hide it (like Browse By). */
+.tv-mode [data-dash-section="stats"] { display: none !important; }
+
 /* Belt-and-braces: drop the episodes Collapse/Expand toggle on TV (asked hidden). */
 .tv-mode .anime-detail-episodes-toggle { display: none !important; }
 
