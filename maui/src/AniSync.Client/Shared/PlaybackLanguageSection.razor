@@ -3,7 +3,8 @@
 @* Default playback languages (per-account, synced). Subtitle applies to both heads; audio is the
    native player only (the browser can't switch audio tracks). This is a controlled component — the
    Account page owns the values and persists them on the shared "Save changes" bar, so changing a
-   dropdown just marks the form dirty (it doesn't save on its own). *@
+   dropdown just marks the form dirty (it doesn't save on its own). @bind:get/@bind:set keeps each
+   <select> in sync with the parent value (incl. the value loaded from the DB on open). *@
 <section class="section-card">
     <span class="section-title">Playback languages</span>
     <p class="section-description">
@@ -13,10 +14,10 @@
     <div class="streams-grid">
         <div class="stream-option">
             <span class="option-name">Default subtitle language</span>
-            <select class="lang-select" @onchange="OnSubtitleChanged">
+            <select class="lang-select" @bind:get="Subtitle" @bind:set="OnSubtitleSet">
                 @foreach (var (langCode, name) in PlaybackLanguages.Options)
                 {
-                    <option value="@langCode" selected="@(langCode == Subtitle)">@name</option>
+                    <option value="@langCode">@name</option>
                 }
             </select>
         </div>
@@ -24,10 +25,10 @@
         {
             <div class="stream-option">
                 <span class="option-name">Default audio language</span>
-                <select class="lang-select" @onchange="OnAudioChanged">
+                <select class="lang-select" @bind:get="Audio" @bind:set="OnAudioSet">
                     @foreach (var (langCode, name) in PlaybackLanguages.Options)
                     {
-                        <option value="@langCode" selected="@(langCode == Audio)">@name</option>
+                        <option value="@langCode">@name</option>
                     }
                 </select>
             </div>
@@ -41,9 +42,6 @@
     [Parameter] public EventCallback<string> AudioChanged { get; set; }
     [Parameter] public EventCallback<string> SubtitleChanged { get; set; }
 
-    private Task OnSubtitleChanged(ChangeEventArgs e)
-        => SubtitleChanged.InvokeAsync(PlaybackLanguages.Normalize(e.Value?.ToString()));
-
-    private Task OnAudioChanged(ChangeEventArgs e)
-        => AudioChanged.InvokeAsync(PlaybackLanguages.Normalize(e.Value?.ToString()));
+    private Task OnSubtitleSet(string value) => SubtitleChanged.InvokeAsync(PlaybackLanguages.Normalize(value));
+    private Task OnAudioSet(string value) => AudioChanged.InvokeAsync(PlaybackLanguages.Normalize(value));
 }
