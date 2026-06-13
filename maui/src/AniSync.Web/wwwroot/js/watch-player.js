@@ -54,12 +54,13 @@ window.anisyncWatch = (function () {
     var LANG_THREE_TO_TWO = {
         eng: 'en', jpn: 'ja', spa: 'es', fra: 'fr', fre: 'fr', deu: 'de', ger: 'de', ita: 'it',
         por: 'pt', rus: 'ru', zho: 'zh', chi: 'zh', kor: 'ko', ara: 'ar', hin: 'hi', nld: 'nl',
-        dut: 'nl', pol: 'pl', tur: 'tr', swe: 'sv', ind: 'id', tha: 'th', vie: 'vi',
+        dut: 'nl', pol: 'pl', tur: 'tr', swe: 'sv', ind: 'id', tha: 'th', vie: 'vi', ell: 'el', gre: 'el',
     };
     var LANG_WORDS = {
         en: 'english', ja: 'japanese', es: 'spanish', fr: 'french', de: 'german', it: 'italian',
         pt: 'portuguese', ru: 'russian', zh: 'chinese', ko: 'korean', ar: 'arabic', hi: 'hindi',
-        nl: 'dutch', pl: 'polish', tr: 'turkish', sv: 'swedish', id: 'indonesian', th: 'thai', vi: 'vietnamese',
+        nl: 'dutch', pl: 'polish', tr: 'turkish', sv: 'swedish', id: 'indonesian', th: 'thai',
+        vi: 'vietnamese', el: 'greek',
     };
     function langMatches(targetCode, code, name) {
         var t = (targetCode || 'en').toLowerCase();

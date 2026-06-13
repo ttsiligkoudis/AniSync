@@ -18,6 +18,7 @@ public static class PlaybackLanguages
         ("nl", "Dutch"),
         ("fr", "French"),
         ("de", "German"),
+        ("el", "Greek"),
         ("hi", "Hindi"),
         ("id", "Indonesian"),
         ("it", "Italian"),
