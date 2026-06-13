@@ -792,7 +792,6 @@ namespace AnimeList.Controllers
                 }
                 else
                 {
-                    var page = int.TryParse(skip, out var s) && limit > 0 ? (s / limit) + 1 : 1;
                     // "For You" is per-user — resolve the caller's uid from the config header;
                     // the other Trakt feeds (trending / popular / anticipated / watched) are public.
                     string uid = null;
@@ -803,8 +802,30 @@ namespace AnimeList.Controllers
                     }
                     if (_trakt.IsConfigured && !(mode == "recommended" && string.IsNullOrEmpty(uid)))
                     {
-                        var items = await _trakt.GetDiscoveryAsync(uid, type, mode, hasGenre ? genre : null, page, limit);
-                        metas = items.ToVideoMetas();
+                        // Trakt is page-based, but ExcludeAnimeAsync drops the anime-overlapping
+                        // titles from each page, so a Trakt page of `limit` comes back shorter.
+                        // The client's `skip` is a post-filter item count, so naively mapping it to
+                        // a Trakt page (skip/limit + 1) drifts: e.g. a 30-item series page returns
+                        // ~25 after exclusion, the client asks again with skip=25 → that maps back to
+                        // page 1 → the same titles → all duplicates → pagination stalls on page 1.
+                        // (Series overlaps anime far more than movies, which is why series stalled.)
+                        // Treat `skip` as a true offset into the FILTERED stream instead: assemble the
+                        // stream from Trakt page 1, exclude anime, and return the disjoint window
+                        // [offset, offset+limit). Disjoint pages mean the client's count advances by
+                        // exactly what it receives, so paging only stops at the real end of catalog.
+                        var offset = int.TryParse(skip, out var s) && s > 0 ? s : 0;
+                        var need = offset + Math.Max(1, limit);
+                        var collected = new List<Meta>();
+                        var seen = new HashSet<string>(StringComparer.Ordinal);
+                        for (var p = 1; collected.Count < need && p <= 15; p++)
+                        {
+                            var items = await _trakt.GetDiscoveryAsync(uid, type, mode, hasGenre ? genre : null, p, limit);
+                            if (items.Count == 0) break; // reached the end of Trakt's catalog
+                            var pageMetas = await items.ToVideoMetas().ExcludeAnimeAsync(_mappingService);
+                            foreach (var m in pageMetas)
+                                if (!string.IsNullOrEmpty(m.Id) && seen.Add(m.Id)) collected.Add(m);
+                        }
+                        metas = collected.Skip(offset).Take(limit).ToList();
                     }
                     else if (_trakt.IsConfigured)
                     {
@@ -819,6 +840,8 @@ namespace AnimeList.Controllers
                     }
                 }
                 // Keep anime out of the movie / series catalogs — it lives on the anime side.
+                // (The Trakt path already excluded per page above; this is idempotent and covers
+                // the search / Cinemeta-fallback paths.)
                 metas = await metas.ExcludeAnimeAsync(_mappingService);
                 if (cacheable && isFirstPage && metas is { Count: > 0 })
                     _discoverCache.Set(cacheKey, metas, _discoverTtl);
