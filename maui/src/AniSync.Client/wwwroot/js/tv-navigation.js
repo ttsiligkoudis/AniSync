@@ -205,6 +205,17 @@
             if (!start) return;
             if (!inScope) { e.preventDefault(); focusEl(start); return; }
             var next = pickInDirection(start, dir);
+
+            // Right from the left rail always leaves it (so it collapses): go to the content
+            // element to the right if there is one, otherwise just move focus into the content
+            // (or blur) — never get stuck expanded when the page has nothing to the right.
+            if (dir === 'right' && start.closest && start.closest('.tv-rail')) {
+                e.preventDefault();
+                if (next && !(next.closest && next.closest('.tv-rail'))) focusEl(next);
+                else focusContent();
+                return;
+            }
+
             if (next) {
                 e.preventDefault();
                 focusEl(next);

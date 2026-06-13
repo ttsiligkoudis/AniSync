@@ -43,10 +43,16 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             if (request.ResumeSeconds is > 0)
                 media.AddOption($":start-time={(int)request.ResumeSeconds.Value}");
 
-            // Software decoding (hardware OFF): some chipsets' HEVC/10-bit hardware decoders corrupt the
-            // picture into green/blocky artifacts. Software decode is the whole reason for LibVLC here, so
-            // prefer correctness over the small CPU cost.
-            var player = new MediaPlayer(media) { EnableHardwareDecoding = false };
+            // Decoding strategy is device-dependent:
+            //  • Phones/tablets: software decode (hardware OFF) — some mobile chipsets' HEVC/10-bit
+            //    hardware decoders corrupt the picture into green/blocky artifacts, and a phone CPU
+            //    keeps up fine.
+            //  • TV boxes: hardware decode (MediaCodec). Their CPUs are weak, so software-decoding a
+            //    high-bitrate/4K stream stalls the video while audio keeps playing ("frozen, only
+            //    sound"); their dedicated video decoders handle it effortlessly. libVLC still
+            //    software-decodes the audio codecs (AC3/EAC3/DTS/TrueHD), so that win is unaffected.
+            var isTv = DeviceInfo.Current.Idiom == DeviceIdiom.TV;
+            var player = new MediaPlayer(media) { EnableHardwareDecoding = isTv };
             _player = player;
 
             // External subtitle tracks (proxied OpenSubtitles URLs) are NOT pre-attached here: libVLC loads

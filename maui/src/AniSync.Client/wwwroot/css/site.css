@@ -9865,11 +9865,11 @@ body.dash-page main {
     top: 0;
     left: 0;
     bottom: 0;
-    width: 88px;
+    width: 60px;
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
-    padding: 1.25rem 0;
+    gap: 0.15rem;
+    padding: 0.9rem 0;
     background: var(--surface);
     border-right: 1px solid var(--border);
     z-index: 60;
@@ -9878,18 +9878,18 @@ body.dash-page main {
 }
 .tv-rail:hover,
 .tv-rail:focus-within {
-    width: 248px;
+    width: 190px;
     box-shadow: 8px 0 32px rgba(0, 0, 0, 0.5);
 }
 
 .tv-rail-logo {
     display: flex;
     align-items: center;
-    padding: 0 22px;
-    margin-bottom: 1rem;
+    padding: 0 14px;
+    margin-bottom: 0.5rem;
     flex: 0 0 auto;
 }
-.tv-rail-logo img { width: 44px; height: 44px; flex: 0 0 auto; }
+.tv-rail-logo img { width: 32px; height: 32px; flex: 0 0 auto; }
 
 .tv-rail-items { display: flex; flex-direction: column; gap: 0.25rem; flex: 1 1 auto; }
 .tv-rail-footer { display: flex; flex-direction: column; gap: 0.25rem; flex: 0 0 auto; }
@@ -9897,18 +9897,18 @@ body.dash-page main {
 .tv-rail-item {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    padding: 0.85rem 26px;
+    gap: 0.85rem;
+    padding: 0.6rem 16px;
     color: var(--text-2);
     text-decoration: none;
     background: none;
     border: 0;
     font: inherit;
-    font-size: 1.05rem;
+    font-size: 0.95rem;
     white-space: nowrap;
     cursor: pointer;
 }
-.tv-rail-icon { width: 30px; height: 30px; flex: 0 0 auto; }
+.tv-rail-icon { width: 24px; height: 24px; flex: 0 0 auto; }
 /* Labels are revealed only when the rail is expanded. */
 .tv-rail-label { opacity: 0; transition: opacity 120ms ease-out; }
 .tv-rail:hover .tv-rail-label,
@@ -9919,10 +9919,10 @@ body.dash-page main {
 /* Content region — offset by the COLLAPSED rail width (the rail overlays when it
    expands, so content never reflows). Full-bleed with generous 10-foot padding. */
 .tv-content {
-    margin-left: 88px;
+    margin-left: 60px;
     flex: 1 1 auto;
     min-width: 0;
-    padding: 2rem 3vw 4rem;
+    padding: 1.6rem 2.5vw 3rem;
 }
 
 /* The reused media-type switch flows inline at the top of the TV content (its
@@ -10087,73 +10087,39 @@ body.dash-page main {
 
 /* ==========================================================================
    TV 10-FOOT POLISH
-   A consistent, couch-legible scale for every TV-reachable surface: bigger
-   headings, cover art and controls, more generous spacing, and a few touch-only
-   bits dropped. All scoped to .tv-mode, so phone / web are byte-for-byte unchanged.
+   Gentle, couch-legible adjustments — only slightly larger than phone/web so the
+   dashboard still fits several shelves on screen (the earlier pass over-enlarged it).
+   Poster cards keep their base size. All scoped to .tv-mode, so phone/web are unchanged.
    ========================================================================== */
 
-/* Content frame — more breathing room around the 10-foot layout. */
-.tv-mode .tv-content { padding: 2.5rem 4vw 5rem; }
-
 /* Page headers (Search / Discover / Library / Account / Calendar). */
-.tv-mode .page-header { margin-bottom: 1.6rem; }
-.tv-mode .page-title { font-size: 2.4rem; line-height: 1.15; }
-.tv-mode .page-subtitle { font-size: 1.05rem; }
+.tv-mode .page-header { margin-bottom: 1.1rem; }
+.tv-mode .page-title { font-size: 1.7rem; line-height: 1.15; }
+.tv-mode .page-subtitle { font-size: 0.95rem; }
 
-/* Section + shelf headings. */
-.tv-mode .dashboard-section { margin-bottom: 2.25rem; }
-.tv-mode .dashboard-section-header { margin-bottom: 0.9rem; }
-.tv-mode .dashboard-section-title { font-size: 1.6rem; }
-.tv-mode .section-title { font-size: 1.5rem; }
-.tv-mode .section-description { font-size: 1.02rem; line-height: 1.5; }
+/* Section + shelf headings — a small bump, not a blow-up. */
+.tv-mode .dashboard-section { margin-bottom: 1.4rem; }
+.tv-mode .dashboard-section-title { font-size: 1.25rem; }
+.tv-mode .section-title { font-size: 1.2rem; }
 
-/* Cover art — bigger cards + labels so posters read across the room. */
-.tv-mode .poster-scroll-row { gap: 1.1rem; }
-.tv-mode .poster-scroll-row .library-card { flex: 0 0 190px; }
-.tv-mode .library-grid {
-    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-    gap: 1.5rem;
-}
-.tv-mode .library-card-title { font-size: 1.05rem; }
-.tv-mode .library-card-meta { font-size: 0.9rem; }
 /* A remote has no pointer — neutralise the lift-on-hover so it can't fight the focus
-   zoom (some TV WebViews synthesise :hover on the focused element). */
+   zoom (some TV WebViews synthesise :hover on the focused element). Cards keep base size. */
 .tv-mode .library-card:hover:not(:focus) { transform: none; }
 
-/* Media-type switch pills (top of Home / Discover / Library). */
-.tv-mode .mt-switch-btn { padding: 0.55rem 1.15rem; }
-.tv-mode .mt-switch-label { font-size: 1.05rem; }
+/* Tabs / media-type pills — a touch larger for legibility, not bulky. */
+.tv-mode .mt-switch-label { font-size: 0.95rem; }
+.tv-mode .library-tab { font-size: 0.95rem; padding: 0.45rem 1rem; }
 
-/* Tabs (Library status / Discover modes) — larger pills, clearer spacing. */
-.tv-mode .library-tabs { gap: 0.55rem; margin-bottom: 1.3rem; }
-.tv-mode .library-tab { font-size: 1.05rem; padding: 0.6rem 1.3rem; }
+/* Detail hero. */
+.tv-mode .anime-detail-title { font-size: 1.9rem; line-height: 1.15; }
+.tv-mode .anime-detail-section-title { font-size: 1.25rem; }
+.tv-mode .anime-detail-watch-next { font-size: 1.05rem; padding: 0.7rem 1.4rem; }
 
-/* Filter bar (genre browse + search) — kept (genre browse is useful on TV) but
-   sized up so it's legible and the controls are comfortable D-pad targets. */
-.tv-mode .filter-bar { gap: 0.7rem; margin-bottom: 1.4rem; }
-.tv-mode .filter-bar-search,
-.tv-mode .filter-bar-select,
-.tv-mode .filter-bar-submit { font-size: 1.05rem; padding: 0.65rem 1rem; }
+/* Search page — keep its enlarged input; modestly bigger result rows. */
+.tv-mode .search-page .site-search-result-poster { width: 52px; height: 78px; }
 
-/* Detail hero — a commanding title + comfortable action buttons. */
-.tv-mode .anime-detail-title { font-size: 2.6rem; line-height: 1.1; }
-.tv-mode .anime-detail-info { font-size: 1.05rem; }
-.tv-mode .anime-detail-section-title { font-size: 1.5rem; }
-.tv-mode .anime-detail-watch-next { font-size: 1.15rem; padding: 0.85rem 1.6rem; }
-.tv-mode .anime-detail-user-state { font-size: 1rem; }
-
-/* Search results — bigger rows + posters in the dedicated /search page. */
-.tv-mode .search-page .site-search-result { font-size: 1.05rem; padding: 0.7rem 0.9rem; }
-.tv-mode .search-page .site-search-result-poster { width: 60px; height: 90px; }
-
-/* Calendar — legible header, day strip + episode cards. */
-.tv-mode .cal-title { font-size: 2.2rem; }
-.tv-mode .cal-card-title { font-size: 1.02rem; }
-.tv-mode .cal-card-meta { font-size: 0.9rem; }
-.tv-mode .cal-strip-nav { padding: 0.5rem 0.75rem; }
-
-/* Account labels. */
-.tv-mode .option-name { font-size: 1.05rem; }
+/* Calendar header. */
+.tv-mode .cal-title { font-size: 1.7rem; }
 
 /* Dashboard "Customize" (drag-reorder/hide shelves) has no D-pad path — hide on TV. */
 .tv-mode .dash-customize-float { display: none !important; }
