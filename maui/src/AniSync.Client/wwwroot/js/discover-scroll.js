@@ -38,3 +38,19 @@ export function disconnect(id) {
     const o = observers.get(id);
     if (o) { o.observer.disconnect(); observers.delete(id); }
 }
+
+// How many columns the discover grid currently has, so the page can render exactly one
+// responsive row of loading skeletons (auto-fill makes the count depend on viewport width:
+// ~2 on a phone, more on a desktop). Reads the resolved grid template off the live grid.
+export function gridColumns(sentinel) {
+    try {
+        const grid = sentinel && sentinel.closest('.discover-paginator')
+            ? sentinel.closest('.discover-paginator').querySelector('.library-grid')
+            : null;
+        if (!grid) return 3;
+        const cols = getComputedStyle(grid).gridTemplateColumns
+            .split(' ').filter(function (s) { return s && s !== '0px'; }).length;
+        return Math.max(1, cols);
+    } catch (_) { return 3; }
+}
+

@@ -122,10 +122,24 @@ else
     {
         <div class="discover-paginator">
             @* Hidden can hold anime + movies/series, so tag video ids with ?type= there too. *@
-            <PosterGrid Items="_items" Variant="grid" VideoLinks="@(!IsAnime || _isHidden)" EmptyMessage="@_emptyMessage" />
-            <div class="paginator-loader" hidden="@(!(_loading && _items.Count > 0))" aria-hidden="true">
-                <div class="paginator-loader-spinner"></div>
-            </div>
+            <PosterGrid Items="_items" Variant="grid" VideoLinks="@(!IsAnime || _isHidden)" EmptyMessage="@_emptyMessage">
+                <Trailing>
+                    @* While the next page loads, fill one responsive row with shimmering skeleton
+                       cards — they're grid cells so they continue the grid and complete the row
+                       (≈2 on a phone, more on desktop). _skeletonCount is the live column count. *@
+                    @if (_loading && _items.Count > 0)
+                    {
+                        @for (var i = 0; i < _skeletonCount; i++)
+                        {
+                            <div class="library-card library-card-skeleton" aria-hidden="true">
+                                <div class="library-card-poster-wrap"><div class="library-card-poster skeleton-shimmer"></div></div>
+                                <span class="library-card-skeleton-line"></span>
+                                <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                            </div>
+                        }
+                    }
+                </Trailing>
+            </PosterGrid>
             <div class="discover-sentinel" @ref="_sentinel" aria-hidden="true"></div>
         </div>
     }
@@ -182,6 +196,9 @@ else
     private readonly HashSet<string> _seenIds = new(StringComparer.Ordinal);
     private bool _loading;
     private bool _done;
+    // Number of skeleton cards to show while paging — set to the grid's live column count so it
+    // fills one responsive row (fallback 3 until the first measure).
+    private int _skeletonCount = 3;
     private string _emptyMessage = "";
     private string _pageTitle = "Discover · AniSync";
 
@@ -308,7 +325,17 @@ else
     {
         if (!initial && (_loading || _done)) return;
         _loading = true;
-        if (!initial) StateHasChanged();   // reveal the inline loader for page 2+
+        if (!initial)
+        {
+            // Size the skeleton row to the grid's current column count so it fills exactly one
+            // responsive row (auto-fill → ~2 on a phone, more on desktop).
+            if (_scroll is not null)
+            {
+                try { _skeletonCount = Math.Clamp(await _scroll.InvokeAsync<int>("gridColumns", _sentinel), 1, 12); }
+                catch { /* keep the previous count */ }
+            }
+            StateHasChanged();   // reveal the skeleton row for page 2+
+        }
 
         var skip = _items.Count > 0 ? _items.Count.ToString() : null;
         IReadOnlyList<MetaDto> page;
