@@ -8810,9 +8810,11 @@ body.streams-modal-open .floating-save-bar { z-index: 260; }
        under the close button (which made the button hard to hit). */
     scrollbar-gutter: stable;
     /* Breathing room around the inner _StreamsSection so its content doesn't
-       hug the modal's rounded edges. Pairs with the section-card padding below
-       for a comfortable frame inside the modal. */
-    padding: 0.85rem 0.9rem 1rem;
+       hug the modal's rounded edges. Extra top padding so the first row clears the
+       close button, and a generous bottom pad so the last setting scrolls clear of
+       the fixed "Save changes" bar (which overlaps the modal's bottom edge) instead
+       of being hidden behind it. */
+    padding: 1.5rem 0.9rem calc(6rem + env(safe-area-inset-bottom, 0px));
 }
 /* Close button — its own class (not dash-modal-close) so it can stack above
    the scrolling body + its scrollbar, and an SVG glyph centres cleanly in the
