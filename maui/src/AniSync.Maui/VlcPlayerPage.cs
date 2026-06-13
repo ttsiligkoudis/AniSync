@@ -375,33 +375,55 @@ public sealed class VlcPlayerPage : ContentPage
     }
 
     // App backgrounded (Home / recents) → pause so audio doesn't keep playing behind an inactive app.
+    // Remember that WE paused it (vs. the user pausing) so resume only auto-plays what was actually playing.
+    private bool _pausedForBackground;
     private void OnWindowStopped(object? sender, EventArgs e)
     {
-        try { if (_player.IsPlaying) _player.SetPause(true); } catch { /* not ready */ }
+        try { if (_player.IsPlaying) { _player.SetPause(true); _pausedForBackground = true; } } catch { /* not ready */ }
     }
 
-    // Returning from background: the native video surface was destroyed while away, so the MediaPlayer is left
-    // bound to a dead surface — playback resumes with audio but a black frame. Re-binding the same VideoView
-    // isn't enough (its handler keeps the stale surface), so swap in a FRESH VideoView: its handler creates a
-    // new live surface and attaches the player to it, bringing the picture back. Delayed so the new surface is
-    // ready before we attach.
+    // Returning from background: Android destroyed the native video surface while away, so the MediaPlayer is
+    // bound to a dead surface — playback resumes with audio but a black frame. We swap in a FRESH VideoView so
+    // its handler builds a new live surface and attaches the player to it. Two things the old version missed,
+    // which left it black with audio-only:
+    //   1. Detach the player from the OLD view FIRST — otherwise removing it fires surfaceDestroyed, which
+    //      tears the video output back off the NEW surface we just attached (a destroy/create race).
+    //   2. Resume playback + nudge the position once the new surface is up, so libVLC actually decodes a
+    //      frame onto it (a paused player paints no video output → black).
     private void OnWindowResumed(object? sender, EventArgs e)
     {
+        SetLoading(true); // spinner instead of a black frame while the surface is rebuilt
         Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(250), () =>
         {
             try
             {
+                _videoView.MediaPlayer = null;   // detach from the dead surface BEFORE removing it
                 _root.Remove(_videoView);
+
                 var fresh = new VideoView
                 {
                     VerticalOptions = LayoutOptions.Fill,
                     HorizontalOptions = LayoutOptions.Fill,
                 };
                 _root.Children.Insert(0, fresh); // behind the controls + sheet overlay
-                fresh.MediaPlayer = _player;
+                fresh.MediaPlayer = _player;     // attaches to the new surface on surfaceCreated
                 _videoView = fresh;
             }
             catch { /* not ready */ }
+
+            // Let the new surface get created, then resume + nudge so a frame paints onto it.
+            Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(200), () =>
+            {
+                try
+                {
+                    if (_pausedForBackground) { _player.SetPause(false); _pausedForBackground = false; }
+                    var at = _player.Time;
+                    // Seek back a touch to force libVLC to flush + decode a fresh frame onto the new surface
+                    // (re-binding alone can leave the last decode buffered against the old, dead surface).
+                    if (at > 0) _player.Time = at > 1500 ? at - 1500 : 0;
+                }
+                catch { /* not ready */ }
+            });
         });
     }
 
