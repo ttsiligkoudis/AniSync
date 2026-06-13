@@ -8852,6 +8852,32 @@ body.streams-modal-open .floating-save-bar { z-index: 260; }
     box-shadow: none;
 }
 
+/* Playback-language dropdowns — polished select matching the manage-entry selects
+   (custom caret, accent focus, themed option list) instead of the bare native control. */
+.lang-select {
+    appearance: none;
+    -webkit-appearance: none;
+    min-width: 11rem;
+    max-width: 14rem;
+    padding: 0.5rem 2rem 0.5rem 0.75rem;
+    background-color: var(--overlay-07);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23999' d='M1.4 0L6 4.6 10.6 0 12 1.4l-6 6-6-6z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.7rem center;
+    border: 1px solid var(--overlay-12);
+    border-radius: 8px;
+    color: var(--text-strong);
+    font-size: 0.9rem;
+    font-family: inherit;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.15s, background-color 0.15s;
+}
+.lang-select:hover { border-color: var(--overlay-15); }
+.lang-select:focus { border-color: var(--accent); background-color: var(--overlay-10); }
+.lang-select:disabled { opacity: 0.6; cursor: default; }
+.lang-select option { background: var(--surface-raised); color: var(--text); }
+
 .dash-modal {
     position: fixed;
     top: 50%;
