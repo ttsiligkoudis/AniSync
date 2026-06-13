@@ -7,7 +7,7 @@ namespace AniSync.Maui;
 /// <summary>
 /// Native sign-in for the MAUI head. OAuth providers (AniList / MAL / Trakt) open the
 /// server flow in the system browser via <see cref="WebAuthenticator"/> against
-/// <c>/Auth/Login?...&amp;native=1</c>; on success the server redirects to the app's
+/// <c>/Auth/Login?...&amp;native=true</c>; on success the server redirects to the app's
 /// <c>anisync://auth?code=…</c> deep link, and we exchange that one-time code at
 /// <c>/api/v1/auth/native/exchange</c> for the config segment (the X-AniSync-Config
 /// credential). Kitsu uses its password grant directly via
@@ -44,7 +44,11 @@ public sealed class MauiNativeAuth : INativeAuth
     public async Task<string?> StartOAuthAsync(string service)
     {
         var baseUrl = _env.ApiBaseUrl.TrimEnd('/');
-        var authUrl = new Uri($"{baseUrl}/Auth/Login?animeService={Uri.EscapeDataString(service)}&native=1");
+        // native=true (NOT native=1) — ASP.NET Core bool model binding only accepts
+        // true/false; "1" fails to bind and silently leaves native=false, so the OAuth
+        // callback would finish in the browser (web login) instead of redirecting to the
+        // anisync:// deep link and the app would never get signed in.
+        var authUrl = new Uri($"{baseUrl}/Auth/Login?animeService={Uri.EscapeDataString(service)}&native=true");
         var callback = new Uri("anisync://auth");
         try
         {
