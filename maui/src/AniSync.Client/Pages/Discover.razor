@@ -281,6 +281,18 @@ else
         _seenIds.Clear();
         _done = false;
         _loading = true;
+        // Tear the sentinel observer down NOW rather than leaning on the intermediate skeleton
+        // render to do it. A reload recreates the sentinel element, and Blazor can batch the
+        // skeleton + grid renders into one (common when page 1 is cached/fast) — so OnAfterRender
+        // never sees the !paginatorRendered state, the disconnect branch never runs, and the
+        // observer stays bound to the now-destroyed sentinel. That's why paging died after the
+        // first mode switch. Forcing _observerId back to 0 here makes OnAfterRender re-observe the
+        // fresh sentinel every time.
+        if (_observerId != 0 && _scroll is not null)
+        {
+            try { await _scroll.InvokeVoidAsync("disconnect", _observerId); } catch { }
+            _observerId = 0;
+        }
         StateHasChanged();
         await LoadPageAsync(initial: true);
     }
