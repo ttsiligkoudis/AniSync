@@ -52,16 +52,18 @@
             else
             {
                 <PosterGrid Items="_items" Variant="scroll" VideoLinks="VideoLinks">
-                    @if (Paginated && !_done)
-                    {
-                        <Trailing>
+                    @* Trailing must be the ONLY child of PosterGrid (it has no ChildContent slot),
+                       so the condition lives INSIDE the slot rather than wrapping it. *@
+                    <Trailing>
+                        @if (Paginated && !_done)
+                        {
                             @if (_loadingMore)
                             {
                                 <div class="shelf-loader" aria-hidden="true"><div class="paginator-loader-spinner"></div></div>
                             }
                             <div class="shelf-sentinel" @ref="_sentinel" aria-hidden="true"></div>
-                        </Trailing>
-                    }
+                        }
+                    </Trailing>
                 </PosterGrid>
             }
         </div>
