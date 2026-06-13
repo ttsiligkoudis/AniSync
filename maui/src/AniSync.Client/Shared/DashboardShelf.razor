@@ -59,7 +59,16 @@
                         {
                             @if (_loadingMore)
                             {
-                                <div class="shelf-loader" aria-hidden="true"><div class="paginator-loader-spinner"></div></div>
+                                @* One shimmering skeleton card at the row's end while the next page
+                                   loads — same look as the initial-load placeholders, nicer than a
+                                   spinner. (Discover keeps its inline spinner.) *@
+                                <div class="library-card library-card-skeleton" aria-hidden="true">
+                                    <div class="library-card-poster-wrap">
+                                        <div class="library-card-poster skeleton-shimmer"></div>
+                                    </div>
+                                    <span class="library-card-skeleton-line"></span>
+                                    <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                                </div>
                             }
                             <div class="shelf-sentinel" @ref="_sentinel" aria-hidden="true"></div>
                         }
