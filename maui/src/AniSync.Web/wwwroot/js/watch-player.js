@@ -65,6 +65,7 @@ window.anisyncWatch = (function () {
 
     // ── Live ArtPlayer instance + listener state ──────────────────────────────
     let art = null;
+    let visibilityHooked = false; // one-time guard for the pause-when-hidden listener
     let dotnetRef = null; // DotNetObjectReference exposing OnProgress / OnEnded / OnStreamEvent
     let watchdog = null;
     let watchdogMs = 25000;
@@ -1026,7 +1027,15 @@ window.anisyncWatch = (function () {
         // worse than none; the user can still pick any track manually.
         var defaultSubIdx = -1;
         for (var i = 0; i < osSubtitles.length; i++) {
-            if (/^en/i.test(osSubtitles[i].lang || osSubtitles[i].language || '')) { defaultSubIdx = i; break; }
+            var s = osSubtitles[i];
+            var lang = (s.lang || s.language || '').toLowerCase();
+            var label = (s.label || '').toLowerCase();
+            // Match the language code OR an English label — some sources tag the language oddly (or not at
+            // all) while labelling the track "English N", which previously left NO default selected and so
+            // showed no subtitles at all.
+            if (/^en/.test(lang) || /\beng?\b/.test(lang) || label.indexOf('english') >= 0 || /\beng?\b/.test(label)) {
+                defaultSubIdx = i; break;
+            }
         }
         if (defaultSubIdx >= 0) {
             currentSubKind = 'vtt';
@@ -1198,6 +1207,18 @@ window.anisyncWatch = (function () {
         art.on('video:ended', function () {
             if (dotnetRef) dotnetRef.invokeMethodAsync('OnEnded').catch(function () { });
         });
+
+        // Pause when the tab/window is hidden (minimised or switched away) so playback doesn't keep
+        // running in the background — mirrors the native app pausing when backgrounded. Registered once
+        // at the document level; it reads the current `art`. Resuming is left to the user.
+        if (!visibilityHooked) {
+            visibilityHooked = true;
+            document.addEventListener('visibilitychange', function () {
+                if (document.hidden && art && !art.paused) {
+                    try { art.pause(); } catch (_) { }
+                }
+            });
+        }
 
         // Kick off embedded MKV subtitle extraction in the background. Track
         // metadata surfaces as soon as the parser hits the Tracks element; full

@@ -74,6 +74,8 @@ public sealed class VlcPlayerPage : ContentPage
     private readonly IReadOnlyList<SubtitleTrack> _externalSubs;
     private HashSet<int>? _embeddedSpuIds;   // SPU ids from the media file, captured before any slave is added
     private string? _selectedExternalUrl;    // url of the external sub the user attached (drives the check)
+    private bool _defaultSubScheduled;       // one-shot guard for the English-default pass
+    private bool _userPickedSub;             // the user chose a subtitle → don't override with the default
 
     private bool _seeking;
     private ScaleMode _scaleMode = ScaleMode.Fit;
@@ -313,7 +315,13 @@ public sealed class VlcPlayerPage : ContentPage
         _player.LengthChanged += OnLengthChanged;
         // KeepAwake: hold the screen on while playing or loading (so the phone never locks mid-movie),
         // and release it when paused / ended / closed so it can sleep normally.
-        _player.Playing += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPause; SetLoading(false); KeepAwake(true); RestartHideTimer(); if (_isTv) _playPause.Focus(); });
+        _player.Playing += (_, _) => Dispatcher.Dispatch(() =>
+        {
+            _playPause.Text = IcPause; SetLoading(false); KeepAwake(true); RestartHideTimer();
+            if (_isTv) _playPause.Focus();
+            // Default the subtitle to English (matching the web) once tracks have had a moment to parse.
+            if (!_defaultSubScheduled) { _defaultSubScheduled = true; Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(700), ApplyDefaultSubtitle); }
+        });
         _player.Paused += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPlay; StopHideTimer(); KeepAwake(false); });
         // Buffering climbs 0→100 on connect and re-fires on a re-buffer; show the spinner until it's full.
         // Buffering means we're loading toward playback, so keep the screen awake through it too.
@@ -432,6 +440,48 @@ public sealed class VlcPlayerPage : ContentPage
     private static void KeepAwake(bool on)
     {
         try { DeviceDisplay.Current.KeepScreenOn = on; } catch { /* unsupported / not ready */ }
+    }
+
+    // Default the subtitle to English, matching the web head. libVLC auto-selects the file's default SPU
+    // (which "opened on French" for the reported title); instead prefer an external OS English sub (what
+    // the web defaults to), then an embedded English track, otherwise OFF — never a surprise foreign track.
+    private void ApplyDefaultSubtitle()
+    {
+        if (_userPickedSub || _selectedExternalUrl is not null) return; // user already chose
+        try
+        {
+            var engExternal = _externalSubs.FirstOrDefault(s => IsEnglish(s.Language, s.Label));
+            if (engExternal is not null) { AttachExternalSub(engExternal.Url); return; }
+
+            foreach (var t in _player.SpuDescription)
+            {
+                if (t.Id == -1) continue;
+                if (IsEnglish(null, t.Name)) { _player.SetSpu(t.Id); return; }
+            }
+            _player.SetSpu(-1); // no English anywhere → off, like the web
+        }
+        catch { /* tracks not parsed yet */ }
+    }
+
+    // Attach an external subtitle off the UI thread. AddSlave fetches the file, and doing that on the UI
+    // thread froze the app (ANR) for a slow/large sub — the reported "swap to English freezes". select:true
+    // makes libVLC switch to it once it's loaded.
+    private void AttachExternalSub(string url)
+    {
+        _selectedExternalUrl = url;
+        _ = Task.Run(() =>
+        {
+            try { _player.AddSlave(MediaSlaveType.Subtitle, url, select: true); }
+            catch { /* unreachable / malformed sub */ }
+        });
+    }
+
+    private static bool IsEnglish(string? code, string? label)
+    {
+        var c = (code ?? "").Trim().ToLowerInvariant();
+        if (c is "en" or "eng" || c.StartsWith("en-") || c.StartsWith("en_")) return true;
+        var l = (label ?? "").ToLowerInvariant();
+        return l.Contains("english") || System.Text.RegularExpressions.Regex.IsMatch(l, @"\beng?\b");
     }
 
     private static void SetImmersive(bool on)
@@ -743,7 +793,7 @@ public sealed class VlcPlayerPage : ContentPage
             options.Add(new SubOption(
                 LangOf(t.Name), t.Name,
                 _selectedExternalUrl is null && currentSpu == id,
-                () => { try { _player.SetSpu(id); } catch { } _selectedExternalUrl = null; CloseSheet(); }));
+                () => { _userPickedSub = true; try { _player.SetSpu(id); } catch { } _selectedExternalUrl = null; CloseSheet(); }));
         }
         foreach (var sub in _externalSubs)
         {
@@ -753,7 +803,7 @@ public sealed class VlcPlayerPage : ContentPage
             options.Add(new SubOption(
                 lang, track,
                 _selectedExternalUrl == url,
-                () => { try { _player.AddSlave(MediaSlaveType.Subtitle, url, select: true); } catch { } _selectedExternalUrl = url; CloseSheet(); }));
+                () => { _userPickedSub = true; AttachExternalSub(url); CloseSheet(); }));
         }
 
         var langs = options.Select(o => o.Lang).Distinct().ToList();
@@ -767,7 +817,7 @@ public sealed class VlcPlayerPage : ContentPage
         var langRows = new List<View>
         {
             Row("Off", currentSpu == -1 && _selectedExternalUrl is null,
-                () => { try { _player.SetSpu(-1); } catch { } _selectedExternalUrl = null; CloseSheet(); }),
+                () => { _userPickedSub = true; try { _player.SetSpu(-1); } catch { } _selectedExternalUrl = null; CloseSheet(); }),
         };
         foreach (var lang in langs)
         {
