@@ -242,6 +242,28 @@
         focusEl(document.querySelector('[autofocus]') || firstFocusable());
     }
 
+    // Move focus out of the left rail into the main content after a navigation, so the rail
+    // collapses (it expands on :focus-within) and the D-pad lands in the page. Called by the
+    // TV shell on LocationChanged. Retries a couple of frames because the destination content
+    // renders just after the route change.
+    function focusContent(attempt) {
+        attempt = attempt || 0;
+        var scope = document.querySelector('.tv-content');
+        var target = null;
+        if (scope) {
+            var nodes = scope.querySelectorAll(FOCUSABLE);
+            for (var i = 0; i < nodes.length; i++) { if (isVisible(nodes[i])) { target = nodes[i]; break; } }
+        }
+        if (target) {
+            focusEl(target);
+        } else {
+            // Nothing focusable in the content yet (e.g. the QR sign-in screen) — at least drop
+            // focus from the rail so it collapses; retry briefly in case content is still rendering.
+            try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (_) { }
+            if (attempt < 3) setTimeout(function () { focusContent(attempt + 1); }, 120);
+        }
+    }
+
     // --- Enable (idempotent) ----------------------------------------------
     var _enabled = false;
     function enable() {
@@ -255,9 +277,9 @@
     }
 
     // The native head can force this on (DeviceIdiom == TV) so the C# shell and
-    // the JS focus layer never disagree; autoFocus is re-exposed so the shell can
-    // re-land focus after a SPA navigation re-renders the page.
-    window.anisyncTv = { enable: enable, autoFocus: autoFocus };
+    // the JS focus layer never disagree; autoFocus + focusContent let the shell re-land
+    // focus after a SPA navigation (and collapse the rail by moving focus into the content).
+    window.anisyncTv = { enable: enable, autoFocus: autoFocus, focusContent: focusContent };
 
     if (detectTv()) enable();
 })();
