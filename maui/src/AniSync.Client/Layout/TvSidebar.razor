@@ -1,5 +1,6 @@
 @inject NavigationManager Nav
 @inject AppState State
+@inject IJSRuntime JS
 @implements IDisposable
 
 @* TV (10-foot) navigation rail — only rendered by TvLayout on Android TV / Google TV.
@@ -114,6 +115,16 @@
     {
         Recompute();
         StateHasChanged();
+        // Activating a rail link leaves focus on the rail, so it stays expanded (it opens on
+        // :focus-within) over the page. Push focus into the content after the route renders so the
+        // rail collapses and the D-pad lands in the page. TV-only (this rail only renders there).
+        _ = MoveFocusToContentAsync();
+    }
+
+    private async Task MoveFocusToContentAsync()
+    {
+        await Task.Delay(80); // let the destination content render before we look for something to focus
+        try { await JS.InvokeVoidAsync("anisyncTv.focusContent"); } catch { /* JS not ready / prerender */ }
     }
 
     public void Dispose()
