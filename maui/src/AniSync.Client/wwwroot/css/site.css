@@ -10032,3 +10032,26 @@ body.dash-page main {
 
 /* Belt-and-braces: drop the episodes Collapse/Expand toggle on TV (asked hidden). */
 .tv-mode .anime-detail-episodes-toggle { display: none !important; }
+
+/* On TV the per-shelf "View all" link is redundant — scrolling the shelf now pages
+   in more itself, and a remote shouldn't have to detour up to a corner link. */
+.tv-mode .dashboard-section-link { display: none !important; }
+
+/* ── Dashboard shelf pagination (all platforms) ──────────────────────────────
+   The sentinel rides at the horizontal end of a shelf's scroll row; when it nears
+   the viewport the shelf fetches + appends the next page. The loader sits just
+   before it as the last visible "card-height" cell while a page is in flight. */
+.shelf-sentinel {
+    flex: 0 0 1px;
+    width: 1px;
+    align-self: stretch;
+    pointer-events: none;
+}
+.shelf-loader {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 1.25rem;
+    align-self: stretch;
+}

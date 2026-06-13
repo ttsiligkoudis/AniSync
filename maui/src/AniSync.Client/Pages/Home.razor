@@ -132,32 +132,35 @@ else
                         DashSection="anime-continue"
                         SkeletonCount="6"
                         ViewAllHref="/library?list=current&type=anime"
-                        Fetch="@(() => Api.ContinueWatchingAsync())" />
+                        Fetch="@(_ => Api.ContinueWatchingAsync())" />
     }
 
     <DashboardShelf Title="@($"New Episodes Today{_animeSuffix}")"
                     MediaType="anime"
                     DashSection="anime-new-episodes"
                     MutedNote="Refreshes daily"
-                    Fetch="@(() => Api.AiringTodayAsync())" />
+                    Fetch="@(_ => Api.AiringTodayAsync())" />
 
     <DashboardShelf Title="@($"Trending{_animeSuffix}")"
                     MediaType="anime"
                     DashSection="anime-trending"
+                    Paginated="true"
                     ViewAllHref="/discover?list=trending&type=anime"
-                    Fetch='@(() => Api.DiscoverAsync("trending"))' />
+                    Fetch='@(skip => Api.DiscoverAsync("trending", skip: skip))' />
 
     <DashboardShelf Title="@($"Most Popular{_animeSuffix}")"
                     MediaType="anime"
                     DashSection="anime-popular"
+                    Paginated="true"
                     ViewAllHref="/discover?list=popular&type=anime"
-                    Fetch='@(() => Api.DiscoverAsync("popular"))' />
+                    Fetch='@(skip => Api.DiscoverAsync("popular", skip: skip))' />
 
     <DashboardShelf Title="@($"Most Anticipated{_animeSuffix}")"
                     MediaType="anime"
                     DashSection="anime-anticipated"
+                    Paginated="true"
                     ViewAllHref="/discover?list=seasonal&type=anime"
-                    Fetch='@(() => Api.DiscoverAsync("seasonal"))' />
+                    Fetch='@(skip => Api.DiscoverAsync("seasonal", skip: skip))' />
 }
 
 @* Movie / series (Trakt-backed) shelves — grouped by list type so the page reads
@@ -174,7 +177,7 @@ else
                         VideoLinks="true"
                         SkeletonCount="6"
                         ViewAllHref="@($"/library?list=current&type={VideoSlug(vt)}")"
-                        Fetch="@(() => Api.VideoListAsync(VideoSlug(vt), "current"))" />
+                        Fetch="@(_ => Api.VideoListAsync(VideoSlug(vt), "current"))" />
     }
 }
 
@@ -184,8 +187,9 @@ else
                     MediaType="@VideoSlug(vt)"
                     DashSection="@($"video-trending-{VideoSlug(vt)}")"
                     VideoLinks="true"
+                    Paginated="true"
                     ViewAllHref="@($"/discover?list=trending&type={VideoSlug(vt)}")"
-                    Fetch="@(() => Api.DiscoverVideoAsync(VideoSlug(vt), "trending"))" />
+                    Fetch="@(skip => Api.DiscoverVideoAsync(VideoSlug(vt), "trending", skip))" />
 }
 
 @foreach (var vt in _videoTypes)
@@ -194,8 +198,9 @@ else
                     MediaType="@VideoSlug(vt)"
                     DashSection="@($"video-popular-{VideoSlug(vt)}")"
                     VideoLinks="true"
+                    Paginated="true"
                     ViewAllHref="@($"/discover?list=popular&type={VideoSlug(vt)}")"
-                    Fetch="@(() => Api.DiscoverVideoAsync(VideoSlug(vt), "popular"))" />
+                    Fetch="@(skip => Api.DiscoverVideoAsync(VideoSlug(vt), "popular", skip))" />
 }
 
 @foreach (var vt in _videoTypes)
@@ -204,8 +209,9 @@ else
                     MediaType="@VideoSlug(vt)"
                     DashSection="@($"video-anticipated-{VideoSlug(vt)}")"
                     VideoLinks="true"
+                    Paginated="true"
                     ViewAllHref="@($"/discover?list=anticipated&type={VideoSlug(vt)}")"
-                    Fetch="@(() => Api.DiscoverVideoAsync(VideoSlug(vt), "anticipated"))" />
+                    Fetch="@(skip => Api.DiscoverVideoAsync(VideoSlug(vt), "anticipated", skip))" />
 }
 
 @* Browse By: secondary discovery surfaces. Four browse paths per mode — all

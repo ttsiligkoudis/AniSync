@@ -67,6 +67,9 @@
                 }
             </a>
         }
+        @* Trailing slot — dashboard shelves drop their pagination sentinel + loader here
+           so it sits at the horizontal END of the scroll row (the grid variant leaves it null). *@
+        @Trailing
     </div>
 }
 else if (!string.IsNullOrEmpty(EmptyMessage))
@@ -79,6 +82,9 @@ else if (!string.IsNullOrEmpty(EmptyMessage))
     [Parameter] public string Variant { get; set; } = "grid";
     [Parameter] public bool VideoLinks { get; set; }
     [Parameter] public string? EmptyMessage { get; set; }
+    /// <summary>Optional content appended as the last child inside the row/grid container —
+    /// used by dashboard shelves for an end-of-shelf pagination sentinel + loader.</summary>
+    [Parameter] public RenderFragment? Trailing { get; set; }
 
     private ElementReference _root;
     private IJSObjectReference? _module;
