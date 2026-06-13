@@ -34,7 +34,8 @@
             </button>
             <div class="streams-modal-body">
                 <StreamsSection IsStremio="false" Flags="Flags" Config="Config" OnDirty="OnDirty" OnReload="OnReload" OnReorder="OnReorder" />
-                <PlaybackLanguageSection />
+                <PlaybackLanguageSection Audio="AudioLang" Subtitle="SubLang"
+                                         AudioChanged="OnAudioLangChanged" SubtitleChanged="OnSubLangChanged" />
             </div>
         </div>
     </div>
@@ -48,6 +49,11 @@
     // Bubbles the dragged stream-addon order up to the page so its Save can fold in the
     // ReorderStreamAddons POST (the original defers the reorder to the page's Save click).
     [Parameter] public EventCallback<string[]> OnReorder { get; set; }
+    // Playback-language dropdowns — the page owns the values + persists them on Save.
+    [Parameter] public string AudioLang { get; set; } = "en";
+    [Parameter] public string SubLang { get; set; } = "en";
+    [Parameter] public EventCallback<string> OnAudioLangChanged { get; set; }
+    [Parameter] public EventCallback<string> OnSubLangChanged { get; set; }
 
     private bool _open;
     private IJSObjectReference? _js;

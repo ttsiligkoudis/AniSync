@@ -1,8 +1,9 @@
-@inject IAniSyncApi Api
 @inject IAppEnvironment Env
 
 @* Default playback languages (per-account, synced). Subtitle applies to both heads; audio is the
-   native player only (the browser can't switch audio tracks). Saved immediately on change. *@
+   native player only (the browser can't switch audio tracks). This is a controlled component — the
+   Account page owns the values and persists them on the shared "Save changes" bar, so changing a
+   dropdown just marks the form dirty (it doesn't save on its own). *@
 <section class="section-card">
     <span class="section-title">Playback languages</span>
     <p class="section-description">
@@ -12,10 +13,10 @@
     <div class="streams-grid">
         <div class="stream-option">
             <span class="option-name">Default subtitle language</span>
-            <select class="custom-select" @onchange="OnSubtitleChanged" disabled="@_busy">
+            <select class="lang-select" @onchange="OnSubtitleChanged">
                 @foreach (var (langCode, name) in PlaybackLanguages.Options)
                 {
-                    <option value="@langCode" selected="@(langCode == _subtitle)">@name</option>
+                    <option value="@langCode" selected="@(langCode == Subtitle)">@name</option>
                 }
             </select>
         </div>
@@ -23,55 +24,26 @@
         {
             <div class="stream-option">
                 <span class="option-name">Default audio language</span>
-                <select class="custom-select" @onchange="OnAudioChanged" disabled="@_busy">
+                <select class="lang-select" @onchange="OnAudioChanged">
                     @foreach (var (langCode, name) in PlaybackLanguages.Options)
                     {
-                        <option value="@langCode" selected="@(langCode == _audio)">@name</option>
+                        <option value="@langCode" selected="@(langCode == Audio)">@name</option>
                     }
                 </select>
             </div>
         }
     </div>
-    @if (!string.IsNullOrEmpty(_status))
-    {
-        <p class="hint-text">@_status</p>
-    }
 </section>
 
 @code {
-    private string _audio = PlaybackLanguages.Default;
-    private string _subtitle = PlaybackLanguages.Default;
-    private bool _busy;
-    private string? _status;
+    [Parameter] public string Audio { get; set; } = PlaybackLanguages.Default;
+    [Parameter] public string Subtitle { get; set; } = PlaybackLanguages.Default;
+    [Parameter] public EventCallback<string> AudioChanged { get; set; }
+    [Parameter] public EventCallback<string> SubtitleChanged { get; set; }
 
-    protected override async Task OnInitializedAsync()
-    {
-        // Reading the stored prefs needs the header credential (interactive pass only).
-        if (!RendererInfo.IsInteractive) return;
-        var langs = await Api.GetPlaybackLanguagesAsync();
-        _audio = PlaybackLanguages.Normalize(langs?.Audio);
-        _subtitle = PlaybackLanguages.Normalize(langs?.Subtitle);
-        StateHasChanged();
-    }
+    private Task OnSubtitleChanged(ChangeEventArgs e)
+        => SubtitleChanged.InvokeAsync(PlaybackLanguages.Normalize(e.Value?.ToString()));
 
-    private async Task OnSubtitleChanged(ChangeEventArgs e)
-    {
-        _subtitle = PlaybackLanguages.Normalize(e.Value?.ToString());
-        await SaveAsync();
-    }
-
-    private async Task OnAudioChanged(ChangeEventArgs e)
-    {
-        _audio = PlaybackLanguages.Normalize(e.Value?.ToString());
-        await SaveAsync();
-    }
-
-    private async Task SaveAsync()
-    {
-        _busy = true; _status = "Saving…"; StateHasChanged();
-        var ok = await Api.SavePlaybackLanguagesAsync(_audio, _subtitle);
-        _busy = false;
-        _status = ok ? "Saved." : "Couldn't save — try again.";
-        StateHasChanged();
-    }
+    private Task OnAudioChanged(ChangeEventArgs e)
+        => AudioChanged.InvokeAsync(PlaybackLanguages.Normalize(e.Value?.ToString()));
 }

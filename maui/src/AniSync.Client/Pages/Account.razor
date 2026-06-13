@@ -66,7 +66,9 @@ else
     {
         <LinkedAccountsSection Config="_config" OnReload="ReloadAsync" AnimeEnabled="AnimeEnabled" />
 
-        <StreamsModal Flags="_flags" Config="_config" OnDirty="MarkDirty" OnReload="ReloadAsync" OnReorder="OnAddonReorderPending" />
+        <StreamsModal Flags="_flags" Config="_config" OnDirty="MarkDirty" OnReload="ReloadAsync" OnReorder="OnAddonReorderPending"
+                      AudioLang="_audioLang" SubLang="_subLang"
+                      OnAudioLangChanged="OnAudioLangChanged" OnSubLangChanged="OnSubLangChanged" />
 
         <PreferencesSection Flags="_flags" AnimeEnabled="AnimeEnabled" OnDirty="MarkDirty" />
 
@@ -109,6 +111,17 @@ else
     // the reorder isn't persisted on drop — it marks the page dirty and the ReorderStreamAddons
     // POST is folded into Save (SaveAsync). Cleared on reload (add/remove/save invalidate it).
     private string[]? _pendingAddonOrder;
+
+    // Playback-language dropdowns (in the Streams modal). The page owns them so they ride the same
+    // Save bar as the flags: changing a dropdown marks dirty; Save persists. _saved* is the last
+    // persisted value, used for the dirty diff.
+    private string _audioLang = PlaybackLanguages.Default;
+    private string _subLang = PlaybackLanguages.Default;
+    private string _savedAudioLang = PlaybackLanguages.Default;
+    private string _savedSubLang = PlaybackLanguages.Default;
+
+    private void OnAudioLangChanged(string lang) { _audioLang = PlaybackLanguages.Normalize(lang); MarkDirty(); }
+    private void OnSubLangChanged(string lang) { _subLang = PlaybackLanguages.Normalize(lang); MarkDirty(); }
 
     // Pre-login provider picker. Mirrors _AccountSection: with anime enabled (the
     // default until the chooser modal lands) the picker offers all three anime
@@ -217,6 +230,9 @@ else
         {
             _flags = ConfigFlags.Decode(_config.Flags1, _config.Flags2, _config.Flags3);
             (_savedF1, _savedF2, _savedF3) = (_config.Flags1, _config.Flags2, _config.Flags3);
+            var langs = await Api.GetPlaybackLanguagesAsync();
+            _savedAudioLang = _audioLang = PlaybackLanguages.Normalize(langs?.Audio);
+            _savedSubLang = _subLang = PlaybackLanguages.Normalize(langs?.Subtitle);
             _dirty = false;
         }
     }
@@ -224,7 +240,8 @@ else
     private void MarkDirty()
     {
         var (f1, f2, f3) = _flags.Encode();
-        _dirty = f1 != _savedF1 || f2 != _savedF2 || f3 != _savedF3 || _pendingAddonOrder is { Length: > 0 };
+        _dirty = f1 != _savedF1 || f2 != _savedF2 || f3 != _savedF3 || _pendingAddonOrder is { Length: > 0 }
+            || _audioLang != _savedAudioLang || _subLang != _savedSubLang;
     }
 
     // A drag-reorder in the Streams modal — stash the new order and light up the Save bar.
@@ -246,6 +263,14 @@ else
             (_savedF1, _savedF2, _savedF3) = (f1, f2, f3);
             _config.Revision = result.Revision;
             if (!string.IsNullOrEmpty(result.InstallConfig)) _config.InstallConfig = result.InstallConfig;
+
+            // Playback-language dropdowns ride the same Save (only POST when they actually changed).
+            if (_audioLang != _savedAudioLang || _subLang != _savedSubLang)
+            {
+                if (await Api.SavePlaybackLanguagesAsync(_audioLang, _subLang))
+                    (_savedAudioLang, _savedSubLang) = (_audioLang, _subLang);
+            }
+
             _dirty = false;
             // Stream-addon reorder rides on the same Save (the original folds it into
             // saveFlags() via saveStreamAddonOrderIfChanged). Persist the dragged order,
