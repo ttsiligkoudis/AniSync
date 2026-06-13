@@ -132,7 +132,7 @@
         if (firstRender)
         {
             _selfRef = DotNetObjectReference.Create(this);
-            try { _scroll = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/discover-scroll.js"); }
+            try { _scroll = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/shelf-scroll.js"); }
             catch { return; }
         }
         if (_scroll is null) return;
@@ -168,10 +168,11 @@
         _loadingMore = false;
         StateHasChanged();
 
-        // Re-arm so a short page that left the sentinel in view keeps pulling.
+        // After the new cards render, keep pulling if the row still isn't scrolled-full
+        // (short page / row not yet overflowing); otherwise this re-arms the scroll trigger.
         if (_observerId != 0 && !_done && _scroll is not null)
         {
-            try { await _scroll.InvokeVoidAsync("reobserve", _observerId); } catch { }
+            try { await _scroll.InvokeVoidAsync("recheck", _observerId); } catch { }
         }
     }
 
