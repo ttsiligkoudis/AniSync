@@ -128,6 +128,14 @@ public sealed class PreferencesDto
     public bool Stored { get; set; }
 }
 
+/// <summary>Preferred default playback languages (ISO 639-1) — GET/POST /api/v1/me/playback-languages.
+/// Null means "English default" (the client substitutes "en").</summary>
+public sealed class PlaybackLanguagesDto
+{
+    public string? Audio { get; set; }
+    public string? Subtitle { get; set; }
+}
+
 // ── Sync diff (primary vs each linked secondary) ─────────────────────────────
 
 public sealed class DiffEntrySnapshot { public string? MediaId { get; set; } public string? Status { get; set; } public int Progress { get; set; } }

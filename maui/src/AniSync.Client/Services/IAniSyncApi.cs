@@ -173,6 +173,10 @@ public interface IAniSyncApi
     Task<string?> GetDashboardLayoutAsync(CancellationToken ct = default);
     Task<bool> SaveDashboardLayoutAsync(string layoutJson, CancellationToken ct = default);
 
+    /// <summary>Preferred default audio + subtitle languages (ISO 639-1). Null fields = English default.</summary>
+    Task<PlaybackLanguagesDto?> GetPlaybackLanguagesAsync(CancellationToken ct = default);
+    Task<bool> SavePlaybackLanguagesAsync(string? audio, string? subtitle, CancellationToken ct = default);
+
     // Notifications + calendar
     Task<IReadOnlyList<NotificationDto>> NotificationsAsync(int limit = 20, int skip = 0, CancellationToken ct = default);
     Task<NotificationCount> NotificationCountAsync(CancellationToken ct = default);

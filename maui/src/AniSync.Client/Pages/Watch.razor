@@ -939,6 +939,22 @@
                         && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps))
             .ToList();
 
+    // Preferred default languages (account setting; English when unset). Loaded once, then handed to every
+    // PlaybackRequest so both players preselect the right audio (native) / subtitle (both) track.
+    private string? _prefAudioLang;
+    private string? _prefSubLang;
+    private async Task EnsurePlaybackLanguagesAsync()
+    {
+        if (_prefSubLang is not null) return;
+        try
+        {
+            var langs = await Api.GetPlaybackLanguagesAsync();
+            _prefAudioLang = PlaybackLanguages.Normalize(langs?.Audio);
+            _prefSubLang = PlaybackLanguages.Normalize(langs?.Subtitle);
+        }
+        catch { _prefAudioLang = PlaybackLanguages.Default; _prefSubLang = PlaybackLanguages.Default; }
+    }
+
     // ── Play / mark-watched / scrobble ─────────────────────────────────────────
     private async Task PlayAsync(EpisodeStreamDto s)
     {
@@ -966,6 +982,7 @@
 
         _playingUrl = s.Url;
 
+        await EnsurePlaybackLanguagesAsync();
         var resume = await ReadResumeAsync();
         var request = new PlaybackRequest(
             Url: s.Url!,
@@ -974,7 +991,9 @@
             Subtitles: Env.SupportsNativePlayback ? NativeSubtitles() : _subtitles,
             OnProgress: OnProgress,
             OnEnded: OnEnded,
-            OnStreamEvent: OnStreamEvent);
+            OnStreamEvent: OnStreamEvent,
+            PreferredAudioLanguage: _prefAudioLang,
+            PreferredSubtitleLanguage: _prefSubLang);
 
         if (Env.SupportsNativePlayback)
         {
@@ -1091,8 +1110,10 @@
             // Native head: VLC plays everything inline — just play it (no external
             // hand-off). Resolve first so MediaFusion IP-bound URLs work.
             var nativeUrl = await Api.ResolveStreamAsync(s.Url!) ?? s.Url!;
+            await EnsurePlaybackLanguagesAsync();
             var resume = await ReadResumeAsync();
-            await Player.PlayAsync(new PlaybackRequest(nativeUrl, PlayerTitle(), resume, NativeSubtitles(), OnProgress, OnEnded));
+            await Player.PlayAsync(new PlaybackRequest(nativeUrl, PlayerTitle(), resume, NativeSubtitles(), OnProgress, OnEnded,
+                PreferredAudioLanguage: _prefAudioLang, PreferredSubtitleLanguage: _prefSubLang));
             _playingUrl = s.Url;
             StateHasChanged();
             return;

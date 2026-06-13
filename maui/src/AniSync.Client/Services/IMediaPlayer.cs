@@ -45,6 +45,10 @@ public record PlaybackRequest(
     IReadOnlyList<SubtitleTrack>? Subtitles = null,
     Action<double, double>? OnProgress = null,
     Action? OnEnded = null,
-    Action<string, string?>? OnStreamEvent = null);
+    Action<string, string?>? OnStreamEvent = null,
+    // Preferred default languages (ISO 639-1). Audio is honoured by the native player only
+    // (the browser doesn't expose track switching); subtitle applies to both heads. Null = English.
+    string? PreferredAudioLanguage = null,
+    string? PreferredSubtitleLanguage = null);
 
 public record SubtitleTrack(string Url, string Label, string? Language = null);

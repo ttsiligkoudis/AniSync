@@ -170,6 +170,9 @@ namespace AnimeList.Services.Interfaces
         Task SetEnabledMediaTypesAsync(string uid, string csv);
         /// <summary>Persists the dashboard layout JSON. No-op for an empty UID.</summary>
         Task SetDashboardLayoutAsync(string uid, string json);
+        /// <summary>Persists the preferred default audio + subtitle languages (ISO 639-1; null/empty = English
+        /// default). No-op for an empty UID.</summary>
+        Task SetPlaybackLanguagesAsync(string uid, string audioLang, string subtitleLang);
 
         /// <summary>
         /// Reads the user's configured stream addons. Empty list when the UID
