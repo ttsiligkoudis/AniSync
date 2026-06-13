@@ -76,6 +76,7 @@ public sealed class VlcPlayerPage : ContentPage
     private string? _selectedExternalUrl;    // url of the external sub the user attached (drives the check)
     private bool _defaultSubScheduled;       // one-shot guard for the English-default pass
     private bool _userPickedSub;             // the user chose a subtitle → don't override with the default
+    private bool _userPickedAudio;           // the user chose an audio track → don't override with the default
 
     private bool _seeking;
     private ScaleMode _scaleMode = ScaleMode.Fit;
@@ -320,7 +321,7 @@ public sealed class VlcPlayerPage : ContentPage
             _playPause.Text = IcPause; SetLoading(false); KeepAwake(true); RestartHideTimer();
             if (_isTv) _playPause.Focus();
             // Default the subtitle to English (matching the web) once tracks have had a moment to parse.
-            if (!_defaultSubScheduled) { _defaultSubScheduled = true; Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(700), ApplyDefaultSubtitle); }
+            if (!_defaultSubScheduled) { _defaultSubScheduled = true; Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(700), () => { ApplyDefaultSubtitle(); ApplyDefaultAudio(); }); }
         });
         _player.Paused += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPlay; StopHideTimer(); KeepAwake(false); });
         // Buffering climbs 0→100 on connect and re-fires on a re-buffer; show the spinner until it's full.
@@ -459,6 +460,28 @@ public sealed class VlcPlayerPage : ContentPage
                 if (IsEnglish(null, t.Name)) { _player.SetSpu(t.Id); return; }
             }
             _player.SetSpu(-1); // no English anywhere → off, like the web
+        }
+        catch { /* tracks not parsed yet */ }
+    }
+
+    // Preselect the English audio track when the media has one (e.g. a dual-audio release defaulting to
+    // Japanese/French). If there's no English track, leave libVLC's default — unlike subtitles we never
+    // turn audio off.
+    private void ApplyDefaultAudio()
+    {
+        if (_userPickedAudio) return;
+        try
+        {
+            var current = _player.AudioTrack;
+            foreach (var t in _player.AudioTrackDescription)
+            {
+                if (t.Id == -1) continue; // the "Disable" pseudo-track
+                if (IsEnglish(null, t.Name))
+                {
+                    if (t.Id != current) _player.SetAudioTrack(t.Id);
+                    return;
+                }
+            }
         }
         catch { /* tracks not parsed yet */ }
     }
@@ -685,7 +708,7 @@ public sealed class VlcPlayerPage : ContentPage
                 rows.Add(Row(
                     string.IsNullOrWhiteSpace(t.Name) ? $"Track {id}" : t.Name,
                     id == current,
-                    () => { try { _player.SetAudioTrack(id); } catch { } CloseSheet(); }));
+                    () => { _userPickedAudio = true; try { _player.SetAudioTrack(id); } catch { } CloseSheet(); }));
             }
         }
         catch { /* tracks not parsed yet */ }
