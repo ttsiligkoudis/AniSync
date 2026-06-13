@@ -311,13 +311,18 @@ public sealed class VlcPlayerPage : ContentPage
         // Keep the UI in sync (libVLC raises these on its own thread → marshal to the UI thread).
         _player.PositionChanged += OnPositionChanged;
         _player.LengthChanged += OnLengthChanged;
-        _player.Playing += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPause; SetLoading(false); RestartHideTimer(); if (_isTv) _playPause.Focus(); });
-        _player.Paused += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPlay; StopHideTimer(); });
+        // KeepAwake: hold the screen on while playing or loading (so the phone never locks mid-movie),
+        // and release it when paused / ended / closed so it can sleep normally.
+        _player.Playing += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPause; SetLoading(false); KeepAwake(true); RestartHideTimer(); if (_isTv) _playPause.Focus(); });
+        _player.Paused += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPlay; StopHideTimer(); KeepAwake(false); });
         // Buffering climbs 0→100 on connect and re-fires on a re-buffer; show the spinner until it's full.
-        _player.Buffering += (_, e) => Dispatcher.Dispatch(() => SetLoading(e.Cache < 100f));
+        // Buffering means we're loading toward playback, so keep the screen awake through it too.
+        _player.Buffering += (_, e) => Dispatcher.Dispatch(() => { var loading = e.Cache < 100f; SetLoading(loading); if (loading) KeepAwake(true); });
+        _player.EndReached += (_, _) => Dispatcher.Dispatch(() => KeepAwake(false));
+        _player.EncounteredError += (_, _) => Dispatcher.Dispatch(() => KeepAwake(false));
 
         // Stop + release when the user backs out of (or closes) the player.
-        NavigatedFrom += (_, _) => { try { _player.Stop(); } catch { /* already stopped */ } };
+        NavigatedFrom += (_, _) => { try { _player.Stop(); } catch { /* already stopped */ } KeepAwake(false); };
 
         // Re-assert immersive once the page's native view is attached to its (modal) window.
         Loaded += (_, _) => ApplyImmersiveToView();
@@ -329,6 +334,8 @@ public sealed class VlcPlayerPage : ContentPage
         base.OnAppearing();
         SetImmersive(true);
         ApplyImmersiveToView();
+        // The player opens on the loading spinner — hold the screen on from the start.
+        KeepAwake(true);
         // Hiding the bars doesn't survive the modal-present + forced rotation on some OEMs, so re-assert once
         // the transition settles (MainActivity also re-applies on config change / resume).
         Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(350), () => { SetImmersive(true); ApplyImmersiveToView(); });
@@ -363,6 +370,8 @@ public sealed class VlcPlayerPage : ContentPage
         }
         StopHideTimer();
         SetImmersive(false);
+        // Always release the wake-lock when leaving the player so it can't leak past the session.
+        KeepAwake(false);
     }
 
     // App backgrounded (Home / recents) → pause so audio doesn't keep playing behind an inactive app.
@@ -394,6 +403,13 @@ public sealed class VlcPlayerPage : ContentPage
             }
             catch { /* not ready */ }
         });
+    }
+
+    // Hold/release the screen-on lock (Android FLAG_KEEP_SCREEN_ON via MAUI's cross-platform API), so the
+    // phone never auto-locks while a movie is playing or loading. Idempotent; safe to call repeatedly.
+    private static void KeepAwake(bool on)
+    {
+        try { DeviceDisplay.Current.KeepScreenOn = on; } catch { /* unsupported / not ready */ }
     }
 
     private static void SetImmersive(bool on)
