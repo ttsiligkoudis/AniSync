@@ -4,6 +4,9 @@ using Android.Views;
 using Android.Webkit;
 using Android.Widget;
 using AndroidX.Core.View;
+// MAUI's global usings also pull in Microsoft.Maui.Controls.View, so the bare name `View` is ambiguous
+// in this Android file (CS0104). Everything here is an Android view, so alias it to the Android type.
+using View = Android.Views.View;
 
 namespace AniSync;
 
