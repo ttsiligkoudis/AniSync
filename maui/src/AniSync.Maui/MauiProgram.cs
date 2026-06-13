@@ -44,6 +44,14 @@ public static class MauiProgram
                 handler.PlatformView.SetBackgroundColor(
                     Android.Graphics.Color.ParseColor(night ? "#0A0A0A" : "#FFFFFF"));
             });
+
+        // Enable HTML5 / iframe fullscreen (the YouTube trailer's fullscreen button, native <video>
+        // fullscreen). BlazorWebView sets no WebChromeClient that handles OnShowCustomView, so without
+        // this the fullscreen button does nothing. Blazor's interop runs over the WebView message
+        // channel, not the chrome client, so swapping the chrome client in is safe.
+        Microsoft.AspNetCore.Components.WebView.Maui.BlazorWebViewHandler.BlazorWebViewMapper.AppendToMapping(
+            "FullscreenVideoSupport",
+            (handler, view) => handler.PlatformView.SetWebChromeClient(new FullscreenWebChromeClient()));
 #endif
 
 #if DEBUG
