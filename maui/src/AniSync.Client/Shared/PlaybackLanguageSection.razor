@@ -1,10 +1,11 @@
 @inject IAppEnvironment Env
 
 @* Default playback languages (per-account, synced). Subtitle applies to both heads; audio is the
-   native player only (the browser can't switch audio tracks). This is a controlled component — the
-   Account page owns the values and persists them on the shared "Save changes" bar, so changing a
-   dropdown just marks the form dirty (it doesn't save on its own). @bind:get/@bind:set keeps each
-   <select> in sync with the parent value (incl. the value loaded from the DB on open). *@
+   native player only (the browser can't switch audio tracks). Controlled by the Account page, which
+   owns the values and persists them on the shared "Save changes" bar — changing a dropdown only marks
+   the form dirty. The selects bind to local fields (synced from the params in OnParametersSet) with
+   plain @bind, so Blazor reliably applies the select value even though the DB value loads async after
+   the options render; @bind:after bubbles the pick up to the page. *@
 <section class="section-card">
     <span class="section-title">Playback languages</span>
     <p class="section-description">
@@ -14,7 +15,7 @@
     <div class="streams-grid">
         <div class="stream-option">
             <span class="option-name">Default subtitle language</span>
-            <select class="lang-select" @bind:get="Subtitle" @bind:set="OnSubtitleSet">
+            <select class="lang-select" @bind="_subtitle" @bind:after="PushSubtitle">
                 @foreach (var (langCode, name) in PlaybackLanguages.Options)
                 {
                     <option value="@langCode">@name</option>
@@ -25,7 +26,7 @@
         {
             <div class="stream-option">
                 <span class="option-name">Default audio language</span>
-                <select class="lang-select" @bind:get="Audio" @bind:set="OnAudioSet">
+                <select class="lang-select" @bind="_audio" @bind:after="PushAudio">
                     @foreach (var (langCode, name) in PlaybackLanguages.Options)
                     {
                         <option value="@langCode">@name</option>
@@ -42,6 +43,15 @@
     [Parameter] public EventCallback<string> AudioChanged { get; set; }
     [Parameter] public EventCallback<string> SubtitleChanged { get; set; }
 
-    private Task OnSubtitleSet(string value) => SubtitleChanged.InvokeAsync(PlaybackLanguages.Normalize(value));
-    private Task OnAudioSet(string value) => AudioChanged.InvokeAsync(PlaybackLanguages.Normalize(value));
+    private string _audio = PlaybackLanguages.Default;
+    private string _subtitle = PlaybackLanguages.Default;
+
+    protected override void OnParametersSet()
+    {
+        _audio = PlaybackLanguages.Normalize(Audio);
+        _subtitle = PlaybackLanguages.Normalize(Subtitle);
+    }
+
+    private Task PushSubtitle() => SubtitleChanged.InvokeAsync(_subtitle);
+    private Task PushAudio() => AudioChanged.InvokeAsync(_audio);
 }
