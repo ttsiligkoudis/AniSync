@@ -823,7 +823,7 @@ namespace AnimeList.Controllers
                             if (items.Count == 0) break; // reached the end of Trakt's catalog
                             var pageMetas = await items.ToVideoMetas().ExcludeAnimeAsync(_mappingService);
                             foreach (var m in pageMetas)
-                                if (!string.IsNullOrEmpty(m.Id) && seen.Add(m.Id)) collected.Add(m);
+                                if (!string.IsNullOrEmpty(m.id) && seen.Add(m.id)) collected.Add(m);
                         }
                         metas = collected.Skip(offset).Take(limit).ToList();
                     }
