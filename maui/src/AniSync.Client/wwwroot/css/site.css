@@ -10085,6 +10085,79 @@ body.dash-page main {
    in more itself, and a remote shouldn't have to detour up to a corner link. */
 .tv-mode .dashboard-section-link { display: none !important; }
 
+/* ==========================================================================
+   TV 10-FOOT POLISH
+   A consistent, couch-legible scale for every TV-reachable surface: bigger
+   headings, cover art and controls, more generous spacing, and a few touch-only
+   bits dropped. All scoped to .tv-mode, so phone / web are byte-for-byte unchanged.
+   ========================================================================== */
+
+/* Content frame — more breathing room around the 10-foot layout. */
+.tv-mode .tv-content { padding: 2.5rem 4vw 5rem; }
+
+/* Page headers (Search / Discover / Library / Account / Calendar). */
+.tv-mode .page-header { margin-bottom: 1.6rem; }
+.tv-mode .page-title { font-size: 2.4rem; line-height: 1.15; }
+.tv-mode .page-subtitle { font-size: 1.05rem; }
+
+/* Section + shelf headings. */
+.tv-mode .dashboard-section { margin-bottom: 2.25rem; }
+.tv-mode .dashboard-section-header { margin-bottom: 0.9rem; }
+.tv-mode .dashboard-section-title { font-size: 1.6rem; }
+.tv-mode .section-title { font-size: 1.5rem; }
+.tv-mode .section-description { font-size: 1.02rem; line-height: 1.5; }
+
+/* Cover art — bigger cards + labels so posters read across the room. */
+.tv-mode .poster-scroll-row { gap: 1.1rem; }
+.tv-mode .poster-scroll-row .library-card { flex: 0 0 190px; }
+.tv-mode .library-grid {
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 1.5rem;
+}
+.tv-mode .library-card-title { font-size: 1.05rem; }
+.tv-mode .library-card-meta { font-size: 0.9rem; }
+/* A remote has no pointer — neutralise the lift-on-hover so it can't fight the focus
+   zoom (some TV WebViews synthesise :hover on the focused element). */
+.tv-mode .library-card:hover:not(:focus) { transform: none; }
+
+/* Media-type switch pills (top of Home / Discover / Library). */
+.tv-mode .mt-switch-btn { padding: 0.55rem 1.15rem; }
+.tv-mode .mt-switch-label { font-size: 1.05rem; }
+
+/* Tabs (Library status / Discover modes) — larger pills, clearer spacing. */
+.tv-mode .library-tabs { gap: 0.55rem; margin-bottom: 1.3rem; }
+.tv-mode .library-tab { font-size: 1.05rem; padding: 0.6rem 1.3rem; }
+
+/* Filter bar (genre browse + search) — kept (genre browse is useful on TV) but
+   sized up so it's legible and the controls are comfortable D-pad targets. */
+.tv-mode .filter-bar { gap: 0.7rem; margin-bottom: 1.4rem; }
+.tv-mode .filter-bar-search,
+.tv-mode .filter-bar-select,
+.tv-mode .filter-bar-submit { font-size: 1.05rem; padding: 0.65rem 1rem; }
+
+/* Detail hero — a commanding title + comfortable action buttons. */
+.tv-mode .anime-detail-title { font-size: 2.6rem; line-height: 1.1; }
+.tv-mode .anime-detail-info { font-size: 1.05rem; }
+.tv-mode .anime-detail-section-title { font-size: 1.5rem; }
+.tv-mode .anime-detail-watch-next { font-size: 1.15rem; padding: 0.85rem 1.6rem; }
+.tv-mode .anime-detail-user-state { font-size: 1rem; }
+
+/* Search results — bigger rows + posters in the dedicated /search page. */
+.tv-mode .search-page .site-search-result { font-size: 1.05rem; padding: 0.7rem 0.9rem; }
+.tv-mode .search-page .site-search-result-poster { width: 60px; height: 90px; }
+
+/* Calendar — legible header, day strip + episode cards. */
+.tv-mode .cal-title { font-size: 2.2rem; }
+.tv-mode .cal-card-title { font-size: 1.02rem; }
+.tv-mode .cal-card-meta { font-size: 0.9rem; }
+.tv-mode .cal-strip-nav { padding: 0.5rem 0.75rem; }
+
+/* Account labels. */
+.tv-mode .option-name { font-size: 1.05rem; }
+
+/* Dashboard "Customize" (drag-reorder/hide shelves) has no D-pad path — hide on TV. */
+.tv-mode .dash-customize-float { display: none !important; }
+
 /* ── Dashboard shelf pagination (all platforms) ──────────────────────────────
    The sentinel rides at the horizontal end of a shelf's scroll row; when it nears
    the viewport the shelf fetches + appends the next page. The loader sits just
