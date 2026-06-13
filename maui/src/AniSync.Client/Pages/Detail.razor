@@ -329,7 +329,10 @@ else
                             <div class="anime-detail-episode-thumb-wrap">
                                 @if (!string.IsNullOrEmpty(ep.Thumbnail))
                                 {
-                                    <img class="anime-detail-episode-thumb" src="@ep.Thumbnail" alt="" loading="lazy" decoding="async" />
+                                    @* On a broken thumbnail URL, hide the img and flip the wrap to the
+                                       striped placeholder state instead of the browser's broken-image icon. *@
+                                    <img class="anime-detail-episode-thumb" src="@ep.Thumbnail" alt="" loading="lazy" decoding="async"
+                                         onerror="this.style.display='none';this.parentElement.classList.add('anime-detail-episode-thumb-failed')" />
                                 }
                                 else
                                 {

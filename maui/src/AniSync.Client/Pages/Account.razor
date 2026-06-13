@@ -24,10 +24,15 @@
 
 <PageTitle>Account · AniSync</PageTitle>
 
-<header class="page-header">
-    <h1 class="page-title">Account</h1>
-    <p class="page-subtitle">Provider · linked accounts</p>
-</header>
+@* On TV before sign-in the screen is just the phone-QR — drop the header so the QR
+   fits without scrolling. (Once signed in, the normal account UI returns.) *@
+@if (!(Env.IsTv && _config is null))
+{
+    <header class="page-header">
+        <h1 class="page-title">Account</h1>
+        <p class="page-subtitle">Provider · linked accounts</p>
+    </header>
+}
 
 @if (_loading)
 {
@@ -48,9 +53,14 @@
 }
 else
 {
-    <AccountSection Config="_config" OnReload="ReloadAsync"
-                    Available="_available" SelectedService="@_selectedService"
-                    SelectedServiceChanged="s => _selectedService = s" />
+    @* Provider picker hidden on the TV sign-in screen — the QR handles provider choice
+       on the phone. It returns once signed in (account management needs it). *@
+    @if (!(Env.IsTv && _config is null))
+    {
+        <AccountSection Config="_config" OnReload="ReloadAsync"
+                        Available="_available" SelectedService="@_selectedService"
+                        SelectedServiceChanged="s => _selectedService = s" />
+    }
 
     @if (_config is not null)
     {

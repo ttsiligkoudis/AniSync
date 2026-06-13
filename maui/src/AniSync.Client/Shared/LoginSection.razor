@@ -14,14 +14,15 @@
    INativeAuth path, mirroring Login.razor. *@
 
 <div class="card-section" id="loginCard">
-    @* On the TV, typing credentials with a remote is painful — lead with the phone QR
-       flow (Stremio/Netflix style) and keep the provider sign-in below as a fallback. *@
+    @* TV: the phone QR is the ONLY sign-in surface — picking a provider or typing
+       credentials with a remote is painful, so the provider picker (AccountSection,
+       hidden by Account.razor) and these manual forms don't render on TV. *@
     @if (Env.IsTv)
     {
         <DevicePairing />
-        <div class="device-pair-divider"><span>or sign in on this device</span></div>
     }
-
+    else
+    {
     @if (Native.IsSupported)
     {
         @* Native head: the password grant / OAuth run through INativeAuth (no
@@ -102,9 +103,10 @@
     <div id="malRegister" class="kitsu-register" style="display:@(IsMal ? "block" : "none")">
         <a href="https://myanimelist.net/register.php" target="_blank" rel="noopener noreferrer" class="hint-text">Don't have a MyAnimeList account? <span class="kitsu-register-link">Create one ↗</span></a>
     </div>
+    }
 </div>
 
-@if (AllowAnonymous)
+@if (!Env.IsTv && AllowAnonymous)
 {
     <p class="hint-text">Login to your anime list provider to get started.</p>
 
