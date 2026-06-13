@@ -13,9 +13,9 @@
         <div class="stream-option">
             <span class="option-name">Default subtitle language</span>
             <select class="custom-select" @onchange="OnSubtitleChanged" disabled="@_busy">
-                @foreach (var (code, name) in PlaybackLanguages.Options)
+                @foreach (var (langCode, name) in PlaybackLanguages.Options)
                 {
-                    <option value="@code" selected="@(code == _subtitle)">@name</option>
+                    <option value="@langCode" selected="@(langCode == _subtitle)">@name</option>
                 }
             </select>
         </div>
@@ -24,9 +24,9 @@
             <div class="stream-option">
                 <span class="option-name">Default audio language</span>
                 <select class="custom-select" @onchange="OnAudioChanged" disabled="@_busy">
-                    @foreach (var (code, name) in PlaybackLanguages.Options)
+                    @foreach (var (langCode, name) in PlaybackLanguages.Options)
                     {
-                        <option value="@code" selected="@(code == _audio)">@name</option>
+                        <option value="@langCode" selected="@(langCode == _audio)">@name</option>
                     }
                 </select>
             </div>
