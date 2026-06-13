@@ -523,7 +523,14 @@ else
 
     // The id is a movie / series (the ?type= query was present). Drives the whole
     // video-detail rendering branch; mirrors the original's isVideo.
-    private bool IsVideo => _typeQuery == "movie" || _typeQuery == "series";
+    // An anime-scheme id (anilist:/mal:/kitsu:) is ALWAYS anime, even if a stray ?type=series
+    // rode in on the link — otherwise the video/Trakt path tries to resolve an AniList id and
+    // dead-ends on "couldn't load this title". Mirrors the server's id→type resolution.
+    private bool IsVideo => (_typeQuery == "movie" || _typeQuery == "series") && !IsAnimeSchemeId;
+    private bool IsAnimeSchemeId =>
+        Id.StartsWith("anilist:", StringComparison.OrdinalIgnoreCase)
+        || Id.StartsWith("mal:", StringComparison.OrdinalIgnoreCase)
+        || Id.StartsWith("kitsu:", StringComparison.OrdinalIgnoreCase);
     // The Trakt media type stamped on the pill / heart / hide triggers (the original's
     // traktPillType / heartMediaType / hideMediaType for video).
     private string VideoMediaType => _typeQuery == "movie" ? "movie" : "series";
