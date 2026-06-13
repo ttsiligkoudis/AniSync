@@ -573,6 +573,12 @@ public sealed class AniSyncApi : IAniSyncApi
     public Task<bool> SaveDashboardLayoutAsync(string layoutJson, CancellationToken ct = default)
         => PostForOk("api/v1/me/dashboard-layout", new { layout = layoutJson }, ct);
 
+    public Task<PlaybackLanguagesDto?> GetPlaybackLanguagesAsync(CancellationToken ct = default)
+        => GetOrDefault<PlaybackLanguagesDto>("api/v1/me/playback-languages", ct);
+
+    public Task<bool> SavePlaybackLanguagesAsync(string? audio, string? subtitle, CancellationToken ct = default)
+        => PostForOk("api/v1/me/playback-languages", new { audio, subtitle }, ct);
+
     // ── Notifications (bulk + delete) ────────────────────────────────────────
 
     public Task MarkNotificationsBulkReadAsync(IReadOnlyList<long> ids, CancellationToken ct = default)

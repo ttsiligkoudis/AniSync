@@ -2048,6 +2048,50 @@ namespace AnimeList.Controllers
             }
         }
 
+        /// <summary>Preferred default playback languages (audio + subtitle, ISO 639-1). Null fields mean
+        /// "English default" — the client treats a missing value as "en".</summary>
+        [HttpGet("playback-languages")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(PlaybackLanguagesDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetPlaybackLanguages()
+        {
+            try
+            {
+                var configuration = await ResolveConfigAsync(ResolvedConfig, _configStore);
+                var uid = configuration?.tokenUid;
+                if (string.IsNullOrEmpty(uid)) return new JsonResult(new PlaybackLanguagesDto(null, null));
+                var ws = await _configStore.GetWebSettingsAsync(uid);
+                return new JsonResult(new PlaybackLanguagesDto(ws?.DefaultAudioLanguage, ws?.DefaultSubtitleLanguage));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API GetPlaybackLanguages failed.");
+                return StatusCode(500, new ApiError("playback-languages lookup failed"));
+            }
+        }
+
+        /// <summary>Persists the preferred default audio + subtitle languages. Requires a stored (v5)
+        /// config; inline configs have nowhere to persist to (no-op).</summary>
+        [HttpPost("playback-languages")]
+        [RequireConfig]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        public async Task<IActionResult> SetPlaybackLanguages([FromBody] PlaybackLanguagesDto body)
+        {
+            try
+            {
+                var configuration = await ResolveConfigAsync(ResolvedConfig, _configStore);
+                var uid = configuration?.tokenUid;
+                if (!string.IsNullOrEmpty(uid) && body is not null)
+                    await _configStore.SetPlaybackLanguagesAsync(uid, body.Audio, body.Subtitle);
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API SetPlaybackLanguages failed.");
+                return StatusCode(500, new ApiError("playback-languages save failed"));
+            }
+        }
+
         // ── Watch: episode streams / subtitles / mark-watched / scrobble ──────
         // Header-authed (X-AniSync-Config) twin of the MVC MetaController.Web.cs
         // /meta/* enrichment surface (which is session-authed and filtered out of
@@ -2522,6 +2566,9 @@ namespace AnimeList.Controllers
     public record DashboardLayoutResponse(string? Layout);
     /// <summary>Body for POST /api/v1/me/dashboard-layout — the serialized [{key,visible}] array.</summary>
     public record DashboardLayoutSaveRequest(string? Layout);
+    /// <summary>Preferred default playback languages (ISO 639-1) — GET/POST /api/v1/me/playback-languages.
+    /// Null means "English default".</summary>
+    public record PlaybackLanguagesDto(string? Audio, string? Subtitle);
 
     /// <summary>Per-user detail-page state — GET /api/v1/me/state/{id}. Drives the
     /// hero's user-state pill, the quick-add heart, and the Hide / Unhide button.

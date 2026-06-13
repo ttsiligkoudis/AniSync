@@ -84,6 +84,10 @@ public sealed class Html5MediaPlayer : IMediaPlayer, IAsyncDisposable
                     ?? Environment.GetEnvironmentVariable("CORS_PROXY_URL") ?? string.Empty).Trim(),
                 corsProxySecret = (_config["CORS_PROXY_SECRET"]
                     ?? Environment.GetEnvironmentVariable("CORS_PROXY_SECRET") ?? string.Empty).Trim(),
+                // Preferred subtitle language (account setting; English default) — drives the embedded-MKV
+                // worker's track pick and the OS-subtitle default, both falling back to English.
+                subtitleLanguage = string.IsNullOrWhiteSpace(request.PreferredSubtitleLanguage)
+                    ? "en" : request.PreferredSubtitleLanguage,
             });
             await _js.InvokeVoidAsync("anisyncWatch.play", ct, VideoElementId, options, _ref);
         }

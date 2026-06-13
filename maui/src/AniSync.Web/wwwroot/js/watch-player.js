@@ -37,6 +37,9 @@ window.anisyncWatch = (function () {
         clientHeader: 'X-AniSync-Client', clientValue: 'anisync-app',
         corsProxyUrl: '', corsProxySecret: '',
         skipTimes: null,
+        // Preferred subtitle language (ISO 639-1, account setting). The embedded-MKV worker + the OS
+        // default both target this, falling back to English. Seeded by Html5MediaPlayer.setContext.
+        subtitleLanguage: 'en',
     };
 
     function setContext(next) {
@@ -45,6 +48,35 @@ window.anisyncWatch = (function () {
         // Normalise the API base to a trailing-slash-free origin so the URL
         // builders below can `apiBase + '/api/v1/...'` uniformly.
         if (ctx.apiBase) ctx.apiBase = String(ctx.apiBase).replace(/\/+$/, '');
+    }
+
+    // ── Language matching (preferred subtitle language, fallback English) ──────
+    var LANG_THREE_TO_TWO = {
+        eng: 'en', jpn: 'ja', spa: 'es', fra: 'fr', fre: 'fr', deu: 'de', ger: 'de', ita: 'it',
+        por: 'pt', rus: 'ru', zho: 'zh', chi: 'zh', kor: 'ko', ara: 'ar', hin: 'hi', nld: 'nl',
+        dut: 'nl', pol: 'pl', tur: 'tr', swe: 'sv', ind: 'id', tha: 'th', vie: 'vi',
+    };
+    var LANG_WORDS = {
+        en: 'english', ja: 'japanese', es: 'spanish', fr: 'french', de: 'german', it: 'italian',
+        pt: 'portuguese', ru: 'russian', zh: 'chinese', ko: 'korean', ar: 'arabic', hi: 'hindi',
+        nl: 'dutch', pl: 'polish', tr: 'turkish', sv: 'swedish', id: 'indonesian', th: 'thai', vi: 'vietnamese',
+    };
+    function langMatches(targetCode, code, name) {
+        var t = (targetCode || 'en').toLowerCase();
+        code = (code || '').toLowerCase().trim();
+        name = (name || '').toLowerCase();
+        if (code) {
+            if (code === t) return true;
+            if (code.indexOf(t + '-') === 0 || code.indexOf(t + '_') === 0) return true; // en-US / en_US
+            if (LANG_THREE_TO_TWO[code] === t) return true;                                // eng / jpn
+        }
+        var word = LANG_WORDS[t];
+        return !!word && name.indexOf(word) >= 0;
+    }
+    // Preferred language, then English (deduped).
+    function langFallback() {
+        var p = (ctx.subtitleLanguage || 'en').toLowerCase();
+        return p === 'en' ? ['en'] : [p, 'en'];
     }
 
     // Build a same-credential request to the AniSync API. Mirrors AniSyncApi's
@@ -666,10 +698,15 @@ window.anisyncWatch = (function () {
             var seenAnyCue = false;
             var earlyExited = false;
 
-            function isEnglishTrack(t) {
-                var l = (t.language || '').toLowerCase();
-                var n = (t.name || '').toLowerCase();
-                return l.indexOf('en') === 0 || /\benglish\b/.test(n) || /\beng\b/.test(n);
+            // Pick the embedded track in the preferred subtitle language, falling back to English.
+            function pickTrack(tracks) {
+                var langs = langFallback();
+                for (var li = 0; li < langs.length; li++) {
+                    for (var i = 0; i < tracks.length; i++) {
+                        if (langMatches(langs[li], tracks[i].language, tracks[i].name)) return tracks[i];
+                    }
+                }
+                return null;
             }
 
             parser.once('tracks', function (tracks) {
@@ -694,17 +731,14 @@ window.anisyncWatch = (function () {
                     }));
                 } catch (_) { }
 
-                var english = null;
-                for (var i = 0; i < trackMeta.length; i++) {
-                    if (isEnglishTrack(trackMeta[i])) { english = trackMeta[i]; break; }
-                }
-                if (english) { targetTrackNumber = english.number; trackMeta = [english]; }
+                var picked = pickTrack(trackMeta);
+                if (picked) { targetTrackNumber = picked.number; trackMeta = [picked]; }
                 else { targetTrackNumber = 0; trackMeta = []; }
 
                 if (trackMeta.length > 0) {
-                    setEmbedStatus('Found embedded ' + (english.label || 'English') + ' track — parsing cues…', 'loading');
+                    setEmbedStatus('Found embedded ' + (picked.label || 'subtitle') + ' track — parsing cues…', 'loading');
                 } else {
-                    setEmbedStatus('No English embedded subtitle in this file', 'none');
+                    setEmbedStatus('No matching embedded subtitle in this file', 'none');
                 }
                 onTracks(trackMeta);
 
@@ -1025,16 +1059,14 @@ window.anisyncWatch = (function () {
         // Default subtitle: first English entry when present, else None. We don't
         // fall back to the first non-English track — a surprise foreign overlay is
         // worse than none; the user can still pick any track manually.
+        // Default to the preferred subtitle language, then English (matched by code OR label — some sources
+        // tag the language oddly/blank but label the track "English N"), else none.
         var defaultSubIdx = -1;
-        for (var i = 0; i < osSubtitles.length; i++) {
-            var s = osSubtitles[i];
-            var lang = (s.lang || s.language || '').toLowerCase();
-            var label = (s.label || '').toLowerCase();
-            // Match the language code OR an English label — some sources tag the language oddly (or not at
-            // all) while labelling the track "English N", which previously left NO default selected and so
-            // showed no subtitles at all.
-            if (/^en/.test(lang) || /\beng?\b/.test(lang) || label.indexOf('english') >= 0 || /\beng?\b/.test(label)) {
-                defaultSubIdx = i; break;
+        var subLangs = langFallback();
+        for (var li = 0; li < subLangs.length && defaultSubIdx < 0; li++) {
+            for (var i = 0; i < osSubtitles.length; i++) {
+                var s = osSubtitles[i];
+                if (langMatches(subLangs[li], s.lang || s.language, s.label)) { defaultSubIdx = i; break; }
             }
         }
         if (defaultSubIdx >= 0) {
@@ -1232,21 +1264,21 @@ window.anisyncWatch = (function () {
             },
             function (full) {
                 embeddedTracks = full;
-                // Auto-promote ONLY an English embedded track (language tag OR
-                // TrackName — fansubs leave Language="und" but set the name).
-                var englishTrack = null;
-                for (var i = 0; i < full.length; i++) {
-                    var t = full[i];
-                    var lang = (t.language || '').toLowerCase();
-                    var name = (t.name || '').toLowerCase();
-                    if (lang.indexOf('en') === 0 || /\benglish\b/.test(name) || /\beng\b/.test(name)) { englishTrack = t; break; }
+                // Auto-promote the embedded track in the preferred subtitle language, falling back to
+                // English (language tag OR TrackName — fansubs leave Language="und" but set the name).
+                var promote = null;
+                var promoteLangs = langFallback();
+                for (var li = 0; li < promoteLangs.length && !promote; li++) {
+                    for (var i = 0; i < full.length; i++) {
+                        if (langMatches(promoteLangs[li], full[i].language, full[i].name)) { promote = full[i]; break; }
+                    }
                 }
-                if (englishTrack && englishTrack.data) {
-                    applySubtitle({ kind: 'ass', html: (englishTrack.label || 'Embedded') + ' SSA', trackData: englishTrack.data });
-                    try { console.info('[AniSync] embedded auto-promoted — ' + (englishTrack.cues || []).length + ' cues, OS pool size=' + osSubtitles.length); } catch (_) { }
-                    setupEmbeddedToOsHandover(englishTrack, osSubtitles, function () { refreshSubtitleSelector(buildSubtitleSelector); });
+                if (promote && promote.data) {
+                    applySubtitle({ kind: 'ass', html: (promote.label || 'Embedded') + ' SSA', trackData: promote.data });
+                    try { console.info('[AniSync] embedded auto-promoted — ' + (promote.cues || []).length + ' cues, OS pool size=' + osSubtitles.length); } catch (_) { }
+                    setupEmbeddedToOsHandover(promote, osSubtitles, function () { refreshSubtitleSelector(buildSubtitleSelector); });
                 } else {
-                    try { console.info('[AniSync] no English embedded track to auto-promote (full=' + full.length + ')'); } catch (_) { }
+                    try { console.info('[AniSync] no preferred/English embedded track to auto-promote (full=' + full.length + ')'); } catch (_) { }
                 }
                 refreshSubtitleSelector(buildSubtitleSelector);
             });

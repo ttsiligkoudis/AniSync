@@ -4,6 +4,8 @@ using Microsoft.Maui.Controls.Shapes;
 // Alias (not a namespace import) — LibVLCSharp.Shared also defines a SubtitleTrack, so a plain
 // `using AniSync.Client.Services;` makes the name ambiguous (CS0104).
 using SubtitleTrack = AniSync.Client.Services.SubtitleTrack;
+// Alias (not a full namespace import) for the same reason as SubtitleTrack above.
+using PlaybackLanguages = AniSync.Client.Services.PlaybackLanguages;
 
 namespace AniSync.Maui;
 
@@ -74,9 +76,11 @@ public sealed class VlcPlayerPage : ContentPage
     private readonly IReadOnlyList<SubtitleTrack> _externalSubs;
     private HashSet<int>? _embeddedSpuIds;   // SPU ids from the media file, captured before any slave is added
     private string? _selectedExternalUrl;    // url of the external sub the user attached (drives the check)
-    private bool _defaultSubScheduled;       // one-shot guard for the English-default pass
+    private bool _defaultSubScheduled;       // one-shot guard for the default-track pass
     private bool _userPickedSub;             // the user chose a subtitle → don't override with the default
     private bool _userPickedAudio;           // the user chose an audio track → don't override with the default
+    private readonly string _preferredAudioLang; // ISO 639-1 (account setting; "en" default)
+    private readonly string _preferredSubLang;
 
     private bool _seeking;
     private ScaleMode _scaleMode = ScaleMode.Fit;
@@ -85,10 +89,13 @@ public sealed class VlcPlayerPage : ContentPage
 
     private enum ScaleMode { Fit, Crop, Fill, SixteenNine, FourThree }
 
-    public VlcPlayerPage(MediaPlayer player, string title, IReadOnlyList<SubtitleTrack>? externalSubs = null)
+    public VlcPlayerPage(MediaPlayer player, string title, IReadOnlyList<SubtitleTrack>? externalSubs = null,
+        string? preferredAudioLang = null, string? preferredSubLang = null)
     {
         _player = player;
         _externalSubs = externalSubs ?? Array.Empty<SubtitleTrack>();
+        _preferredAudioLang = PlaybackLanguages.Normalize(preferredAudioLang);
+        _preferredSubLang = PlaybackLanguages.Normalize(preferredSubLang);
         Title = title;
         BackgroundColor = Colors.Black;
         NavigationPage.SetHasNavigationBar(this, false);
@@ -443,47 +450,58 @@ public sealed class VlcPlayerPage : ContentPage
         try { DeviceDisplay.Current.KeepScreenOn = on; } catch { /* unsupported / not ready */ }
     }
 
-    // Default the subtitle to English, matching the web head. libVLC auto-selects the file's default SPU
-    // (which "opened on French" for the reported title); instead prefer an external OS English sub (what
-    // the web defaults to), then an embedded English track, otherwise OFF — never a surprise foreign track.
+    // Default the subtitle track. libVLC auto-selects the file's default SPU (which "opened on French");
+    // instead honour the user's preferred subtitle language, falling back to English, then OFF — never a
+    // surprise foreign track. External OS subs and embedded SPU tracks are both considered, in that order.
     private void ApplyDefaultSubtitle()
     {
         if (_userPickedSub || _selectedExternalUrl is not null) return; // user already chose
         try
         {
-            var engExternal = _externalSubs.FirstOrDefault(s => IsEnglish(s.Language, s.Label));
-            if (engExternal is not null) { AttachExternalSub(engExternal.Url); return; }
-
-            foreach (var t in _player.SpuDescription)
+            foreach (var lang in PreferredThenEnglish(_preferredSubLang))
             {
-                if (t.Id == -1) continue;
-                if (IsEnglish(null, t.Name)) { _player.SetSpu(t.Id); return; }
+                var ext = _externalSubs.FirstOrDefault(s => LangMatches(lang, s.Language, s.Label));
+                if (ext is not null) { AttachExternalSub(ext.Url); return; }
+
+                foreach (var t in _player.SpuDescription)
+                    if (t.Id != -1 && LangMatches(lang, null, t.Name)) { _player.SetSpu(t.Id); return; }
             }
-            _player.SetSpu(-1); // no English anywhere → off, like the web
+            _player.SetSpu(-1); // nothing in the preferred language or English → off, like the web
         }
         catch { /* tracks not parsed yet */ }
     }
 
-    // Preselect the English audio track when the media has one (e.g. a dual-audio release defaulting to
-    // Japanese/French). If there's no English track, leave libVLC's default — unlike subtitles we never
-    // turn audio off.
+    // Preselect the audio track in the preferred language (e.g. a dual-audio release defaulting to
+    // Japanese), falling back to English. If neither exists, leave libVLC's default (first track) — unlike
+    // subtitles we never turn audio off.
     private void ApplyDefaultAudio()
     {
         if (_userPickedAudio) return;
         try
         {
             var current = _player.AudioTrack;
-            foreach (var t in _player.AudioTrackDescription)
+            foreach (var lang in PreferredThenEnglish(_preferredAudioLang))
             {
-                if (t.Id == -1) continue; // the "Disable" pseudo-track
-                if (IsEnglish(null, t.Name))
+                foreach (var t in _player.AudioTrackDescription)
                 {
-                    if (t.Id != current) _player.SetAudioTrack(t.Id);
-                    return;
+                    if (t.Id == -1) continue; // the "Disable" pseudo-track
+                    if (LangMatches(lang, null, t.Name))
+                    {
+                        if (t.Id != current) _player.SetAudioTrack(t.Id);
+                        return;
+                    }
                 }
             }
         }
         catch { /* tracks not parsed yet */ }
+    }
+
+    // The preferred language, then English as the fallback (deduped) — the lookup order both defaults use.
+    private static IEnumerable<string> PreferredThenEnglish(string? preferred)
+    {
+        var p = PlaybackLanguages.Normalize(preferred);
+        yield return p;
+        if (p != PlaybackLanguages.Default) yield return PlaybackLanguages.Default;
     }
 
     // Attach an external subtitle off the UI thread. AddSlave fetches the file, and doing that on the UI
@@ -499,12 +517,22 @@ public sealed class VlcPlayerPage : ContentPage
         });
     }
 
-    private static bool IsEnglish(string? code, string? label)
+    // Does a track (its language code and/or display name) belong to the target language? Matches the
+    // 2-letter code, the 3-letter/long variants via the LangNames map, and the language name in the label.
+    private static bool LangMatches(string targetCode, string? trackCode, string? trackName)
     {
-        var c = (code ?? "").Trim().ToLowerInvariant();
-        if (c is "en" or "eng" || c.StartsWith("en-") || c.StartsWith("en_")) return true;
-        var l = (label ?? "").ToLowerInvariant();
-        return l.Contains("english") || System.Text.RegularExpressions.Regex.IsMatch(l, @"\beng?\b");
+        var target = PlaybackLanguages.Normalize(targetCode);
+        var targetName = (LangNames.TryGetValue(target, out var tn) ? tn : PlaybackLanguages.DisplayName(target)).ToLowerInvariant();
+
+        var code = (trackCode ?? "").Trim().ToLowerInvariant();
+        if (code.Length > 0)
+        {
+            if (code == target) return true;
+            if (code.Length > 2 && code[..2] == target) return true;                       // "en-US" → "en"
+            if (LangNames.TryGetValue(code, out var cn) && cn.ToLowerInvariant() == targetName) return true; // "eng"/"jpn"
+        }
+        var name = (trackName ?? "").ToLowerInvariant();
+        return targetName.Length > 0 && name.Contains(targetName);
     }
 
     private static void SetImmersive(bool on)

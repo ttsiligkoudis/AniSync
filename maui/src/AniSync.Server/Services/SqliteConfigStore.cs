@@ -193,6 +193,9 @@ namespace AnimeList.Services
             // Web-UI preference columns (see CREATE TABLE comment).
             EnsureColumn(conn, "configs", "enabled_media_types", "TEXT");
             EnsureColumn(conn, "configs", "dashboard_layout", "TEXT");
+            // Preferred default playback languages (ISO 639-1; null = English default).
+            EnsureColumn(conn, "configs", "default_audio_lang", "TEXT");
+            EnsureColumn(conn, "configs", "default_subtitle_lang", "TEXT");
 
             // Created after EnsureColumn so it works on databases that predate the
             // trakt_user_key column (the CREATE TABLE block above won't add a column to
@@ -622,7 +625,7 @@ namespace AnimeList.Services
 
             using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT enabled_media_types, dashboard_layout FROM configs WHERE uid = $uid LIMIT 1";
+            cmd.CommandText = "SELECT enabled_media_types, dashboard_layout, default_audio_lang, default_subtitle_lang FROM configs WHERE uid = $uid LIMIT 1";
             cmd.Parameters.AddWithValue("$uid", uid);
             using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
@@ -630,6 +633,8 @@ namespace AnimeList.Services
                 {
                     EnabledMediaTypes = r.IsDBNull(0) ? null : r.GetString(0),
                     DashboardLayout = r.IsDBNull(1) ? null : r.GetString(1),
+                    DefaultAudioLanguage = r.IsDBNull(2) ? null : r.GetString(2),
+                    DefaultSubtitleLanguage = r.IsDBNull(3) ? null : r.GetString(3),
                 };
             return new WebSettings();
         }
@@ -639,6 +644,12 @@ namespace AnimeList.Services
 
         public Task SetDashboardLayoutAsync(string uid, string json) =>
             SetWebSettingColumnAsync(uid, "dashboard_layout", json);
+
+        public async Task SetPlaybackLanguagesAsync(string uid, string audioLang, string subtitleLang)
+        {
+            await SetWebSettingColumnAsync(uid, "default_audio_lang", audioLang);
+            await SetWebSettingColumnAsync(uid, "default_subtitle_lang", subtitleLang);
+        }
 
         // Shared single-column update for the web-UI preference columns. The
         // column name is a fixed internal literal (never user input), so the
