@@ -975,6 +975,7 @@ public sealed class VlcPlayerPage : ContentPage
         ["es"] = "Spanish", ["spa"] = "Spanish",
         ["fr"] = "French", ["fra"] = "French", ["fre"] = "French",
         ["de"] = "German", ["deu"] = "German", ["ger"] = "German",
+        ["el"] = "Greek", ["ell"] = "Greek", ["gre"] = "Greek",
         ["it"] = "Italian", ["ita"] = "Italian",
         ["pt"] = "Portuguese", ["por"] = "Portuguese",
         ["ru"] = "Russian", ["rus"] = "Russian",
