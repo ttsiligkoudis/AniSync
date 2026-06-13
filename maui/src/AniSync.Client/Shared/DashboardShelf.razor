@@ -138,7 +138,10 @@
         if (_scroll is null) return;
 
         // The sentinel only exists while the row is rendered with more pages to come.
-        var sentinelRendered = !_loading && !_done && _items.Count > 0;
+        // Include _visible: when the media-type filter hides this shelf the row (and sentinel)
+        // is torn out of the DOM, so the listener must drop and re-attach to the fresh row when
+        // the shelf comes back — otherwise it's left bound to a destroyed element.
+        var sentinelRendered = _visible && !_loading && !_done && _items.Count > 0;
         if (sentinelRendered && _observerId == 0)
         {
             try { _observerId = await _scroll.InvokeAsync<int>("observe", _sentinel, _selfRef); } catch { }
