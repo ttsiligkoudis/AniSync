@@ -1,11 +1,13 @@
 @inject IAppEnvironment Env
+@inject IJSRuntime JS
+@implements IAsyncDisposable
 
 @* Default playback languages (per-account, synced). Subtitle applies to both heads; audio is the
    native player only (the browser can't switch audio tracks). Controlled by the Account page, which
    owns the values and persists them on the shared "Save changes" bar — changing a dropdown only marks
-   the form dirty. The selects bind to local fields (synced from the params in OnParametersSet) with
-   plain @bind, so Blazor reliably applies the select value even though the DB value loads async after
-   the options render; @bind:after bubbles the pick up to the page. *@
+   the form dirty. The DOM <select> value is set explicitly via JS after render (lang-select.js):
+   Blazor's value binding leaves a native select blank when the value loads async / across prerender,
+   so we pin it ourselves once the options exist. @onchange bubbles the pick up to the page. *@
 <section class="section-card">
     <span class="section-title">Playback languages</span>
     <p class="section-description">
@@ -15,7 +17,7 @@
     <div class="streams-grid">
         <div class="stream-option">
             <span class="option-name">Default subtitle language</span>
-            <select class="lang-select" @bind="_subtitle" @bind:after="PushSubtitle">
+            <select class="lang-select" @ref="_subRef" @onchange="OnSubtitleChanged">
                 @foreach (var (langCode, name) in PlaybackLanguages.Options)
                 {
                     <option value="@langCode">@name</option>
@@ -26,7 +28,7 @@
         {
             <div class="stream-option">
                 <span class="option-name">Default audio language</span>
-                <select class="lang-select" @bind="_audio" @bind:after="PushAudio">
+                <select class="lang-select" @ref="_audRef" @onchange="OnAudioChanged">
                     @foreach (var (langCode, name) in PlaybackLanguages.Options)
                     {
                         <option value="@langCode">@name</option>
@@ -45,6 +47,9 @@
 
     private string _audio = PlaybackLanguages.Default;
     private string _subtitle = PlaybackLanguages.Default;
+    private ElementReference _subRef;
+    private ElementReference _audRef;
+    private IJSObjectReference? _js;
 
     protected override void OnParametersSet()
     {
@@ -52,6 +57,37 @@
         _subtitle = PlaybackLanguages.Normalize(Subtitle);
     }
 
-    private Task PushSubtitle() => SubtitleChanged.InvokeAsync(_subtitle);
-    private Task PushAudio() => AudioChanged.InvokeAsync(_audio);
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!RendererInfo.IsInteractive) return;
+        try
+        {
+            _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/lang-select.js");
+            await _js.InvokeVoidAsync("setValue", _subRef, _subtitle);
+            if (Env.SupportsNativePlayback) await _js.InvokeVoidAsync("setValue", _audRef, _audio);
+        }
+        catch { /* prerender / disposed circuit */ }
+    }
+
+    // Update the local value first (so the post-render JS pin matches the user's pick with no flicker),
+    // then bubble it up to the page to mark the form dirty.
+    private Task OnSubtitleChanged(ChangeEventArgs e)
+    {
+        _subtitle = PlaybackLanguages.Normalize(e.Value?.ToString());
+        return SubtitleChanged.InvokeAsync(_subtitle);
+    }
+
+    private Task OnAudioChanged(ChangeEventArgs e)
+    {
+        _audio = PlaybackLanguages.Normalize(e.Value?.ToString());
+        return AudioChanged.InvokeAsync(_audio);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_js is not null)
+        {
+            try { await _js.DisposeAsync(); } catch { }
+        }
+    }
 }
