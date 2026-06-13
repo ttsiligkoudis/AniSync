@@ -11,9 +11,10 @@
    and reuses its nav-icon SVGs, but drops the search/theme/auth-CTA clutter for a
    Stremio-style minimal rail. *@
 <nav class="tv-rail" aria-label="Primary">
-    <a class="tv-rail-logo" href="/" aria-label="AniSync home">
-        <img src="_content/AniSync.Client/img/logo-96.png" alt="AniSync" width="44" height="44" decoding="async" />
-    </a>
+    @* Decorative only — not a link/button (Home already goes home), so the D-pad skips it. *@
+    <div class="tv-rail-logo" aria-hidden="true">
+        <img src="_content/AniSync.Client/img/logo-96.png" alt="" width="44" height="44" decoding="async" />
+    </div>
 
     <div class="tv-rail-items">
         <a href="/" class="tv-rail-item @Cls("home")">
@@ -23,10 +24,17 @@
             </svg>
             <span class="tv-rail-label">Home</span>
         </a>
-        <a href="/discover" class="tv-rail-item @Cls("discover")">
+        <a href="/search" class="tv-rail-item @Cls("search")">
             <svg class="tv-rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <circle cx="11" cy="11" r="8"></circle>
                 <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <span class="tv-rail-label">Search</span>
+        </a>
+        <a href="/discover" class="tv-rail-item @Cls("discover")">
+            <svg class="tv-rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88"></polygon>
             </svg>
             <span class="tv-rail-label">Discover</span>
         </a>
