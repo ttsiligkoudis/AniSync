@@ -8446,7 +8446,7 @@ ol.anime-detail-episodes-busy {
    spatial nav skips those, so they're never a real selection; zooming one made
    the page title balloon into a "selected" white box on load. Exclude
    tabindex="-1" (nav/scroll targets) from the focus zoom. */
-.tv-mode :focus:not([tabindex="-1"]) {
+.tv-mode :focus:not([tabindex="-1"]):not(button):not([role="button"]):not([class*="btn"]):not(.library-tab) {
     outline: none;
     /* A gentle lift, no drop-shadow — the focused element grows a touch AND its
        text enlarges so the selection reads clearly from the couch without a
@@ -8457,6 +8457,19 @@ ol.anime-detail-episodes-busy {
     transition: transform 120ms ease-out;
     position: relative;
     z-index: 5;
+}
+
+/* Buttons and pills (real <button>s, btn-* classes, [role=button], the library
+   tabs) keep their OWN focus affordance rather than the zoom/enlarge — scaling
+   a control reads as wrong; the accent ring is what the design uses elsewhere.
+   :focus-visible is unreliable for the D-pad's programmatic focus inside a TV
+   WebView, so paint the same accent outline on plain :focus for these. */
+.tv-mode button:focus,
+.tv-mode [role="button"]:focus,
+.tv-mode [class*="btn"]:focus,
+.tv-mode .library-tab:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 
 /* Dedicated /search page — give the reused header typeahead room to breathe. */
