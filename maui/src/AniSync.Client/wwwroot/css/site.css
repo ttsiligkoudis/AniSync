@@ -8521,6 +8521,25 @@ ol.anime-detail-episodes-busy {
     font-size: 0.82rem;
 }
 
+/* Stream sources panel — the stream rows (.episode-stream-pick) and the refresh / open buttons
+   (.episode-stream-action) already have their own :focus styling, and the filter pills mirror
+   their hover; so just drop the global focus zoom. The pick/action have no explicit font-size
+   (inherit restores their natural size); the filter pills do (0.78rem), so set it back explicitly
+   rather than letting inherit enlarge them. */
+.tv-mode .episode-stream-pick:focus,
+.tv-mode .episode-stream-action:focus {
+    transform: none;
+    font-size: inherit;
+}
+.tv-mode .episode-stream-filter:focus {
+    transform: none;
+    font-size: 0.78rem;
+}
+.tv-mode .episode-stream-filter:focus:not(.is-active) {
+    color: var(--text-2);
+    border-color: var(--overlay-15);
+}
+
 /* Media-type modal ("What do you want to watch?") — behave like tv=0: no zoom/
    enlarge. A plain focus ring marks the selection. It MUST be inset
    (outline-offset negative) — .mt-modal-card has overflow:hidden, so a normal
