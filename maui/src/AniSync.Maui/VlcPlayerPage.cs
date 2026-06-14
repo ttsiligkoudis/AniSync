@@ -56,6 +56,7 @@ public sealed class VlcPlayerPage : ContentPage
     private readonly View _transport;          // centre rewind/play/forward — hidden while the spinner is up
     private readonly Label _position;
     private readonly Label _duration;
+    private readonly Label _resLabel;   // resolution / "4K" indicator in the top bar
     private readonly Grid _controls;
     private readonly Grid _sheetOverlay;
     private readonly Label _sheetTitle;
@@ -70,6 +71,11 @@ public sealed class VlcPlayerPage : ContentPage
     // Android TV / Google TV is driven by a D-pad remote — there's no tap to bring the chrome back, so we
     // never auto-hide it there, and we move focus onto the play button so the remote has a landing spot.
     private readonly bool _isTv = DeviceInfo.Current.Idiom == DeviceIdiom.TV;
+
+    // Set by the foreground TV player so MainActivity.DispatchKeyEvent can route remote D-pad/OK keys
+    // here: when the chrome has auto-hidden, the first press re-summons it (and is swallowed). Returns
+    // true when it consumed the press. Null whenever no TV player is foreground.
+    internal static Func<bool>? TvWakeOnKey;
 
     // External subtitle tracks (proxied OpenSubtitles URLs + real language labels) from the API. Shown in the
     // sheet up-front and attached to libVLC on demand when picked — they aren't pre-loaded as slaves.
@@ -135,16 +141,30 @@ public sealed class VlcPlayerPage : ContentPage
             HorizontalOptions = LayoutOptions.End,
         };
 
+        // Decoded-stream resolution ("4K" / "1080p" …), filled once playback starts. Confirms at a
+        // glance whether a 4K source is actually being decoded at 4K (the "true Ultra HD?" question).
+        _resLabel = new Label
+        {
+            Text = "",
+            TextColor = Colors.White,
+            FontSize = 11,
+            FontAttributes = FontAttributes.Bold,
+            VerticalOptions = LayoutOptions.Center,
+            HorizontalOptions = LayoutOptions.End,
+        };
+
         var topBar = new Grid
         {
-            ColumnDefinitions = { new(GridLength.Auto), new(GridLength.Star), new(GridLength.Auto) },
+            ColumnDefinitions = { new(GridLength.Auto), new(GridLength.Star), new(GridLength.Auto), new(GridLength.Auto) },
+            ColumnSpacing = 10,
             Padding = new Thickness(4, 0, 12, 0),
             BackgroundColor = Scrim,
             VerticalOptions = LayoutOptions.Start,
         };
         topBar.Add(back, 0, 0);
         topBar.Add(titleLabel, 1, 0);
-        topBar.Add(buildLabel, 2, 0);
+        topBar.Add(_resLabel, 2, 0);
+        topBar.Add(buildLabel, 3, 0);
 
         // ── Centre transport: rewind 30s · play/pause · forward 30s (uniform size) ─
         var rewind = GlyphButton(IcReplay30, 32, 60);
@@ -326,6 +346,7 @@ public sealed class VlcPlayerPage : ContentPage
         _player.Playing += (_, _) => Dispatcher.Dispatch(() =>
         {
             _playPause.Text = IcPause; SetLoading(false); KeepAwake(true); RestartHideTimer();
+            ShowResolution();
             if (_isTv) _playPause.Focus();
             // Default the subtitle to English (matching the web) once tracks have had a moment to parse.
             if (!_defaultSubScheduled) { _defaultSubScheduled = true; Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(700), () => { ApplyDefaultSubtitle(); ApplyDefaultAudio(); }); }
@@ -348,6 +369,8 @@ public sealed class VlcPlayerPage : ContentPage
     protected override void OnAppearing()
     {
         base.OnAppearing();
+        // TV only: let the Android activity route remote keys here so a hidden chrome can be re-summoned.
+        if (_isTv) TvWakeOnKey = OnTvWakeKey;
         SetImmersive(true);
         ApplyImmersiveToView();
         // The player opens on the loading spinner — hold the screen on from the start.
@@ -378,6 +401,8 @@ public sealed class VlcPlayerPage : ContentPage
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
+        // Stop routing remote keys here once this player is gone (only one is ever foreground).
+        if (_isTv) TvWakeOnKey = null;
         if (_window is not null)
         {
             _window.Stopped -= OnWindowStopped;
@@ -603,9 +628,26 @@ public sealed class VlcPlayerPage : ContentPage
     private void RestartHideTimer()
     {
         _hideTimer.Stop();
-        // On a TV the remote can't tap to re-summon hidden controls, so keep them up.
-        if (_player.IsPlaying && !_sheetOverlay.IsVisible && !_isTv)
+        // Auto-hide while playing (TV included now): a remote re-summons the chrome via the wake-key
+        // hook (MainActivity.DispatchKeyEvent → OnTvWakeKey), so hidden controls are no longer a dead end.
+        if (_player.IsPlaying && !_sheetOverlay.IsVisible)
             _hideTimer.Start();
+    }
+
+    // Remote key while a TV player is foreground (called from MainActivity on the UI thread). When the
+    // chrome has auto-hidden, the first D-pad/OK press just brings it back (focused on play) and is
+    // swallowed; otherwise it keeps the chrome up a little longer and falls through to the focused control.
+    private bool OnTvWakeKey()
+    {
+        if (_sheetOverlay.IsVisible) { RestartHideTimer(); return false; }
+        if (!_controls.IsVisible)
+        {
+            ShowControls();
+            try { _playPause.Focus(); } catch { /* not realized */ }
+            return true;
+        }
+        RestartHideTimer();
+        return false;
     }
 
     private void StopHideTimer() => _hideTimer.Stop();
@@ -1026,6 +1068,31 @@ public sealed class VlcPlayerPage : ContentPage
     {
         _position.Text = Format(_player.Time);
         _duration.Text = Format(_player.Length);
+    }
+
+    // Read the decoded video size from libVLC (available a beat after the first frame) and show a
+    // resolution / "4K" badge in the top bar. Confirms whether a 4K source is actually decoding at 4K.
+    private void ShowResolution()
+    {
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(900), () =>
+        {
+            try
+            {
+                uint w = 0, h = 0;
+                if (_player.Size(0, ref w, ref h) && h > 0)
+                    _resLabel.Text = ResLabel((int)w, (int)h);
+            }
+            catch { /* size not exposed yet — leave the badge blank */ }
+        });
+    }
+
+    private static string ResLabel(int w, int h)
+    {
+        if (w >= 3840 || h >= 2160) return "4K";
+        if (h >= 1440) return "1440p";
+        if (h >= 1080) return "1080p";
+        if (h >= 720) return "720p";
+        return h > 0 ? $"{h}p" : "";
     }
 
     private static string Format(long ms)
