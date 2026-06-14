@@ -102,6 +102,20 @@ public sealed class AppState
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// Web-only TV-preview override. The native head decides TV via DeviceIdiom; on the web
+    /// <see cref="IAppEnvironment.IsTv"/> reads this so a browser can preview the full 10-foot
+    /// shell with <c>?tv=1</c> (and <c>?tv=0</c> to exit). Never set by default — strictly opt-in.
+    /// </summary>
+    public bool ForceTv { get; private set; }
+
+    public void SetForceTv(bool on)
+    {
+        if (ForceTv == on) return;
+        ForceTv = on;
+        Changed?.Invoke();
+    }
+
     public event Action? Changed;
 
     /// <summary>Raised when the header's mode button asks to reopen the chooser.</summary>

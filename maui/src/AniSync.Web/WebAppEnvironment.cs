@@ -18,15 +18,19 @@ public sealed class WebAppEnvironment : IAppEnvironment
 {
     private readonly NavigationManager _nav;
     private readonly string? _override;
+    private readonly AppState _state;
 
-    public WebAppEnvironment(NavigationManager nav, IConfiguration config)
+    public WebAppEnvironment(NavigationManager nav, IConfiguration config, AppState state)
     {
         _nav = nav;
         _override = config["ApiBaseUrl"];
+        _state = state;
     }
 
     public string ApiBaseUrl => string.IsNullOrWhiteSpace(_override) ? _nav.BaseUri : _override;
     public bool IsNative => false;
     public bool SupportsNativePlayback => false;
-    public bool IsTv => false; // browser-on-TV is out of scope and can't be detected server-side
+    // Browser-on-TV can't be auto-detected server-side, but `?tv=1` opts into a full TV-shell
+    // preview: MainLayout sets AppState.ForceTv from the query / persisted flag. Off by default.
+    public bool IsTv => _state.ForceTv;
 }
