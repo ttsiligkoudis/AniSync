@@ -7025,7 +7025,8 @@ button.anime-detail-user-state {
     cursor: pointer;
 }
 
-button.anime-detail-user-state:hover {
+button.anime-detail-user-state:hover,
+.tv-mode button.anime-detail-user-state:focus {
     background: rgba(59, 130, 246, 0.2);
     border-color: rgba(59, 130, 246, 0.45);
 }
@@ -7063,7 +7064,8 @@ button.anime-detail-user-state:hover {
     transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
 }
 
-.anime-detail-heart:hover {
+.anime-detail-heart:hover,
+.tv-mode .anime-detail-heart:focus {
     background: rgba(244, 63, 94, 0.16);
     border-color: rgba(244, 63, 94, 0.4);
     color: #fda4af;
@@ -7090,7 +7092,8 @@ button.anime-detail-user-state:hover {
     fill: currentColor;
 }
 
-.anime-detail-heart-filled:hover {
+.anime-detail-heart-filled:hover,
+.tv-mode .anime-detail-heart-filled:focus {
     background: rgba(244, 63, 94, 0.26);
     border-color: rgba(244, 63, 94, 0.6);
     color: #fda4af;
@@ -7118,7 +7121,8 @@ button.anime-detail-user-state:hover {
     transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
-.anime-detail-hide:hover {
+.anime-detail-hide:hover,
+.tv-mode .anime-detail-hide:focus {
     background: var(--overlay-08);
     color: rgba(var(--ink-rgb), 0.9);
 }
@@ -7140,7 +7144,8 @@ button.anime-detail-user-state:hover {
     color: #fcd34d;
 }
 
-.anime-detail-hide-on:hover {
+.anime-detail-hide-on:hover,
+.tv-mode .anime-detail-hide-on:focus {
     background: rgba(245, 158, 11, 0.24);
     border-color: rgba(245, 158, 11, 0.55);
     color: #fde68a;
@@ -8504,6 +8509,16 @@ ol.anime-detail-episodes-busy {
 .tv-mode .mt-switch-btn:focus:not(.active) {
     color: var(--text-strong);
     background: var(--overlay-10);
+}
+
+/* Detail-page hero action buttons (status / Add-to-List pill, heart, hide) — focus shows their
+   existing :hover state (wired into each :hover rule above) instead of the global zoom. Cancel the
+   scale and restore the buttons' natural 0.82rem (the heart is icon-only, so size is moot there). */
+.tv-mode .anime-detail-user-state:focus,
+.tv-mode .anime-detail-heart:focus,
+.tv-mode .anime-detail-hide:focus {
+    transform: none;
+    font-size: 0.82rem;
 }
 
 /* Media-type modal ("What do you want to watch?") — behave like tv=0: no zoom/
