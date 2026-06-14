@@ -8472,6 +8472,15 @@ ol.anime-detail-episodes-busy {
     font-size: inherit;
 }
 
+/* Search inputs — .site-search-input already has its own :focus affordance (border +
+   background lift), so the global scale is redundant and just shoves the box around.
+   Drop only the transform: the TV search box's own font-size (.tv-mode .search-page
+   .site-search-input) already wins over the global font bump, so leave font-size alone
+   (forcing it here would fight that intentional larger size). */
+.tv-mode .site-search-input:focus {
+    transform: none;
+}
+
 /* Provider pills — focus mirrors the grey-background hover; the active (primary)
    pill keeps its accent fill rather than going grey. */
 .tv-mode .service-toggle .label:focus {
