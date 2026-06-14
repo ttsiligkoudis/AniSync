@@ -8499,6 +8499,13 @@ ol.anime-detail-episodes-busy {
     outline-offset: -2px;
 }
 
+/* No close (X) on TV — the D-pad has no easy target for it and Back already
+   dismisses the chooser; Continue is the affirmative action. Hiding it also
+   keeps the top-right corner clean and out of the focus order. */
+.tv-mode .mt-modal-close {
+    display: none;
+}
+
 /* Dedicated /search page — give the reused header typeahead room to breathe. */
 .search-page {
     max-width: 640px;
