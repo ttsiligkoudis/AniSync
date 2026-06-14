@@ -10118,6 +10118,14 @@ body.dash-page main {
     padding-bottom: 1.6rem;
     margin-top: -0.8rem;
     margin-bottom: -0.8rem;
+    /* The first tile sits at the scroller's left edge; at scrollLeft 0 it can't
+       grow further left, so the zoom clipped its left half (and it tucked under
+       the fixed rail). Indent the row and snap so the first tile has room to
+       lift into instead of being cut, mirrored on the right for the last tile. */
+    padding-left: 1rem;
+    padding-right: 1rem;
+    scroll-padding-left: 1rem;
+    scroll-padding-right: 1rem;
 }
 
 /* Tabs / media-type pills — a touch larger for legibility, not bulky. */
