@@ -275,6 +275,101 @@
         }
     }
 
+    // --- On-screen D-pad (touch testing aid) ------------------------------
+    // A phone in ?tv=1 preview can't send arrow keys, so draw a draggable virtual remote
+    // (▲▼◀▶ + OK) in the corner. Each press just fires the same keydown the spatial-nav layer
+    // already handles (OK clicks the focused element). Touch devices only — a desktop has real
+    // arrow keys — so it never shows on a real TV (no touch) or on desktop.
+    function setStyle(el, s) { for (var k in s) el.style[k] = s[k]; }
+
+    function dispatchKey(key) {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: key, code: key, bubbles: true, cancelable: true }));
+    }
+    function clickActive() {
+        var ae = document.activeElement;
+        if (ae && ae !== document.body && typeof ae.click === 'function') ae.click();
+    }
+
+    function remoteBtn(label, onPress, pos) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.tabIndex = -1; // keep it OUT of the spatial-nav focus set
+        b.textContent = label;
+        setStyle(b, {
+            position: 'absolute', width: '46px', height: '46px', borderRadius: '50%',
+            border: 'none', background: 'rgba(255,255,255,0.14)', color: '#fff',
+            fontSize: '18px', padding: '0', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+        });
+        setStyle(b, pos);
+        // Don't steal focus from the content — spatial nav must start from the focused tile.
+        b.addEventListener('pointerdown', function (e) { e.preventDefault(); e.stopPropagation(); });
+        b.addEventListener('click', function (e) { e.preventDefault(); onPress(); });
+        return b;
+    }
+
+    function buildVirtualRemote() {
+        if ((navigator.maxTouchPoints || 0) === 0) return;       // touch devices only
+        if (!document.body || document.getElementById('tv-remote')) return;
+
+        var wrap = document.createElement('div');
+        wrap.id = 'tv-remote';
+        wrap.setAttribute('aria-hidden', 'true');
+        setStyle(wrap, {
+            position: 'fixed', right: '14px', bottom: '14px', zIndex: '2147483647',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
+            touchAction: 'none', userSelect: 'none', webkitUserSelect: 'none'
+        });
+
+        var handle = document.createElement('div');
+        setStyle(handle, {
+            width: '56px', height: '18px', borderRadius: '9px', cursor: 'move',
+            background: 'rgba(40,40,52,0.92)', boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+        });
+        var grip = document.createElement('div');
+        setStyle(grip, { width: '22px', height: '3px', borderRadius: '2px', background: 'rgba(255,255,255,0.55)' });
+        handle.appendChild(grip);
+
+        var dial = document.createElement('div');
+        setStyle(dial, {
+            position: 'relative', width: '150px', height: '150px', borderRadius: '50%',
+            background: 'rgba(18,18,26,0.85)', boxShadow: '0 6px 24px rgba(0,0,0,0.55)'
+        });
+        var c = '52px';
+        dial.appendChild(remoteBtn('▲', function () { dispatchKey('ArrowUp'); }, { left: c, top: '8px' }));
+        dial.appendChild(remoteBtn('▼', function () { dispatchKey('ArrowDown'); }, { left: c, bottom: '8px' }));
+        dial.appendChild(remoteBtn('◀', function () { dispatchKey('ArrowLeft'); }, { left: '8px', top: c }));
+        dial.appendChild(remoteBtn('▶', function () { dispatchKey('ArrowRight'); }, { right: '8px', top: c }));
+        var ok = remoteBtn('OK', clickActive, { left: c, top: c });
+        setStyle(ok, { background: '#8B5CF6', fontSize: '13px', fontWeight: '700' });
+        dial.appendChild(ok);
+
+        wrap.appendChild(handle);
+        wrap.appendChild(dial);
+        document.body.appendChild(wrap);
+
+        // Drag the whole remote around by its handle (clamped to the viewport).
+        var dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
+        handle.addEventListener('pointerdown', function (e) {
+            dragging = true;
+            var r = wrap.getBoundingClientRect();
+            ox = r.left; oy = r.top; sx = e.clientX; sy = e.clientY;
+            setStyle(wrap, { right: 'auto', bottom: 'auto', left: ox + 'px', top: oy + 'px' });
+            try { handle.setPointerCapture(e.pointerId); } catch (_) { }
+            e.preventDefault();
+        });
+        handle.addEventListener('pointermove', function (e) {
+            if (!dragging) return;
+            var nx = Math.max(0, Math.min(window.innerWidth - 70, ox + e.clientX - sx));
+            var ny = Math.max(0, Math.min(window.innerHeight - 70, oy + e.clientY - sy));
+            setStyle(wrap, { left: nx + 'px', top: ny + 'px' });
+        });
+        function endDrag(e) { dragging = false; try { handle.releasePointerCapture(e.pointerId); } catch (_) { } }
+        handle.addEventListener('pointerup', endDrag);
+        handle.addEventListener('pointercancel', endDrag);
+    }
+
     // --- Enable (idempotent) ----------------------------------------------
     var _enabled = false;
     function enable() {
@@ -283,8 +378,8 @@
         try { localStorage.setItem('anisync-tv', '1'); } catch (_) { /* storage blocked */ }
         document.documentElement.classList.add('tv-mode');
         document.addEventListener('keydown', onKeydown);
-        if (document.readyState !== 'loading') autoFocus();
-        else document.addEventListener('DOMContentLoaded', autoFocus);
+        if (document.readyState !== 'loading') { autoFocus(); buildVirtualRemote(); }
+        else document.addEventListener('DOMContentLoaded', function () { autoFocus(); buildVirtualRemote(); });
     }
 
     // The native head can force this on (DeviceIdiom == TV) so the C# shell and
