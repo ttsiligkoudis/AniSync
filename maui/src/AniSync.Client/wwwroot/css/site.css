@@ -8494,6 +8494,18 @@ ol.anime-detail-episodes-busy {
     background: var(--accent-fill);
 }
 
+/* Dashboard / Library / Discover media-type switch pills (All · Anime · Movies · Series) —
+   focus shows the same lighter-background hover the pointer gets (.mt-switch-btn:hover) instead
+   of the global zoom; the active pill keeps its accent fill. */
+.tv-mode .mt-switch-btn:focus {
+    transform: none;
+    font-size: inherit;
+}
+.tv-mode .mt-switch-btn:focus:not(.active) {
+    color: var(--text-strong);
+    background: var(--overlay-10);
+}
+
 /* Media-type modal ("What do you want to watch?") — behave like tv=0: no zoom/
    enlarge. A plain focus ring marks the selection. It MUST be inset
    (outline-offset negative) — .mt-modal-card has overflow:hidden, so a normal
