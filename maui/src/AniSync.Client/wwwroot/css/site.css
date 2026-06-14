@@ -10032,8 +10032,23 @@ body.dash-page main {
 }
 
 /* 2. Blur/saturate filters on large images (the detail-page backdrop, hover
-   tints) are likewise expensive per-frame. Drop the blur; keep layout intact. */
-.tv-mode .anime-detail-backdrop { filter: none !important; }
+   tints) are likewise expensive per-frame. Drop the blur; keep layout intact.
+   Without the blur the raw banner reads too sharp — baked-in credits, hard edges
+   and bright patches that the desktop blur used to soften (and that the
+   vertical-only shade can't tame, so the right edge / bottom credit band look
+   "off"). Compensate cheaply, no blur: dim the art more, drop the scale (its only
+   job was hiding blur edges), and add a horizontal pass to the scrim so the side
+   edges stay subdued like the rest. */
+.tv-mode .anime-detail-backdrop {
+    filter: none !important;
+    opacity: 0.3;
+    transform: none;
+}
+.tv-mode .anime-detail-backdrop-shade {
+    background:
+        linear-gradient(180deg, rgba(10, 10, 10, 0.6) 0%, rgba(10, 10, 10, 0.94) 68%, var(--bg) 100%),
+        linear-gradient(90deg, rgba(10, 10, 10, 0.4) 0%, rgba(10, 10, 10, 0) 38%, rgba(10, 10, 10, 0) 62%, rgba(10, 10, 10, 0.4) 100%);
+}
 
 /* 3. Don't animate `filter` (brightness/saturate) on focus/hover — a filter
    transition repaints the whole element every frame of the animation. Cards
