@@ -9977,10 +9977,19 @@ body.dash-page main {
     overflow: hidden;
     transition: width 160ms ease-out;
 }
-.tv-rail:hover,
 .tv-rail:focus-within {
     width: 190px;
     box-shadow: 8px 0 32px rgba(0, 0, 0, 0.5);
+}
+/* Only expand on :hover where a real pointer exists. On a TV (hover: none) the WebView can leave a
+   synthetic :hover stuck on a rail item after a D-pad "click", which kept the rail expanded with no
+   way to collapse it (focus had already moved into the content). Gating :hover to pointer devices
+   leaves :focus-within as the sole trigger on TV, so the rail collapses as soon as focus leaves it. */
+@media (hover: hover) {
+    .tv-rail:hover {
+        width: 190px;
+        box-shadow: 8px 0 32px rgba(0, 0, 0, 0.5);
+    }
 }
 
 .tv-rail-logo {
@@ -10012,8 +10021,8 @@ body.dash-page main {
 .tv-rail-icon { width: 24px; height: 24px; flex: 0 0 auto; }
 /* Labels are revealed only when the rail is expanded. */
 .tv-rail-label { opacity: 0; transition: opacity 120ms ease-out; }
-.tv-rail:hover .tv-rail-label,
 .tv-rail:focus-within .tv-rail-label { opacity: 1; }
+@media (hover: hover) { .tv-rail:hover .tv-rail-label { opacity: 1; } }
 .tv-rail-item.active { color: var(--text-strong); }
 .tv-rail-item.active .tv-rail-icon { color: var(--accent); }
 

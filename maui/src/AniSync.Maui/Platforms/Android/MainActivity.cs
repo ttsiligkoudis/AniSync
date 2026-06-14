@@ -89,6 +89,28 @@ public class MainActivity : MauiAppCompatActivity
         }
     }
 
+    // While the native TV player is foreground, route remote keys to it: when the player's chrome has
+    // auto-hidden, the first D-pad/OK/media press just re-summons it (and is swallowed) — otherwise a
+    // remote can't bring hidden controls back. Any other time the event passes through normally.
+    public override bool DispatchKeyEvent(Android.Views.KeyEvent? e)
+    {
+        if (e is not null && e.Action == Android.Views.KeyEventActions.Down && IsWakeKey(e.KeyCode))
+        {
+            var hook = AniSync.Maui.VlcPlayerPage.TvWakeOnKey;
+            if (hook is not null && hook()) return true; // chrome was hidden → consumed the re-summon press
+        }
+        return base.DispatchKeyEvent(e);
+    }
+
+    // D-pad directions, OK/Enter and the media play/pause keys "wake" hidden player chrome. Back and
+    // volume are deliberately excluded so they keep their normal behaviour even while chrome is hidden.
+    private static bool IsWakeKey(Android.Views.Keycode k) => k is
+        Android.Views.Keycode.DpadUp or Android.Views.Keycode.DpadDown or
+        Android.Views.Keycode.DpadLeft or Android.Views.Keycode.DpadRight or
+        Android.Views.Keycode.DpadCenter or Android.Views.Keycode.Enter or
+        Android.Views.Keycode.NumpadEnter or Android.Views.Keycode.MediaPlayPause or
+        Android.Views.Keycode.MediaPlay or Android.Views.Keycode.MediaPause;
+
     private bool IsSystemDark()
         => (Resources?.Configuration?.UiMode & Android.Content.Res.UiMode.NightMask)
            == Android.Content.Res.UiMode.NightYes;
