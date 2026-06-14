@@ -62,6 +62,17 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Matches ?? new();
     }
 
+    public async Task<IReadOnlyList<SuggestMatch>> SearchGroupedAsync(string title, string? types = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return Array.Empty<SuggestMatch>();
+        // limit is per-category here (grouped=true skips the typeahead's flat global cap), so each
+        // of anime / movies / series can fill its own shelf.
+        var url = $"api/v1/suggest?title={Uri.EscapeDataString(title)}&limit=12&grouped=true";
+        if (!string.IsNullOrWhiteSpace(types)) url += $"&types={Uri.EscapeDataString(types)}";
+        var resp = await GetOrDefault<SuggestResponse>(url, ct);
+        return resp?.Matches ?? new();
+    }
+
     public async Task<IReadOnlyList<MetaDto>> DiscoverAsync(string kind, string? genre = null, string? skip = null, string? season = null, string? search = null, CancellationToken ct = default)
     {
         var url = $"api/v1/discover/{Uri.EscapeDataString(kind)}";

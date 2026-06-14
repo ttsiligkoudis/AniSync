@@ -8506,13 +8506,18 @@ ol.anime-detail-episodes-busy {
     display: none;
 }
 
-/* Dedicated /search page — give the reused header typeahead room to breathe. */
+/* Dedicated /search view — full width so the result shelves can scroll edge to edge; the
+   search box itself stays a comfortable centred width above them. */
 .search-page {
-    max-width: 640px;
-    margin: 0.5rem auto 2rem;
+    margin: 0.5rem 0 2rem;
 }
+.search-page-form {
+    max-width: 640px;
+    margin: 0 auto 1.5rem;
+}
+.search-page-form .site-search-input-wrap,
 .search-page .site-search { width: 100%; }
-.tv-mode .search-page { max-width: 56rem; }
+.tv-mode .search-page-form { max-width: 56rem; }
 .tv-mode .search-page .site-search-input { font-size: 1.3rem; padding: 0.9rem 1.1rem; }
 
 /* Poster cards are the hero content — zoom them a hair more than the general

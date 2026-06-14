@@ -17,7 +17,8 @@
                placeholder="Search…"
                autocomplete="off"
                value="@_query"
-               @oninput="OnInput" />
+               @oninput="OnInput"
+               @onkeydown="OnKeyDown" />
     </div>
 
     @if (_open)
@@ -132,6 +133,18 @@
                 StateHasChanged();
             }
         }
+    }
+
+    // Enter commits the typed query to the dedicated /search view (the solid shelves), prefilled
+    // via ?q= so it runs there. The dropdown is the quick-jump-to-a-title path; Enter is "see all
+    // results". Close the dropdown first so it isn't left hanging over the new page.
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key is not ("Enter" or "NumpadEnter")) return;
+        var q = _query.Trim();
+        if (q.Length == 0) return;
+        await CloseResultsAsync();
+        Nav.NavigateTo($"/search?q={Uri.EscapeDataString(q)}");
     }
 
     private void MarkBroken(string id)
