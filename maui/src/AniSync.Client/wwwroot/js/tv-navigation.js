@@ -119,6 +119,19 @@
         return c.length ? c[0] : null;
     }
 
+    // First visible focusable inside a given element (e.g. the leftmost card of a shelf), even if
+    // it's scrolled out of the horizontal row — focusEl scrolls it back into view.
+    function firstFocusableIn(root) {
+        var nodes = root.querySelectorAll(FOCUSABLE);
+        for (var i = 0; i < nodes.length; i++) if (isVisible(nodes[i])) return nodes[i];
+        return null;
+    }
+
+    // Per-shelf memory of the last card reached by HORIZONTAL nav, so returning to a shelf
+    // vertically lands back where you were (only if you'd walked it); a first vertical arrival
+    // goes to the shelf's start. Keyed by the .poster-scroll-row element (WeakMap → no leak).
+    var shelfFocus = new WeakMap();
+
     // First focusable inside the main content region (not the left rail). Used so initial focus and
     // any "nothing focused yet" landing go into a shelf/tile rather than the rail (the rail is reached
     // deliberately by pressing Left). Returns null while the content is still empty (shelves load async).
@@ -152,6 +165,12 @@
 
     function pickInDirection(current, dir) {
         var cc = centre(current);
+        var curRect = current.getBoundingClientRect();
+        // Horizontal moves must stay on the same row. Without this, "right" at the end of a shelf
+        // jumps diagonally into the NEXT shelf — a far card one row down still falls inside the 45°
+        // cone. The tolerance is generous enough for same-row neighbours of differing heights but
+        // far short of the gap to the next shelf (~a poster height away).
+        var rowTol = Math.max(80, curRect.height * 0.6);
         var best = null;
         var bestScore = Infinity;
         candidates().forEach(function (el) {
@@ -161,10 +180,10 @@
             var dy = c.y - cc.y;
             var primary, cross;
             if (dir === 'left') {
-                if (dx >= -1 || Math.abs(dy) > Math.abs(dx)) return;
+                if (dx >= -1 || Math.abs(dy) > Math.abs(dx) || Math.abs(dy) > rowTol) return;
                 primary = -dx; cross = Math.abs(dy);
             } else if (dir === 'right') {
-                if (dx <= 1 || Math.abs(dy) > Math.abs(dx)) return;
+                if (dx <= 1 || Math.abs(dy) > Math.abs(dx) || Math.abs(dy) > rowTol) return;
                 primary = dx; cross = Math.abs(dy);
             } else if (dir === 'up') {
                 if (dy >= -1 || Math.abs(dx) > Math.abs(dy)) return;
@@ -253,6 +272,21 @@
 
             var next = pickInDirection(start, dir);
 
+            // Shelf-aware vertical landing: moving up/down into a DIFFERENT horizontal shelf lands
+            // on the card you last walked to in it (remembered below), else the shelf's first card —
+            // never the same horizontal offset as the shelf you're leaving. A first vertical arrival
+            // (no memory) therefore starts at the beginning, which is what the eye expects.
+            if (next && (dir === 'up' || dir === 'down')) {
+                var curRow = start.closest && start.closest('.poster-scroll-row');
+                var nextRow = next.closest && next.closest('.poster-scroll-row');
+                if (nextRow && nextRow !== curRow) {
+                    var remembered = shelfFocus.get(nextRow);
+                    var landing = (remembered && nextRow.contains(remembered) && isVisible(remembered))
+                        ? remembered : firstFocusableIn(nextRow);
+                    if (landing) next = landing;
+                }
+            }
+
             // Right from the left rail always leaves it (so it collapses): go to the content
             // element to the right if there is one, otherwise just move focus into the content
             // (or blur) — never get stuck expanded when the page has nothing to the right.
@@ -264,6 +298,12 @@
             }
 
             if (next) {
+                // Record the within-shelf position on horizontal moves so a later vertical return
+                // lands back here (see the shelf-aware landing above).
+                if (dir === 'left' || dir === 'right') {
+                    var horizRow = next.closest && next.closest('.poster-scroll-row');
+                    if (horizRow) shelfFocus.set(horizRow, next);
+                }
                 e.preventDefault();
                 focusEl(next);
             } else if (!ae || ae === document.body) {

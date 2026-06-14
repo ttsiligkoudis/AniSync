@@ -540,7 +540,7 @@ app.MapPost("/api/v1/auth/device/approve", async (HttpContext ctx, DeviceApprove
 // to its own account; the phone scans the QR, which opens /tv/handoff?token=… — that signs the
 // phone's browser in as the account and lands on the settings page, no typing required.
 //   start → TV (authenticated by its X-AniSync-Config header) mints the token + QR
-//   /tv/handoff → phone redeems the token, gets the anisync_uid cookie, bounces to /configure
+//   /tv/handoff → phone redeems the token, gets the anisync_uid cookie, bounces to /account
 
 app.MapPost("/api/v1/auth/handoff/start", async (HttpContext ctx, ISettingsHandoffStore handoff, ITokenService tokenService, IConfigStore configStore, IConfiguration cfg) =>
 {
@@ -572,7 +572,7 @@ app.MapGet("/tv/handoff", (HttpContext ctx, string? token, ISettingsHandoffStore
         // Unknown / expired / already used — drop them on the account page to sign in the normal way.
         return Results.Redirect("/account");
     tokenService.SetPrimaryUidCookie(uid);
-    return Results.Redirect("/auth/complete?returnUrl=/configure");
+    return Results.Redirect("/auth/complete?returnUrl=/account");
 });
 
 // Auth → client config-seeding bridge. After a server-side OAuth/Kitsu login the

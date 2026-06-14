@@ -1066,6 +1066,31 @@ public sealed class VlcPlayerPage : ContentPage
     // Inline icon + label (icon on the left) — keeps the action row to a single short line.
     private View ActionButton(string icon, string label, Action onTap)
     {
+        // TV: a HorizontalStackLayout + TapGestureRecognizer isn't reachable by the D-pad (the same
+        // reason Row() switches to a Button on TV), which is why the bottom menus — Subtitles /
+        // Audio / Speed / Scaling — couldn't be focused with a remote. Use a real Button: it gets the
+        // native focus highlight and activates on OK, with the glyph as a leading font icon so the
+        // look matches the touch row.
+        if (_isTv)
+        {
+            var btn = new Button
+            {
+                Text = label,
+                ImageSource = new FontImageSource { Glyph = icon, FontFamily = IconFont, Color = Colors.White, Size = 18 },
+                ContentLayout = new Button.ButtonContentLayout(Button.ButtonContentLayout.ImagePosition.Left, 6),
+                TextColor = Colors.White,
+                FontSize = 13,
+                BackgroundColor = Colors.Transparent,
+                BorderWidth = 0,
+                CornerRadius = 0,
+                Padding = new Thickness(6, 6),
+                HorizontalOptions = LayoutOptions.Center,
+                VerticalOptions = LayoutOptions.Center,
+            };
+            btn.Clicked += (_, _) => onTap();
+            return btn;
+        }
+
         var stack = new HorizontalStackLayout
         {
             Spacing = 6,

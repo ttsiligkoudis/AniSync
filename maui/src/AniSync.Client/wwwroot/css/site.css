@@ -8521,6 +8521,19 @@ ol.anime-detail-episodes-busy {
     font-size: 0.82rem;
 }
 
+/* Episode rows keep the focus zoom, but a full-width row scaled 1.08 overflowed the list to the
+   right and spawned a stray horizontal scrollbar. Narrow the rows a touch on TV so the zoomed row
+   still fits inside the list (90% × 1.08 ≈ 97%), and clip any residual horizontal overflow on the
+   scroll body so it can never reach the page. */
+.tv-mode .anime-detail-episode {
+    width: 90%;
+    margin-left: auto;
+    margin-right: auto;
+}
+.tv-mode .anime-detail-episodes-body {
+    overflow-x: hidden;
+}
+
 /* Stream sources panel — the stream rows (.episode-stream-pick) and the refresh / open buttons
    (.episode-stream-action) already have their own :focus styling, and the filter pills mirror
    their hover; so just drop the global focus zoom. The pick/action have no explicit font-size

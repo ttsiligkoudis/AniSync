@@ -56,7 +56,9 @@
                 <span class="tv-rail-label">Calendar</span>
             </a>
         }
-        @if (State.EnabledMediaTypes.Count > 1)
+        @* Media-type chooser — always present once hydrated (under Calendar) so the chooser is
+           reachable from the rail even with a single mode enabled (to add more). *@
+        @if (State.MediaTypesHydrated)
         {
             <button type="button" class="tv-rail-item" @onclick="() => State.RequestMediaTypeModal()"
                     aria-label="Change mode (currently @_mtLabel)">
