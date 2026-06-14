@@ -78,6 +78,13 @@
   /* Default hairline border alias — the most common overlay weight. */
   --border: var(--overlay-08);
 
+  /* TV (10-foot) focus drop-shadow. The focused tile/control lifts off the
+     page; the shadow colour follows the theme so it reads as a soft glow, not
+     a hard black slab — a LIGHT grey on the dark canvas, a DARK grey on light
+     (see the light-theme blocks). */
+  --tv-focus-shadow: rgba(255, 255, 255, 0.28);
+  --tv-focus-shadow-strong: rgba(255, 255, 255, 0.38);
+
   /* Radii */
   --radius-sm: 4px;
   --radius: 8px;
@@ -172,6 +179,10 @@
 
     --shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
 
+    /* Dark grey on the light canvas (the inverse of the dark-theme glow). */
+    --tv-focus-shadow: rgba(0, 0, 0, 0.4);
+    --tv-focus-shadow-strong: rgba(0, 0, 0, 0.5);
+
     color-scheme: light;
   }
 }
@@ -217,6 +228,10 @@
   --border: var(--overlay-08);
 
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+
+  /* Dark grey on the light canvas (the inverse of the dark-theme glow). */
+  --tv-focus-shadow: rgba(0, 0, 0, 0.4);
+  --tv-focus-shadow-strong: rgba(0, 0, 0, 0.5);
 
   color-scheme: light;
 }
@@ -8441,10 +8456,15 @@ ol.anime-detail-episodes-busy {
 /* TV focus: the selected element ZOOMS (no accent ring) — far clearer than a thin ring from the
    couch, and one consistent treatment for every control. Only one element is focused at a time, so
    the single soft drop-shadow is cheap; box-shadow follows the element's own border-radius. */
-.tv-mode :focus {
+/* The zoom is for things the remote actually LANDS on. FocusOnNavigate parks
+   programmatic focus on the page <h1> (tabindex="-1") after every navigation —
+   spatial nav skips those, so they're never a real selection; zooming one made
+   the page title balloon into a "selected" white box on load. Exclude
+   tabindex="-1" (nav/scroll targets) from the focus zoom. */
+.tv-mode :focus:not([tabindex="-1"]) {
     outline: none;
-    transform: scale(1.08);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+    transform: scale(1.15);
+    box-shadow: 0 8px 24px var(--tv-focus-shadow);
     transition: transform 120ms ease-out, box-shadow 120ms ease-out;
     position: relative;
     z-index: 5;
@@ -8461,8 +8481,8 @@ ol.anime-detail-episodes-busy {
 
 /* Poster cards are the hero content — zoom them a little more than the general rule. */
 .tv-mode .library-card:focus {
-    transform: scale(1.12);
-    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.65);
+    transform: scale(1.18);
+    box-shadow: 0 12px 34px var(--tv-focus-shadow-strong);
 }
 
 /* There's no pointer on a remote — a stuck cursor floating mid-screen reads as
