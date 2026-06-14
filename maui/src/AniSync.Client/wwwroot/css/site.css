@@ -8459,6 +8459,41 @@ ol.anime-detail-episodes-busy {
     z-index: 5;
 }
 
+/* Per-element focus overrides: a few controls read better when D-pad focus
+   triggers their existing :hover/selected affordance instead of the global
+   zoom. Each cancels the scale/enlarge (transform/font-size) and paints the
+   hover look these elements already use on pointer hover.
+   (The sidebar "All" item and the rest keep the default zoom above.) */
+
+/* Disconnect button — its :hover/:focus already turns red (see
+   .account-disconnect-btn:focus); just drop the zoom so focus = that red state. */
+.tv-mode .account-disconnect-btn:focus {
+    transform: none;
+    font-size: inherit;
+}
+
+/* Provider pills — focus mirrors the grey-background hover; the active (primary)
+   pill keeps its accent fill rather than going grey. */
+.tv-mode .service-toggle .label:focus {
+    transform: none;
+    font-size: inherit;
+    color: var(--text-strong);
+    background: var(--overlay-06);
+}
+.tv-mode .service-toggle .label.active:focus {
+    color: var(--on-accent);
+    background: var(--accent-fill);
+}
+
+/* Media-type modal ("What do you want to watch?") — behave like tv=0: no zoom/
+   enlarge, restore the default focus outline. The options keep their own
+   hover/selected styling. */
+.tv-mode .mt-modal :focus {
+    transform: none;
+    font-size: inherit;
+    outline: revert;
+}
+
 /* Dedicated /search page — give the reused header typeahead room to breathe. */
 .search-page {
     max-width: 640px;
