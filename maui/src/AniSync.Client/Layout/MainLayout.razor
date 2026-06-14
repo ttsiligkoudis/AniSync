@@ -44,6 +44,9 @@ else
     {
         Nav.LocationChanged += OnLocationChanged;
         State.Changed += OnStateChanged;
+        // ?tv=1 opts a browser into the full TV-shell preview (?tv=0 exits). Read it synchronously so the
+        // first render already picks the TV branch. Native heads ignore ForceTv (DeviceIdiom decides).
+        ApplyTvQuery();
         // Cookie-backed prerender: when the server can see the anisync_uid session cookie, render the
         // signed-in chrome from the first paint (and bridge that verdict to the interactive circuit via
         // PersistentComponentState) so a signed-in user never sees the signed-out chrome flash. No-op on
@@ -60,6 +63,16 @@ else
         // prerender via Bootstrap's cookie read above; this deferral is about the JS-backed bits.)
         // They hydrate on the interactive pass below.
         if (!RendererInfo.IsInteractive) return;
+
+        // Restore the TV-preview override across reloads — tv-navigation.js persists ?tv=1 to
+        // localStorage. Web-only in effect (native decides TV by device idiom). Brief web→TV reflow
+        // on a bare reload is acceptable for a preview/dev toggle.
+        try
+        {
+            if (await JS.InvokeAsync<string?>("localStorage.getItem", "anisync-tv") == "1")
+                State.SetForceTv(true);
+        }
+        catch { /* prerender / storage blocked */ }
 
         try
         {
@@ -183,7 +196,28 @@ else
     private DotNetObjectReference<MainLayout>? _themeRef;
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
-        => StateHasChanged();
+    {
+        ApplyTvQuery();
+        StateHasChanged();
+    }
+
+    // Opt a browser into / out of the full TV-shell preview via ?tv=1 / ?tv=0. tv-navigation.js handles
+    // the matching .tv-mode CSS + localStorage persistence; this drives the C# side (Env.IsTv → TvLayout
+    // + every Env.IsTv-gated bit). No-op on native, where DeviceIdiom is authoritative.
+    private void ApplyTvQuery()
+    {
+        try
+        {
+            var query = new Uri(Nav.Uri).Query;
+            if (string.IsNullOrEmpty(query)) return;
+            foreach (var part in query.TrimStart('?').Split('&'))
+            {
+                if (part == "tv=1") { State.SetForceTv(true); return; }
+                if (part == "tv=0") { State.SetForceTv(false); return; }
+            }
+        }
+        catch { /* malformed URI — ignore */ }
+    }
 
     private void OnStateChanged() => StateHasChanged();
 
