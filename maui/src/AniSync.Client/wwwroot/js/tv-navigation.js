@@ -213,7 +213,14 @@
                 if (ae.tagName === 'SELECT') return;
                 if ((ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')
                     && (dir === 'left' || dir === 'right')) {
-                    return;
+                    // Left/right move the caret WITHIN text, but at the boundary they "escape" the
+                    // field for spatial nav — so a remote can leave the search box (e.g. Left → rail)
+                    // instead of being trapped. An empty field is at both ends, so it escapes either way.
+                    var len = (ae.value || '').length;
+                    var atStart = ae.selectionStart === 0 && ae.selectionEnd === 0;
+                    var atEnd = ae.selectionStart === len && ae.selectionEnd === len;
+                    if ((dir === 'left' && !atStart) || (dir === 'right' && !atEnd)) return;
+                    // at the boundary → fall through to spatial nav (escape the field)
                 }
             }
             // If a modal is open and focus is still on something behind it, pull it
