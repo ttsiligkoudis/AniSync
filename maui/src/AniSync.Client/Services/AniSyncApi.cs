@@ -262,6 +262,10 @@ public sealed class AniSyncApi : IAniSyncApi
     public Task<bool> ApproveDeviceAsync(string code, CancellationToken ct = default)
         => PostForOk<object>("api/v1/auth/device/approve", new { code }, ct);
 
+    // TV → phone settings handoff — header-authed (rides the same X-AniSync-Config as /api/v1/me).
+    public Task<SettingsHandoffResponse?> StartSettingsHandoffAsync(CancellationToken ct = default)
+        => PostJson<object, SettingsHandoffResponse>("api/v1/auth/handoff/start", new { }, ct);
+
     // ── Configure / account / advanced ───────────────────────────────────────
 
     public Task<ConfigStateDto?> GetConfigAsync(CancellationToken ct = default)

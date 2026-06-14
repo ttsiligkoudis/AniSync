@@ -304,6 +304,8 @@ builder.Services.AddSingleton<IUserListCache, UserListCache>();
 builder.Services.AddSingleton<INativeAuthCodeStore, NativeAuthCodeStore>();
 // Rendezvous for the TV "scan a QR on your phone" sign-in (device-authorization flow).
 builder.Services.AddSingleton<IDevicePairingStore, DevicePairingStore>();
+// Reverse handoff: a signed-in TV mints a token the phone redeems to manage settings there.
+builder.Services.AddSingleton<ISettingsHandoffStore, SettingsHandoffStore>();
 
 // Episode-release notification stack.
 builder.Services.AddSingleton<INotificationStore, NotificationStore>();
@@ -530,6 +532,47 @@ app.MapPost("/api/v1/auth/device/approve", async (HttpContext ctx, DeviceApprove
     return pairing.TryApprove(body.Code, uid)
         ? Results.Json(new { ok = true })
         : Results.Json(new { error = "invalid_or_expired_code" }, statusCode: StatusCodes.Status404NotFound);
+});
+
+// --- TV → phone settings handoff -------------------------------------------------------
+// Editing settings (addon URLs, debrid keys) with a D-pad is painful, so on TV the settings
+// surface is a QR instead of the form. The already-signed-in TV mints a single-use token bound
+// to its own account; the phone scans the QR, which opens /tv/handoff?token=… — that signs the
+// phone's browser in as the account and lands on the settings page, no typing required.
+//   start → TV (authenticated by its X-AniSync-Config header) mints the token + QR
+//   /tv/handoff → phone redeems the token, gets the anisync_uid cookie, bounces to /configure
+
+app.MapPost("/api/v1/auth/handoff/start", async (HttpContext ctx, ISettingsHandoffStore handoff, ITokenService tokenService, IConfigStore configStore, IConfiguration cfg) =>
+{
+    // Same account resolution as device/approve — only a real (non-anonymous) account can be
+    // handed off, since the phone is signed in via the persistent anisync_uid cookie.
+    var uid = await DeviceSignedInUidAsync(ctx, tokenService, configStore);
+    if (string.IsNullOrEmpty(uid))
+        return Results.Json(new { error = "not_signed_in" }, statusCode: StatusCodes.Status401Unauthorized);
+
+    var ttl = TimeSpan.FromMinutes(5);
+    var token = handoff.Create(uid, ttl);
+    var origin = DevicePublicOrigin(ctx, cfg);
+    var url = $"{origin}/tv/handoff?token={Uri.EscapeDataString(token)}";
+    return Results.Json(new
+    {
+        qrPng = DeviceQrPngDataUri(url),
+        url,
+        expiresIn = (int)ttl.TotalSeconds,
+    });
+});
+
+// The phone lands here from the QR. Redeem the single-use token, sign this browser in as the
+// TV's account (the anisync_uid cookie), then bounce through the standard /auth/complete bridge
+// (which seeds the client credential + lands in the app) straight to the settings page.
+app.MapGet("/tv/handoff", (HttpContext ctx, string? token, ISettingsHandoffStore handoff, ITokenService tokenService) =>
+{
+    var uid = handoff.Redeem(token);
+    if (string.IsNullOrEmpty(uid))
+        // Unknown / expired / already used — drop them on the account page to sign in the normal way.
+        return Results.Redirect("/account");
+    tokenService.SetPrimaryUidCookie(uid);
+    return Results.Redirect("/auth/complete?returnUrl=/configure");
 });
 
 // Auth → client config-seeding bridge. After a server-side OAuth/Kitsu login the

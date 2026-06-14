@@ -38,3 +38,14 @@ public sealed class DeviceContextResponse
     public bool Valid { get; set; }
     public bool SignedIn { get; set; }
 }
+
+/// <summary>Response of POST /api/v1/auth/handoff/start — the TV → phone settings handoff QR.</summary>
+public sealed class SettingsHandoffResponse
+{
+    /// <summary>QR PNG (data: URI) the TV displays; encodes <see cref="Url"/>.</summary>
+    public string? QrPng { get; set; }
+    /// <summary>The /tv/handoff URL the phone opens to sign in + land on settings.</summary>
+    public string? Url { get; set; }
+    /// <summary>Token lifetime in seconds, so the TV can refresh the QR before it expires.</summary>
+    public int ExpiresIn { get; set; }
+}
