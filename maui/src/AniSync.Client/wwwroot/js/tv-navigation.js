@@ -119,6 +119,27 @@
         return c.length ? c[0] : null;
     }
 
+    // First focusable inside the main content region (not the left rail). Used so initial focus and
+    // any "nothing focused yet" landing go into a shelf/tile rather than the rail (the rail is reached
+    // deliberately by pressing Left). Returns null while the content is still empty (shelves load async).
+    function contentFocusable() {
+        var scope = document.querySelector('.tv-content');
+        if (!scope) return null;
+        // Prefer the first poster tile (the first shelf) over the media-type switch at the very top.
+        var card = scope.querySelector('.library-card');
+        if (card && isVisible(card)) return card;
+        var nodes = scope.querySelectorAll(FOCUSABLE);
+        for (var i = 0; i < nodes.length; i++) if (isVisible(nodes[i])) return nodes[i];
+        return null;
+    }
+
+    // Where a fresh "land somewhere" focus should go: inside an open modal if one's up, else the
+    // first content element, else whatever's first (rail fallback).
+    function landingTarget() {
+        if (openModal()) return firstFocusable();    // candidates() is modal-scoped when a modal is open
+        return contentFocusable() || firstFocusable();
+    }
+
     // --- Spatial pick ------------------------------------------------------
     // Classic centre-delta scoring within a 45° cone: a candidate only counts
     // if it lies more in the travel direction than across it, then we minimise
@@ -200,7 +221,7 @@
             var modal = openModal();
             var inScope = !modal || (ae && modal.contains(ae));
             var start = inScope
-                ? ((ae && ae !== document.body) ? ae : firstFocusable())
+                ? ((ae && ae !== document.body) ? ae : landingTarget())
                 : firstFocusable();
             if (!start) return;
             if (!inScope) { e.preventDefault(); focusEl(start); return; }
@@ -248,9 +269,17 @@
     }
 
     // --- Initial focus -----------------------------------------------------
-    function autoFocus() {
+    // Land in the content (first shelf/tile), NOT the rail — otherwise the first Down walked the rail
+    // (Home→Search). Honour an explicit [autofocus] first. The dashboard's shelves load async, so when
+    // there's no content focusable yet we retry rather than fall back to the rail.
+    function autoFocus(attempt) {
+        attempt = attempt || 0;
         if (document.activeElement && document.activeElement !== document.body) return;
-        focusEl(document.querySelector('[autofocus]') || firstFocusable());
+        var explicit = document.querySelector('[autofocus]');
+        if (explicit) { focusEl(explicit); return; }
+        var target = openModal() ? firstFocusable() : contentFocusable();
+        if (target) { focusEl(target); return; }
+        if (attempt < 10) setTimeout(function () { autoFocus(attempt + 1); }, 150);
     }
 
     // Move focus out of the left rail into the main content after a navigation, so the rail
