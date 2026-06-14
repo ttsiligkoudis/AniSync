@@ -1,0 +1,92 @@
+@inject IAniSyncApi Api
+@implements IDisposable
+
+@* TV "manage settings on your phone" — the reverse of DevicePairing. Editing settings with a
+   D-pad is painful, so on TV the settings surface is just this QR: scan it and the phone opens
+   your settings already signed in (the token redeems into the anisync_uid cookie server-side).
+   Reuses DevicePairing's .device-pair* styling, which is already tuned for the 10-foot view.
+   We refresh the QR shortly before it expires so a screen left open never shows a dead code. *@
+
+<div class="device-pair">
+    @if (_state == View.Loading)
+    {
+        <p class="device-pair-status">Preparing a link…</p>
+    }
+    else if (_state == View.Error)
+    {
+        <p class="device-pair-status device-pair-error" role="alert">@_error</p>
+        <button type="button" class="btn-primary-action" autofocus @onclick="StartAsync">Try again</button>
+    }
+    else if (_resp is not null)
+    {
+        <h2 class="device-pair-title">Manage settings on your phone</h2>
+        <div class="device-pair-body">
+            <img class="device-pair-qr" src="@_resp.QrPng" alt="QR code to open your settings on your phone" width="240" height="240" />
+            <ol class="device-pair-steps">
+                <li>Scan the code with your phone's camera.</li>
+                <li>Your settings open <strong>already signed in</strong> — nothing to type.</li>
+                <li>Changes you make there apply to this device automatically.</li>
+            </ol>
+        </div>
+        <p class="device-pair-status" aria-live="polite">Editing on a TV is fiddly — your phone is the comfortable way to change addons, debrid keys and preferences.</p>
+    }
+</div>
+
+@code {
+    private enum View { Loading, Active, Error }
+
+    private View _state = View.Loading;
+    private SettingsHandoffResponse? _resp;
+    private string _error = "Couldn't create a phone link. Check the connection and try again.";
+    private CancellationTokenSource? _cts;
+
+    protected override async Task OnInitializedAsync() => await StartAsync();
+
+    private async Task StartAsync()
+    {
+        StopRefresh();
+        _state = View.Loading;
+        _resp = null;
+        StateHasChanged();
+
+        _resp = await Api.StartSettingsHandoffAsync();
+        if (_resp is { QrPng: not null })
+        {
+            _state = View.Active;
+            ScheduleRefresh(_resp.ExpiresIn);
+        }
+        else
+        {
+            _state = View.Error;
+        }
+        StateHasChanged();
+    }
+
+    // Regenerate ~15s before the token lapses (floored so a tiny TTL still leaves a usable
+    // window) so a TV parked on this screen always shows a live code.
+    private void ScheduleRefresh(int expiresInSeconds)
+    {
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+        var delay = TimeSpan.FromSeconds(Math.Max(30, expiresInSeconds - 15));
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(delay, ct);
+                if (!ct.IsCancellationRequested)
+                    await InvokeAsync(StartAsync);
+            }
+            catch { /* superseded / disposed — fire-and-forget refresh, nothing to surface */ }
+        });
+    }
+
+    private void StopRefresh()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = null;
+    }
+
+    public void Dispose() => StopRefresh();
+}

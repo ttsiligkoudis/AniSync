@@ -118,6 +118,11 @@ public interface IAniSyncApi
     /// Returns true on success; false if not signed in or the code is invalid/expired.</summary>
     Task<bool> ApproveDeviceAsync(string code, CancellationToken ct = default);
 
+    /// <summary>TV-side: mints a single-use QR that opens this account's settings on a phone,
+    /// already signed in — POST /api/v1/auth/handoff/start. Header-authed; null/401 when the
+    /// TV isn't signed in to a real account.</summary>
+    Task<SettingsHandoffResponse?> StartSettingsHandoffAsync(CancellationToken ct = default);
+
     // Configure / account / advanced (header-authed; stored v5 configs only)
     Task<ConfigStateDto?> GetConfigAsync(CancellationToken ct = default);
     Task<SaveFlagsResult?> SaveFlagsAsync(byte flags1, byte flags2, byte flags3, CancellationToken ct = default);

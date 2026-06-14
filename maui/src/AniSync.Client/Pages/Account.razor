@@ -24,9 +24,10 @@
 
 <PageTitle>Account · AniSync</PageTitle>
 
-@* On TV before sign-in the screen is just the phone-QR — drop the header so the QR
-   fits without scrolling. (Once signed in, the normal account UI returns.) *@
-@if (!(Env.IsTv && _config is null))
+@* On TV the screen is always just a QR — the phone-sign-in QR before login, the
+   manage-settings QR after — so drop the page header (each QR shows its own title)
+   and let it fit without scrolling. The full header returns on phone/desktop. *@
+@if (!Env.IsTv)
 {
     <header class="page-header">
         <h1 class="page-title">Account</h1>
@@ -50,6 +51,12 @@
         <span class="library-card-skeleton-line" style="display:block;width:100%;height:2.1em;margin-bottom:0.6rem"></span>
         <span class="library-card-skeleton-line" style="display:block;width:80%;height:2.1em"></span>
     </section>
+}
+else if (Env.IsTv && _config is not null)
+{
+    @* TV: settings editing is a D-pad nightmare (addon URLs, debrid keys). Replace the whole
+       account/settings form with a QR that opens it on the phone, already signed in. *@
+    <SettingsHandoff />
 }
 else
 {
@@ -86,7 +93,8 @@ else
     }
 }
 
-@if (_config is not null && !string.IsNullOrEmpty(_config.ApiConfig))
+@* No save bar on TV — the editable form isn't shown there (the handoff QR replaces it). *@
+@if (!Env.IsTv && _config is not null && !string.IsNullOrEmpty(_config.ApiConfig))
 {
     <FloatingSaveBar Dirty="_dirty" Saving="_saving" OnSave="SaveAsync" />
 }
