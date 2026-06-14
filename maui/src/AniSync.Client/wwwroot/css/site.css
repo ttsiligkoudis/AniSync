@@ -10117,6 +10117,15 @@ body.dash-page main {
 
 /* Tabs / media-type pills — a touch larger for legibility, not bulky. */
 .tv-mode .mt-switch-label { font-size: 0.95rem; }
+/* Focused media-type pill: zoom + depth instead of the accent ring (matches the poster cards). */
+.tv-mode .mt-switch-btn:focus {
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    transform: scale(1.12);
+    transition: transform 120ms ease-out;
+    position: relative;
+    z-index: 5;
+}
+.tv-mode .mt-switch-btn:focus:not(.active) { background: var(--overlay-12); }
 .tv-mode .library-tab { font-size: 0.95rem; padding: 0.45rem 1rem; }
 
 /* Detail hero. */
