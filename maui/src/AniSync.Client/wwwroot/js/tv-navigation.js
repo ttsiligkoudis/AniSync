@@ -232,6 +232,25 @@
                 : firstFocusable();
             if (!start) return;
             if (!inScope) { e.preventDefault(); focusEl(start); return; }
+
+            // Media-type chooser: its focusables are one vertical column in DOM
+            // order — close button, the option cards, then Continue — but the
+            // close/Continue sit offset to the right, so the 45° spatial cone
+            // can't connect them to the centred column (you'd have to press
+            // Left/Right to reach them). Walk the list in DOM order for Up/Down
+            // instead, so the whole modal is reachable with just Up/Down.
+            if (modal && modal.classList && modal.classList.contains('mt-modal')
+                && (dir === 'up' || dir === 'down')) {
+                var listM = candidates();              // DOM-order, modal-scoped
+                var iM = listM.indexOf(start);
+                if (iM !== -1) {
+                    var nextM = dir === 'down' ? listM[iM + 1] : listM[iM - 1];
+                    e.preventDefault();                // never fall through to scroll
+                    if (nextM) focusEl(nextM);         // (at an end: stay put)
+                    return;
+                }
+            }
+
             var next = pickInDirection(start, dir);
 
             // Right from the left rail always leaves it (so it collapses): go to the content

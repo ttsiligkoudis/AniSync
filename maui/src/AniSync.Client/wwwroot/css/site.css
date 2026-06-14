@@ -8486,12 +8486,17 @@ ol.anime-detail-episodes-busy {
 }
 
 /* Media-type modal ("What do you want to watch?") — behave like tv=0: no zoom/
-   enlarge, restore the default focus outline. The options keep their own
-   hover/selected styling. */
+   enlarge. A plain focus ring marks the selection. It MUST be inset
+   (outline-offset negative) — .mt-modal-card has overflow:hidden, so a normal
+   outside outline gets clipped at the card edges (the close button hugs the
+   top-right corner; the option cards reach the sides), which is what made the
+   ring show only partially. An inset white ring sits inside the box, so it's
+   never clipped and reads on both the dark cards and the blue selected ones. */
 .tv-mode .mt-modal :focus {
     transform: none;
     font-size: inherit;
-    outline: revert;
+    outline: 2px solid #fff;
+    outline-offset: -2px;
 }
 
 /* Dedicated /search page — give the reused header typeahead room to breathe. */
