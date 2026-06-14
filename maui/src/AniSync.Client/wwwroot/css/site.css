@@ -10107,6 +10107,19 @@ body.dash-page main {
    zoom (some TV WebViews synthesise :hover on the focused element). Cards keep base size. */
 .tv-mode .library-card:hover:not(:focus) { transform: none; }
 
+/* The focus zoom (scale 1.18) grows a selected tile ~18% taller, but the shelf
+   clips vertical overflow at its padding box (overflow-x:auto forces
+   overflow-y to clip), so the focused tile was cropped top and bottom. Give
+   the TV shelves enough vertical breathing room for the scaled tile to lift
+   into instead of being cut. Pull the row back up by the same amount so the
+   extra padding doesn't visibly space the shelves apart. */
+.tv-mode .poster-scroll-row {
+    padding-top: 1.6rem;
+    padding-bottom: 1.6rem;
+    margin-top: -0.8rem;
+    margin-bottom: -0.8rem;
+}
+
 /* Tabs / media-type pills — a touch larger for legibility, not bulky. */
 .tv-mode .mt-switch-label { font-size: 0.95rem; }
 .tv-mode .library-tab { font-size: 0.95rem; padding: 0.45rem 1rem; }
