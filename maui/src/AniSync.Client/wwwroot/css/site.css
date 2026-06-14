@@ -78,13 +78,6 @@
   /* Default hairline border alias — the most common overlay weight. */
   --border: var(--overlay-08);
 
-  /* TV (10-foot) focus drop-shadow. The focused tile/control lifts off the
-     page; the shadow colour follows the theme so it reads as a soft glow, not
-     a hard black slab — a LIGHT grey on the dark canvas, a DARK grey on light
-     (see the light-theme blocks). */
-  --tv-focus-shadow: rgba(255, 255, 255, 0.28);
-  --tv-focus-shadow-strong: rgba(255, 255, 255, 0.38);
-
   /* Radii */
   --radius-sm: 4px;
   --radius: 8px;
@@ -179,10 +172,6 @@
 
     --shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
 
-    /* Dark grey on the light canvas (the inverse of the dark-theme glow). */
-    --tv-focus-shadow: rgba(0, 0, 0, 0.4);
-    --tv-focus-shadow-strong: rgba(0, 0, 0, 0.5);
-
     color-scheme: light;
   }
 }
@@ -228,10 +217,6 @@
   --border: var(--overlay-08);
 
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
-
-  /* Dark grey on the light canvas (the inverse of the dark-theme glow). */
-  --tv-focus-shadow: rgba(0, 0, 0, 0.4);
-  --tv-focus-shadow-strong: rgba(0, 0, 0, 0.5);
 
   color-scheme: light;
 }
@@ -8463,9 +8448,13 @@ ol.anime-detail-episodes-busy {
    tabindex="-1" (nav/scroll targets) from the focus zoom. */
 .tv-mode :focus:not([tabindex="-1"]) {
     outline: none;
-    transform: scale(1.15);
-    box-shadow: 0 8px 24px var(--tv-focus-shadow);
-    transition: transform 120ms ease-out, box-shadow 120ms ease-out;
+    /* A gentle lift, no drop-shadow — the focused element grows a touch AND its
+       text enlarges so the selection reads clearly from the couch without a
+       heavy slab shadow. font-size isn't transitioned (it reflows; snapping it
+       avoids janky per-frame layout), only the cheap transform animates. */
+    transform: scale(1.08);
+    font-size: 1.1em;
+    transition: transform 120ms ease-out;
     position: relative;
     z-index: 5;
 }
@@ -8479,10 +8468,10 @@ ol.anime-detail-episodes-busy {
 .tv-mode .search-page { max-width: 56rem; }
 .tv-mode .search-page .site-search-input { font-size: 1.3rem; padding: 0.9rem 1.1rem; }
 
-/* Poster cards are the hero content — zoom them a little more than the general rule. */
+/* Poster cards are the hero content — zoom them a hair more than the general
+   rule (still no shadow). */
 .tv-mode .library-card:focus {
-    transform: scale(1.18);
-    box-shadow: 0 12px 34px var(--tv-focus-shadow-strong);
+    transform: scale(1.1);
 }
 
 /* There's no pointer on a remote — a stuck cursor floating mid-screen reads as
@@ -10114,6 +10103,10 @@ body.dash-page main {
    into instead of being cut. Pull the row back up by the same amount so the
    extra padding doesn't visibly space the shelves apart. */
 .tv-mode .poster-scroll-row {
+    /* Top-align tiles so a focused card's enlarged title grows downward only,
+       rather than stretching every sibling tile to match (a row-wide reflow on
+       each focus move). */
+    align-items: flex-start;
     padding-top: 1.6rem;
     padding-bottom: 1.6rem;
     margin-top: -0.8rem;
