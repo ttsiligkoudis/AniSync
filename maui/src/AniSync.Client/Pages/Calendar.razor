@@ -31,7 +31,47 @@
     }
     else if (_loading && _model is null)
     {
-        <p class="hint-text">Loading…</p>
+        @* Skeleton shaped like the real calendar (week strip + day sections of cards) so the page
+           holds its layout while /api/v1/me/calendar loads, instead of a bare "Loading…" line.
+           Reuses the cal-* structure classes so the placeholders line up with the loaded content. *@
+        <div class="cal-strip" aria-hidden="true">
+            <div class="cal-strip-head">
+                <span class="library-card-skeleton-line" style="width:2.2rem;height:2.2rem;margin:0;border-radius:50%"></span>
+                <span class="library-card-skeleton-line" style="width:4rem;height:2rem;margin:0"></span>
+                <span class="library-card-skeleton-line" style="width:2.2rem;height:2.2rem;margin:0;border-radius:50%"></span>
+            </div>
+            <div class="cal-strip-days">
+                @for (var i = 0; i < 7; i++)
+                {
+                    <div class="cal-dcell">
+                        <span class="library-card-skeleton-line" style="width:1.6rem;margin:0"></span>
+                        <span class="library-card-skeleton-line" style="width:1.2rem;height:1.4em;margin:0.25rem 0"></span>
+                        <span class="library-card-skeleton-line" style="width:1.6rem;margin:0"></span>
+                    </div>
+                }
+            </div>
+        </div>
+        <div class="cal-week-data" aria-busy="true">
+            <span class="sr-only">Loading your calendar…</span>
+            @for (var s = 0; s < 2; s++)
+            {
+                <section class="cal-day-section">
+                    <span class="library-card-skeleton-line" style="display:block;width:9rem;height:1.3em;margin:0 0 0.8rem"></span>
+                    <div class="cal-hscroll">
+                        @for (var c = 0; c < 4; c++)
+                        {
+                            <div class="cal-card" aria-hidden="true">
+                                <div class="cal-card-thumb skeleton-shimmer"></div>
+                                <div class="cal-card-info">
+                                    <span class="library-card-skeleton-line"></span>
+                                    <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </section>
+            }
+        </div>
     }
     else if (_model is null)
     {
