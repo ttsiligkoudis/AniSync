@@ -8438,30 +8438,14 @@ ol.anime-detail-episodes-busy {
    across the room. Scoped entirely under .tv-mode, so phone / desktop are
    untouched.
    ========================================================================== */
-/* Form fields keep a quiet ring (scaling an input mid-edit is distracting). We draw
-   the ring with box-shadow rather than outline so it follows the element's own
-   border-radius (pills, rounded posters) for a clean look. */
+/* TV focus: the selected element ZOOMS (no accent ring) — far clearer than a thin ring from the
+   couch, and one consistent treatment for every control. Only one element is focused at a time, so
+   the single soft drop-shadow is cheap; box-shadow follows the element's own border-radius. */
 .tv-mode :focus {
     outline: none;
-    box-shadow: 0 0 0 3px var(--accent);
-}
-
-/* Non-form controls (cards, buttons, links) pop forward when selected: a crisp
-   accent ring, a dark separator ring so it reads against neighbouring posters, a
-   soft lift shadow, and a slightly bigger scale. Only ONE element is focused at a
-   time, so the single moderate drop-shadow here is cheap (unlike a glow on every
-   element). box-shadow tracks each element's border-radius automatically. */
-.tv-mode a:focus,
-.tv-mode button:focus,
-.tv-mode [role="button"]:focus {
-    outline: none;
-    box-shadow:
-        0 0 0 3px var(--accent),
-        0 0 0 6px rgba(0, 0, 0, 0.7),
-        0 10px 26px rgba(0, 0, 0, 0.55);
-    transform: scale(1.06);
+    transform: scale(1.08);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
     transition: transform 120ms ease-out, box-shadow 120ms ease-out;
-    will-change: transform;
     position: relative;
     z-index: 5;
 }
@@ -8475,16 +8459,10 @@ ol.anime-detail-episodes-busy {
 .tv-mode .search-page { max-width: 56rem; }
 .tv-mode .search-page .site-search-input { font-size: 1.3rem; padding: 0.9rem 1.1rem; }
 
-/* Poster cards (shelves + catalogues) read as artwork — selecting one just zooms it in,
-   no accent ring. A soft drop shadow lifts it off its neighbours. */
+/* Poster cards are the hero content — zoom them a little more than the general rule. */
 .tv-mode .library-card:focus {
-    outline: none;
-    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.65);
     transform: scale(1.12);
-    transition: transform 120ms ease-out;
-    will-change: transform;
-    position: relative;
-    z-index: 5;
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.65);
 }
 
 /* There's no pointer on a remote — a stuck cursor floating mid-screen reads as
@@ -8495,13 +8473,7 @@ ol.anime-detail-episodes-busy {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .tv-mode a:focus,
-    .tv-mode button:focus,
-    .tv-mode [role="button"]:focus,
-    .tv-mode .library-card:focus {
-        transform: none;
-        transition: none;
-    }
+    .tv-mode :focus { transform: none; transition: none; }
 }
 
 /* ── Media-type chooser modal + header mode button ──────────────────────────
@@ -10117,15 +10089,6 @@ body.dash-page main {
 
 /* Tabs / media-type pills — a touch larger for legibility, not bulky. */
 .tv-mode .mt-switch-label { font-size: 0.95rem; }
-/* Focused media-type pill: zoom + depth instead of the accent ring (matches the poster cards). */
-.tv-mode .mt-switch-btn:focus {
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
-    transform: scale(1.12);
-    transition: transform 120ms ease-out;
-    position: relative;
-    z-index: 5;
-}
-.tv-mode .mt-switch-btn:focus:not(.active) { background: var(--overlay-12); }
 .tv-mode .library-tab { font-size: 0.95rem; padding: 0.45rem 1rem; }
 
 /* Detail hero. */
