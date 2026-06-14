@@ -566,7 +566,7 @@ namespace AnimeList.Controllers
         /// type so the client can append ?type= for video.
         /// </summary>
         [HttpGet("suggest")]
-        public async Task<IActionResult> Suggest(string title, int limit = 8, string types = null)
+        public async Task<IActionResult> Suggest(string title, int limit = 8, string types = null, bool grouped = false)
         {
             if (string.IsNullOrWhiteSpace(title))
                 return new JsonResult(new { query = title, matches = Array.Empty<object>() });
@@ -657,9 +657,13 @@ namespace AnimeList.Controllers
                 _logger.LogWarning(ex, "API Suggest failed (title={Title}).", title);
             }
 
-            var matches = scored
-                .OrderByDescending(x => x.Score)
-                .Take(limit)
+            // Typeahead: a single flat list capped at `limit` (highest-scoring across all types).
+            // Grouped (the dedicated /search shelves view): keep every per-category hit — each
+            // block above already capped itself at `limit` — so anime / movies / series each get a
+            // populated shelf instead of the top-scoring category crowding the others out of one
+            // global cap. The client groups by `type`.
+            var ordered = scored.OrderByDescending(x => x.Score);
+            var matches = (grouped ? ordered : ordered.Take(limit))
                 .Select(x => (object)new { id = x.Id, name = x.Name, poster = x.Poster, type = x.Type })
                 .ToList();
 

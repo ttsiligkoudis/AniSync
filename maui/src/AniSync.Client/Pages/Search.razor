@@ -1,8 +1,13 @@
 @page "/search"
+@inject IAniSyncApi Api
+@inject AppState State
+@inject NavigationManager Nav
 
-@* Dedicated search page — a focusable search surface for the TV rail's Search link (the D-pad
-   can't reach the header typeahead). Reuses the global SearchBox; its results link straight to
-   detail pages. Works on any head, but the rail only links here on TV. *@
+@* Dedicated search view — a solid results surface (not the header's typeahead dropdown). The user
+   types a query and submits; the categorized results come back from /api/v1/suggest (grouped mode)
+   and render as a shelf per category: Anime, Movies, Series. Submission is by Enter on desktop or
+   the on-screen keyboard's search/go button on mobile/TV (both fire the form submit). The header
+   typeahead's Enter navigates here with ?q= prefilled so the two surfaces hand off cleanly. *@
 
 <PageTitle>Search · AniSync</PageTitle>
 
@@ -12,5 +17,159 @@
 </header>
 
 <div class="search-page">
-    <SearchBox />
+    <form class="search-page-form" @onsubmit="RunSearchAsync" @onsubmit:preventDefault>
+        <div class="site-search-input-wrap">
+            <input class="site-search-input"
+                   type="search"
+                   placeholder="Search anime, movies &amp; series…"
+                   autocomplete="off"
+                   autofocus
+                   @bind="_query"
+                   @bind:event="oninput" />
+        </div>
+    </form>
+
+    @if (_searching)
+    {
+        @* Skeleton shelf while results load — same card placeholders the dashboard shelves use. *@
+        <section class="dashboard-section">
+            <div class="dashboard-section-header">
+                <span class="library-card-skeleton-line" style="display:block;width:8rem;height:1.3em"></span>
+            </div>
+            <div class="poster-scroll-row">
+                @for (var i = 0; i < 8; i++)
+                {
+                    <div class="library-card library-card-skeleton">
+                        <div class="library-card-poster-wrap">
+                            <div class="library-card-poster skeleton-shimmer"></div>
+                        </div>
+                        <span class="library-card-skeleton-line"></span>
+                        <span class="library-card-skeleton-line library-card-skeleton-line-short"></span>
+                    </div>
+                }
+            </div>
+        </section>
+    }
+    else if (_searched && _anime.Count == 0 && _movies.Count == 0 && _series.Count == 0)
+    {
+        <p class="library-empty">No results for “@_lastQuery”.</p>
+    }
+    else if (_searched)
+    {
+        @if (_anime.Count > 0)
+        {
+            <section class="dashboard-section">
+                <div class="dashboard-section-header"><h2 class="dashboard-section-title">Anime</h2></div>
+                <PosterGrid Items="_anime" Variant="scroll" VideoLinks="true" />
+            </section>
+        }
+        @if (_movies.Count > 0)
+        {
+            <section class="dashboard-section">
+                <div class="dashboard-section-header"><h2 class="dashboard-section-title">Movies</h2></div>
+                <PosterGrid Items="_movies" Variant="scroll" VideoLinks="true" />
+            </section>
+        }
+        @if (_series.Count > 0)
+        {
+            <section class="dashboard-section">
+                <div class="dashboard-section-header"><h2 class="dashboard-section-title">Series</h2></div>
+                <PosterGrid Items="_series" Variant="scroll" VideoLinks="true" />
+            </section>
+        }
+    }
 </div>
+
+@code {
+    // Arriving with ?q= (header Enter, a shared link, or a refresh) prefills + runs the search.
+    [SupplyParameterFromQuery(Name = "q")] public string? Q { get; set; }
+
+    private string _query = "";
+    private string _lastQuery = "";
+    private bool _searching;
+    private bool _searched;
+    private List<MetaDto> _anime = new();
+    private List<MetaDto> _movies = new();
+    private List<MetaDto> _series = new();
+    private CancellationTokenSource? _cts;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Run once per distinct ?q=. RunSearchAsync rewrites the URL to the same q, which re-enters
+        // here — the _lastQuery guard stops that from looping.
+        if (!string.IsNullOrWhiteSpace(Q) && Q != _lastQuery)
+        {
+            _query = Q!;
+            await RunSearchAsync();
+        }
+    }
+
+    private async Task RunSearchAsync()
+    {
+        var q = _query.Trim();
+        if (q.Length == 0) return;
+        _lastQuery = q;
+
+        // Reflect the query in the URL so the search is shareable and survives a refresh. Replace
+        // (not push) so repeated submits don't stack history entries.
+        var target = $"search?q={Uri.EscapeDataString(q)}";
+        if (!string.Equals(Nav.ToBaseRelativePath(Nav.Uri), target, StringComparison.Ordinal))
+            Nav.NavigateTo(target, replace: true);
+
+        _cts?.Cancel();
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+        _searching = true;
+        _searched = true;
+        StateHasChanged();
+
+        try
+        {
+            // Span the user's enabled media types (matches the header selection); the server falls
+            // back to anime-only when absent.
+            var types = string.Join(",", State.EnabledMediaTypes);
+            var matches = await Api.SearchGroupedAsync(q, types, ct);
+            if (ct.IsCancellationRequested) return;
+            Categorize(matches);
+        }
+        catch (OperationCanceledException) { return; }
+        finally
+        {
+            if (!ct.IsCancellationRequested)
+            {
+                _searching = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private void Categorize(IReadOnlyList<SuggestMatch> matches)
+    {
+        _anime = new();
+        _movies = new();
+        _series = new();
+        foreach (var m in matches)
+        {
+            var meta = ToMeta(m);
+            if (string.Equals(meta.Type, "movie", StringComparison.OrdinalIgnoreCase)) _movies.Add(meta);
+            else if (string.Equals(meta.Type, "series", StringComparison.OrdinalIgnoreCase)) _series.Add(meta);
+            else _anime.Add(meta);
+        }
+    }
+
+    // Search matches are id/name/poster/type only — enough for a poster card. Normalise the type so
+    // PosterGrid links correctly: video iff "movie"/"series" (→ /meta/{id}?type=…), everything else
+    // is anime (→ /meta/{id}). Mirrors the header typeahead's HrefFor logic.
+    private static MetaDto ToMeta(SuggestMatch m)
+    {
+        var isVideo = string.Equals(m.Type, "movie", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(m.Type, "series", StringComparison.OrdinalIgnoreCase);
+        return new MetaDto
+        {
+            Id = m.Id,
+            Name = m.Name,
+            Poster = m.Poster,
+            Type = isVideo ? m.Type!.ToLowerInvariant() : "anime",
+        };
+    }
+}

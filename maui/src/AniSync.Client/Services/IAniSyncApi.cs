@@ -12,6 +12,10 @@ public interface IAniSyncApi
 {
     // Search + discovery
     Task<IReadOnlyList<SuggestMatch>> SuggestAsync(string title, int limit = 8, string? types = null, CancellationToken ct = default);
+    /// <summary>Grouped search for the dedicated /search shelves view — same /api/v1/suggest source
+    /// as the typeahead but ungated per category (anime/movies/series each return their own hits)
+    /// so the page renders a shelf per category. Each match carries a <c>Type</c> for grouping.</summary>
+    Task<IReadOnlyList<SuggestMatch>> SearchGroupedAsync(string title, string? types = null, CancellationToken ct = default);
     /// <summary>Relevance-ranked best-match resolver — /api/v1/match (header search "Enter to open top result").</summary>
     Task<IReadOnlyList<MatchResult>> MatchAsync(string title, int limit = 8, CancellationToken ct = default);
     Task<IReadOnlyList<MetaDto>> DiscoverAsync(string kind, string? genre = null, string? skip = null, string? season = null, string? search = null, CancellationToken ct = default);
