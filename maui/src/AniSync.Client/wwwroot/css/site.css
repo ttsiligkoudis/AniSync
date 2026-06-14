@@ -10096,6 +10096,11 @@ body.dash-page main {
    Poster cards keep their base size. All scoped to .tv-mode, so phone/web are unchanged.
    ========================================================================== */
 
+/* No text selection on a 10-foot UI — a remote can't select text, and on the touch preview it
+   stopped accidental long-press selection of labels (e.g. the "Search" title). Inputs stay editable. */
+.tv-mode { -webkit-user-select: none; user-select: none; }
+.tv-mode input, .tv-mode textarea { -webkit-user-select: text; user-select: text; }
+
 /* Page headers (Search / Discover / Library / Account / Calendar). */
 .tv-mode .page-header { margin-bottom: 1.1rem; }
 .tv-mode .page-title { font-size: 1.7rem; line-height: 1.15; }
