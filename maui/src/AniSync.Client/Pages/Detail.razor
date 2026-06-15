@@ -47,6 +47,18 @@ else if (_meta is null)
 else
 {
     var a = _meta;
+    @* TV: a visible Back control (the remote's Back works too, but this is a clear D-pad target),
+       mirroring the /watch header's back link. No autofocus — initial focus stays on the Watch CTA. *@
+    @if (Env.IsTv)
+    {
+        <button type="button" class="watch-back anime-detail-back" @onclick="GoBack">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="19" y1="12" x2="5" y2="12"></line>
+                <polyline points="12 19 5 12 12 5"></polyline>
+            </svg>
+            <span>Back</span>
+        </button>
+    }
     <section class="anime-detail-hero @(string.IsNullOrEmpty(a.Background) ? "anime-detail-hero-flat" : "")">
         @if (!string.IsNullOrEmpty(a.Background))
         {
@@ -314,6 +326,7 @@ else
 
             <div class="anime-detail-episodes-body" id="anime-detail-episodes-body">
                 <ol class="anime-detail-episodes" reversed="false" data-active-season="@_activeSeason">
+                    @{ var tvEpAutofocusUsed = false; }
                     @foreach (var ep in _filteredEpisodes)
                     {
                         var future = IsFuture(ep);
@@ -324,10 +337,18 @@ else
                         if (watched) classes.Add("anime-detail-episode-watched");
                         if (future) classes.Add("anime-detail-episode-future");
                         if (_seasons.Count > 1 && ep.Season != _activeSeason) classes.Add("anime-detail-episode-hidden");
+                        @* TV initial focus: when there's no Watch CTA above (so this is the first
+                           focusable target), land on the first VISIBLE episode — not the action
+                           buttons. The Watch-Ep / Watch-movie CTAs come first in the DOM, so they win
+                           when present (autoFocus picks the first [autofocus]). *@
+                        var epAutofocus = Env.IsTv && !tvEpAutofocusUsed
+                            && (_seasons.Count <= 1 || ep.Season == _activeSeason);
+                        if (epAutofocus) { tvEpAutofocusUsed = true; }
                         <li class="@string.Join(" ", classes)"
                             data-episode-num="@ep.Episode"
                             data-season-num="@ep.Season"
                             role="button" tabindex="0"
+                            autofocus="@(epAutofocus ? "autofocus" : null)"
                             @onclick="@(() => OnEpisodeActivate(ep, future))">
                             <div class="anime-detail-episode-thumb-wrap">
                                 @if (!string.IsNullOrEmpty(ep.Thumbnail))
@@ -387,7 +408,7 @@ else
            video movies use /meta/{id}/watch?type=movie (no episode segment), matching
            Detail.cshtml's movie CTA href. *@
         <section class="anime-detail-section anime-detail-movie-cta-wrap">
-            <a class="anime-detail-movie-cta" href="@MovieCtaHref">
+            <a class="anime-detail-movie-cta" href="@MovieCtaHref" autofocus="@(Env.IsTv ? "autofocus" : null)">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <polygon points="6 4 20 12 6 20 6 4"></polygon>
@@ -885,6 +906,14 @@ else
     {
         _modalOpen = true;
         await Task.CompletedTask;
+    }
+
+    // TV Back control — return to wherever the user came from (Discover/Library/Search), like a
+    // browser/remote Back. Falls back to Discover if history isn't navigable.
+    private async Task GoBack()
+    {
+        try { await JS.InvokeVoidAsync("history.back"); }
+        catch { Nav.NavigateTo("/discover"); }
     }
 
     // ── Quick-add heart ────────────────────────────────────────────────────────
