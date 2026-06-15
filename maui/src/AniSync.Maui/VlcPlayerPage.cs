@@ -816,7 +816,6 @@ public sealed class VlcPlayerPage : ContentPage
         try
         {
             // Aspect and crop are independent VLC knobs — always reset both so modes don't stack.
-            float scale = 0f; // 0 = auto-fit (the video is letterboxed to fit the view)
             switch (mode)
             {
                 case ScaleMode.Fit:
@@ -824,27 +823,16 @@ public sealed class VlcPlayerPage : ContentPage
                     _player.CropGeometry = null;
                     break;
                 case ScaleMode.Crop:
-                    // Stremio's "Περικοπή": zoom until the screen is covered, trimming the overflow edges —
-                    // no distortion. Cropping the source to the screen's aspect ratio does exactly that.
+                    // Zoom until the screen is covered, trimming the overflow edges — no distortion.
+                    // Cropping the source to the screen's aspect ratio does exactly that.
                     _player.AspectRatio = null;
                     _player.CropGeometry = SurfaceRatio();
                     break;
                 case ScaleMode.Fill:
-                    // Fill the WHOLE screen with the LEAST distortion: scale up uniformly until both
-                    // dimensions are covered, cropping the overflow — so the top/bottom gaps are used
-                    // instead of left as letterbox, and the picture isn't stretched. Computed from the
-                    // real video + surface pixel sizes. Falls back to the aspect-stretch only when the
-                    // video size isn't known yet (e.g. applied before the first frame).
+                    // Stretch the picture to the screen's aspect (fills fully; may distort, keeps all
+                    // content). "Crop" above is the no-distortion zoom-to-fill alternative.
+                    _player.AspectRatio = SurfaceRatio();
                     _player.CropGeometry = null;
-                    if (TryCoverScale(out var cover))
-                    {
-                        _player.AspectRatio = null;
-                        scale = cover;
-                    }
-                    else
-                    {
-                        _player.AspectRatio = SurfaceRatio();
-                    }
                     break;
                 case ScaleMode.SixteenNine:
                     _player.AspectRatio = "16:9";
@@ -855,39 +843,10 @@ public sealed class VlcPlayerPage : ContentPage
                     _player.CropGeometry = null;
                     break;
             }
-            _player.Scale = scale;
+            _player.Scale = 0; // auto-fit to the view
         }
         catch { /* not ready */ }
         CloseSheet();
-    }
-
-    // VLC Scale that COVERS the screen (fills both dimensions, cropping the overflow, no distortion):
-    // Scale is screen-px ÷ source-px per dimension, so the max of the two ratios fills both. Needs the
-    // decoded video size (available once playing) and the surface size; false if either is unknown.
-    private bool TryCoverScale(out float scale)
-    {
-        scale = 0f;
-        try
-        {
-            uint vw = 0, vh = 0;
-            if (!_player.Size(0, ref vw, ref vh) || vw == 0 || vh == 0) return false;
-            var (sw, sh) = SurfacePixels();
-            if (sw <= 0 || sh <= 0) return false;
-            scale = Math.Max((float)sw / vw, (float)sh / vh);
-            return scale > 0f;
-        }
-        catch { return false; }
-    }
-
-    // The video surface size in pixels (the view we draw on), falling back to the physical display.
-    private (int W, int H) SurfacePixels()
-    {
-#if ANDROID
-        if (_videoView.Handler?.PlatformView is global::Android.Views.View v && v.Width > 0 && v.Height > 0)
-            return (v.Width, v.Height);
-#endif
-        var d = DeviceDisplay.Current.MainDisplayInfo;
-        return ((int)Math.Max(d.Width, d.Height), (int)Math.Min(d.Width, d.Height));
     }
 
     // Ratio of the actual video surface, so Crop/Fill cover exactly the screen we draw on (including the
