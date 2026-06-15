@@ -35,6 +35,19 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
         // Tear down any prior session before starting a new one.
         await StopAsync();
 
+#if ANDROID
+        // Android TV: hand the stream to the standalone VLC app (Stremio-style external player). The embedded
+        // VideoView can't stand up a 4K video output on these budget TV GPUs (vout never initialises, decoder
+        // stalls), but VLC plays the same file hardware-decoded on its own SurfaceView. Phones keep the in-app
+        // player — it works there and carries the chrome / subtitle picker / resume + scrobble. Falls through
+        // to the embedded path below when VLC isn't installed (TryLaunch returns false).
+        if (DeviceInfo.Current.Idiom == DeviceIdiom.TV
+            && await MainThread.InvokeOnMainThreadAsync(() => ExternalVlc.TryLaunch(request)))
+        {
+            return;
+        }
+#endif
+
         try
         {
             using var media = new Media(_libVlc, new Uri(request.Url));
@@ -43,20 +56,14 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             if (request.ResumeSeconds is > 0)
                 media.AddOption($":start-time={(int)request.ResumeSeconds.Value}");
 
-            // Decoding strategy. On-screen diagnostics walked this out in steps:
-            //  • Phones/tablets: SOFTWARE decode — some mobile chipsets' HEVC/10-bit hardware decoders
-            //    corrupt the picture into green/blocky artifacts, and a phone CPU keeps up (verified: a
-            //    3840x2160 stream shows ~24fps steadily with no dropped frames).
-            //  • TV: was hardware MediaCodec (EnableHardwareDecoding=true), on the theory a weak TV CPU
-            //    can't software-decode 4K. But on a real TCL 4K set the MediaCodec VIDEO decoder produced
-            //    only 3–5 frames then stalled with ZERO frames ever displayed. :no-mediacodec-dr fixed the
-            //    pipeline deadlock (audio + clock then ran), yet the video decoder still never output past
-            //    ~5 frames — so the hardware video path can't handle this 4K stream on this TV regardless
-            //    of direct-rendering (and the stuck decoder pegged the CPU, making the D-pad UI laggy).
-            // Since software decode is proven on the same file, use it everywhere and let the on-screen
-            // diagnostic say whether the TV CPU keeps up (shown climbing) or falls behind.
-            var enableHardwareDecoding = false;
-            var player = new MediaPlayer(media) { EnableHardwareDecoding = enableHardwareDecoding };
+            // Software decode for the embedded player. This path now serves phones (and only TV when VLC
+            // isn't installed, since TV normally hands off to the standalone VLC app above). Software is the
+            // right choice for phones: some mobile chipsets' HEVC/10-bit hardware decoders corrupt the
+            // picture into green/blocky artifacts, and a phone CPU keeps up fine (verified on-screen — a
+            // 3840x2160 stream displays ~24fps steadily with no dropped frames). The TV hardware-decode
+            // experiments (MediaCodec, ±:no-mediacodec-dr) all stalled the embedded VideoView on 4K, which is
+            // why TV now delegates to VLC rather than decoding here.
+            var player = new MediaPlayer(media) { EnableHardwareDecoding = false };
             _player = player;
 
             // External subtitle tracks (proxied OpenSubtitles URLs) are NOT pre-attached here: libVLC loads
