@@ -10108,7 +10108,8 @@ body.dash-page main {
    still get the scale + ring from the focus rule above. */
 .tv-mode .library-card,
 .tv-mode .video-tile,
-.tv-mode .episode-item {
+.tv-mode .episode-item,
+.tv-mode .anime-detail-episode {
     transition: transform 0.1s ease-out !important;
 }
 .tv-mode .library-card:hover,
