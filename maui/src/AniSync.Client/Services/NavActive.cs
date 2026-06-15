@@ -11,6 +11,7 @@ public static class NavActive
     {
         var p = "/" + relativePath.Split('?', '#')[0].Trim('/');
         if (p == "/") return "home";
+        if (p.StartsWith("/search")) return "search";
         if (p.StartsWith("/library")) return "library";
         if (p.StartsWith("/discover") || p.StartsWith("/meta") || p.StartsWith("/watch")) return "discover";
         if (p.StartsWith("/calendar")) return "calendar";
