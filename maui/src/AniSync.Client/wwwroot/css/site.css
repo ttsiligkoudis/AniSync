@@ -563,6 +563,18 @@ main {
     }
 }
 
+/* Desktop: fill the full viewport width instead of a centred 1280px column, so the dashboard
+   (and every page) spans edge to edge with no black side gaps. .site-header-inner carries the
+   .container class too, so the header bar stretches with it. A small padding gutter is kept (from
+   .container + main) so content doesn't touch the screen edge. Below 1280px the cap never applied;
+   the TV layout uses its own .tv-content shell and is unaffected. */
+@media (min-width: 1280px) {
+    .container,
+    main {
+        max-width: none;
+    }
+}
+
 /* Detail-page sections all share the main column's width — no per-section
    cap, so Synopsis, Episodes, Related, Recommended, the Tag / Staff /
    Studio link groups, and the trailer card all line up flush left and
