@@ -314,6 +314,7 @@ else
 
             <div class="anime-detail-episodes-body" id="anime-detail-episodes-body">
                 <ol class="anime-detail-episodes" reversed="false" data-active-season="@_activeSeason">
+                    @{ var tvEpAutofocusUsed = false; }
                     @foreach (var ep in _filteredEpisodes)
                     {
                         var future = IsFuture(ep);
@@ -324,10 +325,18 @@ else
                         if (watched) classes.Add("anime-detail-episode-watched");
                         if (future) classes.Add("anime-detail-episode-future");
                         if (_seasons.Count > 1 && ep.Season != _activeSeason) classes.Add("anime-detail-episode-hidden");
+                        @* TV initial focus: when there's no Watch CTA above (so this is the first
+                           focusable target), land on the first VISIBLE episode — not the action
+                           buttons. The Watch-Ep / Watch-movie CTAs come first in the DOM, so they win
+                           when present (autoFocus picks the first [autofocus]). *@
+                        var epAutofocus = Env.IsTv && !tvEpAutofocusUsed
+                            && (_seasons.Count <= 1 || ep.Season == _activeSeason);
+                        if (epAutofocus) { tvEpAutofocusUsed = true; }
                         <li class="@string.Join(" ", classes)"
                             data-episode-num="@ep.Episode"
                             data-season-num="@ep.Season"
                             role="button" tabindex="0"
+                            autofocus="@(epAutofocus ? "autofocus" : null)"
                             @onclick="@(() => OnEpisodeActivate(ep, future))">
                             <div class="anime-detail-episode-thumb-wrap">
                                 @if (!string.IsNullOrEmpty(ep.Thumbnail))
@@ -387,7 +396,7 @@ else
            video movies use /meta/{id}/watch?type=movie (no episode segment), matching
            Detail.cshtml's movie CTA href. *@
         <section class="anime-detail-section anime-detail-movie-cta-wrap">
-            <a class="anime-detail-movie-cta" href="@MovieCtaHref">
+            <a class="anime-detail-movie-cta" href="@MovieCtaHref" autofocus="@(Env.IsTv ? "autofocus" : null)">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <polygon points="6 4 20 12 6 20 6 4"></polygon>
