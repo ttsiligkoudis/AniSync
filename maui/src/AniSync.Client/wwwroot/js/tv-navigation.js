@@ -175,9 +175,15 @@
         var bestScore = Infinity;
         candidates().forEach(function (el) {
             if (el === current) return;
-            var c = centre(el);
+            var elRect = el.getBoundingClientRect();
+            var c = { x: elRect.left + elRect.width / 2, y: elRect.top + elRect.height / 2 };
             var dx = c.x - cc.x;
             var dy = c.y - cc.y;
+            // Horizontal overlap: a full-width row directly below a left-aligned control (e.g. an
+            // episode row under "Show more") has its CENTRE far to the right, so a pure centre-cone
+            // would skip it and Down would fall to whatever IS straight down (the rail). Treat a
+            // candidate whose horizontal span overlaps the current element's as "in line" for up/down.
+            var overlapX = elRect.left < curRect.right && elRect.right > curRect.left;
             var primary, cross;
             if (dir === 'left') {
                 if (dx >= -1 || Math.abs(dy) > Math.abs(dx) || Math.abs(dy) > rowTol) return;
@@ -186,11 +192,11 @@
                 if (dx <= 1 || Math.abs(dy) > Math.abs(dx) || Math.abs(dy) > rowTol) return;
                 primary = dx; cross = Math.abs(dy);
             } else if (dir === 'up') {
-                if (dy >= -1 || Math.abs(dx) > Math.abs(dy)) return;
-                primary = -dy; cross = Math.abs(dx);
+                if (dy >= -1 || (!overlapX && Math.abs(dx) > Math.abs(dy))) return;
+                primary = -dy; cross = overlapX ? 0 : Math.abs(dx);
             } else { // down
-                if (dy <= 1 || Math.abs(dx) > Math.abs(dy)) return;
-                primary = dy; cross = Math.abs(dx);
+                if (dy <= 1 || (!overlapX && Math.abs(dx) > Math.abs(dy))) return;
+                primary = dy; cross = overlapX ? 0 : Math.abs(dx);
             }
             var score = primary + cross * 2;
             if (score < bestScore) { bestScore = score; best = el; }
