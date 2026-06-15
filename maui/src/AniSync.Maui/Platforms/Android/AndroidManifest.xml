@@ -5,6 +5,17 @@
          hidden from / blocked on TV. -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <!-- Android 11+ package visibility: we hand 4K streams off to the standalone VLC app on TV (an
+         ACTION_VIEW intent, Stremio-style), so we must be able to see/resolve it. Declare the VLC package
+         explicitly plus the generic "view a video" intent we launch; without this ResolveActivity returns
+         null even when VLC is installed and the handoff silently fails. -->
+    <queries>
+        <package android:name="org.videolan.vlc" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="video/*" />
+        </intent>
+    </queries>
     <!-- largeHeap: more memory headroom for the WebView + image cache and around 4K playback, so
          low-RAM TV boxes are less likely to GC-thrash (the "laggy home") or get OOM-killed. -->
     <application android:allowBackup="true" android:largeHeap="true" android:icon="@mipmap/appicon" android:roundIcon="@mipmap/appicon_round" android:banner="@mipmap/appicon" android:supportsRtl="true"></application>
