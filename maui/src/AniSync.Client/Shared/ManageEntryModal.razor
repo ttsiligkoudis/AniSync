@@ -1,4 +1,5 @@
 @inject IAniSyncApi Api
+@inject IAppEnvironment Env
 
 @* Manage-entry dialog — the Blazor equivalent of the server-rendered ManageEntry
    modal, driven by the clean JSON API (/api/v1/me/entries/{id}). Status options
@@ -13,7 +14,11 @@
     <div class="entry-modal" role="dialog" aria-modal="true" aria-labelledby="entry-modal-title" @onclick:stopPropagation>
         <header class="entry-modal-header">
             <h3 class="entry-modal-title" id="entry-modal-title">@Name</h3>
-            <button type="button" class="entry-modal-close" aria-label="Close" @onclick="Close">×</button>
+            @* TV: no X — Cancel closes it (one less D-pad target). *@
+            @if (!Env.IsTv)
+            {
+                <button type="button" class="entry-modal-close" aria-label="Close" @onclick="Close">×</button>
+            }
         </header>
         <div class="entry-modal-body">
             @if (_loading)
@@ -30,7 +35,7 @@
                        entries (a cross-service id mapped to ≥ 2 cours). Picking a cour
                        refetches that mapping's saved entry and rebinds the form. Mirrors
                        the MVC ManageEntry #seasonSelect. *@
-                    @if (_seasons.Count > 1)
+                    @if (!Env.IsTv && _seasons.Count > 1)
                     {
                         <div class="entry-modal-field">
                             <label class="entry-modal-label" for="entry-modal-season">Season</label>
@@ -55,6 +60,11 @@
                             <option value="Rewatching">Rewatching</option>
                         </select>
                     </div>
+                    @* TV: keep the modal to just Status + Save/Cancel — episodes/score/dates/rewatches/
+                       notes are fiddly to edit with a remote, so they're hidden there (and left at
+                       their loaded values on save). Pointer heads get the full form. *@
+                    @if (!Env.IsTv)
+                    {
                     <div class="entry-modal-field">
                         <label class="entry-modal-label" for="entry-modal-progress">Episodes Watched</label>
                         <div class="entry-modal-progress-row">
@@ -92,12 +102,13 @@
                         <label class="entry-modal-label" for="entry-modal-notes">Notes</label>
                         <textarea id="entry-modal-notes" class="entry-modal-textarea" rows="3" placeholder="Personal notes about this entry…" @bind="_notes"></textarea>
                     </div>
+                    }
                     @if (!string.IsNullOrEmpty(_error))
                     {
                         <div class="entry-modal-error" role="alert">@_error</div>
                     }
                     <div class="entry-modal-actions">
-                        @if (_inList)
+                        @if (!Env.IsTv && _inList)
                         {
                             <button type="button" class="entry-modal-delete" disabled="@_saving" @onclick="Remove">
                                 @(_removing ? "Removing…" : "Delete")
