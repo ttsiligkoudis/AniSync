@@ -1,4 +1,6 @@
+using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using AniSync.Client.Services;
 using AniSync.Maui;
@@ -79,14 +81,21 @@ public static class MauiProgram
             var env = sp.GetRequiredService<IAppEnvironment>();
             http.BaseAddress = new Uri(env.ApiBaseUrl);
         })
-#if DEBUG
-        // Trust the local dev HTTPS cert when talking to the local web head.
-        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        // Force IPv4 for the device → AniSync connection. The server resolves the caller's IP and
+        // signs IP-locked debrid links to it; the LibVLC player is likewise pinned to IPv4 (--ipv4).
+        // On a dual-stack device a link could otherwise be signed over IPv6 (this request) but the
+        // video fetched over IPv4 (the player), tripping the debrid "Wrong IP" guard. Keeping both
+        // hops on IPv4 makes the signed IP and the playback IP match. Falls back to IPv6 only when
+        // the host has no IPv4 route (rare).
+        .ConfigurePrimaryHttpMessageHandler(() =>
         {
-            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
-        })
+            var handler = new SocketsHttpHandler { ConnectCallback = ConnectIpv4FirstAsync };
+#if DEBUG
+            // Trust the local dev HTTPS cert when talking to the local web head.
+            handler.SslOptions.RemoteCertificateValidationCallback = (_, _, _, _) => true;
 #endif
-        ;
+            return handler;
+        });
 
         // ---- MAUI head: native environment + secure storage (Keychain/KeyStore/DPAPI) ----
         builder.Services.AddSingleton<IAppEnvironment>(new MauiAppEnvironment(apiBaseUrl));
@@ -119,11 +128,45 @@ public static class MauiProgram
         {
             System.Diagnostics.Debug.WriteLine($"LibVLCSharp Core.Initialize failed — VLC playback disabled: {ex}");
         }
+        // "--ipv4": force libVLC to fetch the stream over IPv4, matching the IPv4 the API HttpClient
+        // above signs IP-locked debrid links to — so the signed IP and the playback IP are the same
+        // family (avoids the debrid "Wrong IP" error on dual-stack devices).
         builder.Services.AddSingleton(_ => vlcReady
-            ? new LibVLC()
+            ? new LibVLC("--ipv4")
             : throw new InvalidOperationException("LibVLC native libraries failed to load on this device/build."));
         builder.Services.AddSingleton<IMediaPlayer, VlcMediaPlayer>();
 
         return builder.Build();
+    }
+
+    // Connect HttpClient sockets over IPv4 when the host has an IPv4 address, falling back to IPv6
+    // only if it doesn't. Used so the device → AniSync request (which decides the IP a debrid link is
+    // signed to) uses the same IPv4 the LibVLC player fetches the video over.
+    private static async ValueTask<Stream> ConnectIpv4FirstAsync(
+        SocketsHttpConnectionContext context, CancellationToken ct)
+    {
+        var host = context.DnsEndPoint.Host;
+        var port = context.DnsEndPoint.Port;
+        var addresses = await Dns.GetHostAddressesAsync(host, ct).ConfigureAwait(false);
+        var ordered = addresses
+            .OrderBy(a => a.AddressFamily == AddressFamily.InterNetwork ? 0 : 1) // IPv4 first
+            .ToArray();
+
+        Exception? last = null;
+        foreach (var addr in ordered)
+        {
+            var socket = new Socket(addr.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            try
+            {
+                await socket.ConnectAsync(new IPEndPoint(addr, port), ct).ConfigureAwait(false);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+            catch (Exception ex)
+            {
+                last = ex;
+                socket.Dispose();
+            }
+        }
+        throw last ?? new SocketException((int)SocketError.HostNotFound);
     }
 }
