@@ -35,6 +35,18 @@
                             </svg>
                         </span>
                         <span class="dash-row-label">@DashboardLayout.LabelFor(key)</span>
+                        @* Sections the TV layout hides by code — flag them so it's clear they won't
+                           appear on a TV regardless of this Shown/Hidden toggle. *@
+                        @if (_tvHidden.Contains(key))
+                        {
+                            <span class="dash-row-tv-off" title="Not shown on TV" aria-label="Not shown on TV">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <rect x="2" y="7" width="20" height="13" rx="2"></rect>
+                                    <polyline points="8 3 12 7 16 3"></polyline>
+                                    <line x1="2" y1="2" x2="22" y2="22"></line>
+                                </svg>
+                            </span>
+                        }
                         <button type="button" class="dash-row-toggle" aria-pressed="@(entry.Visible ? "true" : "false")"
                                 aria-label="@(entry.Visible ? "Hide section" : "Show section")" @onclick="() => ToggleVisible(key)">
                             @(entry.Visible ? "Shown" : "Hidden")
@@ -54,6 +66,10 @@
     private bool _open;
     private List<LayoutEntry> _draft = new();
     private HashSet<string> _present = new(StringComparer.Ordinal);
+
+    // Sections the TV layout hides by code (CSS: .tv-mode [data-dash-section="stats"|"browse"] →
+    // display:none). Flagged with a "no TV" icon in the chooser so users know they won't show on TV.
+    private static readonly HashSet<string> _tvHidden = new(StringComparer.Ordinal) { "stats", "browse" };
 
     private ElementReference _listRef;
     private IJSObjectReference? _js;
