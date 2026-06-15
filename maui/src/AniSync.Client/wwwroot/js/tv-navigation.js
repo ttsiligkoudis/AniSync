@@ -323,6 +323,16 @@
                 }
             }
 
+            // Entering the rail (Left from content) always lands on the active nav item — the
+            // highlighted (blue) one — rather than the spatially-nearest item, so opening the side
+            // panel starts on "where I am". Falls back to the spatial pick when nothing's active.
+            if (next && next.closest && next.closest('.tv-rail')
+                && !(start.closest && start.closest('.tv-rail'))) {
+                var enteredRail = next.closest('.tv-rail');
+                var activeNav = enteredRail.querySelector('.tv-rail-item.active');
+                if (activeNav && isVisible(activeNav)) next = activeNav;
+            }
+
             // Right from the left rail always leaves it (so it collapses): go to the content
             // element to the right if there is one, otherwise just move focus into the content
             // (or blur) — never get stuck expanded when the page has nothing to the right.
