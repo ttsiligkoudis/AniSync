@@ -80,7 +80,7 @@ namespace AnimeList.Services
             return set;
         }
 
-        public async Task<List<HiddenEntry>> GetPageAsync(string uid, int limit, int offset)
+        public async Task<List<HiddenEntry>> GetPageAsync(string uid, int limit, int offset, string mediaType = null)
         {
             var result = new List<HiddenEntry>();
             if (string.IsNullOrEmpty(uid)) return result;
@@ -88,14 +88,24 @@ namespace AnimeList.Services
             if (limit < 1) limit = 1;
             using var conn = await SqliteConnectionFactory.OpenConnectionAsync(_connectionString);
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
+            // Optional media-type filter so the Hidden view can show only the active mode. Anime also
+            // matches legacy NULL rows (older hides were anime-only and stored no type); movie/series
+            // match their exact stored type. Done in SQL so paging stays correct.
+            var typeFilter = mediaType switch
+            {
+                "anime" => " AND (media_type = 'anime' OR media_type IS NULL)",
+                "movie" or "series" => " AND media_type = $type",
+                _ => "",
+            };
+            cmd.CommandText = $"""
                 SELECT id, title, image_url, media_type, created_at
                 FROM hidden_entries
-                WHERE uid = $uid
+                WHERE uid = $uid{typeFilter}
                 ORDER BY created_at DESC, rowid DESC
                 LIMIT $limit OFFSET $offset;
                 """;
             cmd.Parameters.AddWithValue("$uid", uid);
+            if (mediaType is "movie" or "series") cmd.Parameters.AddWithValue("$type", mediaType);
             cmd.Parameters.AddWithValue("$limit", limit);
             cmd.Parameters.AddWithValue("$offset", offset);
             using var reader = await cmd.ExecuteReaderAsync();

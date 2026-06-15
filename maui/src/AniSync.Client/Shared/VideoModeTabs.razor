@@ -12,6 +12,11 @@
     }
     <a class="library-tab @(ActorsActive ? "library-tab-active" : "")"
        href="@ActorsHref()" role="tab" aria-selected="@(ActorsActive ? "true" : "false")">Actors</a>
+    @if (ShowHidden)
+    {
+        <a class="library-tab @(HiddenActive ? "library-tab-active" : "")"
+           href="/discover?list=hidden" role="tab" aria-selected="@(HiddenActive ? "true" : "false")">Hidden</a>
+    }
 </nav>
 
 @code {
@@ -25,6 +30,9 @@
     [Parameter] public string Type { get; set; } = "movie";
     [Parameter] public string? Genre { get; set; }
     [Parameter] public string? Search { get; set; }
+    /// <summary>Render the Hidden pill (logged-in only) — the Hidden view is per active media mode.</summary>
+    [Parameter] public bool ShowHidden { get; set; }
+    [Parameter] public bool HiddenActive { get; set; }
 
     private string ModeHref(string slug)
     {
