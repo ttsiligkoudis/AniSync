@@ -8546,6 +8546,27 @@ ol.anime-detail-episodes-busy {
     color: var(--text-strong);
 }
 
+/* Manage-entry modal controls (TV keeps just Status + Save/Cancel) — focus uses each control's
+   own affordance, not the global zoom. The select already styles :focus (accent border); the
+   buttons mirror their :hover. Pin font-size so the global 1.1em can't enlarge them. */
+.tv-mode .entry-modal-select:focus {
+    transform: none;
+    font-size: 0.95rem;
+}
+.tv-mode .entry-modal-cancel:focus,
+.tv-mode .entry-modal-save:focus {
+    transform: none;
+    font-size: 0.9rem;
+}
+.tv-mode .entry-modal-cancel:focus {
+    border-color: rgba(var(--ink-rgb), 0.3);
+    color: var(--text-strong);
+}
+.tv-mode .entry-modal-save:focus {
+    background: var(--accent-fill-hover);
+    border-color: var(--accent-hover);
+}
+
 /* Detail-page hero action buttons (status / Add-to-List pill, heart, hide) — focus shows their
    existing :hover state (wired into each :hover rule above) instead of the global zoom. Cancel the
    scale and restore the buttons' natural 0.82rem (the heart is icon-only, so size is moot there). */
