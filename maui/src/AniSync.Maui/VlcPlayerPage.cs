@@ -30,7 +30,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     // Bump on each player change so we can confirm which APK is actually installed (shown faintly in the top
     // bar). Temporary aid while iterating on the native player — remove once the layout is finalised.
-    private const string BuildTag = "dbg5";
+    private const string BuildTag = "dbg6";
 
     // TEMPORARY: on-screen decoder diagnostic. Flip to false (or delete the block) once the 4K freeze
     // is understood. It polls libVLC's decode stats so we can see, on the device, whether a frozen

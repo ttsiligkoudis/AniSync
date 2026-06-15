@@ -59,15 +59,29 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             if (request.ResumeSeconds is > 0)
                 media.AddOption($":start-time={(int)request.ResumeSeconds.Value}");
 
+            if (isTv)
+            {
+                // TV 4K via embedded MediaCodec. Two on-screen-diagnosed failures had to be fixed together:
+                //  • With direct rendering ON, MediaCodec's output buffers are owned by the surface and never
+                //    released (nothing consumes them), so the decoder deadlocks after ~1 frame and demux
+                //    chokes — total freeze at t=0.
+                //  • With :no-mediacodec-dr (frames copied OUT of the codec) the pipeline runs, but the
+                //    DEFAULT (GL) video output can't stand up a 4K surface ("vout x0" / shown 0) on these
+                //    budget TV GPUs.
+                // So: copy frames out here, and render them through the android-display vout
+                // (--vout=android-display, set on the LibVLC instance for TV in MauiProgram) — it blits
+                // straight to the ANativeWindow with no GL texture-size ceiling, the output VLC-Android
+                // itself uses for 4K.
+                media.AddOption(":no-mediacodec-dr");
+            }
+
             // Decoding strategy is device-dependent:
             //  • Phones/tablets: SOFTWARE decode — some mobile chipsets' HEVC/10-bit hardware decoders corrupt
             //    the picture into green/blocky artifacts, and a phone CPU keeps up fine (verified on-screen: a
             //    3840x2160 stream displays ~24fps steadily with no dropped frames).
-            //  • TV: HARDWARE MediaCodec decode (zero-copy to the surface) — the same path Stremio's embedded
-            //    VLC uses to play 4K on these sets. A weak TV CPU/GPU can't software-render 4K (vout never
-            //    comes up). The earlier hardware stalls were a surface-timing bug (we Play()'d before the
-            //    VideoView's surface existed, so MediaCodec had no output surface) — now the page starts
-            //    playback only once the surface is ready, so let libVLC pick the MediaCodec module.
+            //  • TV: HARDWARE MediaCodec decode — a weak TV CPU/GPU can't software-render 4K. Paired with the
+            //    :no-mediacodec-dr + android-display vout combo above so the hardware-decoded 4K frames
+            //    actually reach the screen (this is the path Stremio's embedded VLC uses to play 4K here).
             var player = new MediaPlayer(media) { EnableHardwareDecoding = isTv };
             _player = player;
 

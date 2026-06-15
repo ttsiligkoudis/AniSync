@@ -128,12 +128,24 @@ public static class MauiProgram
         {
             System.Diagnostics.Debug.WriteLine($"LibVLCSharp Core.Initialize failed — VLC playback disabled: {ex}");
         }
+        // libVLC instance options.
         // "--ipv4": force libVLC to fetch the stream over IPv4, matching the IPv4 the API HttpClient
         // above signs IP-locked debrid links to — so the signed IP and the playback IP are the same
         // family (avoids the debrid "Wrong IP" error on dual-stack devices).
-        builder.Services.AddSingleton(_ => vlcReady
-            ? new LibVLC("--ipv4")
-            : throw new InvalidOperationException("LibVLC native libraries failed to load on this device/build."));
+        // "--vout=android-display" (TV only): render straight to the ANativeWindow instead of the default
+        // GL-texture vout. On-screen diagnostics showed the default vout can't stand up a 4K surface on
+        // budget TV GPUs ("vout x0" / decoded-but-never-shown), the same GL texture-size ceiling that makes
+        // the embedded VideoView fail where standalone/Stremio VLC (which uses this window vout) succeeds.
+        // Paired with :no-mediacodec-dr per-media (VlcMediaPlayer) so hardware-decoded 4K frames are copied
+        // out and rendered through it. Phones keep the default vout (their software path already works).
+        builder.Services.AddSingleton(_ =>
+        {
+            if (!vlcReady)
+                throw new InvalidOperationException("LibVLC native libraries failed to load on this device/build.");
+            return DeviceInfo.Current.Idiom == DeviceIdiom.TV
+                ? new LibVLC("--ipv4", "--vout=android-display")
+                : new LibVLC("--ipv4");
+        });
         builder.Services.AddSingleton<IMediaPlayer, VlcMediaPlayer>();
 
         return builder.Build();
