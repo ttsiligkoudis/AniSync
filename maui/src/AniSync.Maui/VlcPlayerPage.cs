@@ -318,9 +318,6 @@ public sealed class VlcPlayerPage : ContentPage
         _loading.Add(_spinner);
 
         // ── Compose: video, then controls, then the sheet on top ───────────────
-        var tap = new TapGestureRecognizer();
-        tap.Tapped += (_, _) => ToggleControls();
-
         // SafeAreaEdges=None on the PAGE alone isn't enough: MAUI 10 also applies safe-area insets at the
         // layout level, and fs9's diagnostics showed the root Grid padding its children 152px away from the
         // notch (the page view spanned the full 2772px display while the content started at x=152).
@@ -329,7 +326,18 @@ public sealed class VlcPlayerPage : ContentPage
         _root.Add(_controls, 0, 0);
         _root.Add(_loading, 0, 0);     // over the video, under the controls' tap target + the sheet
         _root.Add(_sheetOverlay, 0, 0);
-        _root.GestureRecognizers.Add(tap);
+
+        // Tap-to-toggle the chrome — touch heads only. A TapGestureRecognizer on the root makes it
+        // focusable+clickable on Android, so on a TV it STEALS D-pad focus from the control buttons
+        // and OK (DPAD_CENTER) just fires this toggle instead of activating the focused control
+        // (the "arrows do nothing, OK shows/hides the overlay, nothing clickable" symptom). On TV the
+        // chrome auto-hides and any D-pad key re-summons it (MainActivity → OnTvWakeKey), so no tap.
+        if (!_isTv)
+        {
+            var tap = new TapGestureRecognizer();
+            tap.Tapped += (_, _) => ToggleControls();
+            _root.GestureRecognizers.Add(tap);
+        }
         Content = _root;
 
         // Auto-hide the chrome after a few seconds of inactivity.
