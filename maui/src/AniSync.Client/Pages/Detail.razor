@@ -216,28 +216,31 @@ else
                         }
                     </div>
                 }
+
+                @* Synopsis lives inside the hero (the open space right of the poster) rather than as
+                   a separate section below — fills the dead space, especially on movies. On TV it's
+                   never collapsed (no "Show more"); on pointer heads the long-text toggle stays. *@
+                @if (!string.IsNullOrEmpty(a.Description))
+                {
+                    var isLong = a.Description!.Length > 180;
+                    <div class="anime-detail-hero-synopsis">
+                        <h2 class="anime-detail-section-title">Synopsis</h2>
+                        <div class="anime-detail-synopsis-wrap" data-collapsed="@((!Env.IsTv && isLong && !_synopsisExpanded).ToString().ToLowerInvariant())">
+                            <p class="anime-detail-synopsis">@a.Description</p>
+                            @if (!Env.IsTv && isLong)
+                            {
+                                <button type="button" class="anime-detail-synopsis-toggle"
+                                        aria-expanded="@_synopsisExpanded"
+                                        @onclick="() => _synopsisExpanded = !_synopsisExpanded">
+                                    @(_synopsisExpanded ? "Show less" : "Show more")
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
             </div>
         </div>
     </section>
-
-    @if (!string.IsNullOrEmpty(a.Description))
-    {
-        var isLong = a.Description!.Length > 180;
-        <section class="anime-detail-section">
-            <h2 class="anime-detail-section-title">Synopsis</h2>
-            <div class="anime-detail-synopsis-wrap" data-collapsed="@((isLong && !_synopsisExpanded).ToString().ToLowerInvariant())">
-                <p class="anime-detail-synopsis">@a.Description</p>
-                @if (isLong)
-                {
-                    <button type="button" class="anime-detail-synopsis-toggle"
-                            aria-expanded="@_synopsisExpanded"
-                            @onclick="() => _synopsisExpanded = !_synopsisExpanded">
-                        @(_synopsisExpanded ? "Show less" : "Show more")
-                    </button>
-                }
-            </div>
-        </section>
-    }
 
     @if (!Env.IsTv && !string.IsNullOrEmpty(_trailerId))
     {
