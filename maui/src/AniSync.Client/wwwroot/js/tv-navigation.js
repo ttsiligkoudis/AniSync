@@ -184,6 +184,12 @@
             // would skip it and Down would fall to whatever IS straight down (the rail). Treat a
             // candidate whose horizontal span overlaps the current element's as "in line" for up/down.
             var overlapX = elRect.left < curRect.right && elRect.right > curRect.left;
+            // The rail is reached only by Left and left by Right — never by Up/Down. Without this,
+            // vertical nav in the content hops to the nearest rail item (Down → Settings, Up → the
+            // media-type item) because a rail item straight up/down the left edge often out-scores
+            // the real, horizontally-offset content target. (Rail-internal Up/Down is handled before
+            // pickInDirection, so here `current` is always content.)
+            if ((dir === 'up' || dir === 'down') && el.closest && el.closest('.tv-rail')) return;
             var primary, cross;
             if (dir === 'left') {
                 if (dx >= -1 || Math.abs(dy) > Math.abs(dx) || Math.abs(dy) > rowTol) return;
@@ -192,10 +198,13 @@
                 if (dx <= 1 || Math.abs(dy) > Math.abs(dx) || Math.abs(dy) > rowTol) return;
                 primary = dx; cross = Math.abs(dy);
             } else if (dir === 'up') {
-                if (dy >= -1 || (!overlapX && Math.abs(dx) > Math.abs(dy))) return;
+                // Widen the vertical cone (~63°) and accept horizontal overlap, so an offset control
+                // above (e.g. the Watch CTA / action buttons above a left-aligned "Show more") is
+                // reachable rather than skipped for being too diagonal.
+                if (dy >= -1 || (!overlapX && Math.abs(dx) > Math.abs(dy) * 2)) return;
                 primary = -dy; cross = overlapX ? 0 : Math.abs(dx);
             } else { // down
-                if (dy <= 1 || (!overlapX && Math.abs(dx) > Math.abs(dy))) return;
+                if (dy <= 1 || (!overlapX && Math.abs(dx) > Math.abs(dy) * 2)) return;
                 primary = dy; cross = overlapX ? 0 : Math.abs(dx);
             }
             var score = primary + cross * 2;
