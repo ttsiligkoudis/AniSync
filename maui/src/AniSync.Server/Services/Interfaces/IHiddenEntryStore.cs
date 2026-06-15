@@ -25,7 +25,10 @@ namespace AnimeList.Services.Interfaces
         Task<HashSet<string>> GetHiddenIdsAsync(string uid);
 
         /// <summary>A page of the user's hidden entries, most-recently-hidden
-        /// first, for the Discover Hidden section's infinite scroll.</summary>
-        Task<List<HiddenEntry>> GetPageAsync(string uid, int limit, int offset);
+        /// first, for the Discover Hidden section's infinite scroll. When
+        /// <paramref name="mediaType"/> is given ("anime"/"movie"/"series") only
+        /// entries of that type are returned (anime also matches NULL legacy rows),
+        /// so the Hidden view can show just the active media mode.</summary>
+        Task<List<HiddenEntry>> GetPageAsync(string uid, int limit, int offset, string mediaType = null);
     }
 }

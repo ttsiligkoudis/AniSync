@@ -53,7 +53,7 @@ public interface IAniSyncApi
     /// applies the server's ScoreMatch relevance re-rank.</summary>
     Task<IReadOnlyList<MetaDto>> VideoListAsync(string type, string list, string? search = null, CancellationToken ct = default);
     /// <summary>The user's Hidden section (titles hidden from Discover) — /api/v1/me/hidden?skip=. Paged 24/call.</summary>
-    Task<IReadOnlyList<MetaDto>> HiddenAsync(string? skip = null, CancellationToken ct = default);
+    Task<IReadOnlyList<MetaDto>> HiddenAsync(string? skip = null, string? type = null, CancellationToken ct = default);
     Task<LibraryResponse?> LibraryAsync(string? status = null, CancellationToken ct = default);
 
     // Detail + watch

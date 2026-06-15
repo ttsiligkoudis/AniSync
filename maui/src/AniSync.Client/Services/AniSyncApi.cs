@@ -141,10 +141,12 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.Results ?? new();
     }
 
-    public async Task<IReadOnlyList<MetaDto>> HiddenAsync(string? skip = null, CancellationToken ct = default)
+    public async Task<IReadOnlyList<MetaDto>> HiddenAsync(string? skip = null, string? type = null, CancellationToken ct = default)
     {
-        var url = "api/v1/me/hidden";
-        if (!string.IsNullOrWhiteSpace(skip)) url += $"?skip={Uri.EscapeDataString(skip)}";
+        var q = new List<string>();
+        if (!string.IsNullOrWhiteSpace(skip)) q.Add($"skip={Uri.EscapeDataString(skip)}");
+        if (!string.IsNullOrWhiteSpace(type)) q.Add($"type={Uri.EscapeDataString(type)}");
+        var url = "api/v1/me/hidden" + (q.Count > 0 ? "?" + string.Join("&", q) : "");
         var resp = await GetOrDefault<MetaListResponse>(url, ct);
         return resp?.Results ?? new();
     }

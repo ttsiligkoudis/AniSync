@@ -1212,7 +1212,7 @@ namespace AnimeList.Controllers
         [HttpGet("hidden")]
         [RequireConfig]
         [ProducesResponseType(typeof(MetaListResponse), StatusCodes.Status200OK)]
-        public async Task<IActionResult> Hidden(string skip = null)
+        public async Task<IActionResult> Hidden(string skip = null, string type = null)
         {
             try
             {
@@ -1222,7 +1222,10 @@ namespace AnimeList.Controllers
 
                 const int pageSize = 24;
                 var offset = int.TryParse(skip, out var s) && s > 0 ? s : 0;
-                var hidden = await _hiddenStore.GetPageAsync(uid, pageSize, offset);
+                // Filter to the active media mode when the client passes ?type= (anime/movie/series),
+                // so the Hidden view shows only that mode; absent → all hidden entries (back-compat).
+                var mediaType = type is "anime" or "movie" or "series" ? type : null;
+                var hidden = await _hiddenStore.GetPageAsync(uid, pageSize, offset, mediaType);
                 return new JsonResult(new MetaListResponse(hidden.Select(ToHiddenMeta).ToList()));
             }
             catch (Exception ex)

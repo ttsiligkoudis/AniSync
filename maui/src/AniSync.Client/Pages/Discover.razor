@@ -77,8 +77,20 @@
 }
 else
 {
-    <VideoModeTabs Modes="_videoModes" ActiveMode="@_videoMode" Genre="@Genre" Search="@Search" />
+    @if (_isHidden)
+    {
+        <header class="page-header">
+            <p class="page-subtitle">Discover</p>
+            <h1 class="page-title">Hidden</h1>
+            <p class="page-header-desc">Titles you've hidden from Discover. Open any and use Unhide to bring it back.</p>
+        </header>
+    }
 
+    <VideoModeTabs Modes="_videoModes" ActiveMode="@(_isHidden ? null : _videoMode)" Genre="@Genre" Search="@Search"
+                   ShowHidden="State.LoggedIn" HiddenActive="_isHidden" />
+
+    @if (!_isHidden)
+    {
     <form class="filter-bar" role="search" @onsubmit="ApplyVideoFilters">
         <input type="search" @bind="_searchInput" @bind:event="oninput"
                placeholder="Search @_videoLabelLower…" class="filter-bar-search" autocomplete="off" />
@@ -98,6 +110,7 @@ else
             <a class="filter-bar-clear" href="/discover">Clear</a>
         }
     </form>
+    }
 }
 
 @* Results pane — skeleton while page 1 loads; bare grid for search; paginated grid + sentinel otherwise. *@
@@ -244,7 +257,9 @@ else
     private async Task Refresh()
     {
         _hasTag = IsAnime && !string.IsNullOrWhiteSpace(Tag);
-        _isHidden = IsAnime && string.Equals(List, "hidden", StringComparison.OrdinalIgnoreCase) && State.LoggedIn;
+        // Hidden is per-mode now (anime/movies/series each show only their own hidden titles), so it's
+        // no longer anime-only.
+        _isHidden = string.Equals(List, "hidden", StringComparison.OrdinalIgnoreCase) && State.LoggedIn;
         _hasSearch = !string.IsNullOrWhiteSpace(Search);
         _hasGenre = !string.IsNullOrWhiteSpace(Genre);
         _searchMode = _hasSearch && !_hasTag && !_isHidden;
@@ -344,7 +359,7 @@ else
         {
             if (_isHidden)
             {
-                page = await Api.HiddenAsync(skip);
+                page = await Api.HiddenAsync(skip, CurrentModeType());
             }
             else if (_hasTag)
             {
@@ -512,8 +527,17 @@ else
         return "/discover?" + string.Join("&", q);
     }
 
+    // Active media mode as the API's type token, for the per-mode Hidden fetch.
+    private string CurrentModeType() => State.MediaType switch
+    {
+        MetaType.movie => "movie",
+        MetaType.series => "series",
+        _ => "anime",
+    };
+
     private string BuildTitle()
     {
+        if (_isHidden) return "Hidden · Discover";
         if (!IsAnime)
         {
             var label = State.MediaType == MetaType.movie ? "Movies" : "Series";
@@ -521,7 +545,6 @@ else
             if (_hasGenre) return $"{Genre} · {label}";
             return $"{label} · AniSync";
         }
-        if (_isHidden) return "Hidden · Discover";
         if (_hasSearch) return $"Search: {Search} · Discover";
         if (_hasTag) return $"#{Tag} · Discover";
         if (_hasGenre) return $"{Genre} · Discover";
@@ -531,13 +554,13 @@ else
 
     private string BuildEmptyMessage()
     {
+        if (_isHidden) return "You haven't hidden anything yet. Open a title and use Hide to tuck it away here.";
         if (!IsAnime)
         {
             if (_hasSearch) return $"No matches for \"{Search}\".";
             if (_hasGenre) return $"No {Genre!.ToLower()} {_videoLabelLower} right now.";
             return $"Couldn't load {_videoLabelLower} — try again later.";
         }
-        if (_isHidden) return "You haven't hidden anything yet. Open a title and use Hide to tuck it away here.";
         if (_hasSearch) return $"No matches for \"{Search}\".";
         if (_hasTag) return $"No anime found with the tag \"{Tag}\".";
         var activeLabel = AnimeTabs.First(t => t.Slug == _animeList).Label.ToLower();
