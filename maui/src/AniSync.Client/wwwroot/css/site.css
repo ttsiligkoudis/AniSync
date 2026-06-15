@@ -9126,6 +9126,14 @@ body.dash-modal-open { overflow: hidden; }
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+/* "Not shown on TV" marker (TV with a slash) on the sections the TV layout hides by code. */
+.dash-row-tv-off {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+}
 .dash-row-toggle {
     flex: 0 0 auto;
     padding: 0.3rem 0.7rem;
