@@ -10055,16 +10055,11 @@ body.dash-page main {
     width: 190px;
     box-shadow: 8px 0 32px rgba(0, 0, 0, 0.5);
 }
-/* Only expand on :hover where a real pointer exists. On a TV (hover: none) the WebView can leave a
-   synthetic :hover stuck on a rail item after a D-pad "click", which kept the rail expanded with no
-   way to collapse it (focus had already moved into the content). Gating :hover to pointer devices
-   leaves :focus-within as the sole trigger on TV, so the rail collapses as soon as focus leaves it. */
-@media (hover: hover) {
-    .tv-rail:hover {
-        width: 190px;
-        box-shadow: 8px 0 32px rgba(0, 0, 0, 0.5);
-    }
-}
+/* The rail expands on :focus-within ONLY (no :hover trigger). The MAUI Android WebView reports
+   hover-capable and leaves a synthetic :hover stuck on a rail item after a D-pad "click", which
+   kept the rail expanded with no way to collapse it (focus had already moved into the content) —
+   and unlike a desktop mouse, a remote never moves to clear it. :focus-within is the reliable
+   D-pad signal: the rail collapses the moment focus leaves it.) */
 
 .tv-rail-logo {
     display: flex;
@@ -10096,7 +10091,6 @@ body.dash-page main {
 /* Labels are revealed only when the rail is expanded. */
 .tv-rail-label { opacity: 0; transition: opacity 120ms ease-out; }
 .tv-rail:focus-within .tv-rail-label { opacity: 1; }
-@media (hover: hover) { .tv-rail:hover .tv-rail-label { opacity: 1; } }
 .tv-rail-item.active { color: var(--text-strong); }
 .tv-rail-item.active .tv-rail-icon { color: var(--accent); }
 
