@@ -47,6 +47,18 @@ else if (_meta is null)
 else
 {
     var a = _meta;
+    @* TV: a visible Back control (the remote's Back works too, but this is a clear D-pad target),
+       mirroring the /watch header's back link. No autofocus — initial focus stays on the Watch CTA. *@
+    @if (Env.IsTv)
+    {
+        <button type="button" class="watch-back anime-detail-back" @onclick="GoBack">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="19" y1="12" x2="5" y2="12"></line>
+                <polyline points="12 19 5 12 12 5"></polyline>
+            </svg>
+            <span>Back</span>
+        </button>
+    }
     <section class="anime-detail-hero @(string.IsNullOrEmpty(a.Background) ? "anime-detail-hero-flat" : "")">
         @if (!string.IsNullOrEmpty(a.Background))
         {
@@ -894,6 +906,14 @@ else
     {
         _modalOpen = true;
         await Task.CompletedTask;
+    }
+
+    // TV Back control — return to wherever the user came from (Discover/Library/Search), like a
+    // browser/remote Back. Falls back to Discover if history isn't navigable.
+    private async Task GoBack()
+    {
+        try { await JS.InvokeVoidAsync("history.back"); }
+        catch { Nav.NavigateTo("/discover"); }
     }
 
     // ── Quick-add heart ────────────────────────────────────────────────────────

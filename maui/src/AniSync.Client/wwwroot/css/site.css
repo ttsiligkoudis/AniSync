@@ -3662,6 +3662,16 @@ body.modal-open {
     text-decoration: none;
 }
 
+/* Detail-page TV Back reuses .watch-back but is a <button> — strip the native button chrome. */
+.anime-detail-back {
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    font-family: inherit;
+    margin-bottom: 0.6rem;
+}
+
 .watch-title {
     font-size: var(--text-xl);
     font-weight: 700;
