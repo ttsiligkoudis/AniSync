@@ -61,10 +61,19 @@ internal static class AndroidImmersive
     // Dialog-type windows are normally never laid out into the display cutout regardless of cutout mode —
     // LAYOUT_NO_LIMITS is the documented escape hatch that lets a window extend beyond the screen's "safe"
     // limits, cutout included. Combined with a MATCH_PARENT layout this makes the modal truly edge-to-edge.
+    //
+    // TV EXPERIMENT: a TV has no display cutout, so the cutout opt-in + LAYOUT_NO_LIMITS here do nothing
+    // useful there — but they DO reshape the modal window's surface, which is the leading suspect for why
+    // MediaCodec direct-rendering of 4K decodes frames yet never presents one on TV (works fine in a plain
+    // VLC Activity). So on TV, leave the modal window's surface untouched (just size it full-screen + hide
+    // the bars); keep the full notch treatment on phones, where the cutout actually exists.
     private static void TreatModalWindow(global::Android.Views.Window modal)
     {
-        SetCutout(modal, intoCutout: true);
-        modal.AddFlags(WindowManagerFlags.LayoutNoLimits);
+        if (DeviceInfo.Current.Idiom != DeviceIdiom.TV)
+        {
+            SetCutout(modal, intoCutout: true);
+            modal.AddFlags(WindowManagerFlags.LayoutNoLimits);
+        }
         modal.SetLayout(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent);
         HideBars(modal);
     }
