@@ -82,6 +82,15 @@ namespace AnimeList.Services
                 if (l.NeedsReauth || l.TokenData == null) continue;
                 if (string.IsNullOrEmpty(l.TokenData.access_token)) continue;
                 if (l.Service == primary.anime_service) continue;
+                // Trakt has no anime list of its own — it tracks anime as TV series, keyed per-status.
+                // When the primary IS a real anime tracker (AniList/MAL/Kitsu) it's authoritative for
+                // anime watch-status, so don't fold Trakt's anime copies into the anime merge: a title
+                // the user COMPLETED on the anime side but left "watching" on Trakt would otherwise
+                // leak back in (it's only in Trakt's Current list, so there's no primary entry to win
+                // the dedup) and reappear in Continue-watching / Library, ignoring the anime status —
+                // and re-saving on the anime side can't shift it because it's the Trakt copy. (A
+                // Trakt-PRIMARY user has no separate anime list, so Trakt still contributes there.)
+                if (l.Service == AnimeService.Trakt && primary.anime_service != AnimeService.Trakt) continue;
                 sources.Add((l.TokenData, l.Service));
             }
 
