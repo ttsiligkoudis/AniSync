@@ -36,12 +36,13 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
         await StopAsync();
 
 #if ANDROID
-        // Android TV: hand the stream to the standalone VLC app (Stremio-style external player). The embedded
-        // VideoView can't stand up a 4K video output on these budget TV GPUs (vout never initialises, decoder
-        // stalls), but VLC plays the same file hardware-decoded on its own SurfaceView. Phones keep the in-app
-        // player — it works there and carries the chrome / subtitle picker / resume + scrobble. Falls through
-        // to the embedded path below when VLC isn't installed (TryLaunch returns false).
-        if (DeviceInfo.Current.Idiom == DeviceIdiom.TV
+        // External VLC handoff is kept available but OFF. Testing showed Stremio plays this 4K stream with
+        // its EMBEDDED VLC (its menu lists Exo/VLC/MPV as embedded players, with "External" as a separate
+        // option), so embedded is the correct path — and ours stalled only because we start playback before
+        // the video surface exists (fixed below + in the page). Flip this to delegate to the standalone VLC
+        // app instead (shows the Android "Open with" picker).
+        var useExternalVlcOnTv = false;
+        if (useExternalVlcOnTv && DeviceInfo.Current.Idiom == DeviceIdiom.TV
             && await MainThread.InvokeOnMainThreadAsync(() => ExternalVlc.TryLaunch(request)))
         {
             return;
@@ -50,20 +51,24 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
 
         try
         {
+            var isTv = DeviceInfo.Current.Idiom == DeviceIdiom.TV;
+
             using var media = new Media(_libVlc, new Uri(request.Url));
 
             // Resume position: libVLC takes a start time in seconds via :start-time.
             if (request.ResumeSeconds is > 0)
                 media.AddOption($":start-time={(int)request.ResumeSeconds.Value}");
 
-            // Software decode for the embedded player. This path now serves phones (and only TV when VLC
-            // isn't installed, since TV normally hands off to the standalone VLC app above). Software is the
-            // right choice for phones: some mobile chipsets' HEVC/10-bit hardware decoders corrupt the
-            // picture into green/blocky artifacts, and a phone CPU keeps up fine (verified on-screen — a
-            // 3840x2160 stream displays ~24fps steadily with no dropped frames). The TV hardware-decode
-            // experiments (MediaCodec, ±:no-mediacodec-dr) all stalled the embedded VideoView on 4K, which is
-            // why TV now delegates to VLC rather than decoding here.
-            var player = new MediaPlayer(media) { EnableHardwareDecoding = false };
+            // Decoding strategy is device-dependent:
+            //  • Phones/tablets: SOFTWARE decode — some mobile chipsets' HEVC/10-bit hardware decoders corrupt
+            //    the picture into green/blocky artifacts, and a phone CPU keeps up fine (verified on-screen: a
+            //    3840x2160 stream displays ~24fps steadily with no dropped frames).
+            //  • TV: HARDWARE MediaCodec decode (zero-copy to the surface) — the same path Stremio's embedded
+            //    VLC uses to play 4K on these sets. A weak TV CPU/GPU can't software-render 4K (vout never
+            //    comes up). The earlier hardware stalls were a surface-timing bug (we Play()'d before the
+            //    VideoView's surface existed, so MediaCodec had no output surface) — now the page starts
+            //    playback only once the surface is ready, so let libVLC pick the MediaCodec module.
+            var player = new MediaPlayer(media) { EnableHardwareDecoding = isTv };
             _player = player;
 
             // External subtitle tracks (proxied OpenSubtitles URLs) are NOT pre-attached here: libVLC loads
@@ -100,9 +105,11 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             // session down cleanly rather than leave audio running behind a dead page.
             player.EncounteredError += (_, _) => _ = StopAsync();
 
-            // Hand the configured player to a native page on the UI thread. Only Play() AFTER the page is
-            // actually presented — otherwise a failure to present would leave audio playing with no visible
-            // video surface (the "frozen screen + background sound" symptom).
+            // Hand the configured player to a native page on the UI thread. The page itself calls Play()
+            // once its VideoView's surface is actually created (see VlcPlayerPage) — NOT here right after
+            // presenting. Starting before the surface exists is what left hardware MediaCodec with no output
+            // surface on TV (decoded a few frames then stalled, video black), and starting before the page is
+            // presented would leave audio playing with no visible surface ("frozen screen + background sound").
             await MainThread.InvokeOnMainThreadAsync(async () =>
             {
                 var nav = Application.Current?.Windows.FirstOrDefault()?.Page?.Navigation
@@ -110,7 +117,6 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
                 var page = new VlcPlayerPage(player, request.Title, externalSubs,
                     request.PreferredAudioLanguage, request.PreferredSubtitleLanguage);
                 await nav.PushModalAsync(page);
-                player.Play();
             });
         }
         catch
