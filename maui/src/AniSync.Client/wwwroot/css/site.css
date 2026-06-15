@@ -10045,6 +10045,13 @@ body.dash-page main {
     flex: 1 1 auto;
     min-width: 0;
     padding: 1.6rem 2.5vw 3rem;
+    /* Flex column like the desktop <main>, so the dashboard shelves' CSS `order:` (from the saved
+       DashLayout) actually applies. As a plain block it was ignored, so TV showed DOM order (all
+       anime shelves first) while desktop showed the saved order (e.g. the Continue-watching lists
+       grouped first). The gap matches <main> so the shelf rhythm is the same. */
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
 }
 
 /* The reused media-type switch flows inline at the top of the TV content (its
