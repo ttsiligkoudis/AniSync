@@ -37,38 +37,26 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
 
         try
         {
-            var isTv = DeviceInfo.Current.Idiom == DeviceIdiom.TV;
-
             using var media = new Media(_libVlc, new Uri(request.Url));
 
             // Resume position: libVLC takes a start time in seconds via :start-time.
             if (request.ResumeSeconds is > 0)
                 media.AddOption($":start-time={(int)request.ResumeSeconds.Value}");
 
-            // Decoding strategy is device-dependent:
-            //  • Phones/tablets: software decode (hardware OFF) — some mobile chipsets' HEVC/10-bit
-            //    hardware decoders corrupt the picture into green/blocky artifacts, and a phone CPU
-            //    keeps up fine.
-            //  • TV boxes: hardware decode (MediaCodec) via EnableHardwareDecoding. Their CPUs are
-            //    weak, so software-decoding a high-bitrate/4K stream stalls the video while audio keeps
-            //    playing; their dedicated video decoders handle it. (An explicit ":codec=mediacodec_*"
-            //    pin was tried to force hardware on 4K but broke playback entirely on a real TV — those
-            //    module names aren't valid in this libVLC build, so it got no decoder and hung — so we
-            //    stay on EnableHardwareDecoding and let libVLC pick the module.)
-            if (isTv)
-            {
-                // Disable MediaCodec DIRECT RENDERING on TV. On-screen diagnostics on a TCL 4K set showed a
-                // 4K stream decode exactly 3 frames then deadlock with ZERO frames ever displayed (the
-                // "freeze at 0:00, audio-less black screen" symptom), while the same file software-decodes
-                // smoothly on a phone — so the codec/profile is fine, it's the buffer hand-off that jams.
-                // With direct rendering the decoder's output buffers are owned by the display surface and
-                // can't be reused until rendered; when the first frame never renders, the decoder runs out
-                // of buffers after a few frames and blocks forever. :no-mediacodec-dr makes libVLC copy each
-                // frame out (freeing the codec buffer immediately) instead — breaking the deadlock at a small
-                // copy cost, still far cheaper than software-decoding 4K on the weak TV SoC.
-                media.AddOption(":no-mediacodec-dr");
-            }
-            var player = new MediaPlayer(media) { EnableHardwareDecoding = isTv };
+            // Decoding strategy. On-screen diagnostics walked this out in steps:
+            //  • Phones/tablets: SOFTWARE decode — some mobile chipsets' HEVC/10-bit hardware decoders
+            //    corrupt the picture into green/blocky artifacts, and a phone CPU keeps up (verified: a
+            //    3840x2160 stream shows ~24fps steadily with no dropped frames).
+            //  • TV: was hardware MediaCodec (EnableHardwareDecoding=true), on the theory a weak TV CPU
+            //    can't software-decode 4K. But on a real TCL 4K set the MediaCodec VIDEO decoder produced
+            //    only 3–5 frames then stalled with ZERO frames ever displayed. :no-mediacodec-dr fixed the
+            //    pipeline deadlock (audio + clock then ran), yet the video decoder still never output past
+            //    ~5 frames — so the hardware video path can't handle this 4K stream on this TV regardless
+            //    of direct-rendering (and the stuck decoder pegged the CPU, making the D-pad UI laggy).
+            // Since software decode is proven on the same file, use it everywhere and let the on-screen
+            // diagnostic say whether the TV CPU keeps up (shown climbing) or falls behind.
+            var enableHardwareDecoding = false;
+            var player = new MediaPlayer(media) { EnableHardwareDecoding = enableHardwareDecoding };
             _player = player;
 
             // External subtitle tracks (proxied OpenSubtitles URLs) are NOT pre-attached here: libVLC loads
