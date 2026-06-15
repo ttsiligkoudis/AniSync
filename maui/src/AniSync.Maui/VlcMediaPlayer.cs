@@ -55,6 +55,19 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             //    pin was tried to force hardware on 4K but broke playback entirely on a real TV — those
             //    module names aren't valid in this libVLC build, so it got no decoder and hung — so we
             //    stay on EnableHardwareDecoding and let libVLC pick the module.)
+            if (isTv)
+            {
+                // Disable MediaCodec DIRECT RENDERING on TV. On-screen diagnostics on a TCL 4K set showed a
+                // 4K stream decode exactly 3 frames then deadlock with ZERO frames ever displayed (the
+                // "freeze at 0:00, audio-less black screen" symptom), while the same file software-decodes
+                // smoothly on a phone — so the codec/profile is fine, it's the buffer hand-off that jams.
+                // With direct rendering the decoder's output buffers are owned by the display surface and
+                // can't be reused until rendered; when the first frame never renders, the decoder runs out
+                // of buffers after a few frames and blocks forever. :no-mediacodec-dr makes libVLC copy each
+                // frame out (freeing the codec buffer immediately) instead — breaking the deadlock at a small
+                // copy cost, still far cheaper than software-decoding 4K on the weak TV SoC.
+                media.AddOption(":no-mediacodec-dr");
+            }
             var player = new MediaPlayer(media) { EnableHardwareDecoding = isTv };
             _player = player;
 
