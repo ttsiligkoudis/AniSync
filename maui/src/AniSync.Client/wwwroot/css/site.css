@@ -3080,6 +3080,12 @@ body.modal-open {
     gap: 0.6rem;
     flex-wrap: wrap;
 }
+/* On small screens give each action its own full-width row instead of two-up
+   (which left the odd button stranded on its own line and cramped the labels). */
+@media (max-width: 600px) {
+    .btn-action-row { flex-direction: column; }
+    .btn-action-row > .btn-ghost { flex: 1 1 auto; width: 100%; }
+}
 
 .btn-ghost {
     flex: 1 1 8rem;
