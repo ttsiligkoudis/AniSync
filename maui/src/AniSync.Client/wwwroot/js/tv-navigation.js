@@ -241,10 +241,11 @@
 
         if (dir) {
             // Leave arrow keys to text fields for caret movement; only allow
-            // up/down to "escape" a single-line input, and let SELECT keep all
-            // four for its native option list.
+            // up/down to "escape" a single-line input. A focused <select> is treated like any
+            // other control — arrows MOVE FOCUS (they don't cycle its value): on a remote, landing
+            // on the genre dropdown shouldn't silently change the filter as you pass over it. The
+            // value only changes when you press OK to open the native option list and pick one.
             if (ae) {
-                if (ae.tagName === 'SELECT') return;
                 if ((ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')
                     && (dir === 'left' || dir === 'right')) {
                     // Left/right move the caret WITHIN text, but at the boundary they "escape" the
@@ -401,8 +402,15 @@
         var scope = document.querySelector('.tv-content');
         var target = null;
         if (scope) {
-            var nodes = scope.querySelectorAll(FOCUSABLE);
-            for (var i = 0; i < nodes.length; i++) { if (isVisible(nodes[i])) { target = nodes[i]; break; } }
+            // Prefer the first poster tile so a list/tab change lands on the fetched grid's first
+            // card — not the media-type switch / filter chrome at the very top (which is the first
+            // focusable in DOM order). Matches the initial autoFocus landing.
+            var card = scope.querySelector('.library-card');
+            if (card && isVisible(card)) target = card;
+            if (!target) {
+                var nodes = scope.querySelectorAll(FOCUSABLE);
+                for (var i = 0; i < nodes.length; i++) { if (isVisible(nodes[i])) { target = nodes[i]; break; } }
+            }
         }
         if (target) {
             focusEl(target);
