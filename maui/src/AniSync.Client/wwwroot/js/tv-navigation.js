@@ -411,13 +411,18 @@
         attempt = attempt || 0;
         var scope = document.querySelector('.tv-content');
         var target = null;
+        var loading = false;
         if (scope) {
-            // Prefer the first poster tile so a list/tab change lands on the fetched grid's first
-            // card — not the media-type switch / filter chrome at the very top (which is the first
-            // focusable in DOM order). Matches the initial autoFocus landing.
-            var card = scope.querySelector('.library-card');
-            if (card && isVisible(card)) target = card;
-            if (!target) {
+            // Prefer the first REAL poster tile so a list/tab/filter change lands on the fetched
+            // grid's first card — not the media-type switch / filter chrome at the top, and not a
+            // skeleton placeholder (a <div>, which can't take focus). Skip skeletons + inert cards.
+            var cards = scope.querySelectorAll('.library-card:not(.library-card-skeleton):not(.library-card-inert)');
+            for (var c = 0; c < cards.length; c++) { if (isVisible(cards[c])) { target = cards[c]; break; } }
+            // No real card yet but skeletons are up → the filtered/searched grid is still fetching;
+            // keep retrying for it rather than falling back to a tab/select (which would strand
+            // focus on the chrome instead of the first result).
+            loading = !target && !!scope.querySelector('.library-card-skeleton');
+            if (!target && !loading) {
                 var nodes = scope.querySelectorAll(FOCUSABLE);
                 for (var i = 0; i < nodes.length; i++) { if (isVisible(nodes[i])) { target = nodes[i]; break; } }
             }
@@ -425,10 +430,11 @@
         if (target) {
             focusEl(target);
         } else {
-            // Nothing focusable in the content yet (e.g. the QR sign-in screen) — at least drop
-            // focus from the rail so it collapses; retry briefly in case content is still rendering.
-            try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (_) { }
-            if (attempt < 3) setTimeout(function () { focusContent(attempt + 1); }, 120);
+            // Still loading the grid (skeletons up) → retry for the first card. Otherwise nothing
+            // focusable (e.g. the QR sign-in screen) — drop rail focus so it collapses, then retry
+            // briefly in case content is still rendering.
+            if (!loading) { try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (_) { } }
+            if (attempt < 12) setTimeout(function () { focusContent(attempt + 1); }, 150);
         }
     }
 
