@@ -270,6 +270,26 @@
                 }
             }
 
+            // Left rail: Up/Down walk the rail's own items in DOM order — the nav links (Home …
+            // the media-type chooser) plus the footer (Settings / Log out) — and never escape to
+            // content. The spatial cone would otherwise let Down from a rail item dive into the
+            // nearest poster tile (collapsing the rail), and the big flex gap before the footer
+            // meant a tile was always "closer" than Settings. Right stays the deliberate way out.
+            var railScope = start.closest && start.closest('.tv-rail');
+            if (railScope && (dir === 'up' || dir === 'down')) {
+                var railNodes = railScope.querySelectorAll(FOCUSABLE);
+                var railItems = [];
+                for (var ri = 0; ri < railNodes.length; ri++)
+                    if (isVisible(railNodes[ri])) railItems.push(railNodes[ri]);
+                var iR = railItems.indexOf(start);
+                if (iR !== -1) {
+                    var nextR = dir === 'down' ? railItems[iR + 1] : railItems[iR - 1];
+                    e.preventDefault();                // stay in the rail (don't fall into content)
+                    if (nextR) focusEl(nextR);         // (at an end: stay put)
+                    return;
+                }
+            }
+
             var next = pickInDirection(start, dir);
 
             // Shelf-aware vertical landing: moving up/down into a DIFFERENT horizontal shelf lands
@@ -338,14 +358,23 @@
     // Land in the content (first shelf/tile), NOT the rail — otherwise the first Down walked the rail
     // (Home→Search). Honour an explicit [autofocus] first. The dashboard's shelves load async, so when
     // there's no content focusable yet we retry rather than fall back to the rail.
-    function autoFocus(attempt) {
-        attempt = attempt || 0;
-        if (document.activeElement && document.activeElement !== document.body) return;
-        var explicit = document.querySelector('[autofocus]');
-        if (explicit) { focusEl(explicit); return; }
-        var target = openModal() ? firstFocusable() : contentFocusable();
-        if (target) { focusEl(target); return; }
-        if (attempt < 10) setTimeout(function () { autoFocus(attempt + 1); }, 150);
+    var _afGen = 0;
+    function autoFocus() {
+        // Land focus on the content and KEEP re-asserting it for a short window. The dashboard's
+        // shelves load async; the re-render when later shelves arrive can drop focus back to <body>,
+        // so the first tile ends up looking selected but is no longer :focus — it doesn't show the
+        // zoom until the first keypress. We re-grab focus ONLY while it's on <body>, so we never
+        // steal it once the user (or any real element) holds it. A new call supersedes older chains.
+        var gen = ++_afGen;
+        (function step(attempt) {
+            if (gen !== _afGen) return; // a newer autoFocus() superseded this chain
+            if (!(document.activeElement && document.activeElement !== document.body)) {
+                var explicit = document.querySelector('[autofocus]');
+                var target = explicit || (openModal() ? firstFocusable() : contentFocusable());
+                if (target) focusEl(target);
+            }
+            if (attempt < 14) setTimeout(function () { step(attempt + 1); }, 200);
+        })(0);
     }
 
     // Move focus out of the left rail into the main content after a navigation, so the rail
