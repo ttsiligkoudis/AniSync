@@ -30,7 +30,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     // Bump on each player change so we can confirm which APK is actually installed (shown faintly in the top
     // bar). Temporary aid while iterating on the native player — remove once the layout is finalised.
-    private const string BuildTag = "dbg4";
+    private const string BuildTag = "dbg5";
 
     // TEMPORARY: on-screen decoder diagnostic. Flip to false (or delete the block) once the 4K freeze
     // is understood. It polls libVLC's decode stats so we can see, on the device, whether a frozen
@@ -103,6 +103,7 @@ public sealed class VlcPlayerPage : ContentPage
     private readonly string _preferredSubLang;
 
     private bool _seeking;
+    private bool _started;   // one-shot guard: playback is started once, when the video surface is ready
     private ScaleMode _scaleMode = ScaleMode.Fit;
     private string? _subLang;                        // selected language column in the subtitle sheet
     private Microsoft.Maui.Controls.Window? _window; // for the background-pause hook
@@ -408,8 +409,34 @@ public sealed class VlcPlayerPage : ContentPage
         // Stop + release when the user backs out of (or closes) the player.
         NavigatedFrom += (_, _) => { try { _player.Stop(); } catch { /* already stopped */ } KeepAwake(false); };
 
-        // Re-assert immersive once the page's native view is attached to its (modal) window.
-        Loaded += (_, _) => ApplyImmersiveToView();
+        // Re-assert immersive once the page's native view is attached to its (modal) window, and start
+        // playback only when the video surface is actually ready (see BeginPlaybackWhenSurfaceReady).
+        Loaded += (_, _) => { ApplyImmersiveToView(); BeginPlaybackWhenSurfaceReady(); };
+    }
+
+    // Start playback once the VideoView's native surface exists. libVLC was previously told to Play() the
+    // instant the page was presented — before the SurfaceView's surface was created — which left hardware
+    // MediaCodec on TV with no output surface (it decoded a few frames then stalled, video black). We now
+    // wait for surfaceCreated (hooking the native SurfaceHolder), with a timed safety net so playback never
+    // hangs unstarted if the surface can't be found (e.g. a non-SurfaceView backend).
+    private void BeginPlaybackWhenSurfaceReady()
+    {
+        if (_started) return;
+        var hooked = false;
+#if ANDROID
+        if (_videoView.Handler?.PlatformView is global::Android.Views.View v)
+            hooked = AndroidVideoSurface.WhenReady(v, () => Dispatcher.Dispatch(StartPlaybackOnce));
+#endif
+        // Safety net: if we couldn't hook the surface (or the callback never arrives), start anyway. Longer
+        // when hooked (just insurance behind the real signal); shorter when not (best-effort initial delay).
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(hooked ? 2500 : 600), StartPlaybackOnce);
+    }
+
+    private void StartPlaybackOnce()
+    {
+        if (_started) return;
+        _started = true;
+        try { _player.Play(); } catch { /* torn down before the surface was ready */ }
     }
 
     // ── Lifecycle: force landscape + immersive while open; pause on background ──
