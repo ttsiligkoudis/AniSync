@@ -84,6 +84,7 @@ else
             <div class="btn-action-row">
                 <a class="btn-ghost" href="/configure">Stremio addon &amp; install URL</a>
                 <a class="btn-ghost" href="/advanced">Advanced (sync · backups · danger zone)</a>
+                <button type="button" class="btn-ghost" @onclick="() => _dashCustomize?.Open()">Customize dashboard</button>
             </div>
         </section>
     }
@@ -92,6 +93,10 @@ else
         <LoginSection SelectedService="@_selectedService" ReturnUrl="@LoginReturnUrl" AllowAnonymous="false" />
     }
 }
+
+@* Dashboard layout chooser — also reachable here from Settings (not just the dashboard's
+   Customize float), so the same reorder/show-hide UI is available from the account page. *@
+<DashCustomizeModal @ref="_dashCustomize" />
 
 @* No save bar on TV — the editable form isn't shown there (the handoff QR replaces it). *@
 @if (!Env.IsTv && _config is not null && !string.IsNullOrEmpty(_config.ApiConfig))
@@ -144,6 +149,7 @@ else
     private string _selectedService = "Kitsu";
 
     private IJSObjectReference? _js;
+    private DashCustomizeModal? _dashCustomize;
 
     // Anime-only cards (Preferences toggles) gate on the user's real media-type pick.
     // That choice lives client-side (AppState, hydrated from localStorage by MainLayout) —
