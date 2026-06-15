@@ -37,6 +37,8 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
 
         try
         {
+            var isTv = DeviceInfo.Current.Idiom == DeviceIdiom.TV;
+
             using var media = new Media(_libVlc, new Uri(request.Url));
 
             // Resume position: libVLC takes a start time in seconds via :start-time.
@@ -47,11 +49,14 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             //  • Phones/tablets: software decode (hardware OFF) — some mobile chipsets' HEVC/10-bit
             //    hardware decoders corrupt the picture into green/blocky artifacts, and a phone CPU
             //    keeps up fine.
-            //  • TV boxes: hardware decode (MediaCodec). Their CPUs are weak, so software-decoding a
-            //    high-bitrate/4K stream stalls the video while audio keeps playing ("frozen, only
-            //    sound"); their dedicated video decoders handle it effortlessly. libVLC still
-            //    software-decodes the audio codecs (AC3/EAC3/DTS/TrueHD), so that win is unaffected.
-            var isTv = DeviceInfo.Current.Idiom == DeviceIdiom.TV;
+            //  • TV boxes: force the MediaCodec HARDWARE decoder. EnableHardwareDecoding (avcodec-hw)
+            //    alone didn't reliably engage Android's hardware path for 4K/HEVC, so libVLC software-
+            //    decoded it — which a TV CPU can't sustain: the video freezes while audio keeps
+            //    playing, then the app is killed (ANR/OOM). Pin the decoder to mediacodec_ndk (the
+            //    NDK MediaCodec path other TV apps use), then the JNI variant, with software (avcodec)
+            //    only as a last resort, so 4K runs on the GPU decoder the TV already handles fine.
+            if (isTv)
+                media.AddOption(":codec=mediacodec_ndk,mediacodec_jni,avcodec");
             var player = new MediaPlayer(media) { EnableHardwareDecoding = isTv };
             _player = player;
 
