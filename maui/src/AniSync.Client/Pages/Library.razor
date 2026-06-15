@@ -4,6 +4,7 @@
 @inject AppState State
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject IAppEnvironment Env
 
 @* Library — port of Views/Library/Index.cshtml. Status tabs (Watching /
    Completed / Planning / Paused / Dropped / Rewatching) over /api/v1/me/list
@@ -64,7 +65,7 @@
                the Trakt-sourced movie / series lists, so it's anime-only. *@
             @if (IsAnime)
             {
-                <select class="filter-bar-select" aria-label="Genre" @bind="_genreInput">
+                <select class="filter-bar-select" aria-label="Genre" value="@_genreInput" @onchange="OnGenreChanged">
                     <option value="">All genres</option>
                     @foreach (var g in PopularGenres)
                     {
@@ -275,6 +276,14 @@
     }
 
     // ── Filter-bar submit + tab / clear hrefs (genre rides every tab + the clear link). ──
+    // On TV the Search button is hidden, so a genre pick auto-applies; phone/desktop stage it for
+    // the Search button / Enter as before.
+    private void OnGenreChanged(ChangeEventArgs e)
+    {
+        _genreInput = e.Value?.ToString() ?? "";
+        if (Env.IsTv) ApplyFilters();
+    }
+
     private void ApplyFilters()
     {
         var q = new List<string> { $"list={_status}" };

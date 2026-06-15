@@ -4,6 +4,7 @@
 @inject AppState State
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject IAppEnvironment Env
 
 @* Discover — 1:1 port of Views/Discover/Index.cshtml (anime catalog) + Views/Video/Index.cshtml
    (movies/series browse). One URL, two surfaces, chosen by the active media type (the layout's
@@ -46,7 +47,7 @@
                 <input type="search" @bind="_searchInput" @bind:event="oninput"
                        placeholder="Search anime…" class="filter-bar-search" autocomplete="off" />
 
-                <select class="filter-bar-select" aria-label="Genre" @bind="_genreInput">
+                <select class="filter-bar-select" aria-label="Genre" value="@_genreInput" @onchange="OnAnimeGenreChanged">
                     <option value="">All genres</option>
                     @foreach (var g in AnimeGenres)
                     {
@@ -56,7 +57,7 @@
 
                 @if (_animeList == "seasonal")
                 {
-                    <select class="filter-bar-select" aria-label="Season" @bind="_seasonInput">
+                    <select class="filter-bar-select" aria-label="Season" value="@_seasonInput" @onchange="OnAnimeSeasonChanged">
                         @foreach (var s in _seasonOptions)
                         {
                             <option value="@s">@s</option>
@@ -82,7 +83,7 @@ else
         <input type="search" @bind="_searchInput" @bind:event="oninput"
                placeholder="Search @_videoLabelLower…" class="filter-bar-search" autocomplete="off" />
 
-        <select class="filter-bar-select" aria-label="Genre" @bind="_genreInput">
+        <select class="filter-bar-select" aria-label="Genre" value="@_genreInput" @onchange="OnVideoGenreChanged">
             <option value="">All genres</option>
             @foreach (var g in VideoGenres)
             {
@@ -466,6 +467,27 @@ else
     }
 
     // ── Filter-bar submit + the anime Clear href (preserve the applied filters) ──
+    // Filter-bar dropdowns auto-apply on TV (the Search button is hidden there — there's no
+    // comfortable way to press it with a remote, and a genre pick is the whole intent). On
+    // phone/desktop they just stage the value; the Search button (or Enter) submits as before.
+    private void OnAnimeGenreChanged(ChangeEventArgs e)
+    {
+        _genreInput = e.Value?.ToString() ?? "";
+        if (Env.IsTv) ApplyAnimeFilters();
+    }
+
+    private void OnAnimeSeasonChanged(ChangeEventArgs e)
+    {
+        _seasonInput = e.Value?.ToString() ?? "";
+        if (Env.IsTv) ApplyAnimeFilters();
+    }
+
+    private void OnVideoGenreChanged(ChangeEventArgs e)
+    {
+        _genreInput = e.Value?.ToString() ?? "";
+        if (Env.IsTv) ApplyVideoFilters();
+    }
+
     private void ApplyAnimeFilters()
     {
         var q = new List<string> { $"list={_animeList}" };

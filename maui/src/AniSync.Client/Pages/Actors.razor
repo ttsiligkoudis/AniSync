@@ -77,7 +77,24 @@ else
     private DotNetObjectReference<Actors>? _selfRef;
     private int _observerId;
 
+    protected override void OnInitialized()
+    {
+        // React to the media-type switch like the other browse surfaces (Discover/Library). Without
+        // this the actors directory kept its old type after the toggle changed: the switch flipped
+        // movie↔series but this page never re-derived ?type=, so a later list change still used the
+        // stale type. There's no anime actor directory, so anime maps to movies.
+        State.Changed += OnStateChanged;
+    }
+
     protected override async Task OnInitializedAsync() => _modes = await Api.VideoModesAsync();
+
+    private void OnStateChanged()
+    {
+        var desired = State.MediaType == MetaType.series ? "series" : "movie";
+        if (desired == _type) { InvokeAsync(StateHasChanged); return; }
+        // Switch the directory (URL + fetch) to follow the toggle; OnParametersSetAsync reloads.
+        InvokeAsync(() => Nav.NavigateTo($"/discover/actors?type={desired}"));
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -193,6 +210,7 @@ else
 
     public async ValueTask DisposeAsync()
     {
+        State.Changed -= OnStateChanged;
         if (_scroll is not null)
         {
             if (_observerId != 0) { try { await _scroll.InvokeVoidAsync("disconnect", _observerId); } catch { } }
