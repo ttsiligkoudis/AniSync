@@ -8529,6 +8529,18 @@ ol.anime-detail-episodes-busy {
     background: var(--overlay-10);
 }
 
+/* Discover / Library list tabs (Trending · Popular · … · Actors · Hidden) — focus shows the same
+   hover background instead of the global zoom; the active tab keeps its accent fill. Pin the size
+   to the TV tab size so the global 1.1em can't enlarge it. */
+.tv-mode .library-tab:focus {
+    transform: none;
+    font-size: 0.95rem;
+}
+.tv-mode .library-tab:focus:not(.library-tab-active) {
+    background: var(--overlay-12);
+    color: var(--text-strong);
+}
+
 /* Detail-page hero action buttons (status / Add-to-List pill, heart, hide) — focus shows their
    existing :hover state (wired into each :hover rule above) instead of the global zoom. Cancel the
    scale and restore the buttons' natural 0.82rem (the heart is icon-only, so size is moot there). */
@@ -10240,6 +10252,12 @@ body.dash-page main {
 /* Browse By is a tap-first grid of secondary discovery links — redundant on TV
    (Discover + the rail cover it) and just one more thing to D-pad past. Hide it. */
 .tv-mode [data-dash-section="browse"] { display: none !important; }
+
+/* On TV the Discover/Library filter bar drops the free-text search (no comfortable keyboard there —
+   the dedicated /search view + the rail's Search cover it) and the Search button (genre changes
+   auto-apply on TV). The genre/season dropdowns stay so the remote can still filter. */
+.tv-mode .filter-bar-search,
+.tv-mode .filter-bar-submit { display: none !important; }
 
 /* "Your stats" strip is a dense, glanceable panel that doesn't earn its space on a
    lean-back TV dashboard — hide it (like Browse By). */
