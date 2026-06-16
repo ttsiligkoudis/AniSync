@@ -9,6 +9,8 @@ using Android.Widget;
 using AniSync.Client.Services;
 using LibVLCSharp.Shared;
 using AndroidVideoView = LibVLCSharp.Platforms.Android.VideoView;
+// MAUI's implicit usings pull in Microsoft.Maui.Graphics.Color, which collides with Android.Graphics.Color.
+using AndroidColor = Android.Graphics.Color;
 
 namespace AniSync;
 
@@ -70,15 +72,15 @@ internal sealed class VlcPlayerActivity : Activity
         EnterImmersive();
 
         var root = new FrameLayout(this);
-        root.SetBackgroundColor(Color.Black);
+        root.SetBackgroundColor(AndroidColor.Black);
 
         _videoView = new AndroidVideoView(this);
         root.AddView(_videoView, new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
 
         _diag = new TextView(this);
-        _diag.SetTextColor(Color.Lime);
-        _diag.SetBackgroundColor(Color.Argb(170, 0, 0, 0));
+        _diag.SetTextColor(AndroidColor.Lime);
+        _diag.SetBackgroundColor(AndroidColor.Argb(170, 0, 0, 0));
         _diag.SetTypeface(Typeface.Monospace, TypefaceStyle.Normal);
         _diag.SetTextSize(ComplexUnitType.Sp, 11);
         _diag.SetPadding(16, 12, 16, 12);
