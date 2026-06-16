@@ -22,8 +22,10 @@ public static class MauiProgram
             // the video view couldn't be created.
             .UseLibVLCSharp()
             // Registers the Community Toolkit MediaElement (ExoPlayer/Media3 on Android) — the experimental
-            // alternate player used for TV 4K (see ExoPlayerPage / VlcMediaPlayer).
-            .UseMauiCommunityToolkitMediaElement()
+            // alternate player used for TV 4K (see ExoPlayerPage / VlcMediaPlayer). Foreground service off:
+            // we only play full-screen in the foreground, so we don't need the background-playback service
+            // (which would otherwise require FOREGROUND_SERVICE / notification permissions).
+            .UseMauiCommunityToolkitMediaElement(isAndroidForegroundServiceEnabled: false)
             .ConfigureFonts(fonts =>
             {
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
