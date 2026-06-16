@@ -14,7 +14,8 @@ namespace AniSync.Maui;
 /// <c>PlayerView</c>. PlayerView's built-in controls cover play/seek and a settings menu for audio/subtitle
 /// track selection and playback speed (all D-pad friendly), so the chrome is free. We add: sideloaded
 /// external subtitles, preferred audio/subtitle language preselection, resume, progress/ended callbacks,
-/// background pause/resume, and a MENU-key video-scaling cycle.
+/// background pause/resume, −30s/+30s seek buttons, an on-screen video-scaling button (Fit/Zoom/Fill, also on
+/// the MENU key), and a TV focus highlight on the controls and inside the gear/CC pop-up menus.
 /// </summary>
 public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
 {
@@ -27,6 +28,7 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
     private bool _ended;
     private bool _wasPlayingBeforeBackground;
     private int _scaleIndex;
+    private TextView? _aspectButton;
 
     // Controls we've already given a TV focus highlight (so we set each view's selector exactly once).
     private readonly HashSet<Android.Views.View> _highlighted = new();
@@ -45,20 +47,28 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
 
     protected override PlayerView CreatePlatformView()
     {
-        var view = new ScalingPlayerView(Context!)
+        // Wrap the context in a theme overlay that redirects the controls' selectable-item backgrounds to a
+        // focus-highlighting drawable. This is what makes the focus visible INSIDE the gear/CC pop-up menus
+        // (speed, audio, subtitle lists) — those list items live in a separate pop-up window we can't reach by
+        // walking the view tree, but they inflate from this context's theme, so the override reaches them.
+        var themed = new ContextThemeWrapper(Context!, Resource.Style.AniSync_ExoPlayerOverlay);
+        var view = new ScalingPlayerView(themed)
         {
             KeepScreenOn = true,
         };
-        view.SetShowSubtitleButton(true);   // CC button → toggle/select text tracks (incl. our sideloaded subs)
+        view.SetShowSubtitleButton(true);       // CC button → toggle/select text tracks (incl. sideloaded subs)
+        view.SetShowRewindButton(true);         // VLC-style −30s / +30s seek buttons (increment set on the player)
+        view.SetShowFastForwardButton(true);
         view.SetBackgroundColor(Android.Graphics.Color.Black);
         view.OnCycleScale = CycleScale;
         // ExoPlayer's default control buttons use a borderless ripple background, which shows on touch but
         // gives NO visible focus highlight under D-pad navigation — on a TV you can click buttons but can't
         // see which one is selected. Give each focusable control an explicit focus-state background so the
-        // selected control is clearly outlined. The controls are inflated with the view, but lay out a beat
-        // later, so apply after a short delay (and again, in case any button appears when first shown).
-        view.PostDelayed(() => ApplyTvFocusHighlights(view), 600);
-        view.PostDelayed(() => ApplyTvFocusHighlights(view), 1500);
+        // selected control is clearly outlined, and inject the on-screen aspect-ratio button into the control
+        // bar. The controls are inflated with the view but lay out a beat later, so do this after a short delay
+        // (and again, in case any button appears only when the controls are first shown).
+        view.PostDelayed(() => { ApplyTvFocusHighlights(view); EnsureAspectButton(); }, 600);
+        view.PostDelayed(() => { ApplyTvFocusHighlights(view); EnsureAspectButton(); }, 1500);
         return view;
     }
 
@@ -71,7 +81,11 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         VirtualView.ResumeFromBackgroundRequested += OnResumeFromBackground;
 
         // The Java ExoPlayer.Builder binds to C# as the top-level ExoPlayerBuilder; Build() returns IExoPlayer.
-        var player = new ExoPlayerBuilder(Context!).Build()!;
+        // 30s seek increments drive the rewind / fast-forward buttons (VLC's −30 / +30).
+        var player = new ExoPlayerBuilder(Context!)
+            .SetSeekBackIncrementMs(30_000)
+            .SetSeekForwardIncrementMs(30_000)
+            .Build()!;
         _player = player;
         platformView.Player = player;
 
@@ -168,7 +182,50 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         if (PlatformView is null) return;
         _scaleIndex = (_scaleIndex + 1) % ResizeModes.Length;
         PlatformView.ResizeMode = ResizeModes[_scaleIndex];
+        if (_aspectButton is not null) _aspectButton.Text = ScaleLabels[_scaleIndex];
         Toast.MakeText(Context, ScaleLabels[_scaleIndex], ToastLength.Short)?.Show();
+    }
+
+    // Inject the on-screen aspect-ratio control into ExoPlayer's bottom control bar, next to the settings/CC
+    // buttons. ExoPlayer's bar isn't publicly extensible, so we find the settings button's container and add a
+    // small text button that shows the current mode ("Fit"/"Zoom"/"Fill") and cycles it on click — clicking it
+    // routes through the same CycleScale used by the MENU key, so the label always reflects the live mode.
+    private void EnsureAspectButton()
+    {
+        if (_aspectButton is not null || PlatformView is null) return;
+        if (FindExoView("exo_settings")?.Parent is not ViewGroup bar) return;
+
+        var ctx = PlatformView.Context!;
+        var density = ctx.Resources?.DisplayMetrics?.Density ?? 1f;
+        var button = new TextView(ctx)
+        {
+            Text = ScaleLabels[_scaleIndex],
+            Focusable = true,
+            Clickable = true,
+            Gravity = GravityFlags.Center,
+        };
+        button.SetTextColor(Android.Graphics.Color.White);
+        button.SetTextSize(Android.Util.ComplexUnitType.Sp, 14);
+        var padH = (int)(10 * density);
+        var padV = (int)(4 * density);
+        button.SetPadding(padH, padV, padH, padV);
+        button.Background = BuildFocusSelector(ctx);
+        button.Click += (_, _) => CycleScale();
+
+        // Place it just before the settings (gear) button so it reads with the other bottom-bar controls.
+        var index = bar.IndexOfChild(FindExoView("exo_settings"));
+        bar.AddView(button, index < 0 ? bar.ChildCount : index);
+        _aspectButton = button;
+        _highlighted.Add(button); // already has the focus selector; keep the tree walk from re-applying it
+    }
+
+    // Resolve one of ExoPlayer's own control views by its resource name. The Media3 UI library's ids are merged
+    // under the app package at build time, so look them up by name rather than depending on a generated constant.
+    private Android.Views.View? FindExoView(string idName)
+    {
+        if (PlatformView is null) return null;
+        var id = Context!.Resources!.GetIdentifier(idName, "id", Context.PackageName);
+        return id == 0 ? null : PlatformView.FindViewById(id);
     }
 
     // Walk the PlayerView tree and give every focusable control (the play/seek/CC/settings ImageButtons) a

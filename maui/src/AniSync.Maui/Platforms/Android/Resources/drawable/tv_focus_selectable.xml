@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Focus highlight for D-pad navigation on TV. Used as the controls' selectableItemBackground (via the
+     AniSync.ExoPlayerOverlay theme) so the focused/selected item shows a translucent fill + white ring —
+     ExoPlayer's default borderless ripple is invisible under a remote, including inside the gear/CC menus. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#46FFFFFF" />
+            <stroke android:width="2dp" android:color="#FFFFFFFF" />
+            <corners android:radius="6dp" />
+        </shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#46FFFFFF" />
+            <corners android:radius="6dp" />
+        </shape>
+    </item>
+    <item android:state_selected="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#46FFFFFF" />
+            <corners android:radius="6dp" />
+        </shape>
+    </item>
+    <item>
+        <color android:color="@android:color/transparent" />
+    </item>
+</selector>
