@@ -116,8 +116,14 @@
     private bool _done;
     // _fetched: the first page has been resolved (from cache or a fetch) — guards against a double
     // load. _started: the real fetch has begun (drives the shimmer; a cache hit never sets it).
+    // _needsRefresh: a stale entry was rendered instantly; a silent background refetch is pending
+    // (deferred until the shelf is on-screen so a TV doesn't refresh every stale shelf at once).
+    // _firstPageCount: size of the rendered first page, to skip the refresh-swap if the user has
+    // already paginated past it.
     private bool _fetched;
     private bool _started;
+    private bool _needsRefresh;
+    private int _firstPageCount;
     private readonly List<MetaDto> _items = new();
     private readonly HashSet<string> _seenIds = new(StringComparer.Ordinal);
 
@@ -142,27 +148,31 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // Cache hit → paint instantly from the first page, no skeleton and no request. (Only the
-        // first page is cached; pagination stays live, so a paginated shelf isn't marked _done.)
+        // Cached entry (any age) → paint instantly from the first page, no skeleton. When it's stale
+        // (past TTL) we still show it immediately, then silently refetch once the shelf is on-screen
+        // (stale-while-revalidate). Only the first page is cached; pagination stays live, so a
+        // paginated shelf isn't marked _done.
         if (CacheTtl is { } ttl && !string.IsNullOrEmpty(CacheKey))
         {
-            var cached = await Cache.GetAsync<List<MetaDto>>(CacheKey, ttl);
-            if (cached is { Count: > 0 })
+            var (found, stale, cached) = await Cache.ReadAsync<List<MetaDto>>(CacheKey, ttl);
+            if (found && cached is { Count: > 0 })
             {
                 Append(cached);
+                _firstPageCount = _items.Count;
                 _fetched = true;
+                _needsRefresh = stale;
                 if (!Paginated) _done = true;
                 _loading = false;
                 return;
             }
         }
-        // Miss → defer: stay in the (static) skeleton state; EnsureFetchedAsync fires the request
+        // True miss → defer: stay in the (static) skeleton state; EnsureFetchedAsync fires the request
         // once the shelf scrolls into view (OnShelfVisibleAsync). Above-the-fold shelves trigger
         // almost immediately, so there's no perceptible delay for what's actually on screen.
     }
 
-    // Resolve the first page on demand — invoked once, either when the shelf scrolls into view or
-    // (for cache misses that are already visible) right after the observer attaches.
+    // Resolve the first page on demand — invoked once, when the shelf scrolls into view (or right away
+    // for a miss that's already on-screen). Shows the shimmer while the fetch is in flight.
     private async Task EnsureFetchedAsync()
     {
         if (_fetched) return;
@@ -173,6 +183,7 @@
         {
             var first = await Fetch(null);
             Append(first);
+            _firstPageCount = _items.Count;
             if (!Paginated || first.Count == 0) _done = true;
             // Persist the first page (only) for instant revisits — skip empty/uncacheable shelves.
             if (first.Count > 0 && CacheTtl is not null && !string.IsNullOrEmpty(CacheKey))
@@ -181,15 +192,41 @@
         finally { _loading = false; StateHasChanged(); }
     }
 
+    // Stale-while-revalidate: a fresh first page was already on screen from a stale cache entry — quietly
+    // refetch it, swap it in, and re-prime the cache. Runs only once the shelf is on-screen.
+    private async Task RefreshStaleAsync()
+    {
+        IReadOnlyList<MetaDto> fresh;
+        try { fresh = await Fetch(null); }
+        catch { return; }                 // network hiccup → keep showing the stale data
+        if (fresh.Count == 0) return;
+
+        // Re-prime the cache for next time regardless of whether we swap the visible rows.
+        if (!string.IsNullOrEmpty(CacheKey)) await Cache.SetAsync(CacheKey, fresh.ToList());
+
+        // Only swap the visible rows if the user hasn't paginated past the first page — replacing
+        // mid-scroll would yank rows out from under them. (Next visit picks up the re-primed cache.)
+        if (_loadingMore || _items.Count != _firstPageCount) return;
+        _items.Clear();
+        _seenIds.Clear();
+        Append(fresh);
+        _firstPageCount = _items.Count;
+        StateHasChanged();
+    }
+
     [JSInvokable]
-    public Task OnShelfVisibleAsync() => EnsureFetchedAsync();
+    public async Task OnShelfVisibleAsync()
+    {
+        if (!_fetched) await EnsureFetchedAsync();
+        else if (_needsRefresh) { _needsRefresh = false; await RefreshStaleAsync(); }
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // The JS module backs both observers: the vertical lazy-load trigger (until the first page is
-        // fetched) and, for paginated shelves, the horizontal end-of-row pager. A cached, non-paginated
-        // shelf needs neither, so it never imports the module.
-        var needsModule = !_fetched || Paginated;
+        // The JS module backs both observers: the vertical trigger (the first-page fetch on a miss,
+        // or the silent stale refresh) and, for paginated shelves, the horizontal end-of-row pager. A
+        // fresh cached, non-paginated shelf needs neither, so it never imports the module.
+        var needsModule = !_fetched || _needsRefresh || Paginated;
         if (firstRender && needsModule)
         {
             _selfRef ??= DotNetObjectReference.Create(this);
@@ -198,15 +235,15 @@
         }
         if (_scroll is null) return;
 
-        // Vertical lazy-load: while the shelf is still waiting for its first page and its skeleton
-        // section is on the page, observe it; the fetch fires when it scrolls in. Drops the observer
-        // once fetched (or when the filter tears the section out of the DOM).
-        var awaitingFetch = !_fetched && _visible;
-        if (awaitingFetch && _visId == 0)
+        // Vertical observer: attach while the shelf still has work to do on scroll-in — fetch its first
+        // page (miss) or run the silent stale refresh — and its section is on the page. Drops once the
+        // work is done (or when the filter tears the section out of the DOM).
+        var awaitingWork = _visible && (!_fetched || _needsRefresh);
+        if (awaitingWork && _visId == 0)
         {
             try { _visId = await _scroll.InvokeAsync<int>("observeVisible", _section, _selfRef); } catch { }
         }
-        else if (!awaitingFetch && _visId != 0)
+        else if (!awaitingWork && _visId != 0)
         {
             try { await _scroll.InvokeVoidAsync("disconnectVisible", _visId); } catch { }
             _visId = 0;

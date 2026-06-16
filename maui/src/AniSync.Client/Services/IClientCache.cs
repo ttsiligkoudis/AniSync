@@ -25,6 +25,12 @@ public interface IClientCache
     /// first (no interop), then localStorage, promoting a localStorage hit into memory.</summary>
     Task<T?> GetAsync<T>(string key, TimeSpan ttl);
 
+    /// <summary>Read an entry regardless of age (for stale-while-revalidate). <c>Found</c> is whether
+    /// any entry exists; <c>Stale</c> is whether it's past <paramref name="ttl"/>; <c>Value</c> is the
+    /// stored value (or <c>default</c> when absent). The caller renders <c>Value</c> instantly and,
+    /// when <c>Stale</c>, refetches in the background.</summary>
+    Task<(bool Found, bool Stale, T? Value)> ReadAsync<T>(string key, TimeSpan ttl);
+
     /// <summary>Store <paramref name="value"/> in both tiers, stamped with the current time.
     /// Best-effort: a blocked/absent localStorage leaves the in-memory tier holding it.</summary>
     Task SetAsync<T>(string key, T value);
