@@ -1,5 +1,4 @@
 using AniSync.Client.Services;
-using CommunityToolkit.Maui.Core.Primitives;
 using CommunityToolkit.Maui.Views;
 
 namespace AniSync.Maui;
@@ -39,7 +38,14 @@ public sealed class ExoPlayerPage : ContentPage
 
         // Seek to the resume point once the media is ready (Duration/seek aren't valid before this fires).
         _media.MediaOpened += OnMediaOpened;
-        if (request.OnProgress is not null) _media.PositionChanged += OnPositionChanged;
+        // Read MediaElement.Position directly in the handler so we don't depend on the (version-specific)
+        // event-args type name. Drives resume persistence + scrobble like the libVLC player does.
+        if (request.OnProgress is not null)
+            _media.PositionChanged += (_, _) =>
+            {
+                try { request.OnProgress(_media.Position.TotalSeconds, _media.Duration.TotalSeconds); }
+                catch { /* renderer gone */ }
+            };
         if (request.OnEnded is not null)
             _media.MediaEnded += (_, _) => { try { request.OnEnded!(); } catch { /* renderer gone */ } };
 
@@ -52,12 +58,6 @@ public sealed class ExoPlayerPage : ContentPage
         _resumed = true;
         if (_request.ResumeSeconds is > 0)
             try { _ = _media.SeekTo(TimeSpan.FromSeconds(_request.ResumeSeconds.Value)); } catch { /* not seekable */ }
-    }
-
-    private void OnPositionChanged(object? sender, MediaPositionChangedEventArgs e)
-    {
-        try { _request.OnProgress!(e.Position.TotalSeconds, _media.Duration.TotalSeconds); }
-        catch { /* renderer gone */ }
     }
 
     protected override void OnDisappearing()
