@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using AniSync.Client.Services;
 using AniSync.Maui;
+using CommunityToolkit.Maui;
 using LibVLCSharp.MAUI;
 using LibVLCSharp.Shared;
 
@@ -20,6 +21,11 @@ public static class MauiProgram
             // throws HandlerNotFoundException for VideoView (the debrid-playback crash): audio started but
             // the video view couldn't be created.
             .UseLibVLCSharp()
+            // We drive Media3/ExoPlayer ourselves (ExoVideoView), but the CommunityToolkit.Maui.MediaElement
+            // package — which supplies the Media3 bindings we use — ships an analyzer (MCTME001) that requires
+            // this initializer whenever the package is referenced, so it must stay in the chain. Foreground
+            // service off: we only play full-screen in the foreground.
+            .UseMauiCommunityToolkitMediaElement(isAndroidForegroundServiceEnabled: false)
             .ConfigureFonts(fonts =>
             {
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
