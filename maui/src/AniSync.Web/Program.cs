@@ -567,6 +567,14 @@ app.MapPost("/api/v1/auth/handoff/start", async (HttpContext ctx, ISettingsHando
 // (which seeds the client credential + lands in the app) straight to the settings page.
 app.MapGet("/tv/handoff", (HttpContext ctx, string? token, ISettingsHandoffStore handoff, ITokenService tokenService) =>
 {
+    // Speculation guard. The token is SINGLE-USE, but this is a GET delivered as a scanned link — so a link
+    // PREVIEW/PREFETCH fetch (phone camera & Chrome/Google link-preview cards, chat unfurlers, security
+    // scanners) would redeem and burn the token before the user's real tap, landing them signed-OUT. Such
+    // speculative fetches are stamped with Sec-Purpose / Purpose / X-Purpose; don't redeem on those — the real
+    // navigation that follows carries no such header and redeems normally. Mirrors the Auth/Logout guard.
+    if (IsSpeculativeFetch(ctx))
+        return Results.NoContent();
+
     var uid = handoff.Redeem(token);
     if (string.IsNullOrEmpty(uid))
         // Unknown / expired / already used — drop them on the account page to sign in the normal way.
@@ -574,6 +582,21 @@ app.MapGet("/tv/handoff", (HttpContext ctx, string? token, ISettingsHandoffStore
     tokenService.SetPrimaryUidCookie(uid);
     return Results.Redirect("/auth/complete?returnUrl=/account");
 });
+
+// True when the request is a browser/scanner SPECULATION (prefetch, prerender, or link-preview unfurl) rather
+// than a real user navigation. Used to keep single-use, side-effecting GETs from being consumed by previews.
+static bool IsSpeculativeFetch(HttpContext ctx)
+{
+    static bool Has(Microsoft.Extensions.Primitives.StringValues v, string needle)
+        => v.ToString().Contains(needle, StringComparison.OrdinalIgnoreCase);
+
+    var h = ctx.Request.Headers;
+    return Has(h["Sec-Purpose"], "prefetch")   // Chrome/Edge speculation rules (prefetch + prerender)
+        || Has(h["Purpose"], "prefetch")        // legacy prefetch hint
+        || Has(h["X-Purpose"], "preview")       // Apple/Google link-preview unfurl
+        || Has(h["X-Purpose"], "prefetch")
+        || Has(h["X-Moz"], "prefetch");         // Firefox
+}
 
 // Auth → client config-seeding bridge. After a server-side OAuth/Kitsu login the
 // session identifies the account; resolve its UID, encode the v5 config segment
