@@ -36,15 +36,12 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
         await StopAsync();
 
 #if ANDROID
-        // Android TV: play in a dedicated native full-screen Activity (VlcPlayerActivity) instead of the MAUI
-        // modal page. Every decode/DR/vout/window-flag combination failed to present a 4K frame in the modal
-        // DialogFragment that hosts the MAUI VideoView, while standalone/Stremio VLC plays it from a real
-        // Activity — so we host libVLC's Android SurfaceView in our own Activity here. Reuses this configured
-        // LibVLC and the request's resume + progress/end callbacks (so resume/scrobble still work). Phones
-        // keep the in-app MAUI player below (it works there and carries the full chrome).
-        //
-        // External VLC handoff (ExternalVlc) remains available behind this flag as a last-resort fallback.
-        var useExternalVlcOnTv = false;
+        // Android TV: hand 4K playback to the standalone VLC app (proven to play these files on this TV).
+        // The embedded path was exhausted — every decode/DR/vout/window/Activity variant failed to present a
+        // 4K frame, and the native Activity (VlcPlayerActivity) even ANR-froze the whole app (dec 0/demux 0).
+        // So external is the working path for now; the native Activity stays as a deeper fallback only when
+        // VLC isn't installed. Phones keep the in-app MAUI player below.
+        var useExternalVlcOnTv = true;
         if (DeviceInfo.Current.Idiom == DeviceIdiom.TV)
         {
             await MainThread.InvokeOnMainThreadAsync(() =>
