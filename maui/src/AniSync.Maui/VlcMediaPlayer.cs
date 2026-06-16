@@ -36,28 +36,18 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
         await StopAsync();
 
 #if ANDROID
-        // Android TV player selection (the embedded libVLC SurfaceView never presented a 4K frame here):
-        //  • EXPERIMENT (default): ExoPlayer via the Community Toolkit MediaElement (ExoPlayerPage) — the
-        //    engine Stremio uses by default; we're testing whether it plays 4K cleanly where libVLC couldn't.
-        //  • Fallbacks (flags): the standalone VLC app handoff (proven to work), then the native libVLC
-        //    Activity (froze the app — last resort).
-        // Phones keep the in-app libVLC MAUI player below.
-        var useExoOnTv = true;
-        var useExternalVlcOnTv = false;
+        // Android TV: play with ExoPlayer (Community Toolkit MediaElement → Google Media3), the engine
+        // Stremio uses. The embedded libVLCSharp SurfaceView could never present a 4K frame on these TVs
+        // (the MAUI wrapper's surface integration, not libVLC itself); ExoPlayer plays 4K cleanly. Phones
+        // keep the in-app libVLC MAUI player below (it works there, with the full chrome / exotic audio
+        // codecs).
         if (DeviceInfo.Current.Idiom == DeviceIdiom.TV)
         {
             await MainThread.InvokeOnMainThreadAsync(async () =>
             {
-                var nav = Application.Current?.Windows.FirstOrDefault()?.Page?.Navigation;
-                if (useExoOnTv && nav is not null)
-                {
-                    await nav.PushModalAsync(new ExoPlayerPage(request));
-                    return;
-                }
-                if (useExternalVlcOnTv && ExternalVlc.TryLaunch(request)) return;
-                var ctx = (global::Android.Content.Context?)Platform.CurrentActivity
-                    ?? global::Android.App.Application.Context!;
-                VlcPlayerActivity.Launch(ctx, _libVlc, request);
+                var nav = Application.Current?.Windows.FirstOrDefault()?.Page?.Navigation
+                    ?? throw new InvalidOperationException("No navigation host available to present the player.");
+                await nav.PushModalAsync(new ExoPlayerPage(request));
             });
             return;
         }
@@ -71,7 +61,7 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             if (request.ResumeSeconds is > 0)
                 media.AddOption($":start-time={(int)request.ResumeSeconds.Value}");
 
-            // This embedded MAUI path now serves phones only (TV goes to VlcPlayerActivity above). SOFTWARE
+            // This embedded MAUI path now serves phones only (TV goes to ExoPlayerPage above). SOFTWARE
             // decode is right for phones: some mobile chipsets' HEVC/10-bit hardware decoders corrupt the
             // picture into green/blocky artifacts, and a phone CPU keeps up fine (verified on-screen — a
             // 3840x2160 stream displays ~24fps steadily with no dropped frames).
