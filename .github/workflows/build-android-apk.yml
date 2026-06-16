@@ -44,12 +44,13 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      # Best-effort: ensure the Android 15 (API 35) platform .NET 10 compiles against is present. The
-      # ubuntu runner usually ships it; continue-on-error so a path/already-installed case doesn't fail
-      # the run (a genuinely missing platform surfaces in the build step below).
-      - name: Ensure Android SDK platform 35
+      # Best-effort: ensure the Android platforms .NET 10 / dependencies compile against are present. The
+      # ubuntu runner usually ships 35; CommunityToolkit.Maui.MediaElement 10.x (ExoPlayer/Media3) targets
+      # android-36, so install that too. continue-on-error so an already-installed case doesn't fail the run
+      # (a genuinely missing platform surfaces in the build step below).
+      - name: Ensure Android SDK platforms 35 + 36
         continue-on-error: true
-        run: ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+        run: ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "platforms;android-36" "build-tools;36.0.0"
 
       # Installs exactly the workloads the MAUI project needs (maui-android) by reading the csproj.
       - name: Restore MAUI workloads
