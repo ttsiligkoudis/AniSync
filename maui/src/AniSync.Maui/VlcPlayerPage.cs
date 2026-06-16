@@ -28,15 +28,8 @@ public sealed class VlcPlayerPage : ContentPage
     private static readonly Color Scrim = Color.FromRgba(0, 0, 0, 150); // bar background
     private static readonly Color SheetBg = Color.FromArgb("#15151B");  // bottom-sheet panel
 
-    // Bump on each player change so we can confirm which APK is actually installed (shown faintly in the top
-    // bar). Temporary aid while iterating on the native player — remove once the layout is finalised.
-    private const string BuildTag = "dbg8";
-
-    // TEMPORARY: on-screen decoder diagnostic. Flip to false (or delete the block) once the 4K freeze
-    // is understood. It polls libVLC's decode stats so we can see, on the device, whether a frozen
-    // stream is the decoder falling behind (displayed pictures stall + lost pictures climb), the network
-    // stalling (input bitrate → 0), or no video output ever being created (Vout 0).
-    private const bool ShowDiagnostics = true;
+    // Optional build identifier shown faintly in the top bar to confirm which APK is installed. Empty = hidden.
+    private const string BuildTag = "";
 
     // Material Icons codepoints (font registered as "MaterialIcons" in MauiProgram).
     private const string IconFont = "MaterialIcons";
@@ -73,14 +66,6 @@ public sealed class VlcPlayerPage : ContentPage
     // stream re-buffers, so a debrid link that's slow to start no longer looks like a frozen black screen.
     private readonly Grid _loading;
     private readonly ActivityIndicator _spinner;
-
-    // TEMPORARY decoder diagnostic (see ShowDiagnostics). Overlay label + 1s poll timer + last-event note,
-    // plus the previous tick's counters so we can show per-second deltas (the "are frames still flowing?"
-    // signal). Remove with the rest of the diagnostic once the 4K freeze is diagnosed.
-    private readonly Label? _diag;
-    private IDispatcherTimer? _diagTimer;
-    private string _lastEvent = "";
-    private long _prevDecoded, _prevDisplayed, _prevLost;
 
     // Android TV / Google TV is driven by a D-pad remote — there's no tap to bring the chrome back, so we
     // never auto-hide it there, and we move focus onto the play button so the remote has a landing spot.
@@ -340,28 +325,6 @@ public sealed class VlcPlayerPage : ContentPage
         _root.Add(_videoView, 0, 0);
         _root.Add(_controls, 0, 0);
         _root.Add(_loading, 0, 0);     // over the video, under the controls' tap target + the sheet
-
-        // ── TEMPORARY decoder diagnostic overlay ────────────────────────────────
-        if (ShowDiagnostics)
-        {
-            _diag = new Label
-            {
-                Text = "diag…",
-                FontFamily = "monospace",
-                FontSize = 11,
-                TextColor = Colors.Lime,
-                BackgroundColor = Color.FromRgba(0, 0, 0, 170),
-                Padding = new Thickness(8, 6),
-                LineBreakMode = LineBreakMode.WordWrap,
-                HorizontalOptions = LayoutOptions.Start,
-                VerticalOptions = LayoutOptions.Center, // mid-left: clears the top + bottom bars
-                InputTransparent = true,                // never steals taps / D-pad focus
-            };
-            var diagWrap = new Grid { InputTransparent = true, SafeAreaEdges = SafeAreaEdges.None };
-            diagWrap.Add(_diag);
-            _root.Add(diagWrap, 0, 0);  // above the controls so it stays visible when the chrome hides
-        }
-
         _root.Add(_sheetOverlay, 0, 0);
 
         // Tap-to-toggle the chrome — touch heads only. A TapGestureRecognizer on the root makes it
@@ -399,12 +362,9 @@ public sealed class VlcPlayerPage : ContentPage
         _player.Paused += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPlay; StopHideTimer(); KeepAwake(false); });
         // Buffering climbs 0→100 on connect and re-fires on a re-buffer; show the spinner until it's full.
         // Buffering means we're loading toward playback, so keep the screen awake through it too.
-        _player.Buffering += (_, e) => Dispatcher.Dispatch(() => { var loading = e.Cache < 100f; SetLoading(loading); if (loading) KeepAwake(true); DiagEvent($"buffering {e.Cache:0}%"); });
-        _player.EndReached += (_, _) => Dispatcher.Dispatch(() => { KeepAwake(false); DiagEvent("end reached"); });
-        _player.EncounteredError += (_, _) => Dispatcher.Dispatch(() => { KeepAwake(false); DiagEvent("ERROR"); });
-        // Vout fires when libVLC creates/destroys a video output. Count 0 after start = nothing rendering
-        // (the "black/frozen with audio" symptom); the diagnostic surfaces this directly.
-        _player.Vout += (_, e) => Dispatcher.Dispatch(() => DiagEvent($"vout x{e.Count}"));
+        _player.Buffering += (_, e) => Dispatcher.Dispatch(() => { var loading = e.Cache < 100f; SetLoading(loading); if (loading) KeepAwake(true); });
+        _player.EndReached += (_, _) => Dispatcher.Dispatch(() => KeepAwake(false));
+        _player.EncounteredError += (_, _) => Dispatcher.Dispatch(() => KeepAwake(false));
 
         // Stop + release when the user backs out of (or closes) the player.
         NavigatedFrom += (_, _) => { try { _player.Stop(); } catch { /* already stopped */ } KeepAwake(false); };
@@ -414,11 +374,10 @@ public sealed class VlcPlayerPage : ContentPage
         Loaded += (_, _) => { ApplyImmersiveToView(); BeginPlaybackWhenSurfaceReady(); };
     }
 
-    // Start playback once the VideoView's native surface exists. libVLC was previously told to Play() the
-    // instant the page was presented — before the SurfaceView's surface was created — which left hardware
-    // MediaCodec on TV with no output surface (it decoded a few frames then stalled, video black). We now
-    // wait for surfaceCreated (hooking the native SurfaceHolder), with a timed safety net so playback never
-    // hangs unstarted if the surface can't be found (e.g. a non-SurfaceView backend).
+    // Start playback once the VideoView's native surface exists, rather than the instant the page is
+    // presented — so libVLC always has a valid output surface when it starts. Hooks the native
+    // SurfaceHolder, with a timed safety net so playback never hangs unstarted if the surface can't be
+    // found (e.g. a non-SurfaceView backend).
     private void BeginPlaybackWhenSurfaceReady()
     {
         if (_started) return;
@@ -459,16 +418,6 @@ public sealed class VlcPlayerPage : ContentPage
             _window.Resumed += OnWindowResumed;
         }
         RestartHideTimer();
-
-        // TEMPORARY: start polling decode stats once a second.
-        if (ShowDiagnostics && _diagTimer is null)
-        {
-            _diagTimer = Dispatcher.CreateTimer();
-            _diagTimer.Interval = TimeSpan.FromSeconds(1);
-            _diagTimer.IsRepeating = true;
-            _diagTimer.Tick += (_, _) => UpdateDiag();
-            _diagTimer.Start();
-        }
     }
 
     // Target the player view's OWN hosting window for immersive. MAUI presents the modal in a separate window,
@@ -494,8 +443,6 @@ public sealed class VlcPlayerPage : ContentPage
             _window = null;
         }
         StopHideTimer();
-        _diagTimer?.Stop();
-        _diagTimer = null;
         SetImmersive(false);
         // Always release the wake-lock when leaving the player so it can't leak past the session.
         KeepAwake(false);
@@ -1155,51 +1102,6 @@ public sealed class VlcPlayerPage : ContentPage
     {
         _position.Text = Format(_player.Time);
         _duration.Text = Format(_player.Length);
-    }
-
-    // ── TEMPORARY decoder diagnostic (remove with ShowDiagnostics) ──────────────
-    // Note the most recent libVLC event in the overlay (timestamped so a repeated event still reads as new).
-    private void DiagEvent(string what)
-    {
-        if (!ShowDiagnostics) return;
-        _lastEvent = $"{DateTime.Now:HH:mm:ss} {what}";
-    }
-
-    // Poll libVLC's decode statistics once a second. The deltas are the key signal: if "shown" stops
-    // climbing while "dec" keeps going (and "lost" climbs), the decoder/renderer can't keep up with the
-    // 4K stream; if "in" drops to ~0 the network/debrid link stalled; if Vout never reached 1 there's no
-    // video output at all. Read live on the UI thread so the numbers reflect the current moment.
-    private void UpdateDiag()
-    {
-        if (_diag is null) return;
-        try
-        {
-            var sb = new System.Text.StringBuilder();
-            sb.Append(_player.State).Append("  hw:").Append(_player.EnableHardwareDecoding ? "on" : "off");
-            uint w = 0, h = 0;
-            if (_player.Size(0, ref w, ref h) && h > 0) sb.Append("  ").Append(w).Append('x').Append(h);
-            sb.AppendLine();
-
-            var media = _player.Media;
-            if (media is not null)
-            {
-                var s = media.Statistics;
-                long dec = s.DecodedVideo, shown = s.DisplayedPictures, lost = s.LostPictures;
-                sb.Append("dec ").Append(dec).Append(" (+").Append(dec - _prevDecoded).Append(')')
-                  .Append("  shown ").Append(shown).Append(" (+").Append(shown - _prevDisplayed).Append(')').AppendLine();
-                sb.Append("lostpic ").Append(lost).Append(" (+").Append(lost - _prevLost).Append(')')
-                  .Append("  lostaud ").Append(s.LostAudioBuffers).AppendLine();
-                // libVLC bitrates are bytes/unit; ×8000 gives kb/s (matches VLC's own stats display).
-                sb.Append("in ").Append((s.InputBitrate * 8000f).ToString("0")).Append("kb/s")
-                  .Append("  demux ").Append((s.DemuxBitrate * 8000f).ToString("0")).Append("kb/s").AppendLine();
-                sb.Append("corrupt ").Append(s.DemuxCorrupted).Append("  disc ").Append(s.DemuxDiscontinuity).AppendLine();
-                _prevDecoded = dec; _prevDisplayed = shown; _prevLost = lost;
-            }
-            sb.Append("t ").Append(Format(_player.Time)).Append(" / ").Append(Format(_player.Length));
-            if (_lastEvent.Length > 0) sb.AppendLine().Append(_lastEvent);
-            _diag.Text = sb.ToString();
-        }
-        catch (Exception ex) { _diag.Text = "diag err: " + ex.Message; }
     }
 
     // Read the decoded video size from libVLC (available a beat after the first frame) and show a
