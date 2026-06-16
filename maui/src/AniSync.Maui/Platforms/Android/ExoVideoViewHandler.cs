@@ -70,8 +70,8 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         VirtualView.PauseForBackgroundRequested += OnPauseForBackground;
         VirtualView.ResumeFromBackgroundRequested += OnResumeFromBackground;
 
-        // The Java ExoPlayer interface binds to C# as IExoPlayer, so its nested Builder is IExoPlayer.Builder.
-        var player = new IExoPlayer.Builder(Context!).Build()!;
+        // The Java ExoPlayer.Builder binds to C# as the top-level ExoPlayerBuilder; Build() returns IExoPlayer.
+        var player = new ExoPlayerBuilder(Context!).Build()!;
         _player = player;
         platformView.Player = player;
 
