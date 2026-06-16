@@ -4,6 +4,7 @@
 @inject AppState State
 @inject IJSRuntime JS
 @inject IPrerenderSession Prerender
+@inject IClientCache Cache
 @inject IAppEnvironment Env
 
 @* Anime/title detail — port of Views/Meta/Detail.cshtml (anime path). Hero
@@ -589,8 +590,15 @@ else
         if (RendererInfo.IsInteractive && TryReplaySnapshot(out var snap) && snap is { Meta: not null })
         {
             RestoreFrom(snap);
+            _ = Cache.SetAsync(PersistKey(), snap);   // prime the client cache so a later back-nav is instant
             return;
         }
+
+        // Client-cache replay — instant restore of the last view of this title on back-navigation or
+        // app restart (no skeleton, none of the load below). The in-memory tier serves the live session;
+        // localStorage bridges a restart. Per-user bits (pill/heart) are refreshed in the background.
+        if (await TryRestoreFromCacheAsync())
+            return;
 
         _loading = true;
         _jsBound = false;
@@ -639,8 +647,14 @@ else
 
         // Prerender: stash a snapshot so the interactive remount replays it (above) with no flash
         // and no second API round-trip. Web-only; no-op on native and on the interactive pass.
+        // Also stash it in the two-tier client cache (30 min) so navigating back to this title — or
+        // reopening the app — restores it instantly instead of refetching everything above.
         if (_meta is not null)
-            Prerender.Persist<PersistedDetail>(PersistKey(), RendererInfo.IsInteractive, Snapshot);
+        {
+            var snapshot = Snapshot();
+            Prerender.Persist<PersistedDetail>(PersistKey(), RendererInfo.IsInteractive, () => snapshot);
+            await Cache.SetAsync(PersistKey(), snapshot);
+        }
     }
 
     // Per-page-instance key (type + id) — only one detail page prerenders per request, but keying by
@@ -656,6 +670,35 @@ else
     {
         try { return Prerender.TryReplay<PersistedDetail?>(PersistKey(), out snap); }
         catch { snap = null; return false; }
+    }
+
+    // How long a detail snapshot stays replayable from the client cache. Short — the in-memory tier
+    // makes the live session instant regardless; this mainly bounds the restart-restore window.
+    private static readonly TimeSpan DetailCacheTtl = TimeSpan.FromMinutes(30);
+
+    // Replay the last view of this title from the two-tier client cache when one is fresh. Restores
+    // instantly (no skeleton, no API calls), then refreshes the per-user bits (pill/heart/hidden) in
+    // the background since those can change while the cached content stays valid.
+    private async Task<bool> TryRestoreFromCacheAsync()
+    {
+        PersistedDetail? snap;
+        try { snap = await Cache.GetAsync<PersistedDetail>(PersistKey(), DetailCacheTtl); }
+        catch { return false; }
+        if (snap is not { Meta: not null }) return false;
+
+        RestoreFrom(snap);
+        if (LoggedIn) _ = RefreshUserStateAsync();
+        return true;
+    }
+
+    // Refetch the hero's user-state (pill + heart + hide) and re-derive the CTA. Shared by the
+    // post-cache-restore background refresh and the modal's save/remove callback.
+    private async Task RefreshUserStateAsync()
+    {
+        _state = await Api.DetailStateAsync(Id, type: IsVideo ? VideoMediaType : null) ?? _state;
+        ApplyUserState();
+        ComputeWatchCta();
+        StateHasChanged();
     }
 
     // Everything the render needs that came off the network, captured at the end of the prerender load.
@@ -1109,13 +1152,7 @@ else
     private void OnFilter(ChangeEventArgs e) => _filter = e.Value?.ToString() ?? "";
 
     // Refresh the hero's user-state (pill + heart) after a save/remove in the modal.
-    private async Task OnEntrySaved()
-    {
-        _state = await Api.DetailStateAsync(Id, type: IsVideo ? VideoMediaType : null) ?? _state;
-        ApplyUserState();
-        ComputeWatchCta();
-        StateHasChanged();
-    }
+    private Task OnEntrySaved() => RefreshUserStateAsync();
 
     // Episode rows navigate to the watch page (the original used a delegated JS
     // click handler with role=button; here we do it through Blazor routing).

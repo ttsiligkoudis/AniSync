@@ -5716,6 +5716,16 @@ a.stats-cell-link:hover {
     margin-top: 0.35rem;
 }
 
+/* Deferred shelf: a shelf below the fold reserves its height with the SAME
+   skeleton layout, but its placeholders sit static (no shimmer) until it
+   scrolls into view and actually starts loading. Running the sweep on every
+   off-screen shelf's cards at once is the main source of dashboard jank on
+   low-power TVs; the muted fill alone still reads as "loading". */
+.dashboard-section.is-deferred .skeleton-shimmer,
+.dashboard-section.is-deferred .library-card-skeleton-line {
+    animation: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .library-card-skeleton-line {
         animation: none;

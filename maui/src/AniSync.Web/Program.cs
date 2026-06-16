@@ -50,6 +50,7 @@ builder.Services.AddCascadingAuthenticationState();
 
 // ---- Shared client registrations (identical on both heads) ----
 builder.Services.AddScoped<AppState>();                 // session/nav/media-type/config state
+builder.Services.AddScoped<IClientCache, ClientCache>();// two-tier (memory + localStorage) cache for shelves / detail
 builder.Services.AddHttpContextAccessor();              // idempotent; WebPrerenderSession reads the anisync_uid cookie
 // Cookie-backed prerender: render signed-in chrome from the first byte when the anisync_uid cookie is
 // present, bridging the verdict to the interactive circuit via PersistentComponentState (no flash).
@@ -622,7 +623,11 @@ app.MapGet("/auth/complete", async (HttpContext ctx, ITokenService tokenService,
     // login/logout cookie was already set by AuthController / Auth/Logout before we got here. We also
     // best-effort scrub any legacy 'anisync.config' a pre-Phase-2 client may still have stored, and drop
     // the 24 h AniList stats cache so a fresh login / different user doesn't see the previous one's stats.
-    var op = "localStorage.removeItem('anisync.config');localStorage.removeItem('anisync.stats.anilist');";
+    // Also sweep the client cache (shelves + detail snapshots, "anisync.cache.*") so a fresh login /
+    // different user never sees the previous one's cached user-scoped data. The page fully reloads
+    // right after this, so the in-memory cache tier is discarded too.
+    var op = "localStorage.removeItem('anisync.config');localStorage.removeItem('anisync.stats.anilist');"
+        + "for(var i=localStorage.length-1;i>=0;i--){var k=localStorage.key(i);if(k&&k.indexOf('anisync.cache.')===0)localStorage.removeItem(k);}";
     var nav = System.Text.Json.JsonSerializer.Serialize(returnUrl);
 
     // Dark, themed loading screen instead of the browser's blank white page — this

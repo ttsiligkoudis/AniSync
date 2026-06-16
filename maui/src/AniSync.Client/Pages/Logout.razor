@@ -1,6 +1,7 @@
 @page "/logout"
 @inject ISecureStore Store
 @inject AppState State
+@inject IClientCache Cache
 @inject IAppEnvironment Env
 @inject NavigationManager Nav
 
@@ -22,12 +23,16 @@
 
         if (!Env.IsNative)
         {
-            // Server owns the session + the credential-clearing bridge.
+            // Server owns the session + the credential-clearing bridge (which also sweeps the
+            // anisync.cache.* client cache before the full reload).
             Nav.NavigateTo($"{Env.ApiBaseUrl.TrimEnd('/')}/Auth/Logout?returnUrl=/", forceLoad: true);
             return;
         }
 
         await Store.SetAsync(ISecureStore.ConfigKey, null);
+        // Native stays in the same long-lived circuit (no reload), so drop the client cache by hand —
+        // otherwise the next account would see this one's cached continue-watching / detail state.
+        await Cache.ClearAsync();
         State.SetStreamConfig(null);
         State.HydrateSession(false, "");
         Nav.NavigateTo("/");
