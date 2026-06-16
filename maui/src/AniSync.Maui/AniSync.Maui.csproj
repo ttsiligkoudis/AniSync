@@ -93,6 +93,11 @@
                       Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'" />
     <PackageReference Include="VideoLAN.LibVLC.Android" Version="3.6.5"
                       Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'" />
+
+    <!-- ExoPlayer (Google Media3) via the MAUI Community Toolkit MediaElement — experimental alternate
+         player for TV 4K, where the embedded libVLC SurfaceView never presented a frame. MediaElement 10.x
+         is built on Xamarin.AndroidX.Media3 (ExoPlayer), the same engine Stremio uses by default. -->
+    <PackageReference Include="CommunityToolkit.Maui.MediaElement" Version="10.0.0" />
   </ItemGroup>
 
   <ItemGroup>

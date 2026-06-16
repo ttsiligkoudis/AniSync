@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using AniSync.Client.Services;
 using AniSync.Maui;
+using CommunityToolkit.Maui;
 using LibVLCSharp.MAUI;
 using LibVLCSharp.Shared;
 
@@ -20,6 +21,9 @@ public static class MauiProgram
             // throws HandlerNotFoundException for VideoView (the debrid-playback crash): audio started but
             // the video view couldn't be created.
             .UseLibVLCSharp()
+            // Registers the Community Toolkit MediaElement (ExoPlayer/Media3 on Android) — the experimental
+            // alternate player used for TV 4K (see ExoPlayerPage / VlcMediaPlayer).
+            .UseMauiCommunityToolkitMediaElement()
             .ConfigureFonts(fonts =>
             {
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");

@@ -36,16 +36,24 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
         await StopAsync();
 
 #if ANDROID
-        // Android TV: hand 4K playback to the standalone VLC app (proven to play these files on this TV).
-        // The embedded path was exhausted — every decode/DR/vout/window/Activity variant failed to present a
-        // 4K frame, and the native Activity (VlcPlayerActivity) even ANR-froze the whole app (dec 0/demux 0).
-        // So external is the working path for now; the native Activity stays as a deeper fallback only when
-        // VLC isn't installed. Phones keep the in-app MAUI player below.
-        var useExternalVlcOnTv = true;
+        // Android TV player selection (the embedded libVLC SurfaceView never presented a 4K frame here):
+        //  • EXPERIMENT (default): ExoPlayer via the Community Toolkit MediaElement (ExoPlayerPage) — the
+        //    engine Stremio uses by default; we're testing whether it plays 4K cleanly where libVLC couldn't.
+        //  • Fallbacks (flags): the standalone VLC app handoff (proven to work), then the native libVLC
+        //    Activity (froze the app — last resort).
+        // Phones keep the in-app libVLC MAUI player below.
+        var useExoOnTv = true;
+        var useExternalVlcOnTv = false;
         if (DeviceInfo.Current.Idiom == DeviceIdiom.TV)
         {
-            await MainThread.InvokeOnMainThreadAsync(() =>
+            await MainThread.InvokeOnMainThreadAsync(async () =>
             {
+                var nav = Application.Current?.Windows.FirstOrDefault()?.Page?.Navigation;
+                if (useExoOnTv && nav is not null)
+                {
+                    await nav.PushModalAsync(new ExoPlayerPage(request));
+                    return;
+                }
                 if (useExternalVlcOnTv && ExternalVlc.TryLaunch(request)) return;
                 var ctx = (global::Android.Content.Context?)Platform.CurrentActivity
                     ?? global::Android.App.Application.Context!;
