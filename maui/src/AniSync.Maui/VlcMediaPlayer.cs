@@ -36,39 +36,41 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
         await StopAsync();
 
 #if ANDROID
-        // External VLC handoff is kept available but OFF. Testing showed Stremio plays this 4K stream with
-        // its EMBEDDED VLC (its menu lists Exo/VLC/MPV as embedded players, with "External" as a separate
-        // option), so embedded is the correct path — and ours stalled only because we start playback before
-        // the video surface exists (fixed below + in the page). Flip this to delegate to the standalone VLC
-        // app instead (shows the Android "Open with" picker).
+        // Android TV: play in a dedicated native full-screen Activity (VlcPlayerActivity) instead of the MAUI
+        // modal page. Every decode/DR/vout/window-flag combination failed to present a 4K frame in the modal
+        // DialogFragment that hosts the MAUI VideoView, while standalone/Stremio VLC plays it from a real
+        // Activity — so we host libVLC's Android SurfaceView in our own Activity here. Reuses this configured
+        // LibVLC and the request's resume + progress/end callbacks (so resume/scrobble still work). Phones
+        // keep the in-app MAUI player below (it works there and carries the full chrome).
+        //
+        // External VLC handoff (ExternalVlc) remains available behind this flag as a last-resort fallback.
         var useExternalVlcOnTv = false;
-        if (useExternalVlcOnTv && DeviceInfo.Current.Idiom == DeviceIdiom.TV
-            && await MainThread.InvokeOnMainThreadAsync(() => ExternalVlc.TryLaunch(request)))
+        if (DeviceInfo.Current.Idiom == DeviceIdiom.TV)
         {
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                if (useExternalVlcOnTv && ExternalVlc.TryLaunch(request)) return;
+                var ctx = (global::Android.Content.Context?)Platform.CurrentActivity
+                    ?? global::Android.App.Application.Context!;
+                VlcPlayerActivity.Launch(ctx, _libVlc, request);
+            });
             return;
         }
 #endif
 
         try
         {
-            var isTv = DeviceInfo.Current.Idiom == DeviceIdiom.TV;
-
             using var media = new Media(_libVlc, new Uri(request.Url));
 
             // Resume position: libVLC takes a start time in seconds via :start-time.
             if (request.ResumeSeconds is > 0)
                 media.AddOption($":start-time={(int)request.ResumeSeconds.Value}");
 
-            // Decoding strategy is device-dependent:
-            //  • Phones/tablets: SOFTWARE decode — some mobile chipsets' HEVC/10-bit hardware decoders corrupt
-            //    the picture into green/blocky artifacts, and a phone CPU keeps up fine (verified on-screen: a
-            //    3840x2160 stream displays ~24fps steadily with no dropped frames).
-            //  • TV: HARDWARE MediaCodec decode with direct rendering (zero-copy to the surface) — the only
-            //    path that can render 10-bit 4K, and the one Stremio's embedded VLC uses. It deadlocked for us
-            //    not because of the codec but because the modal window's surface was reshaped by the notch /
-            //    LayoutNoLimits manipulation we apply (now skipped on TV — see AndroidImmersive), which kept
-            //    MediaCodec's rendered frames from ever being presented (decoded, never shown).
-            var player = new MediaPlayer(media) { EnableHardwareDecoding = isTv };
+            // This embedded MAUI path now serves phones only (TV goes to VlcPlayerActivity above). SOFTWARE
+            // decode is right for phones: some mobile chipsets' HEVC/10-bit hardware decoders corrupt the
+            // picture into green/blocky artifacts, and a phone CPU keeps up fine (verified on-screen — a
+            // 3840x2160 stream displays ~24fps steadily with no dropped frames).
+            var player = new MediaPlayer(media) { EnableHardwareDecoding = false };
             _player = player;
 
             // External subtitle tracks (proxied OpenSubtitles URLs) are NOT pre-attached here: libVLC loads
