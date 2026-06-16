@@ -1,70 +1,98 @@
 using AniSync.Client.Services;
-using CommunityToolkit.Maui.Views;
 
 namespace AniSync.Maui;
 
 /// <summary>
-/// Experimental alternate player built on the Community Toolkit <see cref="MediaElement"/>, which on Android
-/// uses Google's ExoPlayer (Media3) — the engine Stremio defaults to, and the one that "just works" for 4K
-/// on Android TV where the embedded libVLC SurfaceView never presented a frame. Kept deliberately minimal
-/// for the experiment: full-screen video, ExoPlayer's own transport controls (D-pad friendly), resume, and
-/// progress/end forwarded to the request callbacks so resume + scrobble still work. If this plays 4K cleanly
-/// we adopt it for TV (or expose it as a player choice in settings).
+/// The Android TV player. Hosts an <see cref="ExoVideoView"/> (a Media3 ExoPlayer + PlayerView) full-screen
+/// and immersive. ExoPlayer plays 4K cleanly where the embedded libVLC SurfaceView never presented a frame,
+/// and PlayerView's built-in controls give D-pad-friendly play/seek plus a settings menu for audio/subtitle
+/// tracks and playback speed; the handler adds sideloaded subtitles, preferred languages, resume,
+/// progress/ended callbacks and a MENU-key scaling cycle. Presented modally by <c>VlcMediaPlayer</c> on TV;
+/// phones use the in-app libVLC player instead.
 /// </summary>
 public sealed class ExoPlayerPage : ContentPage
 {
-    private readonly MediaElement _media;
-    private readonly PlaybackRequest _request;
-    private bool _resumed;
+    private readonly ExoVideoView _video;
+    private Window? _window;
 
     public ExoPlayerPage(PlaybackRequest request)
     {
-        _request = request;
         Title = request.Title;
         BackgroundColor = Colors.Black;
         NavigationPage.SetHasNavigationBar(this, false);
 
-        _media = new MediaElement
+        _video = new ExoVideoView(request)
         {
-            Source = MediaSource.FromUri(request.Url),
-            ShouldAutoPlay = true,
-            ShouldShowPlaybackControls = true,   // ExoPlayer's native transport (works with the TV remote)
-            ShouldKeepScreenOn = true,
-            Aspect = Aspect.AspectFit,
-            Background = Brush.Black,
             VerticalOptions = LayoutOptions.Fill,
             HorizontalOptions = LayoutOptions.Fill,
         };
+        Content = new Grid { BackgroundColor = Colors.Black, Children = { _video } };
 
-        // Seek to the resume point once the media is ready (Duration/seek aren't valid before this fires).
-        _media.MediaOpened += OnMediaOpened;
-        // Read MediaElement.Position directly in the handler so we don't depend on the (version-specific)
-        // event-args type name. Drives resume persistence + scrobble like the libVLC player does.
-        if (request.OnProgress is not null)
-            _media.PositionChanged += (_, _) =>
-            {
-                try { request.OnProgress(_media.Position.TotalSeconds, _media.Duration.TotalSeconds); }
-                catch { /* renderer gone */ }
-            };
-        if (request.OnEnded is not null)
-            _media.MediaEnded += (_, _) => { try { request.OnEnded!(); } catch { /* renderer gone */ } };
-
-        Content = new Grid { BackgroundColor = Colors.Black, Children = { _media } };
+        // Re-assert immersive once the page's native view is attached to its (modal) window.
+        Loaded += (_, _) => ApplyImmersiveToView();
     }
 
-    private void OnMediaOpened(object? sender, EventArgs e)
+    protected override void OnAppearing()
     {
-        if (_resumed) return;
-        _resumed = true;
-        if (_request.ResumeSeconds is > 0)
-            try { _ = _media.SeekTo(TimeSpan.FromSeconds(_request.ResumeSeconds.Value)); } catch { /* not seekable */ }
+        base.OnAppearing();
+        SetImmersive(true);
+        ApplyImmersiveToView();
+        // Hiding the bars doesn't survive the modal-present + forced rotation on some OEMs, so re-assert once
+        // the transition settles (MainActivity also re-applies on config change / resume).
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(350), () => { SetImmersive(true); ApplyImmersiveToView(); });
+
+        _window = Application.Current?.Windows.FirstOrDefault();
+        if (_window is not null)
+        {
+            _window.Stopped += OnWindowStopped;
+            _window.Resumed += OnWindowResumed;
+        }
     }
 
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
-        // Stop + release ExoPlayer so it doesn't keep decoding/holding the surface after the page closes.
-        try { _media.Stop(); } catch { /* already stopped */ }
-        try { _media.Handler?.DisconnectHandler(); } catch { /* already torn down */ }
+        if (_window is not null)
+        {
+            _window.Stopped -= OnWindowStopped;
+            _window.Resumed -= OnWindowResumed;
+            _window = null;
+        }
+        SetImmersive(false);
+        // Release ExoPlayer so it stops decoding / holding the surface once the page closes.
+        try { _video.Handler?.DisconnectHandler(); } catch { /* already torn down */ }
+    }
+
+    // App backgrounded (Home / recents) → pause so audio doesn't keep playing behind an inactive app; resume
+    // what was playing when we return.
+    private void OnWindowStopped(object? sender, EventArgs e) => _video.PauseForBackground();
+    private void OnWindowResumed(object? sender, EventArgs e) => _video.ResumeFromBackground();
+
+    // Target the page's OWN hosting window for immersive: MAUI presents the modal in a separate window, so
+    // flags on the Activity window never reach it — this resolves the right window from the view itself.
+    private void ApplyImmersiveToView()
+    {
+#if ANDROID
+        if (Handler?.PlatformView is global::Android.Views.View v)
+            global::AniSync.AndroidImmersive.ApplyToView(v);
+#endif
+    }
+
+    private static void SetImmersive(bool on)
+    {
+#if ANDROID
+        var activity = Platform.CurrentActivity;
+        if (activity is null) return;
+        if (on)
+        {
+            activity.RequestedOrientation = global::Android.Content.PM.ScreenOrientation.SensorLandscape;
+            global::AniSync.AndroidImmersive.Enter(activity);
+        }
+        else
+        {
+            global::AniSync.AndroidImmersive.Exit(activity);
+            activity.RequestedOrientation = global::Android.Content.PM.ScreenOrientation.Unspecified;
+        }
+#endif
     }
 }

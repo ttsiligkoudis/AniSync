@@ -36,7 +36,7 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
         await StopAsync();
 
 #if ANDROID
-        // Android TV: play with ExoPlayer (Community Toolkit MediaElement → Google Media3), the engine
+        // Android TV: play with ExoPlayer (Google Media3, via our ExoVideoView handler), the engine
         // Stremio uses. The embedded libVLCSharp SurfaceView could never present a 4K frame on these TVs
         // (the MAUI wrapper's surface integration, not libVLC itself); ExoPlayer plays 4K cleanly. Phones
         // keep the in-app libVLC MAUI player below (it works there, with the full chrome / exotic audio
