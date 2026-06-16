@@ -4,7 +4,6 @@ using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using AniSync.Client.Services;
 using AniSync.Maui;
-using CommunityToolkit.Maui;
 using LibVLCSharp.MAUI;
 using LibVLCSharp.Shared;
 
@@ -21,17 +20,18 @@ public static class MauiProgram
             // throws HandlerNotFoundException for VideoView (the debrid-playback crash): audio started but
             // the video view couldn't be created.
             .UseLibVLCSharp()
-            // Registers the Community Toolkit MediaElement (ExoPlayer/Media3 on Android) — the experimental
-            // alternate player used for TV 4K (see ExoPlayerPage / VlcMediaPlayer). Foreground service off:
-            // we only play full-screen in the foreground, so we don't need the background-playback service
-            // (which would otherwise require FOREGROUND_SERVICE / notification permissions).
-            .UseMauiCommunityToolkitMediaElement(isAndroidForegroundServiceEnabled: false)
             .ConfigureFonts(fonts =>
             {
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
                 // Material Icons — uniform-size player control glyphs (Stremio-style chrome).
                 fonts.AddFont("MaterialIcons-Regular.ttf", "MaterialIcons");
             });
+
+#if ANDROID
+        // The TV player view: our ExoVideoView is backed by a Media3 ExoPlayer + PlayerView (Android-only).
+        builder.ConfigureMauiHandlers(handlers =>
+            handlers.AddHandler(typeof(AniSync.Maui.ExoVideoView), typeof(AniSync.Maui.ExoVideoViewHandler)));
+#endif
 
         builder.Services.AddMauiBlazorWebView();
 

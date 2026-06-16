@@ -98,9 +98,11 @@
     <PackageReference Include="VideoLAN.LibVLC.Android" Version="3.6.5"
                       Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'" />
 
-    <!-- ExoPlayer (Google Media3) via the MAUI Community Toolkit MediaElement — experimental alternate
-         player for TV 4K, where the embedded libVLC SurfaceView never presented a frame. MediaElement 10.x
-         is built on Xamarin.AndroidX.Media3 (ExoPlayer), the same engine Stremio uses by default. -->
+    <!-- Brings in Xamarin.AndroidX.Media3 (Google's ExoPlayer) — the engine Stremio uses, and the TV player
+         for AniSync (it plays 4K cleanly where the embedded libVLC SurfaceView never presented a frame). We
+         own the ExoPlayer + PlayerView directly via ExoVideoView / ExoVideoViewHandler (the toolkit's
+         MediaElement can't sideload subtitles or switch audio tracks); this package is referenced for those
+         Media3 bindings, which it pulls in transitively. -->
     <PackageReference Include="CommunityToolkit.Maui.MediaElement" Version="10.0.0" />
   </ItemGroup>
 
