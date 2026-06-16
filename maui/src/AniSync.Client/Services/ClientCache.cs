@@ -20,25 +20,30 @@ public sealed class ClientCache : IClientCache
 
     public async Task<T?> GetAsync<T>(string key, TimeSpan ttl)
     {
+        var (found, stale, value) = await ReadAsync<T>(key, ttl);
+        return found && !stale ? value : default;
+    }
+
+    public async Task<(bool Found, bool Stale, T? Value)> ReadAsync<T>(string key, TimeSpan ttl)
+    {
         var ttlMs = (long)ttl.TotalMilliseconds;
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        // Tier 1 — in-memory (no interop). A stale entry falls through to localStorage, which on a
-        // fresh app start (memory empty) is also where the first read lands.
-        if (_mem.TryGetValue(key, out var mem) && Fresh(mem.Ts, now, ttlMs) && mem.Value is T hit)
-            return hit;
+        // Tier 1 — in-memory (no interop).
+        if (_mem.TryGetValue(key, out var mem) && mem.Value is T memHit)
+            return (true, !Fresh(mem.Ts, now, ttlMs), memHit);
 
-        // Tier 2 — localStorage.
+        // Tier 2 — localStorage (the first read after an app start lands here; promote into memory).
         try
         {
             var raw = await _js.InvokeAsync<string?>("localStorage.getItem", IClientCache.KeyPrefix + key);
-            if (string.IsNullOrEmpty(raw)) return default;
+            if (string.IsNullOrEmpty(raw)) return (false, false, default);
             var entry = JsonSerializer.Deserialize<StoredEntry<T>>(raw);
-            if (entry is null || entry.Value is null || !Fresh(entry.Ts, now, ttlMs)) return default;
-            _mem[key] = new MemEntry(entry.Ts, entry.Value);   // promote so the next read skips interop
-            return entry.Value;
+            if (entry is null || entry.Value is null) return (false, false, default);
+            _mem[key] = new MemEntry(entry.Ts, entry.Value);
+            return (true, !Fresh(entry.Ts, now, ttlMs), entry.Value);
         }
-        catch { return default; }   // no JS (prerender) / blocked storage / parse error → treat as miss
+        catch { return (false, false, default); }   // no JS (prerender) / blocked storage / parse error → miss
     }
 
     public async Task SetAsync<T>(string key, T value)
