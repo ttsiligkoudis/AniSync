@@ -61,3 +61,39 @@ export function disconnect(id) {
     const e = shelves.get(id);
     if (e) { e.row.removeEventListener('scroll', e.onScroll); shelves.delete(id); }
 }
+
+// ── Vertical lazy-load ────────────────────────────────────────────────────────────────────────
+// A shelf whose first page isn't already cached defers its fetch until it scrolls into view, so a
+// fresh Home doesn't fire every shelf's request (and paint every skeleton) at once — the TV-lag fix.
+// This is a viewport-rooted IntersectionObserver against the shelf's <section>; it fires ONCE then
+// disconnects (the component fetches exactly one first page). rootMargin pulls the row in a little
+// early so it's loading just before it's actually on screen. Shelves already in the viewport on the
+// first observe fire immediately (one microtask), so above-the-fold shelves load right away.
+
+const visObservers = new Map();
+let nextVisId = 1;
+
+export function observeVisible(section, dotnet) {
+    if (!section || !dotnet) return 0;
+    const id = nextVisId++;
+    let fired = false;
+    const io = new IntersectionObserver(function (entries) {
+        if (fired) return;
+        for (const e of entries) {
+            if (e.isIntersecting) {
+                fired = true;
+                disconnectVisible(id);            // one-shot
+                dotnet.invokeMethodAsync('OnShelfVisibleAsync');
+                return;
+            }
+        }
+    }, { rootMargin: '200px 0px' });
+    io.observe(section);
+    visObservers.set(id, io);
+    return id;
+}
+
+export function disconnectVisible(id) {
+    const io = visObservers.get(id);
+    if (io) { io.disconnect(); visObservers.delete(id); }
+}

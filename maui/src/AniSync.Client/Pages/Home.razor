@@ -145,6 +145,8 @@ else
                     MediaType="anime"
                     DashSection="anime-trending"
                     Paginated="true"
+                    CacheKey="shelf.anime-trending"
+                    CacheTtl="ShelfTtl"
                     ViewAllHref="/discover?list=trending&type=anime"
                     Fetch='@(skip => Api.DiscoverAsync("trending", skip: skip))' />
 
@@ -152,6 +154,8 @@ else
                     MediaType="anime"
                     DashSection="anime-popular"
                     Paginated="true"
+                    CacheKey="shelf.anime-popular"
+                    CacheTtl="ShelfTtl"
                     ViewAllHref="/discover?list=popular&type=anime"
                     Fetch='@(skip => Api.DiscoverAsync("popular", skip: skip))' />
 
@@ -159,6 +163,8 @@ else
                     MediaType="anime"
                     DashSection="anime-anticipated"
                     Paginated="true"
+                    CacheKey="shelf.anime-anticipated"
+                    CacheTtl="ShelfTtl"
                     ViewAllHref="/discover?list=seasonal&type=anime"
                     Fetch='@(skip => Api.DiscoverAsync("seasonal", skip: skip))' />
 }
@@ -188,6 +194,8 @@ else
                     DashSection="@($"video-trending-{VideoSlug(vt)}")"
                     VideoLinks="true"
                     Paginated="true"
+                    CacheKey="@($"shelf.video-trending-{VideoSlug(vt)}")"
+                    CacheTtl="ShelfTtl"
                     ViewAllHref="@($"/discover?list=trending&type={VideoSlug(vt)}")"
                     Fetch="@(skip => Api.DiscoverVideoAsync(VideoSlug(vt), "trending", skip))" />
 }
@@ -199,6 +207,8 @@ else
                     DashSection="@($"video-popular-{VideoSlug(vt)}")"
                     VideoLinks="true"
                     Paginated="true"
+                    CacheKey="@($"shelf.video-popular-{VideoSlug(vt)}")"
+                    CacheTtl="ShelfTtl"
                     ViewAllHref="@($"/discover?list=popular&type={VideoSlug(vt)}")"
                     Fetch="@(skip => Api.DiscoverVideoAsync(VideoSlug(vt), "popular", skip))" />
 }
@@ -210,6 +220,8 @@ else
                     DashSection="@($"video-anticipated-{VideoSlug(vt)}")"
                     VideoLinks="true"
                     Paginated="true"
+                    CacheKey="@($"shelf.video-anticipated-{VideoSlug(vt)}")"
+                    CacheTtl="ShelfTtl"
                     ViewAllHref="@($"/discover?list=anticipated&type={VideoSlug(vt)}")"
                     Fetch="@(skip => Api.DiscoverVideoAsync(VideoSlug(vt), "anticipated", skip))" />
 }
@@ -352,6 +364,13 @@ else
 <DashCustomizeModal @ref="_customize" />
 
 @code {
+    // Discover shelves (trending/popular/anticipated/seasonal) barely change and are public (no
+    // per-user leak), so their first page is cached client-side for 24 h — instant on revisit /
+    // restart, and no request at all while fresh. User-scoped shelves (continue watching, video
+    // "current") and the daily "New episodes" shelf are deliberately left uncached; lazy-loading
+    // alone keeps them off the critical path.
+    private static readonly TimeSpan ShelfTtl = TimeSpan.FromHours(24);
+
     private bool _animeEnabled => State.EnabledMediaTypes.Contains(MetaType.anime);
     private List<MetaType> _videoTypes => State.EnabledMediaTypes.Where(t => t != MetaType.anime).ToList();
     private bool _combined => State.EnabledMediaTypes.Count > 1;

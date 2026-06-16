@@ -2,6 +2,7 @@
 @inject IAniSyncApi Api
 @inject AppState State
 @inject ISecureStore Store
+@inject IClientCache Cache
 @inject IAppEnvironment Env
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -328,6 +329,7 @@
     private async Task SignOutLocalAsync()
     {
         await Store.SetAsync(ISecureStore.ConfigKey, null);
+        await Cache.ClearAsync();   // drop cached shelves / detail so the next account starts clean
         State.SetStreamConfig(null);
         State.HydrateSession(false, "");
         Nav.NavigateTo("/login");
