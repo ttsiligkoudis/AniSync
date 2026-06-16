@@ -28,6 +28,9 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
     private bool _wasPlayingBeforeBackground;
     private int _scaleIndex;
 
+    // Controls we've already given a TV focus highlight (so we set each view's selector exactly once).
+    private readonly HashSet<Android.Views.View> _highlighted = new();
+
     // Player.STATE_ENDED. Using the literal avoids depending on the exact binding constant name.
     private const int StateEnded = 4;
 
@@ -49,6 +52,13 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         view.SetShowSubtitleButton(true);   // CC button → toggle/select text tracks (incl. our sideloaded subs)
         view.SetBackgroundColor(Android.Graphics.Color.Black);
         view.OnCycleScale = CycleScale;
+        // ExoPlayer's default control buttons use a borderless ripple background, which shows on touch but
+        // gives NO visible focus highlight under D-pad navigation — on a TV you can click buttons but can't
+        // see which one is selected. Give each focusable control an explicit focus-state background so the
+        // selected control is clearly outlined. The controls are inflated with the view, but lay out a beat
+        // later, so apply after a short delay (and again, in case any button appears when first shown).
+        view.PostDelayed(() => ApplyTvFocusHighlights(view), 600);
+        view.PostDelayed(() => ApplyTvFocusHighlights(view), 1500);
         return view;
     }
 
@@ -60,7 +70,8 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         VirtualView.PauseForBackgroundRequested += OnPauseForBackground;
         VirtualView.ResumeFromBackgroundRequested += OnResumeFromBackground;
 
-        var player = new global::AndroidX.Media3.ExoPlayer.ExoPlayer.Builder(Context!).Build()!;
+        // The Java ExoPlayer interface binds to C# as IExoPlayer, so its nested Builder is IExoPlayer.Builder.
+        var player = new IExoPlayer.Builder(Context!).Build()!;
         _player = player;
         platformView.Player = player;
 
@@ -158,6 +169,39 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         _scaleIndex = (_scaleIndex + 1) % ResizeModes.Length;
         PlatformView.ResizeMode = ResizeModes[_scaleIndex];
         Toast.MakeText(Context, ScaleLabels[_scaleIndex], ToastLength.Short)?.Show();
+    }
+
+    // Walk the PlayerView tree and give every focusable control (the play/seek/CC/settings ImageButtons) a
+    // background that highlights the focused (or pressed) state, so D-pad navigation is visible on TV. Skips
+    // the seek bar (a custom view, not an ImageView/TextView) which draws its own focused scrubber. Each view
+    // is highlighted once — a Drawable can only back one view, so we don't share instances.
+    private void ApplyTvFocusHighlights(Android.Views.View? view)
+    {
+        if (view is null) return;
+        if (view is Android.Views.ViewGroup group)
+            for (int i = 0; i < group.ChildCount; i++)
+                ApplyTvFocusHighlights(group.GetChildAt(i));
+
+        if ((view is ImageView or Android.Widget.TextView) && view.Focusable && view.Clickable && _highlighted.Add(view))
+            view.Background = BuildFocusSelector(view.Context!);
+    }
+
+    private static Android.Graphics.Drawables.Drawable BuildFocusSelector(Context ctx)
+    {
+        var density = ctx.Resources?.DisplayMetrics?.Density ?? 1f;
+        var highlight = new Android.Graphics.Drawables.GradientDrawable();
+        highlight.SetShape(Android.Graphics.Drawables.ShapeType.Rectangle);
+        highlight.SetColor(Android.Graphics.Color.Argb(70, 255, 255, 255)); // translucent fill
+        highlight.SetCornerRadius(8 * density);
+        highlight.SetStroke((int)(2 * density), Android.Graphics.Color.White); // crisp focus ring
+
+        var selector = new Android.Graphics.Drawables.StateListDrawable();
+        selector.AddState(new[] { Android.Resource.Attribute.StateFocused }, highlight);
+        selector.AddState(new[] { Android.Resource.Attribute.StatePressed }, highlight);
+        selector.AddState(new[] { Android.Resource.Attribute.StateSelected }, highlight);
+        selector.AddState(System.Array.Empty<int>(),
+            new Android.Graphics.Drawables.ColorDrawable(Android.Graphics.Color.Transparent));
+        return selector;
     }
 
     private void OnPauseForBackground()
