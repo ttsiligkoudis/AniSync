@@ -16,6 +16,10 @@
 
     <OutputType>Exe</OutputType>
     <RootNamespace>AniSync</RootNamespace>
+    <!-- Pin the MAUI package version up from the SDK default (10.0.20) to satisfy
+         CommunityToolkit.Maui.MediaElement 10.0.0, which requires Microsoft.Maui.Controls >= 10.0.60.
+         All MAUI-family PackageReferences below use $(MauiVersion), so this lifts them together. -->
+    <MauiVersion>10.0.60</MauiVersion>
     <UseMaui>true</UseMaui>
     <SingleProject>true</SingleProject>
     <ImplicitUsings>enable</ImplicitUsings>
