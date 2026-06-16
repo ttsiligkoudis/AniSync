@@ -8,4 +8,15 @@
     <style name="AniSync.SplashTheme" parent="Maui.SplashTheme">
         <item name="android:windowBackground">@color/window_background</item>
     </style>
+
+    <!-- Theme overlay applied (via ContextThemeWrapper) to the ExoPlayer PlayerView's context. It only
+         redirects the selectable-item backgrounds to a focus-highlight drawable; with an empty parent it layers
+         these overrides on top of the base context theme. This is what makes D-pad focus visible inside the
+         gear/CC pop-up menus (speed/audio/subtitle lists), whose items inflate from this themed context. -->
+    <style name="AniSync.ExoPlayerOverlay" parent="">
+        <item name="android:selectableItemBackground">@drawable/tv_focus_selectable</item>
+        <item name="android:selectableItemBackgroundBorderless">@drawable/tv_focus_selectable</item>
+        <item name="selectableItemBackground">@drawable/tv_focus_selectable</item>
+        <item name="selectableItemBackgroundBorderless">@drawable/tv_focus_selectable</item>
+    </style>
 </resources>
