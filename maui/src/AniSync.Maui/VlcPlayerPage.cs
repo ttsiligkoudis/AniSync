@@ -968,6 +968,21 @@ public sealed class VlcPlayerPage : ContentPage
         int currentSpu;
         try { currentSpu = _player.Spu; } catch { currentSpu = -1; }
 
+        // libVLC names embedded SPU tracks by codec ("ASS"/"SRT"), not language — the language code lives
+        // in the media-track metadata. Map SPU id -> ISO code there so an in-file track shows under its real
+        // language (e.g. "Japanese") instead of its container format. Best-effort: a miss falls back to the
+        // name-parsing in LangOf, so this never regresses the codec-name display.
+        var spuLang = new Dictionary<int, string>();
+        try
+        {
+            var tracks = _player.Media?.Tracks;
+            if (tracks != null)
+                foreach (var mt in tracks)
+                    if (mt.TrackType == TrackType.Text && !string.IsNullOrWhiteSpace(mt.Language))
+                        spuLang[mt.Id] = mt.Language!;
+        }
+        catch { /* media not parsed yet — fall back to name parsing */ }
+
         // Unified list: in-file tracks + the external OpenSubtitles list (from the API, which carries real
         // languages). External subs attach on demand when picked (AddSlave select:true), so the picker shows
         // everything available regardless of what libVLC has lazily parsed.
@@ -975,8 +990,9 @@ public sealed class VlcPlayerPage : ContentPage
         foreach (var t in spu.Where(t => _embeddedSpuIds.Contains(t.Id)))
         {
             var id = t.Id;
+            var lang = spuLang.TryGetValue(id, out var code) ? FriendlyLang(code, t.Name) : LangOf(t.Name);
             options.Add(new SubOption(
-                LangOf(t.Name), t.Name,
+                lang, t.Name,
                 _selectedExternalUrl is null && currentSpu == id,
                 () => { _userPickedSub = true; try { _player.SetSpu(id); } catch { } _selectedExternalUrl = null; CloseSheet(); }));
         }
@@ -993,12 +1009,17 @@ public sealed class VlcPlayerPage : ContentPage
 
         var langs = options.Select(o => o.Lang).Distinct().ToList();
 
-        // Default the selected language column to the active track's language, else the first available.
+        // The language of the active subtitle (null when off). Drives the left-column checkmark — distinct
+        // from _subLang, which is only the language whose tracks the middle column is currently *viewing*.
+        var activeLang = options.Where(o => o.Selected).Select(o => o.Lang).FirstOrDefault();
+
+        // Default the viewed language column to the active track's language, else the first available.
         if (_subLang is null || !langs.Contains(_subLang))
-            _subLang = options.Where(o => o.Selected).Select(o => o.Lang).FirstOrDefault() ?? langs.FirstOrDefault();
+            _subLang = activeLang ?? langs.FirstOrDefault();
 
         // Left column: "Off" + one entry per language. Selecting a language just re-filters (keeps the sheet
-        // open); selecting "Off" disables subtitles and closes.
+        // open); selecting "Off" disables subtitles and closes. The checkmark tracks the ACTIVE language, so
+        // turning subtitles off clears it instead of leaving the previously-viewed language ticked.
         var langRows = new List<View>
         {
             Row("Off", currentSpu == -1 && _selectedExternalUrl is null,
@@ -1007,7 +1028,7 @@ public sealed class VlcPlayerPage : ContentPage
         foreach (var lang in langs)
         {
             var l = lang;
-            langRows.Add(Row(l, l == _subLang, () => { _subLang = l; OpenSubtitleSheet(); }));
+            langRows.Add(Row(l, l == activeLang, () => { _subLang = l; OpenSubtitleSheet(); }));
         }
 
         // Middle column: tracks in the selected language. Selecting one applies + closes.
@@ -1033,14 +1054,12 @@ public sealed class VlcPlayerPage : ContentPage
         grid.Add(Column("Track", ScrollList(trackRows)), 1, 0);
         grid.Add(Column("Options", BuildSubtitleOptions()), 2, 0);
 
-        // TEMP on-screen diagnostics for the "no subs on native" report (shown in the sheet title):
-        //   ext = external OS tracks the player received (0 ⇒ NativeSubtitles filtered them out, e.g. the
-        //         proxy URL couldn't be made absolute), emb = in-file SPU tracks, spu = current SPU id
-        //         (-1 = off), sel = an external sub is attached, ld = external slaves libVLC has loaded.
-        var firstExt = _externalSubs.Count > 0 ? _externalSubs[0].Url : "-";
-        var extHost = Uri.TryCreate(firstExt, UriKind.Absolute, out var eu) ? eu.Host : "rel";
-        var diag = $"ext{_externalSubs.Count}@{extHost} emb{spu.Count} spu{currentSpu} sel{(_selectedExternalUrl is null ? 0 : 1)} ld{_slaveSpu.Count}";
-        if (!string.IsNullOrEmpty(_fetchDiag)) diag += $"  |  {_fetchDiag}";
+        // TEMP on-screen diagnostics for the embedded-language grouping fix (shown in the sheet title):
+        //   emb = in-file SPU ids, mt = media-track id:language pairs libVLC exposes. If the emb ids and the
+        //   mt ids don't line up, the SPU↔media-track id assumption is wrong and the language lookup misses.
+        var embIds = string.Join(",", spu.Where(t => _embeddedSpuIds.Contains(t.Id)).Select(t => t.Id));
+        var mt = string.Join(",", spuLang.Select(kv => $"{kv.Key}:{kv.Value}"));
+        var diag = $"ext{_externalSubs.Count} emb[{embIds}] mt[{mt}] act={activeLang ?? "off"}";
         OpenSheet($"Subtitles · {diag}", grid);
     }
 
