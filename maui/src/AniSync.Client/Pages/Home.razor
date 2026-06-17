@@ -131,6 +131,9 @@ else
                         MediaType="anime"
                         DashSection="anime-continue"
                         SkeletonCount="6"
+                        CacheKey="shelf.anime-continue"
+                        CacheTtl="ShelfTtl"
+                        AlwaysRevalidate="true"
                         ViewAllHref="/library?list=current&type=anime"
                         Fetch="@(_ => Api.ContinueWatchingAsync())" />
     }
@@ -182,6 +185,9 @@ else
                         DashSection="@($"video-continue-{VideoSlug(vt)}")"
                         VideoLinks="true"
                         SkeletonCount="6"
+                        CacheKey="@($"shelf.video-continue-{VideoSlug(vt)}")"
+                        CacheTtl="ShelfTtl"
+                        AlwaysRevalidate="true"
                         ViewAllHref="@($"/library?list=current&type={VideoSlug(vt)}")"
                         Fetch="@(_ => Api.VideoListAsync(VideoSlug(vt), "current"))" />
     }
@@ -364,11 +370,13 @@ else
 <DashCustomizeModal @ref="_customize" />
 
 @code {
-    // Discover shelves (trending/popular/anticipated/seasonal) barely change and are public (no
-    // per-user leak), so their first page is cached client-side for 24 h — instant on revisit /
-    // restart, and no request at all while fresh. User-scoped shelves (continue watching, video
-    // "current") and the daily "New episodes" shelf are deliberately left uncached; lazy-loading
-    // alone keeps them off the critical path.
+    // Discover shelves (trending/popular/anticipated/seasonal) barely change and are public, so their
+    // first page is cached client-side for 24 h — instant on revisit / restart, and no request at all
+    // while fresh. The Continue-watching lists are also cached (so they paint instantly instead of
+    // skeleton-flashing on every Home visit) but with AlwaysRevalidate: the cache is just a paint seed
+    // and the live list is refetched in the background every time and swapped in silently. User-scoped
+    // entries are safe to cache under plain keys because the cache is wiped on logout / account switch
+    // (Cache.ClearAsync in Logout/Advanced). The daily "New episodes" shelf stays uncached.
     private static readonly TimeSpan ShelfTtl = TimeSpan.FromHours(24);
 
     private bool _animeEnabled => State.EnabledMediaTypes.Contains(MetaType.anime);
