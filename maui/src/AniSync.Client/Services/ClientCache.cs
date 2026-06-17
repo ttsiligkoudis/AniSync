@@ -90,7 +90,7 @@ public sealed class ClientCache : IClientCache
                 try
                 {
                     var entry = JsonSerializer.Deserialize<StoredEntry<T>>(raw);
-                    if (entry?.Value is not null) _mem[key] = new MemEntry(entry.Ts, entry.Value);
+                    if (entry is not null && entry.Value is not null) _mem[key] = new MemEntry(entry.Ts, entry.Value);
                 }
                 catch { /* a single malformed entry shouldn't abort priming the rest */ }
             }
