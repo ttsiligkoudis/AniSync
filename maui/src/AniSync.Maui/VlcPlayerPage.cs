@@ -1031,7 +1031,14 @@ public sealed class VlcPlayerPage : ContentPage
         grid.Add(Column("Track", ScrollList(trackRows)), 1, 0);
         grid.Add(Column("Options", BuildSubtitleOptions()), 2, 0);
 
-        OpenSheet("Subtitles", grid);
+        // TEMP on-screen diagnostics for the "no subs on native" report (shown in the sheet title):
+        //   ext = external OS tracks the player received (0 ⇒ NativeSubtitles filtered them out, e.g. the
+        //         proxy URL couldn't be made absolute), emb = in-file SPU tracks, spu = current SPU id
+        //         (-1 = off), sel = an external sub is attached, ld = external slaves libVLC has loaded.
+        var firstExt = _externalSubs.Count > 0 ? _externalSubs[0].Url : "-";
+        var extHost = Uri.TryCreate(firstExt, UriKind.Absolute, out var eu) ? eu.Host : "rel";
+        var diag = $"ext{_externalSubs.Count}@{extHost} emb{spu.Count} spu{currentSpu} sel{(_selectedExternalUrl is null ? 0 : 1)} ld{_slaveSpu.Count}";
+        OpenSheet($"Subtitles · {diag}", grid);
     }
 
     private View Column(string heading, View body)
