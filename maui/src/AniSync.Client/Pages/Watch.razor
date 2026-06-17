@@ -939,6 +939,21 @@
                         && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps))
             .ToList();
 
+    // TEMP diagnostic for the "no subs on native" report. Surfaces what the page actually fetched and how
+    // the native transform treated it: raw = tracks the API returned, xf = tracks surviving NativeSubtitles,
+    // kind = whether the raw URL was already absolute, base = the API origin used to absolutize, hs = whether
+    // the page thinks this title has multiple seasons, url = a snippet of the first raw URL.
+    private string SubtitleDiag()
+    {
+        var raw = _subtitles.Count;
+        var xf = NativeSubtitles().Count;
+        var firstRaw = raw > 0 ? _subtitles[0].Url : "-";
+        var kind = Uri.TryCreate(firstRaw, UriKind.Absolute, out _) ? "abs" : "rel";
+        var baseHost = Uri.TryCreate(Env.ApiBaseUrl, UriKind.Absolute, out var bu) ? bu.Host : (Env.ApiBaseUrl ?? "?");
+        var snip = firstRaw.Length > 28 ? firstRaw[..28] : firstRaw;
+        return $"raw{raw} xf{xf} {kind} base={baseHost} hs{(_hasSeasons ? 1 : 0)} u:{snip}";
+    }
+
     // Resolve a (possibly relative) same-origin API URL to an absolute one against the API origin, for
     // players that can't resolve relative URLs (LibVLC / cast). No-op when already absolute, or when the
     // origin isn't known (web head — relative is already correct same-origin there).
@@ -1003,7 +1018,8 @@
             OnEnded: OnEnded,
             OnStreamEvent: OnStreamEvent,
             PreferredAudioLanguage: _prefAudioLang,
-            PreferredSubtitleLanguage: _prefSubLang);
+            PreferredSubtitleLanguage: _prefSubLang,
+            Diagnostics: Env.SupportsNativePlayback ? SubtitleDiag() : null);
 
         if (Env.SupportsNativePlayback)
         {
@@ -1123,7 +1139,7 @@
             await EnsurePlaybackLanguagesAsync();
             var resume = await ReadResumeAsync();
             await Player.PlayAsync(new PlaybackRequest(nativeUrl, PlayerTitle(), resume, NativeSubtitles(), OnProgress, OnEnded,
-                PreferredAudioLanguage: _prefAudioLang, PreferredSubtitleLanguage: _prefSubLang));
+                PreferredAudioLanguage: _prefAudioLang, PreferredSubtitleLanguage: _prefSubLang, Diagnostics: SubtitleDiag()));
             _playingUrl = s.Url;
             StateHasChanged();
             return;

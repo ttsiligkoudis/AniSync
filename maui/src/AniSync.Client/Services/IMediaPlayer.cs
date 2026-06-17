@@ -49,6 +49,9 @@ public record PlaybackRequest(
     // Preferred default languages (ISO 639-1). Audio is honoured by the native player only
     // (the browser doesn't expose track switching); subtitle applies to both heads. Null = English.
     string? PreferredAudioLanguage = null,
-    string? PreferredSubtitleLanguage = null);
+    string? PreferredSubtitleLanguage = null,
+    // TEMP: free-form diagnostic string surfaced in the native player's subtitle sheet to debug the
+    // "no subs on native" report (raw fetch count + request params the page used). Not shown on web.
+    string? Diagnostics = null);
 
 public record SubtitleTrack(string Url, string Label, string? Language = null);
