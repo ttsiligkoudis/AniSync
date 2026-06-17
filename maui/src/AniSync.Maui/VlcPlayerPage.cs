@@ -977,9 +977,9 @@ public sealed class VlcPlayerPage : ContentPage
         {
             var tracks = _player.Media?.Tracks;
             if (tracks != null)
-                foreach (var mt in tracks)
-                    if (mt.TrackType == TrackType.Text && !string.IsNullOrWhiteSpace(mt.Language))
-                        spuLang[mt.Id] = mt.Language!;
+                foreach (var track in tracks)
+                    if (track.TrackType == TrackType.Text && !string.IsNullOrWhiteSpace(track.Language))
+                        spuLang[track.Id] = track.Language!;
         }
         catch { /* media not parsed yet — fall back to name parsing */ }
 
