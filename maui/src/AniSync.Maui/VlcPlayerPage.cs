@@ -976,18 +976,23 @@ public sealed class VlcPlayerPage : ContentPage
         int currentSpu;
         try { currentSpu = _player.Spu; } catch { currentSpu = -1; }
 
-        // libVLC names embedded SPU tracks by codec ("ASS"/"SRT"), not language — the language code lives
-        // in the media-track metadata. Map SPU id -> ISO code there so an in-file track shows under its real
-        // language (e.g. "Japanese") instead of its container format. Best-effort: a miss falls back to the
-        // name-parsing in LangOf, so this never regresses the codec-name display.
-        var spuLang = new Dictionary<int, string>();
+        // libVLC names embedded SPU tracks by codec ("ASS"/"SRT"), not language. Pull the richer media-track
+        // metadata (ISO language + the track's Name/Description element) so an in-file track shows under its
+        // real language. Also grab the dominant audio language as a last-resort hint for untagged subs.
+        var spuMeta = new Dictionary<int, (string? Lang, string? Desc)>();
+        string? audioLang = null;
         try
         {
             var tracks = _player.Media?.Tracks;
             if (tracks != null)
                 foreach (var track in tracks)
-                    if (track.TrackType == TrackType.Text && !string.IsNullOrWhiteSpace(track.Language))
-                        spuLang[track.Id] = track.Language!;
+                {
+                    if (track.TrackType == TrackType.Text)
+                        spuMeta[track.Id] = (track.Language, track.Description);
+                    else if (track.TrackType == TrackType.Audio && string.IsNullOrEmpty(audioLang)
+                             && !string.IsNullOrWhiteSpace(track.Language))
+                        audioLang = track.Language;
+                }
         }
         catch { /* media not parsed yet — fall back to name parsing */ }
 
@@ -998,7 +1003,8 @@ public sealed class VlcPlayerPage : ContentPage
         foreach (var t in spu.Where(t => _embeddedSpuIds.Contains(t.Id)))
         {
             var id = t.Id;
-            var lang = spuLang.TryGetValue(id, out var code) ? FriendlyLang(code, t.Name) : LangOf(t.Name);
+            spuMeta.TryGetValue(id, out var meta);
+            var lang = ResolveEmbeddedLang(meta.Lang, meta.Desc, t.Name, audioLang);
             options.Add(new SubOption(
                 lang, t.Name,
                 _selectedExternalUrl is null && currentSpu == id,
@@ -1062,12 +1068,11 @@ public sealed class VlcPlayerPage : ContentPage
         grid.Add(Column("Track", ScrollList(trackRows)), 1, 0);
         grid.Add(Column("Options", BuildSubtitleOptions()), 2, 0);
 
-        // TEMP on-screen diagnostics for the embedded-language grouping fix (shown in the sheet title):
-        //   emb = in-file SPU ids, mt = media-track id:language pairs libVLC exposes. If the emb ids and the
-        //   mt ids don't line up, the SPU↔media-track id assumption is wrong and the language lookup misses.
-        var embIds = string.Join(",", spu.Where(t => _embeddedSpuIds.Contains(t.Id)).Select(t => t.Id));
-        var mt = string.Join(",", spuLang.Select(kv => $"{kv.Key}:{kv.Value}"));
-        var diag = $"ext{_externalSubs.Count} emb[{embIds}] mt[{mt}] act={activeLang ?? "off"}";
+        // TEMP on-screen diagnostics for the embedded-language detection (shown in the sheet title):
+        //   mt = text-track id:language/description libVLC exposes; aud = dominant audio language. Shows
+        //   whether any language signal (tag, name, or audio) exists for the untagged ASS/SRT tracks.
+        var mt = string.Join(",", spuMeta.Select(kv => $"{kv.Key}:{kv.Value.Lang ?? "-"}/{kv.Value.Desc ?? "-"}"));
+        var diag = $"ext{_externalSubs.Count} mt[{mt}] aud={audioLang ?? "-"} act={activeLang ?? "off"}";
         OpenSheet($"Subtitles · {diag}", grid);
     }
 
@@ -1182,6 +1187,44 @@ public sealed class VlcPlayerPage : ContentPage
         if (open >= 0 && close > open) return name.Substring(open + 1, close - open - 1).Trim();
         var cut = name.IndexOfAny(new[] { '(', '-' });
         return (cut > 0 ? name[..cut] : name).Trim();
+    }
+
+    // Resolve the friendly language for an embedded SPU track, mirroring the cf-mkv-extractor worker's
+    // dual-signal approach for the common "Language=und" case:
+    //   1. a real ISO language tag wins;
+    //   2. else scan the track Name/Description for a language word or 3-letter code (fansubs often leave
+    //      Language=und but name the track "English [Group]" / "Japanese");
+    //   3. else fall back to the audio track's language — untagged in-file subs almost always match the
+    //      programme's spoken language (e.g. Japanese for anime);
+    //   4. else give up and show the codec/name parse, as before.
+    private static string ResolveEmbeddedLang(string? code, string? desc, string? spuName, string? audioLang)
+    {
+        var c = (code ?? "").Trim();
+        if (c.Length > 0 && !c.Equals("und", StringComparison.OrdinalIgnoreCase)
+            && LangNames.TryGetValue(c, out var byCode)) return byCode;
+
+        var byName = LangFromName(desc) ?? LangFromName(spuName);
+        if (byName != null) return byName;
+
+        var a = (audioLang ?? "").Trim();
+        if (a.Length > 0 && !a.Equals("und", StringComparison.OrdinalIgnoreCase)
+            && LangNames.TryGetValue(a, out var byAudio)) return byAudio;
+
+        return LangOf(spuName ?? "");
+    }
+
+    // Look for a language in a free-text track name: a display name as a whole word ("english"/"japanese"),
+    // else a 3-letter ISO code as a standalone token ("eng"/"jpn"). 2-letter codes are skipped — too short,
+    // they false-match inside ordinary words.
+    private static string? LangFromName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        var n = name.ToLowerInvariant();
+        foreach (var kv in LangNames)
+            if (System.Text.RegularExpressions.Regex.IsMatch(n, $@"\b{kv.Value.ToLowerInvariant()}\b")) return kv.Value;
+        foreach (var kv in LangNames)
+            if (kv.Key.Length == 3 && System.Text.RegularExpressions.Regex.IsMatch(n, $@"\b{kv.Key.ToLowerInvariant()}\b")) return kv.Value;
+        return null;
     }
 
     // ── Event marshalling + formatting ──────────────────────────────────────────
