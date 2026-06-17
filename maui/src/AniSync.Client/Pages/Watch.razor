@@ -959,9 +959,16 @@
     // origin isn't known (web head — relative is already correct same-origin there).
     private string ToAbsoluteApiUrl(string url)
     {
-        if (string.IsNullOrWhiteSpace(url) || Uri.TryCreate(url, UriKind.Absolute, out _)) return url;
+        if (string.IsNullOrWhiteSpace(url)) return url;
+        // Detect "already absolute" by scheme prefix, NOT Uri.TryCreate(Absolute): a same-origin proxy
+        // path like "/api/v1/subtitle?url=https%3A%2F%2F..." makes Uri.TryCreate report it as absolute
+        // (the encoded upstream scheme in the query fools the parser on Android), so the relative URL
+        // slipped through un-absolutized and then failed LibVLC's absolute-http requirement → no subs.
+        if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            return url;
         var origin = Env.ApiBaseUrl;
-        return string.IsNullOrWhiteSpace(origin) ? url : $"{origin.TrimEnd('/')}/{url.TrimStart('/')}";
+        return string.IsNullOrWhiteSpace(origin) || origin == "/" ? url : $"{origin.TrimEnd('/')}/{url.TrimStart('/')}";
     }
 
     // Preferred default languages (account setting; English when unset). Loaded once, then handed to every
