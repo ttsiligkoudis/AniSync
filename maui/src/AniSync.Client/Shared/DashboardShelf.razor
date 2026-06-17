@@ -104,6 +104,13 @@
     [Parameter] public string? CacheKey { get; set; }
     [Parameter] public TimeSpan? CacheTtl { get; set; }
 
+    // When true, the cached first page is rendered instantly and then ALWAYS refetched in the
+    // background (not only when past TTL) — for user-scoped lists like Continue watching, where the
+    // cache is just a paint-instantly seed and the live list is authoritative. An empty refetch is
+    // then taken at face value (you finished everything → the shelf clears and self-hides), whereas a
+    // plain cached shelf treats an empty refetch as a blip and keeps the stale rows.
+    [Parameter] public bool AlwaysRevalidate { get; set; }
+
     // CSS flex `order` + hidden state read from the saved layout (AppState.DashLayout).
     private int Order
     {
@@ -148,10 +155,10 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // Cached entry (any age) → paint instantly from the first page, no skeleton. When it's stale
-        // (past TTL) we still show it immediately, then silently refetch once the shelf is on-screen
-        // (stale-while-revalidate). Only the first page is cached; pagination stays live, so a
-        // paginated shelf isn't marked _done.
+        // Cached entry (any age) → paint instantly from the first page, no skeleton. Then refetch in
+        // the background once the shelf is on-screen — for AlwaysRevalidate (user lists) every time,
+        // otherwise only when the entry is past TTL (stale-while-revalidate). Only the first page is
+        // cached; pagination stays live, so a paginated shelf isn't marked _done.
         if (CacheTtl is { } ttl && !string.IsNullOrEmpty(CacheKey))
         {
             var (found, stale, cached) = await Cache.ReadAsync<List<MetaDto>>(CacheKey, ttl);
@@ -160,7 +167,7 @@
                 Append(cached);
                 _firstPageCount = _items.Count;
                 _fetched = true;
-                _needsRefresh = stale;
+                _needsRefresh = stale || AlwaysRevalidate;
                 if (!Paginated) _done = true;
                 _loading = false;
                 return;
@@ -192,21 +199,31 @@
         finally { _loading = false; StateHasChanged(); }
     }
 
-    // Stale-while-revalidate: a fresh first page was already on screen from a stale cache entry — quietly
-    // refetch it, swap it in, and re-prime the cache. Runs only once the shelf is on-screen.
+    // Revalidate: a first page is already on screen (from a stale or AlwaysRevalidate cache entry) —
+    // quietly refetch it, swap it in, and re-prime the cache. Runs only once the shelf is on-screen.
     private async Task RefreshStaleAsync()
     {
         IReadOnlyList<MetaDto> fresh;
         try { fresh = await Fetch(null); }
-        catch { return; }                 // network hiccup → keep showing the stale data
-        if (fresh.Count == 0) return;
+        catch { return; }                 // network hiccup → keep showing what's already there
 
-        // Re-prime the cache for next time regardless of whether we swap the visible rows.
+        // Don't disturb a shelf the user has paginated past — swapping mid-scroll would yank loaded
+        // rows out from under them. The cache is still re-primed/dropped so the next visit is correct.
+        var canSwap = !_loadingMore && _items.Count == _firstPageCount;
+
+        if (fresh.Count == 0)
+        {
+            // A discover shelf shouldn't legitimately empty out, so treat an empty refetch as a blip and
+            // keep the stale rows. A user list (AlwaysRevalidate) genuinely empties when you finish
+            // everything → drop the cache and clear the rows so the shelf self-hides.
+            if (!AlwaysRevalidate) return;
+            if (!string.IsNullOrEmpty(CacheKey)) await Cache.RemoveAsync(CacheKey);
+            if (canSwap) { _items.Clear(); _seenIds.Clear(); _firstPageCount = 0; StateHasChanged(); }
+            return;
+        }
+
         if (!string.IsNullOrEmpty(CacheKey)) await Cache.SetAsync(CacheKey, fresh.ToList());
-
-        // Only swap the visible rows if the user hasn't paginated past the first page — replacing
-        // mid-scroll would yank rows out from under them. (Next visit picks up the re-primed cache.)
-        if (_loadingMore || _items.Count != _firstPageCount) return;
+        if (!canSwap) return;
         _items.Clear();
         _seenIds.Clear();
         Append(fresh);
