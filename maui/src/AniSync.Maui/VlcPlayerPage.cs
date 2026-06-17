@@ -88,6 +88,7 @@ public sealed class VlcPlayerPage : ContentPage
     private bool _userPickedAudio;           // the user chose an audio track → don't override with the default
     private readonly string _preferredAudioLang; // ISO 639-1 (account setting; "en" default)
     private readonly string _preferredSubLang;
+    private readonly string? _fetchDiag;         // TEMP: page-side subtitle-fetch diagnostics for the sheet title
 
     private bool _seeking;
     private bool _started;   // one-shot guard: playback is started once, when the video surface is ready
@@ -98,12 +99,13 @@ public sealed class VlcPlayerPage : ContentPage
     private enum ScaleMode { Fit, Crop, Fill, SixteenNine, FourThree }
 
     public VlcPlayerPage(MediaPlayer player, string title, IReadOnlyList<SubtitleTrack>? externalSubs = null,
-        string? preferredAudioLang = null, string? preferredSubLang = null)
+        string? preferredAudioLang = null, string? preferredSubLang = null, string? fetchDiag = null)
     {
         _player = player;
         _externalSubs = externalSubs ?? Array.Empty<SubtitleTrack>();
         _preferredAudioLang = PlaybackLanguages.Normalize(preferredAudioLang);
         _preferredSubLang = PlaybackLanguages.Normalize(preferredSubLang);
+        _fetchDiag = fetchDiag;
         Title = title;
         BackgroundColor = Colors.Black;
         NavigationPage.SetHasNavigationBar(this, false);
@@ -1038,6 +1040,7 @@ public sealed class VlcPlayerPage : ContentPage
         var firstExt = _externalSubs.Count > 0 ? _externalSubs[0].Url : "-";
         var extHost = Uri.TryCreate(firstExt, UriKind.Absolute, out var eu) ? eu.Host : "rel";
         var diag = $"ext{_externalSubs.Count}@{extHost} emb{spu.Count} spu{currentSpu} sel{(_selectedExternalUrl is null ? 0 : 1)} ld{_slaveSpu.Count}";
+        if (!string.IsNullOrEmpty(_fetchDiag)) diag += $"  |  {_fetchDiag}";
         OpenSheet($"Subtitles · {diag}", grid);
     }
 
