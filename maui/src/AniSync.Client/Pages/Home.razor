@@ -141,6 +141,8 @@ else
     <DashboardShelf Title="@($"New Episodes Today{_animeSuffix}")"
                     MediaType="anime"
                     DashSection="anime-new-episodes"
+                    CacheKey="shelf.anime-new-episodes"
+                    ExpiresAtMidnight="true"
                     MutedNote="Refreshes daily"
                     Fetch="@(_ => Api.AiringTodayAsync())" />
 
@@ -376,7 +378,9 @@ else
     // skeleton-flashing on every Home visit) but with AlwaysRevalidate: the cache is just a paint seed
     // and the live list is refetched in the background every time and swapped in silently. User-scoped
     // entries are safe to cache under plain keys because the cache is wiped on logout / account switch
-    // (Cache.ClearAsync in Logout/Advanced). The daily "New episodes" shelf stays uncached.
+    // (Cache.ClearAsync in Logout/Advanced). The daily "New episodes" shelf is cached too but with
+    // ExpiresAtMidnight: it paints instantly with no request for the rest of the day, then once the day
+    // rolls over it re-skeletons and fetches fresh — no stale paint, no silent update.
     private static readonly TimeSpan ShelfTtl = TimeSpan.FromHours(24);
 
     private bool _animeEnabled => State.EnabledMediaTypes.Contains(MetaType.anime);

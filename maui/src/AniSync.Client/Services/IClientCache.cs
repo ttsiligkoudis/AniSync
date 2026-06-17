@@ -31,6 +31,12 @@ public interface IClientCache
     /// when <c>Stale</c>, refetches in the background.</summary>
     Task<(bool Found, bool Stale, T? Value)> ReadAsync<T>(string key, TimeSpan ttl);
 
+    /// <summary>Like <see cref="ReadAsync"/> but staleness is decided by an absolute expiry derived from
+    /// the entry's write time rather than a sliding window — <paramref name="expiry"/> maps the write
+    /// instant to the instant it expires. Use for a wall-clock boundary a <see cref="TimeSpan"/> can't
+    /// express, e.g. a once-a-day shelf that should hold until the next local midnight.</summary>
+    Task<(bool Found, bool Stale, T? Value)> ReadUntilAsync<T>(string key, Func<DateTimeOffset, DateTimeOffset> expiry);
+
     /// <summary>Store <paramref name="value"/> in both tiers, stamped with the current time.
     /// Best-effort: a blocked/absent localStorage leaves the in-memory tier holding it.</summary>
     Task SetAsync<T>(string key, T value);

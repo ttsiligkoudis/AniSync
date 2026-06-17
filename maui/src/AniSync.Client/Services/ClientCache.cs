@@ -24,14 +24,29 @@ public sealed class ClientCache : IClientCache
         return found && !stale ? value : default;
     }
 
-    public async Task<(bool Found, bool Stale, T? Value)> ReadAsync<T>(string key, TimeSpan ttl)
+    public Task<(bool Found, bool Stale, T? Value)> ReadAsync<T>(string key, TimeSpan ttl)
     {
         var ttlMs = (long)ttl.TotalMilliseconds;
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        return ReadCoreAsync<T>(key, ts => Fresh(ts, now, ttlMs));
+    }
 
+    public Task<(bool Found, bool Stale, T? Value)> ReadUntilAsync<T>(string key, Func<DateTimeOffset, DateTimeOffset> expiry)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var nowMs = now.ToUnixTimeMilliseconds();
+        return ReadCoreAsync<T>(key, ts =>
+            nowMs >= ts                                                            // clock-jumped-back guard
+            && now < expiry(DateTimeOffset.FromUnixTimeMilliseconds(ts)));
+    }
+
+    // Shared two-tier read; <paramref name="isFresh"/> decides staleness from the entry's write
+    // timestamp (sliding TTL or absolute expiry — see the two public readers above).
+    private async Task<(bool Found, bool Stale, T? Value)> ReadCoreAsync<T>(string key, Func<long, bool> isFresh)
+    {
         // Tier 1 — in-memory (no interop).
         if (_mem.TryGetValue(key, out var mem) && mem.Value is T memHit)
-            return (true, !Fresh(mem.Ts, now, ttlMs), memHit);
+            return (true, !isFresh(mem.Ts), memHit);
 
         // Tier 2 — localStorage (the first read after an app start lands here; promote into memory).
         try
@@ -41,7 +56,7 @@ public sealed class ClientCache : IClientCache
             var entry = JsonSerializer.Deserialize<StoredEntry<T>>(raw);
             if (entry is null || entry.Value is null) return (false, false, default);
             _mem[key] = new MemEntry(entry.Ts, entry.Value);
-            return (true, !Fresh(entry.Ts, now, ttlMs), entry.Value);
+            return (true, !isFresh(entry.Ts), entry.Value);
         }
         catch { return (false, false, default); }   // no JS (prerender) / blocked storage / parse error → miss
     }
