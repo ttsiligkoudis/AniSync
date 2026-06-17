@@ -336,11 +336,12 @@ namespace AnimeList.Services
 
         private static string ProxyUrl(string upstreamUrl)
         {
-            // Relative /meta/subtitle?url=... — same-origin as the
-            // host page so the <track> tag loads without needing a
-            // CORS opt-in on the player. The endpoint is id-agnostic.
+            // Relative /api/v1/subtitle?url=... — same-origin as the host page so the <track> tag loads
+            // without a CORS opt-in. MUST be the MetaProxyController route (admitted on both heads), NOT
+            // /meta/subtitle: the web head filters MetaController out (its /meta/* routes collide with the
+            // Blazor Detail page), so /meta/subtitle 404s there and subtitles silently never render.
             var encoded = Uri.EscapeDataString(upstreamUrl);
-            return $"/meta/subtitle?url={encoded}";
+            return $"/api/v1/subtitle?url={encoded}";
         }
 
         private static bool IsAllowedSubtitleHost(string url)

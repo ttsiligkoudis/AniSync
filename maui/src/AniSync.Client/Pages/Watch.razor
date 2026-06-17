@@ -926,18 +926,28 @@
         return string.Join(" · ", parts);
     }
 
-    // Subtitle tracks for the native (LibVLC) player. The raw upstream OpenSubtitles
-    // URLs can be relative or non-http, which makes libVLC fall through to the SMB
-    // access module ("smb2_parse_url failed") and can crash the demux mid-playback.
-    // Route them through the same-origin SRT→VTT proxy — absolute https on the native
-    // head — so VLC always gets a valid, well-formed slave. (The web head leaves
-    // _subtitles raw; its ArtPlayer engine proxies them itself.)
+    // Subtitle tracks for the native (LibVLC) player. The API already hands back same-origin proxy URLs
+    // (/api/v1/subtitle?url=… — SRT→VTT, CORS-safe); libVLC just needs them ABSOLUTE (a relative URL
+    // makes it fall through to the SMB access module — "smb2_parse_url failed" — and can crash the demux).
+    // So absolutise against the API origin; do NOT re-run them through SubtitleProxyUrl, which would
+    // double-proxy (/api/v1/subtitle?url=/api/v1/subtitle?…) and leave VLC with a dead slave. (The web
+    // head uses the relative proxy URLs as-is — same-origin <track src>.)
     private IReadOnlyList<SubtitleTrack> NativeSubtitles()
         => _subtitles
-            .Select(t => t with { Url = Api.SubtitleProxyUrl(t.Url) })
+            .Select(t => t with { Url = ToAbsoluteApiUrl(t.Url) })
             .Where(t => Uri.TryCreate(t.Url, UriKind.Absolute, out var u)
                         && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps))
             .ToList();
+
+    // Resolve a (possibly relative) same-origin API URL to an absolute one against the API origin, for
+    // players that can't resolve relative URLs (LibVLC / cast). No-op when already absolute, or when the
+    // origin isn't known (web head — relative is already correct same-origin there).
+    private string ToAbsoluteApiUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || Uri.TryCreate(url, UriKind.Absolute, out _)) return url;
+        var origin = Env.ApiBaseUrl;
+        return string.IsNullOrWhiteSpace(origin) ? url : $"{origin.TrimEnd('/')}/{url.TrimStart('/')}";
+    }
 
     // Preferred default languages (account setting; English when unset). Loaded once, then handed to every
     // PlaybackRequest so both players preselect the right audio (native) / subtitle (both) track.
