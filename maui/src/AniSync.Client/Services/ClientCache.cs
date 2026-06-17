@@ -73,6 +73,31 @@ public sealed class ClientCache : IClientCache
         catch { /* storage blocked → the in-memory tier still holds it for this session */ }
     }
 
+    public async Task PrimeAsync<T>(IReadOnlyList<string> keys)
+    {
+        // Skip keys already warm — on a within-session navigation _mem is populated and no interop is
+        // needed at all (this whole call no-ops on MAUI after the first dashboard render).
+        var cold = keys.Where(k => !_mem.ContainsKey(k)).ToArray();
+        if (cold.Length == 0) return;
+        try
+        {
+            await using var mod = await _js.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/AniSync.Client/js/client-cache.js");
+            var raws = await mod.InvokeAsync<Dictionary<string, string?>>("batchGet", IClientCache.KeyPrefix, cold);
+            foreach (var (key, raw) in raws)
+            {
+                if (string.IsNullOrEmpty(raw)) continue;
+                try
+                {
+                    var entry = JsonSerializer.Deserialize<StoredEntry<T>>(raw);
+                    if (entry?.Value is not null) _mem[key] = new MemEntry(entry.Ts, entry.Value);
+                }
+                catch { /* a single malformed entry shouldn't abort priming the rest */ }
+            }
+        }
+        catch { /* no JS (prerender) / blocked storage → reads fall back to their own localStorage path */ }
+    }
+
     public async Task RemoveAsync(string key)
     {
         _mem.Remove(key);

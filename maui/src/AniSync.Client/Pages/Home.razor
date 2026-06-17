@@ -2,6 +2,7 @@
 @inject IAniSyncApi Api
 @inject AppState State
 @inject IJSRuntime JS
+@inject IClientCache Cache
 @implements IAsyncDisposable
 
 @* Home dashboard — full port of Views/Home/Index.cshtml's section order: the
@@ -391,6 +392,29 @@ else
     private static string VideoSlug(MetaType vt) => vt == MetaType.movie ? "movie" : "series";
     private string VideoSuffix(MetaType vt) => _combined ? " · " + (vt == MetaType.movie ? "Movies" : "Series") : "";
 
+    // Every cached shelf's key for the enabled media types — must mirror the CacheKeys assigned to the
+    // <DashboardShelf>s above. PrimeAsync warms them all in one localStorage read before the shelves
+    // render. (A key with nothing stored is simply skipped, so listing all of them is harmless.)
+    private IReadOnlyList<string> ShelfCacheKeys()
+    {
+        var keys = new List<string>();
+        if (_animeEnabled)
+            keys.AddRange(new[]
+            {
+                "shelf.anime-continue", "shelf.anime-new-episodes",
+                "shelf.anime-trending", "shelf.anime-popular", "shelf.anime-anticipated",
+            });
+        foreach (var vt in _videoTypes)
+        {
+            var s = VideoSlug(vt);
+            keys.Add($"shelf.video-continue-{s}");
+            keys.Add($"shelf.video-trending-{s}");
+            keys.Add($"shelf.video-popular-{s}");
+            keys.Add($"shelf.video-anticipated-{s}");
+        }
+        return keys;
+    }
+
     // Browse section's CSS order + hidden state from the saved layout (key "browse").
     private int BrowseOrder { get { var l = State.DashLayout; for (var i = 0; i < l.Count; i++) if (l[i].Key == "browse") return i; return 999; } }
     private bool BrowseHidden => State.DashLayout.FirstOrDefault(e => e.Key == "browse") is { Visible: false };
@@ -458,10 +482,17 @@ else
         // prerender bridge flips true before StreamConfig exists. Resolving earlier would take
         // the anonymous branch (default layout) and skip the user's saved layout entirely.
         if (!State.ConfigHydrated) return;
+        _layoutLoaded = true;   // guard re-entry across the awaits below (Changed can fire again)
+
+        // Warm the shelf cache from localStorage in ONE batched interop call before the shelves render,
+        // so each shelf's first read is a synchronous memory hit instead of an async localStorage
+        // round-trip. On a cold Blazor Server circuit (every full page load) that async gap is what
+        // repaints each cached shelf's skeleton even though the data is stored. No-op on MAUI (memory
+        // already warm within the session) and on a true first visit (nothing cached yet to warm).
+        await Cache.PrimeAsync<List<MetaDto>>(ShelfCacheKeys());
 
         if (State.LoggedIn && !string.IsNullOrEmpty(State.StreamConfig))
         {
-            _layoutLoaded = true;
             try
             {
                 var json = await Api.GetDashboardLayoutAsync();
@@ -481,7 +512,6 @@ else
         // visitor's reorder/hide survives a reload; default order stands when nothing's stored. The
         // shelves keep their skeleton until this resolves (gated on DashLayoutLoaded), so they paint
         // once in the saved order rather than flashing the default then reordering.
-        _layoutLoaded = true;
         try
         {
             _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/dashboard.js");

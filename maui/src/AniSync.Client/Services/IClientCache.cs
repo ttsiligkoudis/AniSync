@@ -41,6 +41,13 @@ public interface IClientCache
     /// Best-effort: a blocked/absent localStorage leaves the in-memory tier holding it.</summary>
     Task SetAsync<T>(string key, T value);
 
+    /// <summary>Warm the in-memory tier for <paramref name="keys"/> (all of type <typeparamref name="T"/>)
+    /// from localStorage in a single interop call. Call before rendering a page's cached components so
+    /// their first read is a synchronous memory hit rather than an async localStorage round-trip — which
+    /// on Blazor Server (cold circuit on every full load) is what makes cached shelves flash a skeleton
+    /// during the read. No-op for keys already in memory, and best-effort (prerender / blocked storage).</summary>
+    Task PrimeAsync<T>(IReadOnlyList<string> keys);
+
     /// <summary>Drop a single entry from both tiers.</summary>
     Task RemoveAsync(string key);
 

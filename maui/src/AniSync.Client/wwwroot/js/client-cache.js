@@ -13,3 +13,16 @@ export function clearPrefix(prefix) {
         }
     } catch (_) { /* storage blocked — nothing to clear */ }
 }
+
+// Read several cache entries in ONE interop call so ClientCache can warm its in-memory tier before a
+// page's components render — without this each component's first read is a separate async round-trip
+// (painful on Blazor Server, where every localStorage hit crosses SignalR). Returns { key: rawJson|null }
+// keyed by the bare (unprefixed) key.
+export function batchGet(prefix, keys) {
+    const out = {};
+    for (const k of keys) {
+        try { out[k] = localStorage.getItem(prefix + k); } catch (_) { out[k] = null; }
+    }
+    return out;
+}
+
