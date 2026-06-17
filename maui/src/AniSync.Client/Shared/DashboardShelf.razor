@@ -111,6 +111,13 @@
     // plain cached shelf treats an empty refetch as a blip and keeps the stale rows.
     [Parameter] public bool AlwaysRevalidate { get; set; }
 
+    // When true, the first page is cached until the next LOCAL midnight (a once-a-day shelf, e.g.
+    // "New episodes today") instead of for a sliding CacheTtl — needs no CacheTtl. Unlike the other
+    // cached shelves this does NOT stale-render: while still the same day it paints instantly from
+    // cache with no request, but once the day has rolled over the entry is treated as a miss — the
+    // shelf shows its skeleton and fetches fresh, with no stale paint and no silent background update.
+    [Parameter] public bool ExpiresAtMidnight { get; set; }
+
     // CSS flex `order` + hidden state read from the saved layout (AppState.DashLayout).
     private int Order
     {
@@ -155,19 +162,23 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // Cached entry (any age) → paint instantly from the first page, no skeleton. Then refetch in
-        // the background once the shelf is on-screen — for AlwaysRevalidate (user lists) every time,
-        // otherwise only when the entry is past TTL (stale-while-revalidate). Only the first page is
-        // cached; pagination stays live, so a paginated shelf isn't marked _done.
-        if (CacheTtl is { } ttl && !string.IsNullOrEmpty(CacheKey))
+        // Paint instantly from a cached first page when one's usable. The policy decides whether a
+        // STALE entry still paints (SWR / AlwaysRevalidate paint any age; ExpiresAtMidnight does not —
+        // a rolled-over day is treated as a miss so the shelf re-skeletons and fetches fresh) and
+        // whether a background refetch is then scheduled. Only the first page is cached; pagination
+        // stays live, so a paginated shelf isn't marked _done.
+        if (!string.IsNullOrEmpty(CacheKey) && (ExpiresAtMidnight || CacheTtl is not null))
         {
-            var (found, stale, cached) = await Cache.ReadAsync<List<MetaDto>>(CacheKey, ttl);
-            if (found && cached is { Count: > 0 })
+            var (found, stale, cached) = ExpiresAtMidnight
+                ? await Cache.ReadUntilAsync<List<MetaDto>>(CacheKey, NextLocalMidnight)
+                : await Cache.ReadAsync<List<MetaDto>>(CacheKey, CacheTtl!.Value);
+
+            if (found && cached is { Count: > 0 } && !(ExpiresAtMidnight && stale))
             {
                 Append(cached);
                 _firstPageCount = _items.Count;
                 _fetched = true;
-                _needsRefresh = stale || AlwaysRevalidate;
+                _needsRefresh = !ExpiresAtMidnight && (stale || AlwaysRevalidate);
                 if (!Paginated) _done = true;
                 _loading = false;
                 return;
@@ -193,7 +204,8 @@
             _firstPageCount = _items.Count;
             if (!Paginated || first.Count == 0) _done = true;
             // Persist the first page (only) for instant revisits — skip empty/uncacheable shelves.
-            if (first.Count > 0 && CacheTtl is not null && !string.IsNullOrEmpty(CacheKey))
+            // SetAsync stamps the write time; the read policy (TTL or midnight) decides freshness.
+            if (first.Count > 0 && !string.IsNullOrEmpty(CacheKey) && (CacheTtl is not null || ExpiresAtMidnight))
                 await Cache.SetAsync(CacheKey, _items.ToList());
         }
         finally { _loading = false; StateHasChanged(); }
@@ -308,6 +320,15 @@
         {
             try { await _scroll.InvokeVoidAsync("recheck", _observerId); } catch { }
         }
+    }
+
+    // Expiry for ExpiresAtMidnight shelves: the start of the day AFTER the entry was written, in the
+    // device's local zone — so an entry holds for the rest of the calendar day it was fetched and is
+    // stale once the day rolls over, regardless of what time of day it was written.
+    private static DateTimeOffset NextLocalMidnight(DateTimeOffset write)
+    {
+        var local = write.ToLocalTime();
+        return new DateTimeOffset(local.Date.AddDays(1), local.Offset);
     }
 
     private int Append(IReadOnlyList<MetaDto> page)
