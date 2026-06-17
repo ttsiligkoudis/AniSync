@@ -1238,7 +1238,11 @@ namespace AnimeList.Controllers
                 if (string.IsNullOrEmpty(imdbId))
                     return new JsonResult(new SubtitlesResponse([], new SubtitleProviderCounts(0)));
 
-                var tracks = await SafeOpenSubtitlesSearch(imdbId, season, episode);
+                // ImdbSeason is the franchise-side season; the URL season is AniSync's cour-internal value
+                // (usually 1). OpenSubtitles is keyed by the franchise season, so a season-2 cour asking
+                // with season=1 gets season-1's subtitles — mirror UserApiController.EpisodeSubtitles.
+                var effectiveSeason = sourceLinks!.ImdbSeason ?? season;
+                var tracks = await SafeOpenSubtitlesSearch(imdbId, effectiveSeason, episode);
                 return new JsonResult(new SubtitlesResponse(
                     tracks.ToList(),
                     new SubtitleProviderCounts(tracks.Count)));
