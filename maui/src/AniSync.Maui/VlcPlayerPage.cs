@@ -1,5 +1,6 @@
 using LibVLCSharp.Shared;
 using LibVLCSharp.MAUI;
+using System.Collections.Concurrent;
 using Microsoft.Maui.Controls.Shapes;
 // Alias (not a namespace import) — LibVLCSharp.Shared also defines a SubtitleTrack, so a plain
 // `using AniSync.Client.Services;` makes the name ambiguous (CS0104).
@@ -80,6 +81,7 @@ public sealed class VlcPlayerPage : ContentPage
     // sheet up-front and attached to libVLC on demand when picked — they aren't pre-loaded as slaves.
     private readonly IReadOnlyList<SubtitleTrack> _externalSubs;
     private HashSet<int>? _embeddedSpuIds;   // SPU ids from the media file, captured before any slave is added
+    private readonly ConcurrentDictionary<string, int> _slaveSpu = new();  // external sub url → its SPU id once libVLC has parsed the added slave
     private string? _selectedExternalUrl;    // url of the external sub the user attached (drives the check)
     private bool _defaultSubScheduled;       // one-shot guard for the default-track pass
     private bool _userPickedSub;             // the user chose a subtitle → don't override with the default
@@ -563,16 +565,70 @@ public sealed class VlcPlayerPage : ContentPage
     }
 
     // Attach an external subtitle off the UI thread. AddSlave fetches the file, and doing that on the UI
-    // thread froze the app (ANR) for a slow/large sub — the reported "swap to English freezes". select:true
-    // makes libVLC switch to it once it's loaded.
+    // thread froze the app (ANR) for a slow/large sub — the reported "swap to English freezes".
+    //
+    // We do NOT trust AddSlave's select:true to actually switch the displayed track: when the media file
+    // has an embedded default SPU (the "opened on French" case), libVLC keeps showing it — the slave is
+    // added but not selected — so the user picks English yet still sees French. Instead we find the
+    // freshly-parsed slave's SPU id and select it ourselves (SetSpu), which is reliable.
     private void AttachExternalSub(string url)
     {
         _selectedExternalUrl = url;
-        _ = Task.Run(() =>
+        _embeddedSpuIds ??= CaptureSpuIds();   // freeze the file's own SPU ids before adding any slave
+
+        // Already loaded once → just (re)select it. A second AddSlave of the same URL won't re-fire
+        // selection, so re-picking has to go straight to SetSpu.
+        if (_slaveSpu.TryGetValue(url, out var knownId))
+        {
+            try { _player.SetSpu(knownId); } catch { /* track gone */ }
+            return;
+        }
+
+        _ = Task.Run(async () =>
         {
             try { _player.AddSlave(MediaSlaveType.Subtitle, url, select: true); }
-            catch { /* unreachable / malformed sub */ }
+            catch { return; }   // unreachable / malformed sub
+
+            // The slave loads asynchronously; once its SPU track appears (the id that's neither embedded
+            // nor an already-mapped slave) select it — but only if the user still wants this one.
+            for (var i = 0; i < 40; i++)   // up to ~6s, polling every 150ms
+            {
+                if (FindNewSpuId() is int id)
+                {
+                    _slaveSpu[url] = id;
+                    if (_selectedExternalUrl == url)
+                        Dispatcher.Dispatch(() => { try { _player.SetSpu(id); } catch { /* track gone */ } });
+                    return;
+                }
+                await Task.Delay(150);
+            }
         });
+    }
+
+    // Snapshot the player's current SPU track ids (skips the -1 "disable" pseudo-track).
+    private HashSet<int> CaptureSpuIds()
+    {
+        var ids = new HashSet<int>();
+        try { foreach (var t in _player.SpuDescription) if (t.Id != -1) ids.Add(t.Id); } catch { /* not parsed */ }
+        return ids;
+    }
+
+    // The SPU id of a just-added external slave: present in SpuDescription but neither one of the file's
+    // embedded ids nor an already-mapped slave. Null until libVLC has parsed the new slave.
+    private int? FindNewSpuId()
+    {
+        try
+        {
+            foreach (var t in _player.SpuDescription)
+            {
+                if (t.Id == -1) continue;
+                if (_embeddedSpuIds is { } emb && emb.Contains(t.Id)) continue;
+                if (_slaveSpu.Values.Contains(t.Id)) continue;
+                return t.Id;
+            }
+        }
+        catch { /* tracks not parsed yet */ }
+        return null;
     }
 
     // Does a track (its language code and/or display name) belong to the target language? Matches the
