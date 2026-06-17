@@ -783,8 +783,12 @@ public sealed class VlcPlayerPage : ContentPage
     }
 
     // A single tappable list row with a selection check. onTap decides whether to close the sheet.
-    private View Row(string text, bool selected, Action onTap)
+    // selected = the active track (purple + checkmark). viewing = this language's tracks are shown in the
+    // middle column but nothing's been picked yet — give it a bold/highlighted look so a language tap reads
+    // as "selected to browse" even before a track is chosen, without the checkmark that means "active".
+    private View Row(string text, bool selected, Action onTap, bool viewing = false)
     {
+        var emphasise = selected || viewing;
         // TV: a Grid+TapGestureRecognizer isn't reachable by the D-pad, so use a Button (gets the native
         // focus highlight + activates on OK). The check is folded into the text since a Button hosts only text.
         if (_isTv)
@@ -792,7 +796,8 @@ public sealed class VlcPlayerPage : ContentPage
             var btn = new Button
             {
                 Text = (selected ? "✓  " : "") + text,
-                TextColor = selected ? Accent : Colors.White,
+                TextColor = emphasise ? Accent : Colors.White,
+                FontAttributes = emphasise ? FontAttributes.Bold : FontAttributes.None,
                 BackgroundColor = Colors.Transparent,
                 BorderWidth = 0,
                 CornerRadius = 0,
@@ -807,7 +812,8 @@ public sealed class VlcPlayerPage : ContentPage
         var label = new Label
         {
             Text = text,
-            TextColor = selected ? Accent : Colors.White,
+            TextColor = emphasise ? Accent : Colors.White,
+            FontAttributes = emphasise ? FontAttributes.Bold : FontAttributes.None,
             FontSize = 15,
             VerticalOptions = LayoutOptions.Center,
             HorizontalOptions = LayoutOptions.Fill,
@@ -826,6 +832,8 @@ public sealed class VlcPlayerPage : ContentPage
         {
             ColumnDefinitions = { new(GridLength.Star), new(GridLength.Auto) },
             Padding = new Thickness(16, 11),
+            // Faint fill behind the browsed-but-not-active language so the tap registers visually.
+            BackgroundColor = viewing && !selected ? Color.FromRgba(255, 255, 255, 18) : Colors.Transparent,
         };
         row.Add(label, 0, 0);
         row.Add(check, 1, 0);
@@ -1028,7 +1036,7 @@ public sealed class VlcPlayerPage : ContentPage
         foreach (var lang in langs)
         {
             var l = lang;
-            langRows.Add(Row(l, l == activeLang, () => { _subLang = l; OpenSubtitleSheet(); }));
+            langRows.Add(Row(l, l == activeLang, () => { _subLang = l; OpenSubtitleSheet(); }, viewing: l == _subLang));
         }
 
         // Middle column: tracks in the selected language. Selecting one applies + closes.
