@@ -83,7 +83,11 @@ public sealed class ClientCache : IClientCache
         {
             await using var mod = await _js.InvokeAsync<IJSObjectReference>(
                 "import", "./_content/AniSync.Client/js/client-cache.js");
-            var raws = await mod.InvokeAsync<Dictionary<string, string?>>("batchGet", IClientCache.KeyPrefix, cold);
+            // Cap the combined payload well under the circuit's 1 MB receive limit (titles can be
+            // multi-byte UTF-8, so budget in chars conservatively). Keys beyond the budget come back
+            // null and are read individually by their component — a flash, never a dropped circuit.
+            const int maxChars = 300_000;
+            var raws = await mod.InvokeAsync<Dictionary<string, string?>>("batchGet", IClientCache.KeyPrefix, cold, maxChars);
             foreach (var (key, raw) in raws)
             {
                 if (string.IsNullOrEmpty(raw)) continue;

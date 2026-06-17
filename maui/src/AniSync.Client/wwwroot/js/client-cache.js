@@ -17,11 +17,20 @@ export function clearPrefix(prefix) {
 // Read several cache entries in ONE interop call so ClientCache can warm its in-memory tier before a
 // page's components render — without this each component's first read is a separate async round-trip
 // (painful on Blazor Server, where every localStorage hit crosses SignalR). Returns { key: rawJson|null }
-// keyed by the bare (unprefixed) key.
-export function batchGet(prefix, keys) {
+// keyed by the bare (unprefixed) key. `maxChars` bounds the combined payload: once the budget is spent,
+// the remaining keys come back null so they fall back to their own per-key read — this keeps the interop
+// result under SignalR's message-size limit (a too-large message would otherwise drop the circuit).
+export function batchGet(prefix, keys, maxChars) {
     const out = {};
+    let used = 0;
     for (const k of keys) {
-        try { out[k] = localStorage.getItem(prefix + k); } catch (_) { out[k] = null; }
+        let v = null;
+        try { v = localStorage.getItem(prefix + k); } catch (_) { v = null; }
+        if (v != null) {
+            if (used + v.length > maxChars) { out[k] = null; continue; }  // over budget → let the caller read it singly
+            used += v.length;
+        }
+        out[k] = v;
     }
     return out;
 }

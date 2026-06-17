@@ -30,7 +30,16 @@ var builder = WebApplication.CreateBuilder(args);
 
 // ---- Blazor (interactive server) ----
 builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
+    .AddInteractiveServerComponents()
+    .AddHubOptions(options =>
+    {
+        // The dashboard warms its shelf cache by uploading the cached first pages from localStorage to
+        // the server in one interop call (ClientCache.PrimeAsync) so the shelves render without an async
+        // read flash. That payload exceeds SignalR's 32 KB default once several shelves are cached, which
+        // would otherwise terminate the circuit (a frozen skeleton on reload). 1 MB is ample headroom for
+        // the dashboard cache; PrimeAsync also caps its own batch client-side as a second guard.
+        options.MaximumReceiveMessageSize = 1024 * 1024;
+    });
 
 // Authenticate the HttpOnly anisync_uid cookie into HttpContext.User (presence-only; see
 // UidAuthenticationHandler). This is what lets the interactive circuit learn the signed-in uid via
