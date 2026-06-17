@@ -87,7 +87,12 @@ else
             }
 
             await HydrateMediaTypesAsync();
-            await HydrateSessionAsync();
+
+            // Signed-in verdict from the resolved credential — a synchronous flip (no network) so the
+            // chrome and the dashboard's logged-in layout resolve immediately. The "Connected to X · Y"
+            // label is a /me/linked round-trip kept OFF this critical path (below), so the shelves never
+            // wait on it (that wait was a visible chunk of the cold-load skeleton).
+            State.HydrateSession(!string.IsNullOrEmpty(State.StreamConfig), "");
         }
         finally
         {
@@ -96,6 +101,11 @@ else
             // hydration step throws — so the dashboard never hangs on the skeleton.
             State.MarkConfigHydrated();
         }
+
+        // Fill in the connected-services label after the dashboard is already unblocked — ConfigHydrated
+        // fired above, so this /me/linked round-trip updates only the chrome and never gates the shelves.
+        if (!string.IsNullOrEmpty(State.StreamConfig))
+            await RefreshLinkedLabelAsync();
     }
 
     // Seed the switch / dashboard from the stored media-type preference so they
@@ -142,28 +152,23 @@ else
     // credential is stored; the connected-services label comes from /me/linked
     // (empty when the config can't be resolved upstream, matching the web app's
     // "only show when known" behaviour).
-    private async Task HydrateSessionAsync()
+    // Fetch the "Connected to X · Y" services label and update the chrome. Runs off the dashboard's
+    // critical path (ConfigHydrated has already fired), so the /me/linked round-trip never delays the
+    // shelves. Best-effort: on failure the chrome stays signed-in with no services line.
+    private async Task RefreshLinkedLabelAsync()
     {
-        if (string.IsNullOrEmpty(State.StreamConfig))
+        try
         {
-            State.HydrateSession(false, "");
-            return;
+            var linked = await Api.LinkedAsync();
+            if (linked is null || string.IsNullOrEmpty(linked.Primary)) return;
+
+            var services = new List<string> { PrettyService(linked.Primary) };
+            services.AddRange(linked.Linked
+                .Where(l => !string.IsNullOrEmpty(l.Service))
+                .Select(l => PrettyService(l.Service!)));
+            State.HydrateSession(true, string.Join(" · ", services.Distinct(StringComparer.OrdinalIgnoreCase)));
         }
-
-        // Config present → signed in. Flip the chrome to signed-in NOW rather than blocking on
-        // the linked-accounts round-trip — that wait was the visible "loads as signed-out, then
-        // a second later loads my config" delay. The "Connected to X · Y" label fills in below
-        // once /me/linked returns (a second, cheaper HydrateSession that only updates the label).
-        State.HydrateSession(true, "");
-
-        var linked = await Api.LinkedAsync();
-        if (linked is null || string.IsNullOrEmpty(linked.Primary)) return;
-
-        var services = new List<string> { PrettyService(linked.Primary) };
-        services.AddRange(linked.Linked
-            .Where(l => !string.IsNullOrEmpty(l.Service))
-            .Select(l => PrettyService(l.Service!)));
-        State.HydrateSession(true, string.Join(" · ", services.Distinct(StringComparer.OrdinalIgnoreCase)));
+        catch { /* label stays blank — chrome still shows signed-in */ }
     }
 
     private static string PrettyService(string service) => service switch

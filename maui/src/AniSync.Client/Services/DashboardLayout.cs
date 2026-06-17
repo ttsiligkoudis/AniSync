@@ -20,6 +20,11 @@ public sealed class LayoutEntry
 /// </summary>
 public static class DashboardLayout
 {
+    /// <summary>Client-cache key for the signed-in user's saved layout JSON, so the dashboard can paint
+    /// in the saved order without waiting on /api/v1/me/dashboard-layout every load. Cleared on logout /
+    /// account switch with the rest of the cache.</summary>
+    public const string CacheKey = "dash.layout";
+
     /// <summary>Every customisable section in DEFAULT order, with the modal label. Keys match the
     /// [data-dash-section] / DashboardShelf.DashSection values the dashboard stamps.</summary>
     public static readonly (string Key, string Label)[] Units =

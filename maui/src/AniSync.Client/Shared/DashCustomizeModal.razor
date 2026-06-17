@@ -1,6 +1,7 @@
 @inject AppState State
 @inject IAniSyncApi Api
 @inject IJSRuntime JS
+@inject IClientCache Cache
 @implements IAsyncDisposable
 
 @* Customize dashboard modal — Blazor port of _DashCustomize.cshtml + dashboard-layout.js's modal.
@@ -135,6 +136,7 @@
         if (State.LoggedIn)
         {
             await Api.SaveDashboardLayoutAsync(json);
+            await Cache.SetAsync(DashboardLayout.CacheKey, json);   // keep the cache in step so the next load paints this layout without a fetch
         }
         else
         {

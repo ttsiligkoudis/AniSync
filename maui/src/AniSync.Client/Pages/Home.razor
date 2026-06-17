@@ -493,13 +493,23 @@ else
 
         if (State.LoggedIn && !string.IsNullOrEmpty(State.StreamConfig))
         {
+            // Serve the saved layout from the client cache so the shelves aren't gated on the
+            // /me/dashboard-layout round-trip every load — it only changes when the user customises it
+            // (and Save re-primes the cache). Within TTL → no request at all; when stale → paint the
+            // cached layout instantly and revalidate in the background. The empty/no-saved-layout case is
+            // cached too, so a default-layout user doesn't refetch every load.
+            var (found, stale, cached) = await Cache.ReadAsync<string>(DashboardLayout.CacheKey, ShelfTtl);
+            if (found)
+            {
+                ApplyLayout(cached);
+                if (stale) _ = RevalidateLayoutAsync();
+                return;
+            }
             try
             {
                 var json = await Api.GetDashboardLayoutAsync();
-                if (!string.IsNullOrWhiteSpace(json))
-                    State.SetDashLayout(DashboardLayout.Merge(json));   // sets DashLayoutLoaded + fires Changed
-                else
-                    State.MarkDashLayoutResolved();                     // nothing saved → default stands
+                await Cache.SetAsync(DashboardLayout.CacheKey, json ?? "");
+                ApplyLayout(json);
             }
             catch
             {
@@ -525,6 +535,29 @@ else
         {
             State.MarkDashLayoutResolved();
         }
+    }
+
+    // Apply a layout JSON (cached or freshly fetched): a saved layout sets the order/visibility; an
+    // empty payload means "nothing saved" → resolve to the default. Both drive DashLayoutLoaded true.
+    private void ApplyLayout(string? json)
+    {
+        if (!string.IsNullOrWhiteSpace(json))
+            State.SetDashLayout(DashboardLayout.Merge(json));
+        else
+            State.MarkDashLayoutResolved();
+    }
+
+    // Background refresh for a stale cached layout — re-prime the cache and apply if it actually
+    // changed. Best-effort: a failure keeps the cached layout already on screen.
+    private async Task RevalidateLayoutAsync()
+    {
+        try
+        {
+            var json = await Api.GetDashboardLayoutAsync();
+            await Cache.SetAsync(DashboardLayout.CacheKey, json ?? "");
+            ApplyLayout(json);
+        }
+        catch { /* keep the cached layout */ }
     }
 
     private async void OnStateChanged()
