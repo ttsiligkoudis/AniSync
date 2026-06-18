@@ -52,6 +52,13 @@ public record PlaybackRequest(
     string? PreferredSubtitleLanguage = null,
     // TEMP: free-form diagnostic string surfaced in the native player's subtitle sheet to debug the
     // "no subs on native" report (raw fetch count + request params the page used). Not shown on web.
-    string? Diagnostics = null);
+    string? Diagnostics = null,
+    // AniSkip OP/ED bands (absolute seconds) for the native players' "Skip Intro/Outro" button. The web
+    // head drives its own skip overlay from JS, so these are only consumed by the native player pages.
+    SkipMark? SkipIntro = null,
+    SkipMark? SkipOutro = null);
+
+/// <summary>An AniSkip band: skip from <paramref name="Start"/> to <paramref name="End"/> (absolute seconds).</summary>
+public record SkipMark(double Start, double End);
 
 public record SubtitleTrack(string Url, string Label, string? Language = null);
