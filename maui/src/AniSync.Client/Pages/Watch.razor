@@ -7,6 +7,7 @@
 @inject IAppEnvironment Env
 @inject IMediaPlayer Player
 @inject IClientCache Cache
+@inject IDiagnosticLog Diag
 @inject ISecureStore Store
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -1361,6 +1362,11 @@
             var type = _type is "movie" or "series" ? _type : null;
             var res = await Api.MarkWatchedAsync(
                 Id, Episode, _hasSeasons ? (Season ?? 1) : null, type, sourceUrl);
+            // Breadcrumb the outcome so a "counter didn't change" report is diagnosable from the
+            // exported log: did the POST fire, and what did the server say?
+            Diag.Log("MarkWatched",
+                $"id={Id} s{(_hasSeasons ? (Season ?? 1) : 0)}e{Episode} type={type ?? "anime"} reason={reason} " +
+                $"→ ok={res?.Ok.ToString() ?? "null"} serverReason={res?.Reason ?? "-"}");
             // ok:false with a transient reason → clear the guard so a later
             // trigger retries (matches the original's save-failed / placeholder
             // handling).
@@ -1373,7 +1379,7 @@
             else if (res is { Ok: true })
                 await InvalidateProgressCachesAsync();
         }
-        catch { _marked = false; }
+        catch (Exception ex) { _marked = false; Diag.Log("MarkWatched", $"id={Id} reason={reason} EXCEPTION {ex.GetType().Name}: {ex.Message}"); }
         finally { _marking = false; }
     }
 
