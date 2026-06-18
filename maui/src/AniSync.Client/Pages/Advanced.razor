@@ -3,6 +3,7 @@
 @inject AppState State
 @inject ISecureStore Store
 @inject IClientCache Cache
+@inject IDiagnosticLog Diag
 @inject IAppEnvironment Env
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -123,6 +124,30 @@
             @if (!string.IsNullOrEmpty(_backupStatus)) { <p class="option-name-sub">@_backupStatus</p> }
         </section>
 
+        <!-- ─── DIAGNOSTICS ─── -->
+        @if (Diag.CanShare)
+        {
+            <section class="section-card">
+                <span class="section-title">Diagnostics</span>
+                <p class="section-description">
+                    Export the app's diagnostic log — crashes plus recent mark-watched results — to attach when
+                    reporting a problem. On Android the log file lives in app-private storage that file managers
+                    can't reach, so the share sheet here is the way to get it off the device.
+                </p>
+                <div class="btn-action-row">
+                    <button class="btn-ghost" type="button" disabled="@_sharingLog" @onclick="ShareLogAsync">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle>
+                            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+                        </svg>
+                        @(_sharingLog ? "Opening…" : "Share log")
+                    </button>
+                    <button class="btn-ghost btn-ghost-sm" type="button" @onclick="ClearLogAsync">Clear log</button>
+                </div>
+                @if (!string.IsNullOrEmpty(_logStatus)) { <p class="option-name-sub">@_logStatus</p> }
+            </section>
+        }
+
         <!-- ─── DANGER ZONE ─── -->
         <section class="section-card danger-zone-card">
             <span class="section-title">Danger Zone</span>
@@ -150,8 +175,8 @@
     private bool _loading = true;
     private ConfigStateDto? _config;
     private string _plexUsername = "";
-    private bool _syncing, _rotating, _exporting, _plexSaved, _copied;
-    private string? _syncStatus, _backupStatus, _dangerStatus;
+    private bool _syncing, _rotating, _exporting, _plexSaved, _copied, _sharingLog;
+    private string? _syncStatus, _backupStatus, _dangerStatus, _logStatus;
     private IJSObjectReference? _js;
 
     private string Origin => Env.ApiBaseUrl.TrimEnd('/');
@@ -324,6 +349,19 @@
         }
         if (await Api.SignOutEverywhereAsync()) await SignOutLocalAsync();
         else _dangerStatus = "Sign-out failed.";
+    }
+
+    private async Task ShareLogAsync()
+    {
+        _sharingLog = true; _logStatus = null;
+        if (!await Diag.ShareAsync()) _logStatus = "Couldn't open the share sheet.";
+        _sharingLog = false;
+    }
+
+    private async Task ClearLogAsync()
+    {
+        await Diag.ClearAsync();
+        _logStatus = "Log cleared.";
     }
 
     private async Task SignOutLocalAsync()

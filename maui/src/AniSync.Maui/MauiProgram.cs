@@ -113,6 +113,7 @@ public static class MauiProgram
         // ---- MAUI head: native environment + secure storage (Keychain/KeyStore/DPAPI) ----
         builder.Services.AddSingleton<IAppEnvironment>(new MauiAppEnvironment(apiBaseUrl));
         builder.Services.AddSingleton<ISecureStore, MauiSecureStore>();
+        builder.Services.AddSingleton<IDiagnosticLog, MauiDiagnosticLog>();   // breadcrumbs → crash.log, exported via the share sheet
         // Native sign-in: WebAuthenticator OAuth (anisync:// callback) + Kitsu password
         // grant, exchanged for the config segment. See MauiNativeAuth for the per-platform
         // URI-scheme wiring the callback needs.
