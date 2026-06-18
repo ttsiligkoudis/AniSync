@@ -6,6 +6,7 @@
 @inject AppState State
 @inject IAppEnvironment Env
 @inject IMediaPlayer Player
+@inject IClientCache Cache
 @inject ISecureStore Store
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -1026,7 +1027,10 @@
             OnStreamEvent: OnStreamEvent,
             PreferredAudioLanguage: _prefAudioLang,
             PreferredSubtitleLanguage: _prefSubLang,
-            Diagnostics: Env.SupportsNativePlayback ? SubtitleDiag() : null);
+            Diagnostics: Env.SupportsNativePlayback ? SubtitleDiag() : null,
+            // AniSkip bands for the native players' Skip button (web drives its own JS overlay).
+            SkipIntro: Env.SupportsNativePlayback && _skipTimes?.Intro is { } si ? new SkipMark(si.Start, si.End) : null,
+            SkipOutro: Env.SupportsNativePlayback && _skipTimes?.Outro is { } so ? new SkipMark(so.Start, so.End) : null);
 
         if (Env.SupportsNativePlayback)
         {
@@ -1146,7 +1150,9 @@
             await EnsurePlaybackLanguagesAsync();
             var resume = await ReadResumeAsync();
             await Player.PlayAsync(new PlaybackRequest(nativeUrl, PlayerTitle(), resume, NativeSubtitles(), OnProgress, OnEnded,
-                PreferredAudioLanguage: _prefAudioLang, PreferredSubtitleLanguage: _prefSubLang, Diagnostics: SubtitleDiag()));
+                PreferredAudioLanguage: _prefAudioLang, PreferredSubtitleLanguage: _prefSubLang, Diagnostics: SubtitleDiag(),
+                SkipIntro: _skipTimes?.Intro is { } si2 ? new SkipMark(si2.Start, si2.End) : null,
+                SkipOutro: _skipTimes?.Outro is { } so2 ? new SkipMark(so2.Start, so2.End) : null));
             _playingUrl = s.Url;
             StateHasChanged();
             return;
@@ -1285,7 +1291,7 @@
     private sealed class ClientFlags { public bool HevcRisky { get; set; } public bool IosSafari { get; set; } }
 
     // Persist resume at most every ~5s; clear it within 15s of the end. Mark the
-    // episode watched at 70% (the original's threshold). AniSkip surfaces a Skip
+    // episode watched at 80% (matches the old app). AniSkip surfaces a Skip
     // button while inside an OP/ED band and auto-seeks past it when auto-skip is on.
     private async void OnProgress(double positionSec, double durationSec)
     {
@@ -1305,9 +1311,9 @@
         // launch.js can convert seconds→% against ArtPlayer's progress bar.
         if (!_skipRangesPainted && !Env.SupportsNativePlayback) await PaintSkipRangesAsync(durationSec);
 
-        // Mark-watched at 70% (duration ≥ 60s guards against RD DMCA placeholders).
-        if (durationSec >= 60 && positionSec >= durationSec * 0.70)
-            MarkWatched("progress-70", null);
+        // Mark-watched at 80% (duration ≥ 60s guards against RD DMCA placeholders).
+        if (durationSec >= 60 && positionSec >= durationSec * 0.80)
+            MarkWatched("progress-80", null);
 
         if (durationSec > 0 && positionSec > durationSec - 15)
         {
@@ -1360,9 +1366,32 @@
             // handling).
             if (res is { Ok: false, Reason: "save-failed" or "placeholder" })
                 _marked = false;
+            // On success, drop the cached surfaces that show the episode counter so the new
+            // progress paints next time they load — otherwise the in-memory/localStorage cache
+            // keeps showing the pre-watch count (the "counter didn't change" report on native,
+            // where the SPA never does a fresh full-page load to bust it).
+            else if (res is { Ok: true })
+                await InvalidateProgressCachesAsync();
         }
         catch { _marked = false; }
         finally { _marking = false; }
+    }
+
+    // Bust the cached surfaces that display this title's progress so the bumped episode count
+    // shows on the next visit instead of the stale cached value. Keys mirror Detail.PersistKey
+    // ("detail:{type}:{id}") and Home's Continue-watching shelves ("shelf.*-continue").
+    // Best-effort: a cache miss here just means a fresh fetch later.
+    private async Task InvalidateProgressCachesAsync()
+    {
+        try
+        {
+            var detailType = _type is "movie" or "series" ? _type : "";
+            await Cache.RemoveAsync($"detail:{detailType}:{Id}");
+            await Cache.RemoveAsync("shelf.anime-continue");
+            await Cache.RemoveAsync("shelf.video-continue-movie");
+            await Cache.RemoveAsync("shelf.video-continue-series");
+        }
+        catch { /* cache eviction is best-effort */ }
     }
 
     private string ResumeKey => $"pos:{Id}:{Season ?? 1}:{Episode}";

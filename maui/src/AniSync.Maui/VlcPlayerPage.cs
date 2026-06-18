@@ -7,6 +7,7 @@ using Microsoft.Maui.Controls.Shapes;
 using SubtitleTrack = AniSync.Client.Services.SubtitleTrack;
 // Alias (not a full namespace import) for the same reason as SubtitleTrack above.
 using PlaybackLanguages = AniSync.Client.Services.PlaybackLanguages;
+using SkipMark = AniSync.Client.Services.SkipMark;
 
 namespace AniSync.Maui;
 
@@ -90,6 +91,13 @@ public sealed class VlcPlayerPage : ContentPage
     private readonly string _preferredSubLang;
     private readonly string? _fetchDiag;         // TEMP: page-side subtitle-fetch diagnostics for the sheet title
 
+    // AniSkip OP/ED bands (absolute seconds) + the corner "Skip Intro/Outro" button. Shown while the
+    // current position is inside a band; tapping seeks just past it. Phone-only (TV uses ExoPlayerPage).
+    private readonly SkipMark? _skipIntro;
+    private readonly SkipMark? _skipOutro;
+    private readonly Button _skipButton;
+    private double _skipTarget;
+
     private bool _seeking;
     private bool _started;   // one-shot guard: playback is started once, when the video surface is ready
     private ScaleMode _scaleMode = ScaleMode.Fit;
@@ -99,13 +107,16 @@ public sealed class VlcPlayerPage : ContentPage
     private enum ScaleMode { Fit, Crop, Fill, SixteenNine, FourThree }
 
     public VlcPlayerPage(MediaPlayer player, string title, IReadOnlyList<SubtitleTrack>? externalSubs = null,
-        string? preferredAudioLang = null, string? preferredSubLang = null, string? fetchDiag = null)
+        string? preferredAudioLang = null, string? preferredSubLang = null, string? fetchDiag = null,
+        SkipMark? skipIntro = null, SkipMark? skipOutro = null)
     {
         _player = player;
         _externalSubs = externalSubs ?? Array.Empty<SubtitleTrack>();
         _preferredAudioLang = PlaybackLanguages.Normalize(preferredAudioLang);
         _preferredSubLang = PlaybackLanguages.Normalize(preferredSubLang);
         _fetchDiag = fetchDiag;
+        _skipIntro = skipIntro;
+        _skipOutro = skipOutro;
         Title = title;
         BackgroundColor = Colors.Black;
         NavigationPage.SetHasNavigationBar(this, false);
@@ -325,10 +336,30 @@ public sealed class VlcPlayerPage : ContentPage
         // SafeAreaEdges=None on the PAGE alone isn't enough: MAUI 10 also applies safe-area insets at the
         // layout level, and fs9's diagnostics showed the root Grid padding its children 152px away from the
         // notch (the page view spanned the full 2772px display while the content started at x=152).
+        // AniSkip corner button — shown only inside an OP/ED band, independent of the auto-hiding chrome
+        // (Stremio-style: it stays put so you can skip even after the controls fade). Hidden until a band.
+        _skipButton = new Button
+        {
+            IsVisible = false,
+            TextColor = Colors.White,
+            BackgroundColor = Color.FromRgba(0, 0, 0, 180),
+            FontSize = 15,
+            FontAttributes = FontAttributes.Bold,
+            Padding = new Thickness(20, 12),
+            CornerRadius = 8,
+            BorderColor = Color.FromRgba(255, 255, 255, 90),
+            BorderWidth = 1,
+            HorizontalOptions = LayoutOptions.End,
+            VerticalOptions = LayoutOptions.End,
+            Margin = new Thickness(0, 0, 28, 92),   // clear of the bottom control bar
+        };
+        _skipButton.Clicked += OnSkipClicked;
+
         _root = new Grid { SafeAreaEdges = SafeAreaEdges.None };
         _root.Add(_videoView, 0, 0);
         _root.Add(_controls, 0, 0);
         _root.Add(_loading, 0, 0);     // over the video, under the controls' tap target + the sheet
+        _root.Add(_skipButton, 0, 0);  // above the chrome so it survives auto-hide, below the sheet
         _root.Add(_sheetOverlay, 0, 0);
 
         // Tap-to-toggle the chrome — touch heads only. A TapGestureRecognizer on the root makes it
@@ -1238,6 +1269,39 @@ public sealed class VlcPlayerPage : ContentPage
     {
         _position.Text = Format(_player.Time);
         _duration.Text = Format(_player.Length);
+        UpdateSkipButton();
+    }
+
+    // Show / hide the AniSkip corner button based on the current position. Driven off the same
+    // position ticks as the clock, so it appears within ~1s of entering an OP/ED band.
+    private void UpdateSkipButton()
+    {
+        if (_skipIntro is null && _skipOutro is null) return;   // nothing to skip for this episode
+        var t = _player.Time / 1000.0;
+        var band = ActiveBand(t);
+        if (band is null)
+        {
+            if (_skipButton.IsVisible) _skipButton.IsVisible = false;
+            return;
+        }
+        _skipTarget = band.Value.End + 1;       // land just past the band so we don't re-enter it
+        _skipButton.Text = band.Value.Label;
+        if (!_skipButton.IsVisible) _skipButton.IsVisible = true;
+    }
+
+    // The active OP/ED band at time t (seconds), or null. The −0.5 keeps the button from flashing
+    // for a frame right at the boundary — mirrors the web head's ActiveSkipBand.
+    private (string Label, double End)? ActiveBand(double t)
+    {
+        if (_skipIntro is { } i && t >= i.Start && t < i.End - 0.5) return ("Skip Intro  ⏭", i.End);
+        if (_skipOutro is { } o && t >= o.Start && t < o.End - 0.5) return ("Skip Outro  ⏭", o.End);
+        return null;
+    }
+
+    private void OnSkipClicked(object? sender, EventArgs e)
+    {
+        try { _player.Time = (long)(_skipTarget * 1000); } catch { /* not seekable yet */ }
+        _skipButton.IsVisible = false;
     }
 
     // Read the decoded video size from libVLC (available a beat after the first frame) and show a

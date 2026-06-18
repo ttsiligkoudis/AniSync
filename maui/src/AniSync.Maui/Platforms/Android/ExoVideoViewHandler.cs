@@ -5,6 +5,7 @@ using AndroidX.Media3.Common;
 using AndroidX.Media3.ExoPlayer;
 using AndroidX.Media3.UI;
 using Microsoft.Maui.Handlers;
+using AniSync.Client.Services;
 using AndroidUri = Android.Net.Uri;
 
 namespace AniSync.Maui;
@@ -29,6 +30,13 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
     private bool _wasPlayingBeforeBackground;
     private int _scaleIndex;
     private TextView? _aspectButton;
+
+    // AniSkip OP/ED bands (absolute seconds) + the "Skip Intro/Outro" overlay button. Shown by the
+    // position ticker while inside a band; tapping (or D-pad OK) seeks just past it.
+    private SkipMark? _skipIntro;
+    private SkipMark? _skipOutro;
+    private Android.Widget.Button? _skipButton;
+    private long _skipTargetMs;
 
     // Controls we've already given a TV focus highlight (so we set each view's selector exactly once).
     private readonly HashSet<Android.Views.View> _highlighted = new();
@@ -123,6 +131,10 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         player.Prepare();
         player.PlayWhenReady = true;
 
+        _skipIntro = request.SkipIntro;
+        _skipOutro = request.SkipOutro;
+        if (_skipIntro is not null || _skipOutro is not null) EnsureSkipButton(platformView);
+
         StartTicker();
     }
 
@@ -137,6 +149,7 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         platformView.Player = null;
         try { _player?.Release(); } catch { /* already released */ }
         _player = null;
+        _skipButton = null;   // child of platformView, torn down with it
         base.DisconnectHandler(platformView);
     }
 
@@ -157,6 +170,7 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
                 {
                     long pos = p.CurrentPosition, dur = p.Duration;
                     if (dur > 0) VirtualView?.Request.OnProgress?.Invoke(pos / 1000.0, dur / 1000.0);
+                    UpdateSkipButton(pos / 1000.0);
                     if (!_ended && p.PlaybackState == StateEnded)
                     {
                         _ended = true;
@@ -175,6 +189,63 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         _ticking = false;
         _ticker = null;
         _tick = null;
+    }
+
+    // Build the "Skip Intro/Outro" overlay button once, anchored bottom-right over the PlayerView
+    // (a FrameLayout). Focusable so the D-pad can land on it and OK skips. Hidden until in a band.
+    private void EnsureSkipButton(PlayerView platformView)
+    {
+        if (_skipButton is not null) return;
+        var btn = new Android.Widget.Button(Context!)
+        {
+            Text = "Skip Intro",
+            Visibility = ViewStates.Gone,
+            Focusable = true,
+        };
+        btn.SetAllCaps(false);
+        btn.SetTextColor(Android.Graphics.Color.White);
+        btn.SetBackgroundColor(Android.Graphics.Color.Argb(190, 0, 0, 0));
+        btn.SetPadding(48, 24, 48, 24);
+        var lp = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent)
+        {
+            Gravity = GravityFlags.Bottom | GravityFlags.End,
+        };
+        lp.SetMargins(0, 0, 56, 132);   // clear of PlayerView's bottom control bar
+        btn.LayoutParameters = lp;
+        btn.Click += (_, _) =>
+        {
+            try { _player?.SeekTo(_skipTargetMs); } catch { /* not seekable yet */ }
+            btn.Visibility = ViewStates.Gone;
+        };
+        platformView.AddView(btn);
+        _skipButton = btn;
+    }
+
+    // Show / hide the skip button from the position ticker. Mirrors the libVLC player's ActiveBand.
+    private void UpdateSkipButton(double t)
+    {
+        if (_skipButton is null) return;
+        var band = ActiveSkipBand(t);
+        if (band is null)
+        {
+            if (_skipButton.Visibility == ViewStates.Visible) _skipButton.Visibility = ViewStates.Gone;
+            return;
+        }
+        _skipTargetMs = (long)((band.Value.End + 1) * 1000);   // land just past the band
+        _skipButton.Text = band.Value.Label;
+        if (_skipButton.Visibility != ViewStates.Visible)
+        {
+            _skipButton.Visibility = ViewStates.Visible;
+            _skipButton.RequestFocus();    // TV: put the D-pad on it so OK skips immediately
+        }
+    }
+
+    private (string Label, double End)? ActiveSkipBand(double t)
+    {
+        if (_skipIntro is { } i && t >= i.Start && t < i.End - 0.5) return ("Skip Intro", i.End);
+        if (_skipOutro is { } o && t >= o.Start && t < o.End - 0.5) return ("Skip Outro", o.End);
+        return null;
     }
 
     private void CycleScale()
