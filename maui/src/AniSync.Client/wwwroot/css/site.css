@@ -3084,7 +3084,10 @@ body.modal-open {
    (which left the odd button stranded on its own line and cramped the labels). */
 @media (max-width: 600px) {
     .btn-action-row { flex-direction: column; }
-    .btn-action-row > .btn-ghost { flex: 1 1 auto; width: 100%; }
+    /* In a column flex the flex-basis sizes the MAIN axis (height), so the danger pills' `flex: 1 1 9rem`
+       ballooned them into 9rem-tall blobs. Reset to an auto basis + full width like the ghost buttons. */
+    .btn-action-row > .btn-ghost,
+    .btn-action-row > .btn-danger-pill { flex: 1 1 auto; width: 100%; }
 }
 
 .btn-ghost {
