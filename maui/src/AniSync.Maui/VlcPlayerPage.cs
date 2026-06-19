@@ -746,6 +746,19 @@ public sealed class VlcPlayerPage : ContentPage
         try { await Navigation.PopModalAsync(); } catch { /* already closing */ }
     }
 
+    // Hardware / gesture back: if a bottom-sheet menu (subtitles / audio / speed / scaling) is open,
+    // back just dismisses it and keeps the player up. Only when no sheet is open does back fall through
+    // to the default (pop the modal = close the player), matching the prior behaviour.
+    protected override bool OnBackButtonPressed()
+    {
+        if (_sheetOverlay.IsVisible)
+        {
+            CloseSheet();
+            return true;   // consumed — don't close the player
+        }
+        return base.OnBackButtonPressed();
+    }
+
     // ── Controls visibility / auto-hide ─────────────────────────────────────────
     private void ToggleControls()
     {
