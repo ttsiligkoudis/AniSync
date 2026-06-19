@@ -1320,7 +1320,18 @@ public sealed class VlcPlayerPage : ContentPage
 
     private void OnSkipClicked(object? sender, EventArgs e)
     {
-        try { _player.Time = (long)(_skipTarget * 1000); } catch { /* not seekable yet */ }
+        try
+        {
+            var len = _player.Length;                 // ms; 0 until known
+            var targetMs = (long)(_skipTarget * 1000);
+            // An outro usually runs to the episode end, so End+1 lands at/after EOF — which libVLC can't
+            // seek to (it buffers then snaps back to the same spot, the reported bug). Clamp to ~1.5s before
+            // the end so the seek lands on real data and playback rolls into the natural end (→ EndReached).
+            if (len > 0 && targetMs > len - 1500) targetMs = len - 1500;
+            if (targetMs < 0) targetMs = 0;
+            _player.Time = targetMs;
+        }
+        catch { /* not seekable yet */ }
         _skipButton.IsVisible = false;
     }
 
