@@ -60,7 +60,10 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!RendererInfo.IsInteractive) return;
+        // No RendererInfo.IsInteractive guard: OnAfterRenderAsync never fires during SSR prerender anyway,
+        // and on the native MAUI head the Blazor render mode is unassigned so IsInteractive reports false —
+        // which previously skipped this pin entirely and left the dropdowns blank after an async load. The
+        // try/catch below covers the only real failure (no JS / disposed circuit).
         try
         {
             _js ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/AniSync.Client/js/lang-select.js");
