@@ -2403,8 +2403,37 @@ namespace AnimeList.Controllers
                     // /scrobble/stop at 100 % both adds to history AND clears the
                     // in-progress playback entry, so a finished title leaves Continue
                     // Watching instead of lingering there.
-                    var ok = await _traktService.StopScrobbleAsync(videoUid, req.Type, req.Id, season, episode, 100);
-                    return new JsonResult(new MarkWatchedResponse(ok, ok ? null : "trakt-not-connected"));
+                    var traktOk = await _traktService.StopScrobbleAsync(videoUid, req.Type, req.Id, season, episode, 100);
+
+                    // "Group anime seasons" addons expose anime as IMDb (tt) series ids, so a movie/series
+                    // mark can still be anime. When the id maps to a known anime, ALSO push it to the anime
+                    // trackers (AniList/MAL/Kitsu) — GetIdByService resolves the tt id + season to the right
+                    // entry inside the per-service save. The Trakt write above stays, so both stay in sync.
+                    var animeTracked = false;
+                    try
+                    {
+                        if (await _mappingService.IsAnimeImdbAsync(req.Id))
+                        {
+                            await _syncService.SaveProgressAndFanOutAsync(tokenData, req.Id, req.Season, req.Episode);
+                            animeTracked = true;
+                            _logger.LogInformation(
+                                "Marked watched (grouped-IMDb anime): {Id} S{Season}E{Episode} → anime trackers + Trakt({TraktOk}).",
+                                req.Id, req.Season, req.Episode, traktOk);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex,
+                            "Anime fan-out for grouped-IMDb title {Id} S{Season}E{Episode} failed.",
+                            req.Id, req.Season, req.Episode);
+                    }
+
+                    // Success when EITHER side recorded it: a Trakt-less user still gets anime tracking for
+                    // grouped anime (the trakt-not-connected report you saw), and a plain non-anime video
+                    // still surfaces the Trakt outcome.
+                    if (traktOk || animeTracked)
+                        return new JsonResult(new MarkWatchedResponse(true));
+                    return new JsonResult(new MarkWatchedResponse(false, "trakt-not-connected"));
                 }
 
                 // Single call into the shared SyncService helper: dispatches to the
