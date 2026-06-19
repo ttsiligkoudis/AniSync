@@ -274,7 +274,7 @@ public sealed class EpisodeStreamsBootstrap
 
 public sealed class EpisodeStreamAddonDto { public int Index { get; set; } public string Name { get; set; } = ""; }
 public sealed class EpisodeExternalLinkDto { public string? Site { get; set; } public string? Url { get; set; } }
-public sealed class EpisodeSkipTimesDto { public EpisodeSkipMarkerDto? Intro { get; set; } public EpisodeSkipMarkerDto? Outro { get; set; } }
+public sealed class EpisodeSkipTimesDto { public EpisodeSkipMarkerDto? Intro { get; set; } public EpisodeSkipMarkerDto? Recap { get; set; } public EpisodeSkipMarkerDto? Outro { get; set; } }
 public sealed class EpisodeSkipMarkerDto { public double Start { get; set; } public double End { get; set; } }
 
 /// <summary>Per-addon fan-out response from GET /api/v1/me/episode-streams?addonIndex=N.</summary>

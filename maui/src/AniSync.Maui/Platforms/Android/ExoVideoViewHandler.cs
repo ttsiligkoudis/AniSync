@@ -35,6 +35,7 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
     // position ticker while inside a band; tapping (or D-pad OK) seeks just past it.
     private SkipMark? _skipIntro;
     private SkipMark? _skipOutro;
+    private SkipMark? _skipRecap;
     private Android.Widget.Button? _skipButton;
     private long _skipTargetMs;
 
@@ -133,7 +134,8 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
 
         _skipIntro = request.SkipIntro;
         _skipOutro = request.SkipOutro;
-        if (_skipIntro is not null || _skipOutro is not null) EnsureSkipButton(platformView);
+        _skipRecap = request.SkipRecap;
+        if (_skipIntro is not null || _skipOutro is not null || _skipRecap is not null) EnsureSkipButton(platformView);
 
         StartTicker();
     }
@@ -259,6 +261,7 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
     private (string Label, double End)? ActiveSkipBand(double t)
     {
         if (_skipIntro is { } i && t >= i.Start && t < i.End - 0.5) return ("Skip Intro", i.End);
+        if (_skipRecap is { } r && t >= r.Start && t < r.End - 0.5) return ("Skip Recap", r.End);
         if (_skipOutro is { } o && t >= o.Start && t < o.End - 0.5) return ("Skip Outro", o.End);
         return null;
     }

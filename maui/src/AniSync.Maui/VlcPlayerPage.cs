@@ -1,6 +1,7 @@
 using LibVLCSharp.Shared;
 using LibVLCSharp.MAUI;
 using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
 using Microsoft.Maui.Controls.Shapes;
 // Alias (not a namespace import) — LibVLCSharp.Shared also defines a SubtitleTrack, so a plain
 // `using AniSync.Client.Services;` makes the name ambiguous (CS0104).
@@ -91,10 +92,16 @@ public sealed class VlcPlayerPage : ContentPage
     private readonly string _preferredSubLang;
     private readonly string? _fetchDiag;         // TEMP: page-side subtitle-fetch diagnostics for the sheet title
 
-    // AniSkip OP/ED bands (absolute seconds) + the corner "Skip Intro/Outro" button. Shown while the
+    // Intro/recap/outro skip bands (absolute seconds) + the corner "Skip …" button. Shown while the
     // current position is inside a band; tapping seeks just past it. Phone-only (TV uses ExoPlayerPage).
+    // The _skip* fields are the API-provided bands (AniSkip / introdb); the _eff* fields are what the
+    // button actually uses — seeded from the API bands, then filled from embedded media chapters for any
+    // band type the API left null (chapter fallback, phone only).
     private readonly SkipMark? _skipIntro;
     private readonly SkipMark? _skipOutro;
+    private readonly SkipMark? _skipRecap;
+    private SkipMark? _effIntro, _effOutro, _effRecap;
+    private bool _chaptersTried;
     private readonly Button _skipButton;
     private double _skipTarget;
 
@@ -108,7 +115,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     public VlcPlayerPage(MediaPlayer player, string title, IReadOnlyList<SubtitleTrack>? externalSubs = null,
         string? preferredAudioLang = null, string? preferredSubLang = null, string? fetchDiag = null,
-        SkipMark? skipIntro = null, SkipMark? skipOutro = null)
+        SkipMark? skipIntro = null, SkipMark? skipOutro = null, SkipMark? skipRecap = null)
     {
         _player = player;
         _externalSubs = externalSubs ?? Array.Empty<SubtitleTrack>();
@@ -117,6 +124,11 @@ public sealed class VlcPlayerPage : ContentPage
         _fetchDiag = fetchDiag;
         _skipIntro = skipIntro;
         _skipOutro = skipOutro;
+        _skipRecap = skipRecap;
+        // Effective bands start as the API bands; chapter fallback fills any null type once playing.
+        _effIntro = skipIntro;
+        _effOutro = skipOutro;
+        _effRecap = skipRecap;
         Title = title;
         BackgroundColor = Colors.Black;
         NavigationPage.SetHasNavigationBar(this, false);
@@ -393,6 +405,8 @@ public sealed class VlcPlayerPage : ContentPage
             if (_isTv) _playPause.Focus();
             // Default the subtitle to English (matching the web) once tracks have had a moment to parse.
             if (!_defaultSubScheduled) { _defaultSubScheduled = true; Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(700), () => { ApplyDefaultSubtitle(); ApplyDefaultAudio(); }); }
+            // Chapter fallback for skip bands the API didn't cover (chapters lag the first frame).
+            if (!_chaptersTried) Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(500), TryApplyChapterFallback);
         });
         _player.Paused += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPlay; StopHideTimer(); KeepAwake(false); });
         // Buffering climbs 0→100 on connect and re-fires on a re-buffer; show the spinner until it's full.
@@ -1305,11 +1319,12 @@ public sealed class VlcPlayerPage : ContentPage
         UpdateSkipButton();
     }
 
-    // Show / hide the AniSkip corner button based on the current position. Driven off the same
-    // position ticks as the clock, so it appears within ~1s of entering an OP/ED band.
+    // Show / hide the skip corner button based on the current position. Driven off the same
+    // position ticks as the clock, so it appears within ~1s of entering a band. No early-out on the
+    // raw API bands — chapter fallback may add bands after the constructor; ActiveBand returns null
+    // when nothing matches.
     private void UpdateSkipButton()
     {
-        if (_skipIntro is null && _skipOutro is null) return;   // nothing to skip for this episode
         var t = _player.Time / 1000.0;
         var band = ActiveBand(t);
         if (band is null)
@@ -1322,12 +1337,58 @@ public sealed class VlcPlayerPage : ContentPage
         if (!_skipButton.IsVisible) _skipButton.IsVisible = true;
     }
 
-    // The active OP/ED band at time t (seconds), or null. The −0.5 keeps the button from flashing
-    // for a frame right at the boundary — mirrors the web head's ActiveSkipBand.
+    // The active intro/recap/outro band at time t (seconds), or null. Reads the effective bands
+    // (API + chapter fallback). The −0.5 keeps the button from flashing for a frame at the boundary.
     private (string Label, double End)? ActiveBand(double t)
     {
-        if (_skipIntro is { } i && t >= i.Start && t < i.End - 0.5) return ("Skip Intro  ⏭", i.End);
-        if (_skipOutro is { } o && t >= o.Start && t < o.End - 0.5) return ("Skip Outro  ⏭", o.End);
+        if (_effIntro is { } i && t >= i.Start && t < i.End - 0.5) return ("Skip Intro  ⏭", i.End);
+        if (_effRecap is { } r && t >= r.Start && t < r.End - 0.5) return ("Skip Recap  ⏭", r.End);
+        if (_effOutro is { } o && t >= o.Start && t < o.End - 0.5) return ("Skip Outro  ⏭", o.End);
+        return null;
+    }
+
+    // Phone-only fallback: when the API (AniSkip/introdb) didn't supply a band type, derive it from the
+    // file's embedded chapter markers (e.g. "Intro"/"Recap"/"Credits") — common in scene/Blu-ray rips.
+    // One-shot, read after the first frame since chapters parse a beat behind Playing. The API always wins
+    // per type; chapters only fill the null ones.
+    private void TryApplyChapterFallback()
+    {
+        if (_chaptersTried) return;
+        _chaptersTried = true;
+        try
+        {
+            var titleIdx = _player.Title;
+            if (titleIdx < 0) titleIdx = 0;
+            var chapters = _player.FullChapterDescriptions(titleIdx);
+            if (chapters is null || chapters.Length == 0) return;
+            for (int k = 0; k < chapters.Length; k++)
+            {
+                var ch = chapters[k];
+                var startSec = ch.TimeOffset / 1000.0;
+                var endSec = (k + 1 < chapters.Length)
+                    ? chapters[k + 1].TimeOffset / 1000.0
+                    : (ch.Duration > 0 ? startSec + ch.Duration / 1000.0 : startSec + 90);
+                switch (ClassifyChapter(ch.Name))
+                {
+                    case "intro" when _effIntro is null: _effIntro = new SkipMark(startSec, endSec); break;
+                    case "recap" when _effRecap is null: _effRecap = new SkipMark(startSec, endSec); break;
+                    case "outro" when _effOutro is null: _effOutro = new SkipMark(startSec, endSec); break;
+                }
+            }
+            UpdateSkipButton();   // a band we're already inside should show immediately
+        }
+        catch { /* chapters unavailable on this source — API-only */ }
+    }
+
+    // Classify a chapter title into a skip band. Recap is checked before ED so "previously" wins;
+    // \bop\b / \bed\b are narrow word matches so they don't catch "open"/"edit".
+    private static string? ClassifyChapter(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        var n = name.ToLowerInvariant();
+        if (Regex.IsMatch(n, @"\b(intro|opening|op)\b")) return "intro";
+        if (Regex.IsMatch(n, @"\b(recap|previously|last time)\b")) return "recap";
+        if (Regex.IsMatch(n, @"\b(outro|credits?|ending|ed|end card)\b")) return "outro";
         return null;
     }
 

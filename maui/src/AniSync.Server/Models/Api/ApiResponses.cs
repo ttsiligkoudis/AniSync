@@ -230,9 +230,9 @@ namespace AnimeList.Models.Api
     /// the source picker's "Other sites" bucket.</summary>
     public record EpisodeExternalLinkDto(string Site, string Url);
 
-    /// <summary>AniSkip intro/outro markers for the episode, or null members when
-    /// AniSkip has no match. Seconds from file start.</summary>
-    public record EpisodeSkipTimesDto(EpisodeSkipMarkerDto? Intro, EpisodeSkipMarkerDto? Outro);
+    /// <summary>Intro / recap / outro skip markers for the episode (AniSkip for anime,
+    /// introdb.app for series), or null members when there's no match. Seconds from file start.</summary>
+    public record EpisodeSkipTimesDto(EpisodeSkipMarkerDto? Intro, EpisodeSkipMarkerDto? Recap, EpisodeSkipMarkerDto? Outro);
 
     /// <summary>One AniSkip marker (start/end in seconds).</summary>
     public record EpisodeSkipMarkerDto(double Start, double End);
