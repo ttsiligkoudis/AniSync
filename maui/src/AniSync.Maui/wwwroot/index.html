@@ -49,6 +49,9 @@
     <script src="_framework/blazor.webview.js" autostart="false"></script>
     <!-- Shared shell behaviour (theme toggle, back button, mobile "More" sheet). -->
     <script src="_content/AniSync.Client/js/chrome.js"></script>
+    <!-- Native head only: open external (target=_blank) links in the system browser. Android's WebView
+         drops _blank, so without this the Sign-up / API-key / manifest links do nothing. -->
+    <script src="js/native-links.js"></script>
     <!-- D-pad / remote spatial navigation for Android TV / Google TV. Self-detects TV mode (UA + a no-touch
          capability heuristic) and no-ops on phones, so it's safe to load on the native head everywhere. -->
     <script src="_content/AniSync.Client/js/tv-navigation.js"></script>
