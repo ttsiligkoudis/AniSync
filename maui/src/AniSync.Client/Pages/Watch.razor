@@ -475,9 +475,10 @@
 
     private string? _playingUrl;
     private PlaybackRequest? _pendingWebPlay;
-    // "anime" (no ?type=) | "movie" | "series". Anime watch links carry no type query, so the absence of
-    // ?type= means anime — NOT series. Defaulting to "series" routed anime mark-watched to Trakt
-    // (type=series) instead of the anime tracker dispatch, so AniList/MAL/Kitsu never got the progress.
+    // "anime" | "movie" | "series". Anime watch links carry no ?type=, and an anime-scheme id is anime
+    // regardless of any type query (see IsAnimeSchemeId) — defaulting to "series" routed anime
+    // mark-watched to Trakt (type=series) instead of the anime tracker dispatch, so AniList/MAL/Kitsu
+    // never got the progress.
     private string _type = "anime";
     private string _title = "Watch";
     private string _episodeLabel = "Watch";
@@ -568,7 +569,13 @@
         // episode / bootstrap awaits below resolve — so the empty "No streaming
         // sources found" line never flashes ahead of the streams loading in.
         _loadingSources = true;
-        _type = QueryValue("type") ?? "anime";   // no ?type= ⇒ anime (routes mark-watched to the tracker, not Trakt)
+        // Anime vs video is decided by the id scheme (the anime-mapping namespace), not just the URL —
+        // an anilist:/mal:/kitsu: id is always anime even if a stray ?type= rides along, mirroring
+        // Detail.IsVideo. This keeps anime mark-watched on the tracker dispatch instead of Trakt.
+        var typeQuery = QueryValue("type");
+        _type = IsAnimeSchemeId ? "anime"
+              : typeQuery is "movie" or "series" ? typeQuery
+              : "anime";
         var season = Season ?? 1;
 
         // Preference persists across episodes/launches (matches localStorage
@@ -1583,6 +1590,13 @@
             ? $"/meta/{Uri.EscapeDataString(Id)}/watch/{(ep.Season > 0 ? ep.Season : 1)}/{ep.Episode}{q}"
             : $"/meta/{Uri.EscapeDataString(Id)}/watch/{ep.Episode}{q}";
     }
+
+    // True when the id is an anime-mapping scheme (anilist:/mal:/kitsu:), which is anime no matter what
+    // ?type= says. Mirrors Detail.IsAnimeSchemeId so both pages agree on anime-vs-video classification.
+    private bool IsAnimeSchemeId =>
+        Id.StartsWith("anilist:", StringComparison.OrdinalIgnoreCase)
+        || Id.StartsWith("mal:", StringComparison.OrdinalIgnoreCase)
+        || Id.StartsWith("kitsu:", StringComparison.OrdinalIgnoreCase);
 
     private string? QueryValue(string key)
     {
