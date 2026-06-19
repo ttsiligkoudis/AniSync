@@ -215,7 +215,22 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         btn.LayoutParameters = lp;
         btn.Click += (_, _) =>
         {
-            try { _player?.SeekTo(_skipTargetMs); } catch { /* not seekable yet */ }
+            try
+            {
+                var p = _player;
+                if (p is not null)
+                {
+                    // An outro usually runs to the end, so End+1 lands at/after EOF. Clamp to ~1.5s before
+                    // the end so the seek lands on real data and rolls into the natural end, rather than
+                    // refusing the seek / snapping back.
+                    var target = _skipTargetMs;
+                    var dur = p.Duration;
+                    if (dur > 0 && target > dur - 1500) target = dur - 1500;
+                    if (target < 0) target = 0;
+                    p.SeekTo(target);
+                }
+            }
+            catch { /* not seekable yet */ }
             btn.Visibility = ViewStates.Gone;
         };
         platformView.AddView(btn);
