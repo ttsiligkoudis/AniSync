@@ -127,6 +127,29 @@ namespace AnimeList.Controllers
                 outro == null ? null : new EpisodeSkipMarkerDto(outro.Start, outro.End));
         }
 
+        // Collapse the AniSkip vocabulary to the three UI bands.
+        private static string BandKind(string type) => type switch
+        {
+            "op" or "mixed-op" => "intro",
+            "recap" => "recap",
+            "ed" or "mixed-ed" => "ed",
+            _ => null,
+        };
+
+        // Merge two marker lists, preferring the primary (AniSkip) — secondary (introdb) only
+        // contributes band kinds the primary is missing.
+        private static List<SkipTime> MergeBands(List<SkipTime> primary, List<SkipTime> secondary)
+        {
+            var result = new List<SkipTime>(primary ?? []);
+            var present = new HashSet<string>(result.Select(m => BandKind(m.Type)).Where(k => k != null));
+            foreach (var m in secondary ?? [])
+            {
+                var k = BandKind(m.Type);
+                if (k != null && present.Add(k)) result.Add(m);
+            }
+            return result;
+        }
+
         // Anime-scheme ids own the AniSkip path; everything else (tt…/tmdb:) is treated as video.
         private static bool IsAnimeSchemeId(string id) =>
             !string.IsNullOrEmpty(id) && (
@@ -2283,31 +2306,49 @@ namespace AnimeList.Controllers
                 .Select(l => new EpisodeExternalLinkDto(l.Site, l.Url))
                 .ToList();
 
-            // AniSkip — same lookup chain StreamController.BuildSkipHintsAsync uses for
-            // the Stremio addon side. Returns the intro/outro markers for the resolved
-            // MAL id; surfaces silently as null when there's no MAL mapping or markers.
+            // Skip markers: AniSkip for anime (per-cour MAL episode), introdb.app for series
+            // (and as a gap-filler for anime that carry an IMDb mapping). Both best-effort —
+            // null members when there's no match.
             EpisodeSkipTimesDto skipTimes = null;
             try
             {
+                var markers = new List<SkipTime>();
+
+                // 1. Anime → AniSkip (crowdsourced op/ed/recap, keyed on the MAL cour episode).
                 var malIdRaw = await _mappingService.GetIdByService(id, AnimeService.MyAnimeList, season);
-                if (int.TryParse(malIdRaw, out var malId) && malId > 0 && episode > 0)
+                var isAnime = int.TryParse(malIdRaw, out var malId) && malId > 0;
+                if (isAnime && episode > 0)
+                    markers.AddRange(await _aniSkipService.GetSkipTimesAsync(malId, episode));
+
+                // 2. introdb (keyless) via the IMDb id — primary for non-anime series, and fills
+                //    any band AniSkip didn't supply for anime (e.g. recap). AniSkip wins per band.
+                var haveAllBands = markers.Select(m => BandKind(m.Type)).Where(k => k != null).Distinct().Count() >= 3;
+                if (!haveAllBands && episode > 0 && type != "movie")
                 {
-                    // Anime → AniSkip (op/ed + recap, now surfaced).
-                    var markers = await _aniSkipService.GetSkipTimesAsync(malId, episode);
-                    skipTimes = MapSkipMarkers(markers);
-                }
-                else if (episode > 0 && type != "movie" && !IsAnimeSchemeId(id))
-                {
-                    // Non-anime series → introdb.app, keyed on the IMDb id (Cinemeta ids ARE
-                    // imdb 'tt' ids; tmdb: ids resolve via the mapping's source links). No-ops
-                    // when no introdb key is configured or the id has no imdb mapping.
-                    var imdbId = await ResolveImdbIdAsync(id);
+                    string imdbId = null;
+                    int introSeason = season ?? 1;
+                    if (isAnime)
+                    {
+                        // Anime shares one IMDb listing across cours; ImdbSeason points into it
+                        // (same coordinate Torrentio uses), so introdb gets the right episode.
+                        var links = await _mappingService.BuildSourceLinksAsync(id);
+                        imdbId = links?.ImdbId;
+                        introSeason = links?.ImdbSeason ?? season ?? 1;
+                    }
+                    else if (!IsAnimeSchemeId(id))
+                    {
+                        // Non-anime series: Cinemeta ids ARE imdb 'tt' ids; tmdb: resolves via links.
+                        imdbId = await ResolveImdbIdAsync(id);
+                    }
+
                     if (!string.IsNullOrEmpty(imdbId))
                     {
-                        var markers = await _introDbService.GetSkipTimesAsync(imdbId, season ?? 1, episode);
-                        skipTimes = MapSkipMarkers(markers);
+                        var introMarkers = await _introDbService.GetSkipTimesAsync(imdbId, introSeason, episode);
+                        markers = MergeBands(markers, introMarkers);   // existing (AniSkip) bands win
                     }
                 }
+
+                skipTimes = MapSkipMarkers(markers);
             }
             catch (Exception ex)
             {
