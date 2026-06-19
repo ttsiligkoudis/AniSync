@@ -154,10 +154,10 @@ function isIosSafari() {
 // Idempotent — clears prior bands before re-painting, so it's safe to call on
 // every loadedmetadata / progress tick. Returns true once a band was painted (so
 // the caller can stop retrying for an unknown-duration video).
-export function paintSkipRanges(videoId, intro, outro, dur) {
+export function paintSkipRanges(videoId, intro, recap, outro, dur) {
     var video = document.getElementById(videoId);
     if (!video) return false;
-    if (!intro && !outro) { clearSkipRanges(videoId); return true; }
+    if (!intro && !recap && !outro) { clearSkipRanges(videoId); return true; }
 
     // Prefer a custom progress bar if a future stage-3b ArtPlayer swap added one;
     // otherwise overlay a thin strip on the bottom edge of the <video> frame (the
@@ -230,11 +230,12 @@ export function paintSkipRanges(videoId, intro, outro, dur) {
             band.style.top = '0';
             band.style.height = '100%';
         }
-        band.title = (kind === 'intro' ? 'Opening' : 'Ending')
+        band.title = (kind === 'intro' ? 'Opening' : kind === 'recap' ? 'Recap' : 'Ending')
             + ' — ' + Math.round(range.start) + 's → ' + Math.round(range.end) + 's';
         host.appendChild(band);
     }
     addBand(intro, 'intro');
+    addBand(recap, 'recap');
     addBand(outro, 'outro');
     return true;
 }

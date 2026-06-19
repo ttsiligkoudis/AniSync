@@ -309,6 +309,7 @@ builder.Services.AddSingleton<ISubtitleService, OpenSubtitlesService>();
 builder.Services.AddScoped<ISyncService, SyncService>();
 builder.Services.AddScoped<IMergedListService, MergedListService>();
 builder.Services.AddSingleton<IAniSkipService, AniSkipService>();
+builder.Services.AddSingleton<IIntroDbService, IntroDbService>();   // series intro/recap/outro (introdb.app)
 builder.Services.AddSingleton<IFillerListService, FillerListService>();
 builder.Services.AddSingleton<IUserListCache, UserListCache>();
 // One-time codes bridging native (MAUI) OAuth logins back to the app via anisync://.

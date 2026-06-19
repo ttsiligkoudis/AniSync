@@ -700,7 +700,7 @@
         // heuristic only has to cover the no-season /watch/{episode} route.
         var streamSeason = Season is int explicitSeason ? explicitSeason : (_hasSeasons ? season : (int?)null);
         var bootstrap = await Api.EpisodeStreamsBootstrapAsync(
-            Id, streamSeason, Episode, _type == "movie" ? "movie" : null);
+            Id, streamSeason, Episode, _type is "movie" or "series" ? _type : null);
 
         _loadingSources = false;
         _sourcesResolved = true;
@@ -768,7 +768,7 @@
     private async Task<List<EpisodeStreamDto>> FetchAddonAsync(int addonIndex, int? streamSeason, int season)
     {
         var list = await Api.EpisodeStreamsAsync(
-            Id, addonIndex, streamSeason, Episode, _type == "movie" ? "movie" : null);
+            Id, addonIndex, streamSeason, Episode, _type is "movie" or "series" ? _type : null);
         return list.ToList();
     }
 
@@ -1041,7 +1041,8 @@
             Diagnostics: Env.SupportsNativePlayback ? SubtitleDiag() : null,
             // AniSkip bands for the native players' Skip button (web drives its own JS overlay).
             SkipIntro: Env.SupportsNativePlayback && _skipTimes?.Intro is { } si ? new SkipMark(si.Start, si.End) : null,
-            SkipOutro: Env.SupportsNativePlayback && _skipTimes?.Outro is { } so ? new SkipMark(so.Start, so.End) : null);
+            SkipOutro: Env.SupportsNativePlayback && _skipTimes?.Outro is { } so ? new SkipMark(so.Start, so.End) : null,
+            SkipRecap: Env.SupportsNativePlayback && _skipTimes?.Recap is { } sr ? new SkipMark(sr.Start, sr.End) : null);
 
         if (Env.SupportsNativePlayback)
         {
@@ -1163,7 +1164,8 @@
             await Player.PlayAsync(new PlaybackRequest(nativeUrl, PlayerTitle(), resume, NativeSubtitles(), OnProgress, OnEnded,
                 PreferredAudioLanguage: _prefAudioLang, PreferredSubtitleLanguage: _prefSubLang, Diagnostics: SubtitleDiag(),
                 SkipIntro: _skipTimes?.Intro is { } si2 ? new SkipMark(si2.Start, si2.End) : null,
-                SkipOutro: _skipTimes?.Outro is { } so2 ? new SkipMark(so2.Start, so2.End) : null));
+                SkipOutro: _skipTimes?.Outro is { } so2 ? new SkipMark(so2.Start, so2.End) : null,
+                SkipRecap: _skipTimes?.Recap is { } sr2 ? new SkipMark(sr2.Start, sr2.End) : null));
             _playingUrl = s.Url;
             StateHasChanged();
             return;
@@ -1430,6 +1432,8 @@
         if (times is null) return null;
         if (times.Intro is { } intro && t >= intro.Start && t < intro.End - 0.5)
             return new SkipBand("Skip intro", intro.Start, intro.End);
+        if (times.Recap is { } recap && t >= recap.Start && t < recap.End - 0.5)
+            return new SkipBand("Skip recap", recap.Start, recap.End);
         if (times.Outro is { } outro && t >= outro.Start && t < outro.End - 0.5)
             return new SkipBand("Skip outro", outro.Start, outro.End);
         return null;
@@ -1561,13 +1565,13 @@
     private async Task PaintSkipRangesAsync(double durationSec = 0)
     {
         if (Env.SupportsNativePlayback || _playingUrl is null || _skipTimes is null) return;
-        if (_skipTimes.Intro is null && _skipTimes.Outro is null) return;
+        if (_skipTimes.Intro is null && _skipTimes.Recap is null && _skipTimes.Outro is null) return;
         if (!(durationSec > 0)) return; // wait for a real duration before converting seconds→%
         try
         {
             object? Band(EpisodeSkipMarkerDto? m) => m is null ? null : new { start = m.Start, end = m.End };
             var painted = await (await LaunchModuleAsync()).InvokeAsync<bool>(
-                "paintSkipRanges", "watch-video", Band(_skipTimes.Intro), Band(_skipTimes.Outro), durationSec);
+                "paintSkipRanges", "watch-video", Band(_skipTimes.Intro), Band(_skipTimes.Recap), Band(_skipTimes.Outro), durationSec);
             if (painted) _skipRangesPainted = true;
         }
         catch { /* best-effort — the corner Skip button still works without the paint */ }

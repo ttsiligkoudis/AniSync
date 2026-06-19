@@ -113,7 +113,7 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
                     ?? throw new InvalidOperationException("No navigation host available to present the player.");
                 var page = new VlcPlayerPage(player, request.Title, externalSubs,
                     request.PreferredAudioLanguage, request.PreferredSubtitleLanguage, request.Diagnostics,
-                    request.SkipIntro, request.SkipOutro);
+                    request.SkipIntro, request.SkipOutro, request.SkipRecap);
                 await nav.PushModalAsync(page);
             });
         }

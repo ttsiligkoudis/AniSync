@@ -55,6 +55,7 @@ namespace AnimeList.Controllers
         private readonly IMergedListService _mergedListService;
         private readonly IAddonStreamService _addonStreamService;
         private readonly IAniSkipService _aniSkipService;
+        private readonly IIntroDbService _introDbService;
         private readonly ISubtitleService _subtitleService;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<UserApiController> _logger;
@@ -76,6 +77,7 @@ namespace AnimeList.Controllers
             IMergedListService mergedListService,
             IAddonStreamService addonStreamService,
             IAniSkipService aniSkipService,
+            IIntroDbService introDbService,
             ISubtitleService subtitleService,
             IHttpClientFactory httpClientFactory,
             ILogger<UserApiController> logger)
@@ -96,9 +98,54 @@ namespace AnimeList.Controllers
             _mergedListService = mergedListService;
             _addonStreamService = addonStreamService;
             _aniSkipService = aniSkipService;
+            _introDbService = introDbService;
             _subtitleService = subtitleService;
             _httpClientFactory = httpClientFactory;
             _logger = logger;
+        }
+
+        // Build the intro/recap/outro DTO from AniSkip/introdb markers — shared vocabulary
+        // (op/mixed-op → intro, recap → recap, ed/mixed-ed → outro), last-wins per band like
+        // BuildSkipHintsAsync. Returns null when there's nothing usable.
+        private static EpisodeSkipTimesDto MapSkipMarkers(List<SkipTime> markers)
+        {
+            if (markers == null || markers.Count == 0) return null;
+            SkipTime intro = null, recap = null, outro = null;
+            foreach (var m in markers)
+            {
+                switch (m.Type)
+                {
+                    case "op": case "mixed-op": intro = m; break;
+                    case "recap": recap = m; break;
+                    case "ed": case "mixed-ed": outro = m; break;
+                }
+            }
+            if (intro == null && recap == null && outro == null) return null;
+            return new EpisodeSkipTimesDto(
+                intro == null ? null : new EpisodeSkipMarkerDto(intro.Start, intro.End),
+                recap == null ? null : new EpisodeSkipMarkerDto(recap.Start, recap.End),
+                outro == null ? null : new EpisodeSkipMarkerDto(outro.Start, outro.End));
+        }
+
+        // Anime-scheme ids own the AniSkip path; everything else (tt…/tmdb:) is treated as video.
+        private static bool IsAnimeSchemeId(string id) =>
+            !string.IsNullOrEmpty(id) && (
+                id.StartsWith("anilist:", StringComparison.OrdinalIgnoreCase)
+                || id.StartsWith("mal:", StringComparison.OrdinalIgnoreCase)
+                || id.StartsWith("kitsu:", StringComparison.OrdinalIgnoreCase));
+
+        // Resolve a watch id to an IMDb 'tt' id for introdb. Cinemeta series ids already ARE
+        // imdb ids; a tmdb: id resolves through the mapping's source links (best-effort).
+        private async Task<string> ResolveImdbIdAsync(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return null;
+            if (id.StartsWith("tt", StringComparison.Ordinal)) return id;
+            try
+            {
+                var links = await _mappingService.BuildSourceLinksAsync(id);
+                return links?.ImdbId;
+            }
+            catch { return null; }
         }
 
         /// <summary>
@@ -2245,29 +2292,26 @@ namespace AnimeList.Controllers
                 var malIdRaw = await _mappingService.GetIdByService(id, AnimeService.MyAnimeList, season);
                 if (int.TryParse(malIdRaw, out var malId) && malId > 0 && episode > 0)
                 {
+                    // Anime → AniSkip (op/ed + recap, now surfaced).
                     var markers = await _aniSkipService.GetSkipTimesAsync(malId, episode);
-                    if (markers != null && markers.Count > 0)
+                    skipTimes = MapSkipMarkers(markers);
+                }
+                else if (episode > 0 && type != "movie" && !IsAnimeSchemeId(id))
+                {
+                    // Non-anime series → introdb.app, keyed on the IMDb id (Cinemeta ids ARE
+                    // imdb 'tt' ids; tmdb: ids resolve via the mapping's source links). No-ops
+                    // when no introdb key is configured or the id has no imdb mapping.
+                    var imdbId = await ResolveImdbIdAsync(id);
+                    if (!string.IsNullOrEmpty(imdbId))
                     {
-                        // Multiple "op" variants (op / mixed-op) can exist — last-wins
-                        // matches what BuildSkipHintsAsync does.
-                        SkipTime intro = null, outro = null;
-                        foreach (var m in markers)
-                        {
-                            switch (m.Type)
-                            {
-                                case "op": case "mixed-op": intro = m; break;
-                                case "ed": case "mixed-ed": outro = m; break;
-                            }
-                        }
-                        skipTimes = new EpisodeSkipTimesDto(
-                            intro == null ? null : new EpisodeSkipMarkerDto(intro.Start, intro.End),
-                            outro == null ? null : new EpisodeSkipMarkerDto(outro.Start, outro.End));
+                        var markers = await _introDbService.GetSkipTimesAsync(imdbId, season ?? 1, episode);
+                        skipTimes = MapSkipMarkers(markers);
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "AniSkip lookup failed for {Id} ep {Ep}.", id, episode);
+                _logger.LogWarning(ex, "Skip-times lookup failed for {Id} ep {Ep}.", id, episode);
             }
 
             // Subtitles are fetched lazily by the watch page once the user picks a
