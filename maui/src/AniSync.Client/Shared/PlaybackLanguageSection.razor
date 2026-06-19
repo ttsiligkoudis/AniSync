@@ -3,11 +3,12 @@
 @implements IAsyncDisposable
 
 @* Default playback languages (per-account, synced). Subtitle applies to both heads; audio is the
-   native player only (the browser can't switch audio tracks). Controlled by the Account page, which
-   owns the values and persists them on the shared "Save changes" bar — changing a dropdown only marks
-   the form dirty. The DOM <select> value is set explicitly via JS after render (lang-select.js):
-   Blazor's value binding leaves a native select blank when the value loads async / across prerender,
-   so we pin it ourselves once the options exist. @onchange bubbles the pick up to the page. *@
+   native player only (the browser can't switch audio tracks). Owned by the parent page, which persists
+   the values on the shared "Save changes" bar — changing a dropdown only marks the form dirty. The
+   matching <option> carries `selected` so the control shows the right value on first render across every
+   head (Blazor's <select> value binding leaves a native select blank when the value loads async / across
+   prerender, and the lang-select.js JS pin didn't apply inside the native WebView). The JS pin below is
+   kept as a belt-and-suspenders re-assert for the web async-load case. @onchange bubbles the pick up. *@
 <section class="section-card">
     <span class="section-title">Playback languages</span>
     <p class="section-description">
@@ -20,7 +21,7 @@
             <select class="lang-select" @ref="_subRef" @onchange="OnSubtitleChanged">
                 @foreach (var (langCode, name) in PlaybackLanguages.Options)
                 {
-                    <option value="@langCode">@name</option>
+                    <option value="@langCode" selected="@(langCode == _subtitle)">@name</option>
                 }
             </select>
         </div>
@@ -31,7 +32,7 @@
                 <select class="lang-select" @ref="_audRef" @onchange="OnAudioChanged">
                     @foreach (var (langCode, name) in PlaybackLanguages.Options)
                     {
-                        <option value="@langCode">@name</option>
+                        <option value="@langCode" selected="@(langCode == _audio)">@name</option>
                     }
                 </select>
             </div>
