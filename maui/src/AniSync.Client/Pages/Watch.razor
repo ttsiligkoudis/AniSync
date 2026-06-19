@@ -475,7 +475,10 @@
 
     private string? _playingUrl;
     private PlaybackRequest? _pendingWebPlay;
-    private string _type = "series";
+    // "anime" (no ?type=) | "movie" | "series". Anime watch links carry no type query, so the absence of
+    // ?type= means anime — NOT series. Defaulting to "series" routed anime mark-watched to Trakt
+    // (type=series) instead of the anime tracker dispatch, so AniList/MAL/Kitsu never got the progress.
+    private string _type = "anime";
     private string _title = "Watch";
     private string _episodeLabel = "Watch";
     private string _seasonLabel = "";
@@ -565,7 +568,7 @@
         // episode / bootstrap awaits below resolve — so the empty "No streaming
         // sources found" line never flashes ahead of the streams loading in.
         _loadingSources = true;
-        _type = QueryValue("type") ?? "series";
+        _type = QueryValue("type") ?? "anime";   // no ?type= ⇒ anime (routes mark-watched to the tracker, not Trakt)
         var season = Season ?? 1;
 
         // Preference persists across episodes/launches (matches localStorage
