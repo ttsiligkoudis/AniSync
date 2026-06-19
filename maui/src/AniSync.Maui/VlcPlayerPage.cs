@@ -481,6 +481,23 @@ public sealed class VlcPlayerPage : ContentPage
         SetImmersive(false);
         // Always release the wake-lock when leaving the player so it can't leak past the session.
         KeepAwake(false);
+        // Tear the native video surface down deterministically (LibVLCSharp issue #659). The libVLC
+        // platform VideoView removes its AWindow surface-callback in Detach(); left to the GC, that
+        // finalizer runs AFTER the MediaPlayer's AWindow has been disposed and throws
+        // ObjectDisposedException on the finalizer thread — the AWindow crash in the diagnostic log.
+        // Detaching the player + disconnecting the handler here removes the callback while the AWindow
+        // is still valid and disposes the platform view so its finalizer is suppressed. Mirrors
+        // ExoPlayerPage's teardown.
+        TeardownVideoView(_videoView);
+    }
+
+    // Detach the player from a VideoView and dispose its platform view now, while its native AWindow is
+    // still alive — see OnDisappearing / LibVLCSharp #659. Static + null-tolerant so it's safe from both
+    // the page-close path and the background-resume surface swap.
+    private static void TeardownVideoView(VideoView view)
+    {
+        try { view.MediaPlayer = null; } catch { /* surface / player already gone */ }
+        try { view.Handler?.DisconnectHandler(); } catch { /* already disconnected */ }
     }
 
     // App backgrounded (Home / recents) → pause so audio doesn't keep playing behind an inactive app.
@@ -508,6 +525,9 @@ public sealed class VlcPlayerPage : ContentPage
             {
                 _videoView.MediaPlayer = null;   // detach from the dead surface BEFORE removing it
                 _root.Remove(_videoView);
+                // Dispose the swapped-out view's platform peer too, so it doesn't reach the GC finalizer
+                // and crash on the dead AWindow (LibVLCSharp #659) — same reason as the page-close path.
+                try { _videoView.Handler?.DisconnectHandler(); } catch { /* already disconnected */ }
 
                 var fresh = new VideoView
                 {
