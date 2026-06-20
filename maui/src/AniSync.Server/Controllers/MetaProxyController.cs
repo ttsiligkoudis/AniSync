@@ -145,6 +145,14 @@ namespace AnimeList.Controllers
 
                 var client = _httpClientFactory.CreateClient();
                 using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                // Forward the *client's* IP so the resolver/debrid binds the post-redirect CDN URL
+                // to the device that will actually play it — not to our server's egress IP. Without
+                // this, IP-locked hosts (ElfHosted/MediaFusion, RealDebrid) bind our server IP and the
+                // device gets a "wrong IP" placeholder on playback. Mirrors AddonStreamService's
+                // X-Forwarded-For on the stream-list fetch.
+                var clientIp = ResolveClientIp(HttpContext);
+                if (!string.IsNullOrEmpty(clientIp))
+                    req.Headers.TryAddWithoutValidation("X-Forwarded-For", clientIp);
                 // Range to keep the body tiny — we only care about the post-redirect URI.
                 req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
                 // Most CF-protected resolvers reject obvious bot UAs; a plausible browser
@@ -166,6 +174,31 @@ namespace AnimeList.Controllers
                 _logger.LogWarning(ex, "ResolveStream failed for {Url}.", url);
                 return new JsonResult(new ResolveStreamResponse(url));
             }
+        }
+
+        /// <summary>
+        /// Best-effort client IP for forwarding to IP-locked stream hosts. Consults the
+        /// CF / Fly / X-Forwarded-For headers our edge sets, then the connection address.
+        /// Mirrors UserApiController.ResolveClientIp.
+        /// </summary>
+        private static string ResolveClientIp(HttpContext ctx)
+        {
+            string headerIp = null;
+            if (ctx.Request.Headers.TryGetValue("CF-Connecting-IP", out var cf) && cf.Count > 0)
+                headerIp = cf[0]?.Trim();
+            if (string.IsNullOrEmpty(headerIp)
+                && ctx.Request.Headers.TryGetValue("Fly-Client-IP", out var fly) && fly.Count > 0)
+                headerIp = fly[0]?.Trim();
+            if (string.IsNullOrEmpty(headerIp)
+                && ctx.Request.Headers.TryGetValue("X-Forwarded-For", out var xff) && xff.Count > 0)
+                headerIp = xff[0]?.Split(',')[0]?.Trim();
+
+            if (!string.IsNullOrEmpty(headerIp)) return headerIp;
+
+            var addr = ctx.Connection.RemoteIpAddress;
+            if (addr == null) return null;
+            if (addr.IsIPv4MappedToIPv6) addr = addr.MapToIPv4();
+            return addr.ToString();
         }
     }
 }
