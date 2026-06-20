@@ -767,8 +767,29 @@
 
     private async Task<List<EpisodeStreamDto>> FetchAddonAsync(int addonIndex, int? streamSeason, int season)
     {
-        var list = await Api.EpisodeStreamsAsync(
-            Id, addonIndex, streamSeason, Episode, _type is "movie" or "series" ? _type : null);
+        var type = _type is "movie" or "series" ? _type : null;
+
+        // Device-direct: fetch the addon's stream list from THIS device (browser / WebView) so the
+        // debrid binds its IP-locked URLs to the device that will play — mirroring how Stremio works.
+        // Routing this through our server bound the wrong IP (often a different IP family), which the
+        // host rejected with "Wrong IP" on playback. Falls back to the server fetch on any failure
+        // (e.g. an addon that blocks cross-origin fetches), so there's never a regression.
+        try
+        {
+            var fetchInfo = await Api.EpisodeStreamFetchUrlAsync(Id, addonIndex, streamSeason, Episode, type);
+            if (!string.IsNullOrEmpty(fetchInfo?.FetchUrl))
+            {
+                var raw = await (await ModuleAsync()).InvokeAsync<string?>("fetchText", fetchInfo!.FetchUrl);
+                if (!string.IsNullOrEmpty(raw))
+                {
+                    var parsed = await Api.EpisodeStreamsParseAsync(Id, addonIndex, raw!);
+                    return parsed.ToList();
+                }
+            }
+        }
+        catch { /* fall through to the server-side fetch */ }
+
+        var list = await Api.EpisodeStreamsAsync(Id, addonIndex, streamSeason, Episode, type);
         return list.ToList();
     }
 

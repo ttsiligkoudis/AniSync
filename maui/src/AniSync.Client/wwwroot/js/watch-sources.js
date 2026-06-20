@@ -17,6 +17,22 @@
 
 var STREAM_CACHE_TTL_MS = 10 * 60 * 1000;
 
+// Device-direct stream fetch: fetch the addon's /stream/{type}/{id}.json from THIS device
+// (browser tab or MAUI WebView) so debrid hosts bind the playback token to the device's own
+// IP — not AniSync's backend, whose IP (and IP family) differs from the device's media path.
+// Returns the raw JSON text, or null on CORS / network / non-2xx so the caller can fall back
+// to the server-side fetch. credentials:'omit' keeps it a simple CORS request (no preflight).
+export async function fetchText(url) {
+    if (!url) return null;
+    try {
+        var resp = await fetch(url, { credentials: 'omit', redirect: 'follow' });
+        if (!resp.ok) return null;
+        return await resp.text();
+    } catch (_) {
+        return null;   // CORS-blocked / offline — caller falls back to the server fetch
+    }
+}
+
 // Read the cached fan-out result for an episode. Returns the stored data object
 // (the combined { debridStreams, externalLinks, skipTimes, … } shape) or null
 // when the key is empty (anonymous — no uid), missing, expired, or unparseable.

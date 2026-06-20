@@ -517,6 +517,37 @@ namespace AnimeList.Services
         }
 
         /// <summary>
+        /// Builds the addon's <c>/stream/{type}/{id}.json</c> URL WITHOUT fetching it —
+        /// so the device (browser / WebView) can fetch it directly and the addon binds its
+        /// IP-locked playback tokens to the device that will actually play, not our backend.
+        /// Returns null when the URL or id can't be built.
+        /// </summary>
+        public string BuildStreamsUrl(
+            string manifestUrl, AnimeSourceLinks links, int? season, int? episode, AnimeService primaryService)
+        {
+            if (string.IsNullOrWhiteSpace(manifestUrl) || links == null) return null;
+            var addonRoot = ExtractAddonRoot(manifestUrl);
+            if (addonRoot == null) return null;
+            var stremioId = BuildStremioId(links, season, episode, primaryService);
+            if (stremioId == null) return null;
+            return $"{addonRoot}/stream/{stremioId.Value.Type}/{stremioId.Value.Path}.json";
+        }
+
+        /// <summary>
+        /// Parses a raw <c>{ streams: [...] }</c> JSON body the device fetched directly —
+        /// the parse half of <see cref="GetStreamsAsync"/>, reused so device-fetched streams
+        /// get the same quality/size/HEVC/HDR/audio labelling. Returns [] on any failure.
+        /// </summary>
+        public IReadOnlyList<AddonStream> ParseStreamsJson(string json, string manifestUrl)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return [];
+            var addonRoot = ExtractAddonRoot(manifestUrl);
+            if (addonRoot == null) return [];
+            try { return ParseStreams(json, addonRoot); }
+            catch { return []; }
+        }
+
+        /// <summary>
         /// Strips <c>/manifest.json</c> and any trailing slash from the
         /// user-pasted URL to derive the addon root that prefixes
         /// <c>/stream/{type}/{id}.json</c>. Returns null when the input

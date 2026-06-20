@@ -85,6 +85,12 @@ public interface IAniSyncApi
     /// seeders / language / provider / infoHash / isHevc / source / hdr / audio /
     /// audioUnsupported / description) for the client to merge + cap + warn on.</summary>
     Task<IReadOnlyList<EpisodeStreamDto>> EpisodeStreamsAsync(string id, int addonIndex, int? season, int episode, string? type = null, CancellationToken ct = default);
+    /// <summary>Device-direct: get the addon /stream URL so this device fetches the IP-bound list
+    /// itself — GET /api/v1/me/episode-streams?addonIndex=N&amp;deviceFetch=1.</summary>
+    Task<EpisodeStreamFetchResponse?> EpisodeStreamFetchUrlAsync(string id, int addonIndex, int? season, int episode, string? type = null, CancellationToken ct = default);
+    /// <summary>Relay the raw addon /stream JSON the device fetched for enriched server-side parsing —
+    /// POST /api/v1/me/episode-streams/parse.</summary>
+    Task<IReadOnlyList<EpisodeStreamDto>> EpisodeStreamsParseAsync(string id, int addonIndex, string rawJson, CancellationToken ct = default);
     /// <summary>Release-matched subtitle lookup for the picked source — GET
     /// /api/v1/me/episode-subtitles. <paramref name="filename"/> is the chosen source's
     /// file name (the OpenSubtitles timing-match signal).</summary>

@@ -69,6 +69,20 @@ namespace AnimeList.Services.Interfaces
             AnimeService primaryService,
             string clientIp = null,
             CancellationToken ct = default);
+
+        /// <summary>
+        /// Builds the addon's <c>/stream/{type}/{id}.json</c> URL without fetching it, so the
+        /// device can fetch it directly (device-direct playback — keeps the debrid IP-binding on
+        /// the device that plays). Returns null when the URL/id can't be built.
+        /// </summary>
+        string BuildStreamsUrl(
+            string manifestUrl, AnimeSourceLinks links, int? season, int? episode, AnimeService primaryService);
+
+        /// <summary>
+        /// Parses a raw <c>{ streams: [...] }</c> body the device fetched directly, reusing the
+        /// same labelling as <see cref="GetStreamsAsync"/>. Returns [] on any failure.
+        /// </summary>
+        IReadOnlyList<AddonStream> ParseStreamsJson(string json, string manifestUrl);
     }
 
     /// <summary>

@@ -279,6 +279,8 @@ public sealed class EpisodeSkipMarkerDto { public double Start { get; set; } pub
 
 /// <summary>Per-addon fan-out response from GET /api/v1/me/episode-streams?addonIndex=N.</summary>
 public sealed class EpisodeStreamsResponse { public List<EpisodeStreamDto> DebridStreams { get; set; } = new(); }
+// Device-direct fan-out: the addon /stream URL for the device to fetch itself (binds the device's IP).
+public sealed class EpisodeStreamFetchResponse { public string? FetchUrl { get; set; } public string? Provider { get; set; } }
 
 /// <summary>One enriched debrid stream row. <see cref="Url"/> is the resolved direct
 /// file URL; <see cref="InfoHash"/> lets the client dedup identical releases across
