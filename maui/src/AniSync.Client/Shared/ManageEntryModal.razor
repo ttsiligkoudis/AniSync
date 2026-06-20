@@ -65,6 +65,13 @@
                        their loaded values on save). Pointer heads get the full form. *@
                     @if (!Env.IsTv)
                     {
+                    @* A multi-season video series tracks per-episode watched state in the detail
+                       page's episode list (the per-episode eye markers), so a single linear
+                       "episodes watched / total-across-all-seasons" counter here is misleading —
+                       hide it for those and keep status / score / dates / notes. Movies and
+                       single-season series keep the counter. *@
+                    @if (!HideEpisodeCounter)
+                    {
                     <div class="entry-modal-field">
                         <label class="entry-modal-label" for="entry-modal-progress">Episodes Watched</label>
                         <div class="entry-modal-progress-row">
@@ -76,6 +83,7 @@
                             }
                         </div>
                     </div>
+                    }
                     <div class="entry-modal-field">
                         <label class="entry-modal-label" for="entry-modal-score">Score</label>
                         <div class="entry-modal-progress-row">
@@ -138,6 +146,9 @@
     /// routes the GET / save / remove through Trakt (watchlist / history / rating) instead
     /// of the anime tracker. Null / empty for anime.</summary>
     [Parameter] public string? MediaType { get; set; }
+    /// <summary>True when the video series spans more than one season (from the detail page's
+    /// episode list). Hides the misleading linear all-seasons episode counter — see HideEpisodeCounter.</summary>
+    [Parameter] public bool MultiSeason { get; set; }
 
     private bool _loading;
     private bool _saving;
@@ -170,6 +181,11 @@
     // the media type so the server routes to Trakt instead of the anime tracker. Null
     // type for anime keeps the existing behaviour.
     private bool IsVideo => MediaType == "movie" || MediaType == "series";
+
+    // Hide the single linear "episodes watched / total" field for a multi-season video series —
+    // its per-episode progress is tracked in the detail page's episode list, so a flat count
+    // across all seasons (e.g. 2 / 204) just confuses. Movies / single-season series keep it.
+    private bool HideEpisodeCounter => MediaType == "series" && MultiSeason;
 
     // Per-service score range — mirrors the MVC ManageEntry scoreMax/scoreStep:
     // AniList 0–100 step 0.1; MyAnimeList 0–10 step 1; Kitsu 0–10 step 0.5.
