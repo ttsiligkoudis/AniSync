@@ -2110,7 +2110,11 @@ body.modal-open {
        to the input. */
     .site-search-results {
         position: fixed;
-        top: 56px;
+        /* Offset by the header height PLUS the top safe-area inset — without the inset the
+           panel starts at the status-bar line and is drawn over the search input on notched
+           phones (MAUI edge-to-edge), hiding the text being typed. Mirrors the .site-header
+           padding-top so the panel sits just under the input, not on top of it. */
+        top: calc(56px + env(safe-area-inset-top, 0px));
         left: 12px;
         right: 12px;
         min-width: 0;
