@@ -203,6 +203,20 @@ public sealed class AniSyncApi : IAniSyncApi
         return resp?.DebridStreams ?? new();
     }
 
+    // Device-direct: ask the server for the addon /stream URL so THIS device fetches the IP-bound
+    // list itself (debrid binds the playing device, not our backend). Null when unavailable.
+    public Task<EpisodeStreamFetchResponse?> EpisodeStreamFetchUrlAsync(string id, int addonIndex, int? season, int episode, string? type = null, CancellationToken ct = default)
+        => GetOrDefault<EpisodeStreamFetchResponse>(EpisodeStreamsUrl(id, season, episode, type, addonIndex) + "&deviceFetch=true", ct);
+
+    // Relays the raw addon /stream JSON the device fetched back to the server for enriched parsing.
+    public async Task<IReadOnlyList<EpisodeStreamDto>> EpisodeStreamsParseAsync(string id, int addonIndex, string rawJson, CancellationToken ct = default)
+    {
+        var resp = await PostJson<object, EpisodeStreamsResponse>(
+            $"api/v1/me/episode-streams/parse?id={Uri.EscapeDataString(id)}&addonIndex={addonIndex}",
+            new { json = rawJson }, ct);
+        return resp?.DebridStreams ?? new();
+    }
+
     // Shared URL builder for the two episode-streams modes — bootstrap (addonIndex
     // null) and per-addon fan-out. Movie-typed entries forward ?type=movie so the
     // server drops season+episode from the addon id shape.

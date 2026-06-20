@@ -242,6 +242,13 @@ namespace AnimeList.Models.Api
     /// MetaController.EpisodeStreams' addonIndex branch.</summary>
     public record EpisodeStreamsResponse(List<EpisodeStreamDto> DebridStreams);
 
+    /// <summary>Device-direct fan-out: the addon /stream URL for the client to fetch itself
+    /// (so the debrid binds the device's IP, not our backend's), plus the addon's display name.</summary>
+    public record EpisodeStreamFetchResponse(string FetchUrl, string Provider);
+
+    /// <summary>Body for POST episode-streams/parse — the raw addon /stream JSON the device fetched.</summary>
+    public record StreamParseRequest(string Json);
+
     /// <summary>One enriched debrid stream row. Quality / size / seeders / language /
     /// provider / infoHash / isHevc / source / hdr / audio / audioUnsupported /
     /// description are the same fields the MVC EpisodeStreams addonIndex branch

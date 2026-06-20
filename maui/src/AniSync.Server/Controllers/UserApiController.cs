@@ -2195,7 +2195,7 @@ namespace AnimeList.Controllers
         [ProducesResponseType(typeof(EpisodeStreamsBootstrapResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(EpisodeStreamsResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> EpisodeStreams(string id, int? season, int episode, string type = null, int? addonIndex = null)
+        public async Task<IActionResult> EpisodeStreams(string id, int? season, int episode, string type = null, int? addonIndex = null, bool deviceFetch = false)
         {
             if (string.IsNullOrWhiteSpace(id))
                 return BadRequest(new ApiError("id required"));
@@ -2239,39 +2239,25 @@ namespace AnimeList.Controllers
                 if (!isMovie && lookupSeason.HasValue && lookupSeason.Value > 1)
                     sourceLinks.ImdbSeason = lookupSeason.Value;
 
-                var clientIp = ResolveClientIp(HttpContext);
                 var addon = addons[addonIndex.Value];
+
+                // Device-direct: hand the client the addon /stream URL so the DEVICE fetches the
+                // IP-bound list itself (binding the debrid token to the device that will play,
+                // not our backend's IP). The client relays the raw JSON back to /parse below.
+                if (deviceFetch)
+                {
+                    var fetchUrl = _addonStreamService.BuildStreamsUrl(
+                        addon.Url, sourceLinks, lookupSeason, lookupEpisode, tokenData.anime_service);
+                    return new JsonResult(new EpisodeStreamFetchResponse(fetchUrl, addon.Name));
+                }
+
+                // Server-fetch fallback (older clients / addons that block CORS on the device).
+                var clientIp = ResolveClientIp(HttpContext);
                 var streams = await _addonStreamService.GetStreamsAsync(
                     addon.Url, sourceLinks, lookupSeason, lookupEpisode,
                     tokenData.anime_service, clientIp);
 
-                var labelled = streams.Select(s => new EpisodeStreamDto(
-                    Name: s.Name,
-                    Title: s.Title,
-                    Url: s.Url,
-                    Quality: s.Quality,
-                    Size: s.Size,
-                    Playable: s.Playable,
-                    Seeders: s.Seeders,
-                    Language: s.Language,
-                    Provider: addon.Name,
-                    // Torrent hash — the client merge dedups identical releases returned
-                    // by more than one addon before applying the 5-per-resolution cap.
-                    InfoHash: s.InfoHash,
-                    IsHevc: s.IsHevc,
-                    Source: s.Source,
-                    Hdr: s.Hdr,
-                    Audio: s.Audio,
-                    // Derived from the already-detected audio label (not in the stream
-                    // service, so the shared parse path stays untouched). Dolby/DTS/TrueHD
-                    // play as silent video in most browsers — the watch page warns + offers
-                    // an external player.
-                    AudioUnsupported: IsBrowserUnsupportedAudio(s.Audio),
-                    // Raw addon description — the client renders the release title from it
-                    // (Stremio's right column) instead of the short name.
-                    Description: s.Description)).ToList();
-
-                return new JsonResult(new EpisodeStreamsResponse(labelled));
+                return new JsonResult(new EpisodeStreamsResponse(LabelStreams(streams, addon.Name)));
             }
 
             // Bootstrap mode: hand the client the list of configured addons plus the
@@ -2365,6 +2351,57 @@ namespace AnimeList.Controllers
                 Addons: addonList,
                 ExternalLinks: externalLinks,
                 SkipTimes: skipTimes));
+        }
+
+        // Maps parsed addon streams onto the enriched DTO the watch page renders. Shared by the
+        // server-fetch fan-out and the device-direct /parse endpoint so both label identically.
+        private List<EpisodeStreamDto> LabelStreams(IReadOnlyList<AddonStream> streams, string provider)
+            => streams.Select(s => new EpisodeStreamDto(
+                Name: s.Name,
+                Title: s.Title,
+                Url: s.Url,
+                Quality: s.Quality,
+                Size: s.Size,
+                Playable: s.Playable,
+                Seeders: s.Seeders,
+                Language: s.Language,
+                Provider: provider,
+                InfoHash: s.InfoHash,
+                IsHevc: s.IsHevc,
+                Source: s.Source,
+                Hdr: s.Hdr,
+                Audio: s.Audio,
+                AudioUnsupported: IsBrowserUnsupportedAudio(s.Audio),
+                Description: s.Description)).ToList();
+
+        /// <summary>
+        /// Device-direct parse: the client fetched the addon's /stream JSON itself (so the debrid
+        /// bound the device's IP), and POSTs the raw body here for the same enriched labelling the
+        /// server-fetch fan-out applies. Keeps all parsing server-side while the IP-binding network
+        /// hit stays on the device that plays.
+        /// </summary>
+        [HttpPost("episode-streams/parse")]
+        [RequireConfig]
+        [ProducesResponseType(typeof(EpisodeStreamsResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiError), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> EpisodeStreamsParse(string id, int addonIndex, [FromBody] StreamParseRequest body)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new ApiError("id required"));
+
+            var tokenData = await _tokenService.GetAccessTokenAsync(ResolvedConfig);
+            tokenData ??= new TokenData { anime_service = AnimeService.Kitsu };
+            var (uid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
+
+            var addons = !string.IsNullOrEmpty(uid)
+                ? await _configStore.GetStreamAddonsAsync(uid)
+                : new List<StreamAddon>();
+            if (addonIndex < 0 || addonIndex >= addons.Count)
+                return new JsonResult(new EpisodeStreamsResponse(new List<EpisodeStreamDto>()));
+
+            var addon = addons[addonIndex];
+            var streams = _addonStreamService.ParseStreamsJson(body?.Json ?? "", addon.Url);
+            return new JsonResult(new EpisodeStreamsResponse(LabelStreams(streams, addon.Name)));
         }
 
         /// <summary>
