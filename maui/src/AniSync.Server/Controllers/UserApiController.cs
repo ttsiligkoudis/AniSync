@@ -271,7 +271,7 @@ namespace AnimeList.Controllers
                 if (type == "movie" || type == "series")
                 {
                     var (vUid, _) = await _configStore.FindUidByIdentityAsync(tokenData);
-                    var (vStatus, vProgress, vTotal, vScore) =
+                    var (vStatus, vProgress, vTotal, vScore, vSeasons) =
                         await GetTraktVideoStateAsync(vUid, type, id);
                     var vEntry = string.IsNullOrEmpty(vStatus)
                         ? null
@@ -283,9 +283,13 @@ namespace AnimeList.Controllers
                             TotalEpisodes = vTotal > 0 ? vTotal : null,
                             Score = vScore,
                         };
+                    // vSeasons drives the modal's per-season episode picker for a
+                    // multi-season series (empty otherwise). Returned even when the title
+                    // isn't on a list yet (vEntry null), so the user can pick a season
+                    // while adding it — same as the anime franchise dropdown.
                     return new JsonResult(new EntryResponse(
                         vEntry,
-                        Seasons: new List<EntrySeason>(),
+                        Seasons: vSeasons,
                         Service: (int)AnimeService.Trakt,
                         SelectedEntryId: id));
                 }
@@ -1383,9 +1387,9 @@ namespace AnimeList.Controllers
 
                     // Only read the Trakt entry when actually connected — keeps the
                     // status pill empty ("Add to List") for an unconnected viewer.
-                    var (vStatus, vProgress, vTotal, vScore) = traktConnected
+                    var (vStatus, vProgress, vTotal, vScore, _) = traktConnected
                         ? await GetTraktVideoStateAsync(uid, type, id)
-                        : ("", 0, type == "series" ? (int?)null : 1, (double?)null);
+                        : ("", 0, type == "series" ? (int?)null : 1, (double?)null, new List<EntrySeason>());
                     return new JsonResult(new DetailStateResponse(
                         OnList: !string.IsNullOrEmpty(vStatus),
                         Status: string.IsNullOrEmpty(vStatus) ? null : vStatus,
@@ -1620,21 +1624,47 @@ namespace AnimeList.Controllers
         /// status + 0 progress when there's no uid or the title isn't tracked. Mirrors
         /// the MVC GetTraktVideoEntryAsync / VideoDetail pill derivation.
         /// </summary>
-        private async Task<(string Status, int Progress, int? TotalEpisodes, double? Score)>
+        private async Task<(string Status, int Progress, int? TotalEpisodes, double? Score, List<EntrySeason> Seasons)>
             GetTraktVideoStateAsync(string uid, string type, string id)
         {
-            if (string.IsNullOrEmpty(uid)) return ("", 0, null, null);
+            if (string.IsNullOrEmpty(uid)) return ("", 0, null, null, new List<EntrySeason>());
 
             int? totalEpisodes = 1;
+            var seasons = new List<EntrySeason>();
             if (type == "series")
             {
                 var meta = await _cinemeta.GetVideoMetaAsync(type, id);
                 totalEpisodes = meta?.videos?.Count;
+                seasons = BuildVideoSeasons(meta);
             }
 
             var entry = await _traktService.GetVideoEntryAsync(uid, type, id);
             var (status, progress) = DeriveTraktVideoStatus(type, entry, totalEpisodes);
-            return (status, progress, totalEpisodes, entry.Rating);
+            return (status, progress, totalEpisodes, entry.Rating, seasons);
+        }
+
+        // Per-season options for the modal's video Season dropdown. Groups Cinemeta's
+        // episode list by season the SAME way ApplyTraktVideoSaveAsync orders it for the
+        // watched prefix (season > 0 ? season : 1, ascending), so each season's episode
+        // count — and the cumulative offset the client derives from it — lines up exactly
+        // with which episodes "watched up to N" marks. A video series' progress is one
+        // contiguous prefix across that ordered list, so the picker is purely a UI lens
+        // over the global count; the save still receives the global progress. Returns
+        // empty for a single-season show — no picker needed.
+        private static List<EntrySeason> BuildVideoSeasons(Meta meta)
+        {
+            if (meta?.videos is not { Count: > 0 } videos) return new List<EntrySeason>();
+            var seasons = videos
+                .GroupBy(v => v.season > 0 ? v.season : 1)
+                .OrderBy(g => g.Key)
+                .Select(g => new EntrySeason
+                {
+                    Id = g.Key.ToString(),
+                    Label = $"Season {g.Key}",
+                    TotalEpisodes = g.Count(),
+                })
+                .ToList();
+            return seasons.Count > 1 ? seasons : new List<EntrySeason>();
         }
 
         // Projects a TraktVideoEntry onto the pill/modal's (status, progress) shape.

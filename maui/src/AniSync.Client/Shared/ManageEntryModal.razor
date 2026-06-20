@@ -31,16 +31,19 @@
             else
             {
                 <form class="entry-modal-form" @onsubmit="Save" @onsubmit:preventDefault>
-                    @* Season selector — only for franchises split across multiple service
-                       entries (a cross-service id mapped to ≥ 2 cours). Picking a cour
-                       refetches that mapping's saved entry and rebinds the form. Mirrors
-                       the MVC ManageEntry #seasonSelect. *@
+                    @* Season selector. Two shapes share the dropdown:
+                       • Anime — franchises split across multiple service entries (a
+                         cross-service id mapped to ≥ 2 cours). Picking a cour refetches
+                         that mapping's saved entry and rebinds the form.
+                       • Video (Trakt) — a multi-season series. Picking a season just
+                         re-lenses the Episodes Watched field onto that season's slice of
+                         the global progress; no refetch (see OnSeasonChanged). *@
                     @if (!Env.IsTv && _seasons.Count > 1)
                     {
                         <div class="entry-modal-field">
                             <label class="entry-modal-label" for="entry-modal-season">Season</label>
                             <select id="entry-modal-season" class="entry-modal-select"
-                                    value="@_selectedEntryId" @onchange="OnSeasonChanged">
+                                    value="@(IsVideo ? _selectedSeason.ToString() : _selectedEntryId)" @onchange="OnSeasonChanged">
                                 @foreach (var s in _seasons)
                                 {
                                     <option value="@s.Id">@s.Label</option>
@@ -65,25 +68,21 @@
                        their loaded values on save). Pointer heads get the full form. *@
                     @if (!Env.IsTv)
                     {
-                    @* A multi-season video series tracks per-episode watched state in the detail
-                       page's episode list (the per-episode eye markers), so a single linear
-                       "episodes watched / total-across-all-seasons" counter here is misleading —
-                       hide it for those and keep status / score / dates / notes. Movies and
-                       single-season series keep the counter. *@
-                    @if (!HideEpisodeCounter)
-                    {
+                    @* Episodes Watched. For a multi-season video series the Season dropdown
+                       scopes this to the picked season (EpisodesFieldValue / EpisodesFieldTotal
+                       translate between the season slice and the global count the server
+                       stores); for everything else it's the plain progress / total. *@
                     <div class="entry-modal-field">
                         <label class="entry-modal-label" for="entry-modal-progress">Episodes Watched</label>
                         <div class="entry-modal-progress-row">
                             <input id="entry-modal-progress" class="entry-modal-input" type="number" min="0"
-                                   max="@(_total?.ToString())" @bind="_progress" />
-                            @if (_total is int t && t > 0)
+                                   max="@(EpisodesFieldTotal?.ToString())" @bind="EpisodesFieldValue" />
+                            @if (EpisodesFieldTotal is int t && t > 0)
                             {
                                 <span class="entry-modal-total">/ @t</span>
                             }
                         </div>
                     </div>
-                    }
                     <div class="entry-modal-field">
                         <label class="entry-modal-label" for="entry-modal-score">Score</label>
                         <div class="entry-modal-progress-row">
@@ -146,9 +145,6 @@
     /// routes the GET / save / remove through Trakt (watchlist / history / rating) instead
     /// of the anime tracker. Null / empty for anime.</summary>
     [Parameter] public string? MediaType { get; set; }
-    /// <summary>True when the video series spans more than one season (from the detail page's
-    /// episode list). Hides the misleading linear all-seasons episode counter — see HideEpisodeCounter.</summary>
-    [Parameter] public bool MultiSeason { get; set; }
 
     private bool _loading;
     private bool _saving;
@@ -182,10 +178,62 @@
     // type for anime keeps the existing behaviour.
     private bool IsVideo => MediaType == "movie" || MediaType == "series";
 
-    // Hide the single linear "episodes watched / total" field for a multi-season video series —
-    // its per-episode progress is tracked in the detail page's episode list, so a flat count
-    // across all seasons (e.g. 2 / 204) just confuses. Movies / single-season series keep it.
-    private bool HideEpisodeCounter => MediaType == "series" && MultiSeason;
+    // ── Video per-season episode lens ────────────────────────────────────────
+    // A video series' progress is a single contiguous prefix across the
+    // season-ordered episode list — the server marks ordered.Take(global) watched.
+    // For a multi-season series the server returns one _seasons option per season
+    // (Id = season number, TotalEpisodes = that season's count, ordered ascending
+    // to match the save's ordering). The dropdown is a UI lens: it shows / edits
+    // the picked season's slice of the prefix while _progress stays the global
+    // count the server reads. _selectedSeason is the picked season number.
+    private bool VideoSeasonPicker => IsVideo && _seasons.Count > 1;
+    private int _selectedSeason = 1;
+
+    private static int SeasonNum(string? id) => int.TryParse(id, out var n) ? n : 0;
+
+    // Episode count of the picked season — the "/ N" + input max in season mode.
+    private int SelectedSeasonTotal =>
+        _seasons.FirstOrDefault(s => SeasonNum(s.Id) == _selectedSeason)?.TotalEpisodes ?? 0;
+
+    // Episodes in every season ordered before the picked one — the global-progress
+    // offset at which the picked season's first episode sits.
+    private int SelectedSeasonOffset =>
+        _seasons.Where(s => SeasonNum(s.Id) < _selectedSeason).Sum(s => s.TotalEpisodes ?? 0);
+
+    // The Episodes Watched input: the picked season's local progress in season mode
+    // (global minus the season's offset, clamped to the season), else the global count.
+    private int EpisodesFieldValue
+    {
+        get => VideoSeasonPicker
+            ? Math.Clamp(_progress - SelectedSeasonOffset, 0, SelectedSeasonTotal)
+            : _progress;
+        set => _progress = VideoSeasonPicker
+            ? SelectedSeasonOffset + Math.Clamp(value, 0, SelectedSeasonTotal)
+            : value;
+    }
+
+    // The "/ N" total + input max shown beside the field.
+    private int? EpisodesFieldTotal => VideoSeasonPicker ? SelectedSeasonTotal : _total;
+
+    // Land the dropdown on the season the watched prefix currently ends in (the
+    // "current" season): walk seasons ascending, consuming each one's episodes from
+    // the global progress until the remainder falls inside a season. Progress 0 →
+    // first season; a season watched in full stays on that season (local == its total)
+    // rather than jumping to the next at 0.
+    private void InitVideoSeason()
+    {
+        if (!VideoSeasonPicker) { _selectedSeason = 1; return; }
+        var ordered = _seasons.OrderBy(s => SeasonNum(s.Id)).ToList();
+        var remaining = _progress;
+        _selectedSeason = SeasonNum(ordered[0].Id);
+        foreach (var s in ordered)
+        {
+            _selectedSeason = SeasonNum(s.Id);
+            var count = s.TotalEpisodes ?? 0;
+            if (remaining <= count) break;
+            remaining -= count;
+        }
+    }
 
     // Per-service score range — mirrors the MVC ManageEntry scoreMax/scoreStep:
     // AniList 0–100 step 0.1; MyAnimeList 0–10 step 1; Kitsu 0–10 step 0.5.
@@ -230,6 +278,7 @@
         _service = resp?.Service;
         ApplyScoreRange();
         BindEntry(resp?.Entry);
+        InitVideoSeason();   // land the video Season dropdown on the in-progress season
         _loading = false;
     }
 
@@ -262,13 +311,21 @@
         }
     }
 
-    // User picked a different cour from the dropdown → refetch that mapping's saved
-    // entry by its id and rebind. Mirrors the MVC #seasonSelect change handler, which
-    // re-reads StremioGetEntry for the chosen cour's id.
+    // User picked a different season / cour from the dropdown.
     private async Task OnSeasonChanged(ChangeEventArgs e)
     {
         var courId = e.Value?.ToString();
         if (string.IsNullOrEmpty(courId)) return;
+
+        // Video: the season list is a UI lens over the one global progress, so just
+        // re-point the Episodes Watched field at the picked season — no refetch, no
+        // form rebind (status / score / dates are series-level and stay put).
+        if (IsVideo)
+        {
+            _selectedSeason = SeasonNum(courId);
+            return;
+        }
+
         _selectedEntryId = courId;
         _loading = true;
         _error = null;

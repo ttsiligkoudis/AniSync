@@ -508,7 +508,6 @@ else
 
 <ManageEntryModal Id="@Id" Name="@(_meta?.Name ?? string.Empty)"
                   MediaType="@(IsVideo ? VideoMediaType : null)"
-                  MultiSeason="_multiSeason"
                   Visible="_modalOpen"
                   OnClose="() => _modalOpen = false"
                   OnSaved="OnEntrySaved" />
