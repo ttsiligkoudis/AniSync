@@ -332,14 +332,18 @@ namespace AnimeList.Services
             "[Events]\n" +
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n";
 
-        // Two timestamps of a VTT cue header: "[HH:]MM:SS.mmm --> [HH:]MM:SS.mmm".
+        // Two timestamps of a VTT cue header + any settings tail: "[HH:]MM:SS.mmm -->
+        // [HH:]MM:SS.mmm[ settings]".
         private static readonly Regex VttCueTimes = new(
-            @"^((?:\d{2}:)?\d{2}:\d{2}\.\d{3})\s+-->\s+((?:\d{2}:)?\d{2}:\d{2}\.\d{3})",
+            @"^((?:\d{2}:)?\d{2}:\d{2}\.\d{3})\s+-->\s+((?:\d{2}:)?\d{2}:\d{2}\.\d{3})([^\n]*)",
             RegexOptions.Compiled);
 
-        // Builds an ASS document from a WebVTT body, one Dialogue line per cue. ASS override
-        // blocks ({\an8}, {\pos…}) already inline in the cue text are kept verbatim (libass
-        // renders them); basic HTML styling is mapped to ASS tags and any other tag dropped.
+        // Builds an ASS document from a WebVTT body, one Dialogue line per cue. Positioning is
+        // carried over in whatever form the cue expresses it: WebVTT cue settings (line/position/
+        // align) are translated to a leading {\an…[\pos…]} override, and any ASS override blocks
+        // already inline in the cue text ({\an8}, {\pos…}) are kept verbatim — libass renders both,
+        // so signs land where the author placed them while plain dialogue stays bottom-centre.
+        // Basic HTML styling is mapped to ASS tags and any other tag dropped.
         private static string VttToAss(string vtt)
         {
             var sb = new StringBuilder(AssPreamble);
@@ -351,6 +355,7 @@ namespace AnimeList.Services
                 if (!m.Success) continue;
                 var start = VttTsToAss(m.Groups[1].Value);
                 var end = VttTsToAss(m.Groups[2].Value);
+                var posOverride = AssOverrideFromVttSettings(m.Groups[3].Value);
 
                 var text = new StringBuilder();
                 for (var j = i + 1; j < lines.Length; j++)
@@ -362,9 +367,48 @@ namespace AnimeList.Services
                 var body = ConvertVttInlineTags(text.ToString());
                 if (body.Length == 0) continue;
                 sb.Append("Dialogue: 0,").Append(start).Append(',').Append(end)
-                  .Append(",Default,,0,0,0,,").Append(body).Append('\n');
+                  .Append(",Default,,0,0,0,,").Append(posOverride).Append(body).Append('\n');
             }
             return sb.ToString();
+        }
+
+        private static readonly Regex VttLineSetting = new(@"\bline:(-?\d+(?:\.\d+)?)(%?)", RegexOptions.Compiled);
+        private static readonly Regex VttPositionSetting = new(@"\bposition:(\d+(?:\.\d+)?)%", RegexOptions.Compiled);
+        private static readonly Regex VttAlignSetting = new(@"\balign:(start|center|centre|end|left|right)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        // WebVTT cue settings → a leading ASS override. line%/position% map to an \an anchor (and
+        // an exact \pos when both axes are given); align picks the horizontal column. Returns ""
+        // when the cue carries no positioning (the common bottom-centre dialogue case). Only the
+        // percentage line form counts — the snap-to-lines integer form (e.g. our own line:-2) is
+        // a bottom nudge, not a position.
+        private static string AssOverrideFromVttSettings(string settings)
+        {
+            if (string.IsNullOrWhiteSpace(settings)) return string.Empty;
+            double? linePct = null, posPct = null;
+            var lm = VttLineSetting.Match(settings);
+            if (lm.Success && lm.Groups[2].Value == "%"
+                && double.TryParse(lm.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var lp))
+                linePct = lp;
+            var pm = VttPositionSetting.Match(settings);
+            if (pm.Success && double.TryParse(pm.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var pp))
+                posPct = pp;
+            var am = VttAlignSetting.Match(settings);
+            var align = am.Success ? am.Groups[1].Value.ToLowerInvariant() : null;
+            if (linePct is null && posPct is null && align is null) return string.Empty;
+
+            // ASS numpad anchor: vertical base (top 7 / middle 4 / bottom 1) + horizontal column
+            // (left 0 / centre 1 / right 2).
+            int vert = linePct is double L ? (L < 33 ? 7 : L < 66 ? 4 : 1) : 1;
+            int horiz = align is "start" or "left" ? 0 : align is "end" or "right" ? 2 : 1;
+            int an = vert + horiz;
+
+            if (linePct is double ly && posPct is double px)
+            {
+                var x = Math.Clamp(px / 100 * 1920, 0, 1920);
+                var y = Math.Clamp(ly / 100 * 1080, 0, 1080);
+                return $"{{\\an{an}\\pos({x:0},{y:0})}}";
+            }
+            return $"{{\\an{an}}}";
         }
 
         // "[HH:]MM:SS.mmm" → ASS "H:MM:SS.cc" (centiseconds).
