@@ -82,10 +82,12 @@ else
         <section class="section-card">
             <span class="section-title">Appearance</span>
             <p class="section-description">Pick a theme, or follow your device's light/dark setting.</p>
+            <div class="theme-pills" role="group" aria-label="Theme">
+                <button type="button" class="theme-pill @(_theme == "system" ? "is-active" : "")" @onclick='() => SetThemeAsync("system")'>System</button>
+                <button type="button" class="theme-pill @(_theme == "light" ? "is-active" : "")" @onclick='() => SetThemeAsync("light")'>Light</button>
+                <button type="button" class="theme-pill @(_theme == "dark" ? "is-active" : "")" @onclick='() => SetThemeAsync("dark")'>Dark</button>
+            </div>
             <div class="btn-action-row">
-                <button type="button" class="@(_theme == "system" ? "btn-primary-action" : "btn-ghost")" @onclick='() => SetThemeAsync("system")'>System</button>
-                <button type="button" class="@(_theme == "light" ? "btn-primary-action" : "btn-ghost")" @onclick='() => SetThemeAsync("light")'>Light</button>
-                <button type="button" class="@(_theme == "dark" ? "btn-primary-action" : "btn-ghost")" @onclick='() => SetThemeAsync("dark")'>Dark</button>
                 <button type="button" class="btn-ghost" @onclick="() => _dashCustomize?.Open()">Customize dashboard</button>
             </div>
         </section>
