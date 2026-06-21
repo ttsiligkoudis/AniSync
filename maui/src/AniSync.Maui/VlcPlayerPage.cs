@@ -585,13 +585,34 @@ public sealed class VlcPlayerPage : ContentPage
         if (_userPickedSub || _selectedExternalUrl is not null) return; // user already chose
         try
         {
+            // ISO language tags for the in-file SPU tracks — libVLC names SPU tracks by codec
+            // ("ASS"/"SRT"), not language, so the real language sits on the media tracks (same
+            // source the picker sheet uses). Lets us match an embedded track by its tag even
+            // when its name carries no language word.
+            var spuLang = new Dictionary<int, string?>();
+            try
+            {
+                if (_player.Media?.Tracks is { } tracks)
+                    foreach (var track in tracks)
+                        if (track.TrackType == TrackType.Text)
+                            spuLang[track.Id] = track.Language;
+            }
+            catch { /* media not parsed yet — fall back to name matching */ }
+
             foreach (var lang in PreferredThenEnglish(_preferredSubLang))
             {
+                // Prefer an embedded (in-file) track in this language over a downloaded OS sub:
+                // embedded subs are better timed/styled and carry positioned sign translations,
+                // so when both exist for the chosen language the in-file one wins.
+                foreach (var t in _player.SpuDescription)
+                {
+                    if (t.Id == -1) continue;
+                    spuLang.TryGetValue(t.Id, out var code);
+                    if (LangMatches(lang, code, t.Name)) { _player.SetSpu(t.Id); return; }
+                }
+
                 var ext = _externalSubs.FirstOrDefault(s => LangMatches(lang, s.Language, s.Label));
                 if (ext is not null) { AttachExternalSub(ext.Url); return; }
-
-                foreach (var t in _player.SpuDescription)
-                    if (t.Id != -1 && LangMatches(lang, null, t.Name)) { _player.SetSpu(t.Id); return; }
             }
             _player.SetSpu(-1); // nothing in the preferred language or English → off, like the web
         }
@@ -1146,12 +1167,7 @@ public sealed class VlcPlayerPage : ContentPage
         grid.Add(Column("Track", ScrollList(trackRows)), 1, 0);
         grid.Add(Column("Options", BuildSubtitleOptions()), 2, 0);
 
-        // TEMP on-screen diagnostics for the embedded-language detection (shown in the sheet title):
-        //   mt = text-track id:language/description libVLC exposes; aud = dominant audio language. Shows
-        //   whether any language signal (tag, name, or audio) exists for the untagged ASS/SRT tracks.
-        var mt = string.Join(",", spuMeta.Select(kv => $"{kv.Key}:{kv.Value.Lang ?? "-"}/{kv.Value.Desc ?? "-"}"));
-        var diag = $"ext{_externalSubs.Count} mt[{mt}] aud={audioLang ?? "-"} act={activeLang ?? "off"}";
-        OpenSheet($"Subtitles · {diag}", grid);
+        OpenSheet("Subtitles", grid);
     }
 
     private View Column(string heading, View body)
