@@ -254,6 +254,150 @@ namespace AnimeList.Services
             }
         }
 
+        public async Task<string> FetchAsAssAsync(string url, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return null;
+            if (!IsAllowedSubtitleHost(url))
+            {
+                _logger.LogWarning("Subtitle proxy refused host: {Host}", SafeHost(url));
+                return null;
+            }
+
+            var cacheKey = "subtitle-ass:" + url;
+            if (_cache.TryGetValue<string>(cacheKey, out var cached) && !string.IsNullOrEmpty(cached))
+            {
+                return cached;
+            }
+
+            var fetchUrl = EnsureUtf8Transform(url);
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(8));
+                var client = _clientFactory.CreateClient();
+                var bytes = await client.GetByteArrayAsync(fetchUrl, cts.Token);
+                var text = DecodeText(bytes);
+
+                string ass;
+                if (LooksLikeAss(text))
+                {
+                    // Already ASS/SSA — hand it to libVLC untouched so libass renders the
+                    // author's own styles + positioning against the file's real PlayResX/Y.
+                    ass = text.TrimStart('﻿');
+                }
+                else
+                {
+                    // SRT / VTT (often a re-packaged ASS with the positioning left inline as
+                    // {\an8}/{\pos(…)} in the cue text). Normalise to VTT, then wrap each cue
+                    // in an ASS Dialogue line that keeps those overrides inline — libass then
+                    // positions the signs while plain dialogue stays at the bottom (\an2).
+                    var vtt = text.TrimStart().StartsWith("WEBVTT", StringComparison.OrdinalIgnoreCase)
+                        ? text
+                        : SrtToVtt(text);
+                    vtt = StripFontTags(vtt);
+                    ass = VttToAss(vtt);
+                }
+
+                _cache.Set(cacheKey, ass, new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(15),
+                });
+                return ass;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Subtitle fetch failed ({Url}).", SafeHost(url));
+                return null;
+            }
+        }
+
+        // Cheap sniff for an ASS/SSA document so we can pass it through untouched
+        // (preserving the author's styles + PlayRes) instead of rebuilding it.
+        private static bool LooksLikeAss(string text) =>
+            !string.IsNullOrEmpty(text)
+            && (text.Contains("[Script Info]", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("[V4+ Styles]", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("[Events]", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("Dialogue:", StringComparison.OrdinalIgnoreCase));
+
+        // Minimal ASS preamble. PlayResX/Y match the web converter's fallback (1920×1080)
+        // so a \pos authored without a declared canvas lands consistently across heads;
+        // a single Default style anchored bottom-centre (\an2) is the dialogue baseline,
+        // and per-cue {\an…}/{\pos…} overrides move signs off it.
+        private const string AssPreamble =
+            "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n" +
+            "[V4+ Styles]\n" +
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n" +
+            "Style: Default,Arial,54,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,1,2,40,40,40,1\n\n" +
+            "[Events]\n" +
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n";
+
+        // Two timestamps of a VTT cue header: "[HH:]MM:SS.mmm --> [HH:]MM:SS.mmm".
+        private static readonly Regex VttCueTimes = new(
+            @"^((?:\d{2}:)?\d{2}:\d{2}\.\d{3})\s+-->\s+((?:\d{2}:)?\d{2}:\d{2}\.\d{3})",
+            RegexOptions.Compiled);
+
+        // Builds an ASS document from a WebVTT body, one Dialogue line per cue. ASS override
+        // blocks ({\an8}, {\pos…}) already inline in the cue text are kept verbatim (libass
+        // renders them); basic HTML styling is mapped to ASS tags and any other tag dropped.
+        private static string VttToAss(string vtt)
+        {
+            var sb = new StringBuilder(AssPreamble);
+            if (string.IsNullOrEmpty(vtt)) return sb.ToString();
+            var lines = vtt.Replace("\r\n", "\n").Split('\n');
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var m = VttCueTimes.Match(lines[i]);
+                if (!m.Success) continue;
+                var start = VttTsToAss(m.Groups[1].Value);
+                var end = VttTsToAss(m.Groups[2].Value);
+
+                var text = new StringBuilder();
+                for (var j = i + 1; j < lines.Length; j++)
+                {
+                    if (string.IsNullOrWhiteSpace(lines[j]) || VttCueTimes.IsMatch(lines[j])) break;
+                    if (text.Length > 0) text.Append("\\N");
+                    text.Append(lines[j]);
+                }
+                var body = ConvertVttInlineTags(text.ToString());
+                if (body.Length == 0) continue;
+                sb.Append("Dialogue: 0,").Append(start).Append(',').Append(end)
+                  .Append(",Default,,0,0,0,,").Append(body).Append('\n');
+            }
+            return sb.ToString();
+        }
+
+        // "[HH:]MM:SS.mmm" → ASS "H:MM:SS.cc" (centiseconds).
+        private static string VttTsToAss(string ts)
+        {
+            var parts = ts.Split(':');
+            var sec = parts[^1].Split('.');
+            int hh = parts.Length == 3 && int.TryParse(parts[0], out var h) ? h : 0;
+            int mm = int.TryParse(parts[^2], out var m) ? m : 0;
+            int ss = int.TryParse(sec[0], out var s) ? s : 0;
+            int ms = sec.Length > 1 && int.TryParse(sec[1], out var x) ? x : 0;
+            long totalMs = (((long)hh * 3600) + (mm * 60) + ss) * 1000 + ms;
+            long oh = totalMs / 3600000; totalMs %= 3600000;
+            long om = totalMs / 60000; totalMs %= 60000;
+            long os = totalMs / 1000; long ocs = (totalMs % 1000) / 10;
+            return $"{oh}:{om:D2}:{os:D2}.{ocs:D2}";
+        }
+
+        private static readonly Regex HtmlTag = new(@"<[^>]+>", RegexOptions.Compiled);
+
+        // Keep inline ASS overrides ({…}); translate the handful of HTML styling tags VTT
+        // uses to their ASS equivalents and drop any other tag so it doesn't print literally.
+        private static string ConvertVttInlineTags(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+            text = text
+                .Replace("<i>", "{\\i1}", StringComparison.OrdinalIgnoreCase).Replace("</i>", "{\\i0}", StringComparison.OrdinalIgnoreCase)
+                .Replace("<b>", "{\\b1}", StringComparison.OrdinalIgnoreCase).Replace("</b>", "{\\b0}", StringComparison.OrdinalIgnoreCase)
+                .Replace("<u>", "{\\u1}", StringComparison.OrdinalIgnoreCase).Replace("</u>", "{\\u0}", StringComparison.OrdinalIgnoreCase);
+            text = HtmlTag.Replace(text, string.Empty);
+            return text.Replace("&amp;", "&").Replace("&lt;", "<").Replace("&gt;", ">").Trim();
+        }
+
         // Cap on how many entries we surface per language. The addon
         // can return 10+ "English" variants for popular shows; menu
         // sanity wins over completeness. Variant 1 is unlabelled

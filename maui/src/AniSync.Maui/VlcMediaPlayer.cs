@@ -77,6 +77,11 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             var externalSubs = (request.Subtitles ?? Array.Empty<SubtitleTrack>())
                 .Where(s => Uri.TryCreate(s.Url, UriKind.Absolute, out var u)
                             && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps))
+                // libVLC ignores WebVTT cue positioning (every cue lands at the bottom) but
+                // renders ASS \an/\pos natively — so ask our proxy for the ASS variant, which
+                // keeps OpenSubtitles sign/song positioning. Only our own proxy understands
+                // fmt=ass; any other URL is left alone. (The TV/ExoPlayer head above keeps VTT.)
+                .Select(s => s with { Url = PreferAssSubtitle(s.Url) })
                 .ToList();
 
             // Report progress + completion back to the Watch page (it owns resume
@@ -124,6 +129,16 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             await StopAsync();
             throw;
         }
+    }
+
+    // Point a proxied subtitle URL (/api/v1/subtitle?url=…) at the ASS variant (fmt=ass) so
+    // libVLC gets positioning it can render. Non-proxy URLs are returned unchanged — fmt=ass
+    // is only meaningful to our own proxy.
+    private static string PreferAssSubtitle(string url)
+    {
+        if (string.IsNullOrEmpty(url) || url.IndexOf("/api/v1/subtitle", StringComparison.OrdinalIgnoreCase) < 0)
+            return url;
+        return url + (url.Contains('?') ? "&" : "?") + "fmt=ass";
     }
 
     public Task SeekAsync(double seconds)

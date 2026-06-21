@@ -37,6 +37,15 @@ namespace AnimeList.Services.Interfaces
         /// Returns null on failure so the controller can 502 cleanly.
         /// </summary>
         Task<string> FetchAsVttAsync(string url, CancellationToken ct = default);
+
+        /// <summary>
+        /// Same fetch as <see cref="FetchAsVttAsync"/> but returns an ASS/SSA
+        /// payload instead of WebVTT. libVLC ignores WebVTT cue positioning
+        /// (line/position) and renders every cue at the bottom, but it renders
+        /// ASS \an / \pos natively — so the native (libVLC) head asks for this
+        /// variant to keep sign / song positioning. Returns null on failure.
+        /// </summary>
+        Task<string> FetchAsAssAsync(string url, CancellationToken ct = default);
     }
 
     /// <summary>

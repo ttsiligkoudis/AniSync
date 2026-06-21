@@ -51,11 +51,15 @@ namespace AnimeList.Controllers
         [HttpGet("subtitle")]
         [HttpGet("subtitle.vtt")]
         [ApiExplorerSettings(IgnoreApi = true)]
-        public async Task<IActionResult> Subtitle(string url)
+        public async Task<IActionResult> Subtitle(string url, string fmt = null)
         {
             if (string.IsNullOrWhiteSpace(url))
                 return BadRequest();
-            return await ServeSubtitleVtt(url);
+            // fmt=ass → ASS/SSA for the native libVLC head (it ignores WebVTT positioning
+            // but renders ASS \an/\pos). Everyone else (web <track>, ExoPlayer) gets VTT.
+            return string.Equals(fmt, "ass", StringComparison.OrdinalIgnoreCase)
+                ? await ServeSubtitleAss(url)
+                : await ServeSubtitleVtt(url);
         }
 
         /// <summary>
@@ -103,6 +107,19 @@ namespace AnimeList.Controllers
             // subtitle extension).
             Response.Headers["Content-Disposition"] = "inline; filename=\"subtitle.vtt\"";
             return Content(vtt, "text/vtt", System.Text.Encoding.UTF8);
+        }
+
+        // ASS/SSA variant for the native libVLC head — keeps \an/\pos positioning libVLC
+        // honours but WebVTT loses. Filename ends in .ass so VLC's extension sniff agrees.
+        private async Task<IActionResult> ServeSubtitleAss(string url)
+        {
+            var ass = await _subtitleService.FetchAsAssAsync(url);
+            if (string.IsNullOrEmpty(ass))
+                return StatusCode(502);
+            Response.Headers["Cache-Control"] = "public, max-age=3600";
+            Response.Headers["Access-Control-Allow-Origin"] = "*";
+            Response.Headers["Content-Disposition"] = "inline; filename=\"subtitle.ass\"";
+            return Content(ass, "text/x-ssa", System.Text.Encoding.UTF8);
         }
 
         /// <summary>
