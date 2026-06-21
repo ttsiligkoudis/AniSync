@@ -685,7 +685,9 @@ namespace AnimeList.Services
                 {
                     var count = 0;
                     foreach (var s in seasons)
-                        if (s["episodes"] is JArray eps) count += eps.Count;
+                        // Skip season 0 (specials / extras) so the watched count matches
+                        // the progress total + season picker, which count real episodes only.
+                        if ((int?)s["number"] > 0 && s["episodes"] is JArray eps) count += eps.Count;
                     entry.WatchedEpisodes = count;
                 }
 
