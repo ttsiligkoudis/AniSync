@@ -1634,7 +1634,11 @@ namespace AnimeList.Controllers
             if (type == "series")
             {
                 var meta = await _cinemeta.GetVideoMetaAsync(type, id);
-                totalEpisodes = meta?.videos?.Count;
+                // Count only real episodes (season > 0). Cinemeta lists a show's
+                // specials / extras under season 0 — the detail page's episode list
+                // hides them, so the progress total and the season picker must too,
+                // or the modal disagrees with the episodes the user actually sees.
+                totalEpisodes = meta?.videos?.Count(v => v.season > 0);
                 seasons = BuildVideoSeasons(meta);
             }
 
@@ -1644,18 +1648,20 @@ namespace AnimeList.Controllers
         }
 
         // Per-season options for the modal's video Season dropdown. Groups Cinemeta's
-        // episode list by season the SAME way ApplyTraktVideoSaveAsync orders it for the
-        // watched prefix (season > 0 ? season : 1, ascending), so each season's episode
-        // count — and the cumulative offset the client derives from it — lines up exactly
-        // with which episodes "watched up to N" marks. A video series' progress is one
-        // contiguous prefix across that ordered list, so the picker is purely a UI lens
-        // over the global count; the save still receives the global progress. Returns
-        // empty for a single-season show — no picker needed.
+        // episode list by real season the SAME way ApplyTraktVideoSaveAsync orders the
+        // watched prefix (season > 0, ascending), so each season's episode count — and
+        // the cumulative offset the client derives from it — lines up exactly with which
+        // episodes "watched up to N" marks AND with the season tabs on the detail page.
+        // Season 0 (Cinemeta specials / extras) is excluded, matching the detail episode
+        // list. A video series' progress is one contiguous prefix across that ordered
+        // list, so the picker is purely a UI lens over the global count; the save still
+        // receives the global progress. Returns empty for a single-season show.
         private static List<EntrySeason> BuildVideoSeasons(Meta meta)
         {
             if (meta?.videos is not { Count: > 0 } videos) return new List<EntrySeason>();
             var seasons = videos
-                .GroupBy(v => v.season > 0 ? v.season : 1)
+                .Where(v => v.season > 0)
+                .GroupBy(v => v.season)
                 .OrderBy(g => g.Key)
                 .Select(g => new EntrySeason
                 {
@@ -1739,7 +1745,10 @@ namespace AnimeList.Controllers
             // Resolve the episode coords to mark watched (series only). Cinemeta's
             // videos carry the real season/episode numbers; order them and take the
             // watched prefix so "watched up to N" lands on the right episodes even
-            // across multiple seasons.
+            // across multiple seasons. Season 0 (specials / extras) is excluded so the
+            // counted universe matches the progress total + season picker + detail
+            // episode list (which all skip specials) — otherwise progress N would walk
+            // through specials before real episodes.
             IReadOnlyList<(int Season, int Episode)> episodes = Array.Empty<(int, int)>();
             // Series + "watching": the episode to leave in-progress so Trakt surfaces
             // the show as continue-watching (not completed) — the next unwatched
@@ -1749,9 +1758,10 @@ namespace AnimeList.Controllers
             {
                 var meta = await _cinemeta.GetVideoMetaAsync("series", id);
                 var ordered = (meta?.videos ?? new List<Video>())
-                    .OrderBy(v => v.season > 0 ? v.season : 1)
+                    .Where(v => v.season > 0)
+                    .OrderBy(v => v.season)
                     .ThenBy(v => v.episode)
-                    .Select(v => (Season: v.season > 0 ? v.season : 1, Episode: v.episode))
+                    .Select(v => (Season: v.season, Episode: v.episode))
                     .ToList();
                 var take = status == "completed" ? ordered.Count : Math.Clamp(progress, 0, ordered.Count);
                 episodes = ordered.Take(take).ToList();
