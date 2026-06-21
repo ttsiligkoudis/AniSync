@@ -6,6 +6,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
     <meta name="theme-color" content="#0b0d12" />
+    <!-- Stamp the saved theme on <html> before first paint so the page doesn't flash dark before
+         MainLayout re-applies it once interactive. The theme preference lives in the settings store
+         (ISecureStore), which on the web head is localStorage under "pref:theme". "system"/absent →
+         leave it to prefers-color-scheme. -->
+    <script>
+        (function () {
+            try {
+                var t = localStorage.getItem('pref:theme');
+                if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+            } catch (e) { /* storage blocked — CSS prefers-color-scheme decides */ }
+        })();
+    </script>
     <ResourcePreloader />
     @* Static assets go through @Assets[...] so MapStaticAssets serves them fingerprinted
        (Cache-Control: immutable, 1yr → "Add Expires headers") AND content-negotiated
@@ -26,7 +38,7 @@
     <Routes @rendermode="InteractiveServer" />
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
-    <!-- Shared shell behaviour (theme toggle, back button, mobile "More" sheet). -->
+    <!-- Shared shell behaviour (theme apply hook, back button, mobile "More" sheet). -->
     <script src="@Assets["_content/AniSync.Client/js/chrome.js"]"></script>
     <!-- D-pad / remote spatial navigation for TV browsers (Android TV / Google TV / webOS / Tizen). Self-
          detects TV mode and no-ops on phone + desktop. -->

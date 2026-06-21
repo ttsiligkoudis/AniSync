@@ -77,6 +77,19 @@ else
                       AudioLang="_audioLang" SubLang="_subLang"
                       OnAudioLangChanged="OnAudioLangChanged" OnSubLangChanged="OnSubLangChanged" />
 
+        @* Appearance — theme (System / Light / Dark) + dashboard customisation. The theme
+           applies instantly and persists to the settings store (not the server Save bar). *@
+        <section class="section-card">
+            <span class="section-title">Appearance</span>
+            <p class="section-description">Pick a theme, or follow your device's light/dark setting.</p>
+            <div class="btn-action-row">
+                <button type="button" class="@(_theme == "system" ? "btn-primary-action" : "btn-ghost")" @onclick='() => SetThemeAsync("system")'>System</button>
+                <button type="button" class="@(_theme == "light" ? "btn-primary-action" : "btn-ghost")" @onclick='() => SetThemeAsync("light")'>Light</button>
+                <button type="button" class="@(_theme == "dark" ? "btn-primary-action" : "btn-ghost")" @onclick='() => SetThemeAsync("dark")'>Dark</button>
+                <button type="button" class="btn-ghost" @onclick="() => _dashCustomize?.Open()">Customize dashboard</button>
+            </div>
+        </section>
+
         <PreferencesSection Flags="_flags" AnimeEnabled="AnimeEnabled" OnDirty="MarkDirty" />
 
         <!-- Quick links to the other config surfaces (mirrors /configure's footer row) -->
@@ -84,7 +97,6 @@ else
             <div class="btn-action-row">
                 <a class="btn-ghost" href="/configure">Stremio addon &amp; install URL</a>
                 <a class="btn-ghost" href="/advanced">Advanced (sync · backups · danger zone)</a>
-                <button type="button" class="btn-ghost" @onclick="() => _dashCustomize?.Open()">Customize dashboard</button>
             </div>
         </section>
     }
@@ -151,6 +163,18 @@ else
     private IJSObjectReference? _js;
     private DashCustomizeModal? _dashCustomize;
 
+    // Theme preference for the Appearance switch: "system" (follow OS) / "light" / "dark".
+    // Persisted to the settings store and applied instantly via chrome.js's anisyncApplyTheme.
+    private string _theme = "system";
+
+    private async Task SetThemeAsync(string theme)
+    {
+        if (_theme == theme) return;
+        _theme = theme;
+        await Store.SetAsync("pref:theme", theme);
+        try { await JS.InvokeVoidAsync("anisyncApplyTheme", theme); } catch { /* no JS */ }
+    }
+
     // Anime-only cards (Preferences toggles) gate on the user's real media-type pick.
     // That choice lives client-side (AppState, hydrated from localStorage by MainLayout) —
     // NOT in the server config: the Blazor-Server self-call to /api/v1/me/config can't see
@@ -167,6 +191,9 @@ else
             // Re-render when media types hydrate / change (the anime-only Preferences card
             // gates on State.EnabledMediaTypes), e.g. the header chooser flips anime off.
             State.Changed += OnStateChanged;
+
+            // Current theme for the Appearance switch's highlight (default System = follow OS).
+            _theme = await Store.GetAsync("pref:theme") ?? "system";
 
             // Replay the config the prerender stashed (cookie-seeded credential → real cards) instead
             // of re-reading localStorage + refetching, so a logged-in refresh doesn't flash the
