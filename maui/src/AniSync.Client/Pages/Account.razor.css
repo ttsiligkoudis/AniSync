@@ -2,13 +2,14 @@
    mirroring the .mt-switch media-type control. Inactive pills are quiet; the active
    one fills with the accent. Theme-aware via the shared CSS variables. */
 .theme-pills {
-    display: inline-flex;
+    display: flex;
+    width: fit-content;
     gap: 4px;
     background: var(--surface-raised);
     border: 1px solid var(--border);
     border-radius: 999px;
     padding: 4px;
-    margin-bottom: 12px;
+    margin: 0 auto 12px;
 }
 
 .theme-pill {
