@@ -1034,34 +1034,49 @@ else
         if (_meta is null || IsMovie || _episodes.Count == 0) return;
 
         var progress = _state?.Progress ?? 0;
-        var total = _episodes.Count;
         var norm = NormalizeStatus(_state?.Status);
         var entryTotal = _state?.TotalEpisodes;
-        var completed = norm == "completed" || (entryTotal is int et && et > 0 && progress >= et);
-        var nextEp = progress + 1;
-        if (completed || nextEp > total) return;
+        var idSeg = Uri.EscapeDataString(Id);
+        var q = string.IsNullOrEmpty(_typeQuery) ? "" : $"?type={_typeQuery}";
+
         // Anime franchise umbrella (imdb tt-id grouped into one entry across cours) →
         // no single "next episode". Video series legitimately carry a tt id + multiple
         // seasons and are NOT grouped umbrellas, so the guard is anime-only.
         if (!IsVideo && _multiSeason && (_meta.Id?.StartsWith("tt") ?? false)) return;
 
-        // Pick the target video — prefer the cour matching the tracked progress so a
-        // multi-season franchise lands on the right season's episode.
-        var entrySeason = _episodes
-            .Where(v => v.Episode == nextEp)
-            .Select(v => (int?)(v.Season > 0 ? v.Season : 1))
-            .LastOrDefault();
-        var target = _episodes.FirstOrDefault(v => v.Episode == nextEp
-            && (entrySeason == null || (v.Season > 0 ? v.Season : 1) == entrySeason.Value));
+        if (_multiSeason)
+        {
+            // Progress is a single linear count across the season-ordered episode list
+            // (the same prefix model the manage-entry season picker uses), so the next
+            // episode to watch is the one at index `progress`. Show its real season +
+            // within-season number ("Continue · Se 9 Ep 4") rather than a flat count, and
+            // deep-link the season/episode watch route. Specials (season 0) are excluded
+            // so the index lines up with the progress total.
+            var ordered = _episodes
+                .Where(v => v.Season > 0)
+                .OrderBy(v => v.Season)
+                .ThenBy(v => v.Episode)
+                .ToList();
+            if (norm == "completed" || progress >= ordered.Count) return;
+            var next = ordered[progress];
+            if (IsFuture(next)) return; // can't promise a future-aired episode
+            _watchCtaHref = $"/meta/{idSeg}/watch/{next.Season}/{next.Episode}{q}";
+            _watchCtaLabel = progress > 0
+                ? $"Continue · Se {next.Season} Ep {next.Episode}"
+                : $"Watch · Se {next.Season} Ep {next.Episode}";
+            _showWatchCta = true;
+            return;
+        }
+
+        // Single season: episodes are numbered 1..N, so progress+1 is the next episode.
+        var total = _episodes.Count;
+        var completed = norm == "completed" || (entryTotal is int et && et > 0 && progress >= et);
+        var nextEp = progress + 1;
+        if (completed || nextEp > total) return;
+        var target = _episodes.FirstOrDefault(v => v.Episode == nextEp);
         if (target is null) return;
         if (IsFuture(target)) return; // can't promise a future-aired episode
-
-        var idSeg = Uri.EscapeDataString(Id);
-        var q = string.IsNullOrEmpty(_typeQuery) ? "" : $"?type={_typeQuery}";
-        var season = target.Season > 0 ? target.Season : 1;
-        _watchCtaHref = _multiSeason
-            ? $"/meta/{idSeg}/watch/{season}/{nextEp}{q}"
-            : $"/meta/{idSeg}/watch/{nextEp}{q}";
+        _watchCtaHref = $"/meta/{idSeg}/watch/{nextEp}{q}";
         _watchCtaLabel = progress > 0 ? $"Continue · Ep {nextEp}" : $"Watch Ep {nextEp}";
         _showWatchCta = true;
     }
