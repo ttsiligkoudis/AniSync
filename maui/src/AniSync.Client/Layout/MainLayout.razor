@@ -186,6 +186,17 @@ else
         if (!firstRender || !RendererInfo.IsInteractive) return;
         try
         {
+            // Apply the saved theme (System / Light / Dark) from the settings store — the
+            // preference lives here now, not a header toggle / localStorage key. On web the
+            // pre-paint stamp already applied it (this is an idempotent re-apply); on native
+            // this is the authoritative apply once the secure store is readable. Done before
+            // registering the bridge so its first push reflects the resolved data-theme.
+            var theme = await Store.GetAsync("pref:theme");
+            await JS.InvokeVoidAsync("anisyncApplyTheme", theme ?? "system");
+        }
+        catch { /* no JS / nothing stored — CSS prefers-color-scheme decides */ }
+        try
+        {
             _themeBridge = await JS.InvokeAsync<IJSObjectReference>(
                 "import", "./_content/AniSync.Client/js/theme-bridge.js");
             _themeRef = DotNetObjectReference.Create(this);

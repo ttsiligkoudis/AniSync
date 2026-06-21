@@ -4,9 +4,9 @@
 
 @* Site header — exact port of _Layout.cshtml's .site-header. Back button, logo,
    inline desktop nav (collapses to the hamburger under 992px via site.css), the
-   global SearchBox typeahead, notification bell, media-type + theme buttons, the
-   desktop auth CTA and the hamburger. Behaviour (back, theme, more) is wired by
-   the ported chrome.js / theme-toggle.js loaded in each head. *@
+   global SearchBox typeahead, notification bell, media-type button, the
+   desktop auth CTA and the hamburger. Behaviour (back, more) is wired by
+   the ported chrome.js loaded in each head. (Theme now lives on the Account page.) *@
 <header class="site-header">
     <div class="container site-header-inner">
         <button type="button" class="site-back-btn" aria-label="Go back" data-site-back>
@@ -110,16 +110,8 @@
             <span class="media-type-btn-label">@_mtBtnLabel</span>
         </button>
 
-        <button type="button" class="theme-toggle-btn" data-theme-toggle
-                aria-label="Switch theme" title="Switch theme">
-            <svg class="theme-icon-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="12" cy="12" r="4"></circle>
-                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
-            </svg>
-            <svg class="theme-icon-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-            </svg>
-        </button>
+        @* The theme switch moved to the Account page (Appearance section) and now persists
+           via the settings store rather than a header toggle / localStorage key. *@
 
         @* Gate the auth CTA on SessionHydrated so a signed-in user never sees "Sign in" flash
            before the stored config is read (it resolves to Disconnect a beat later). Until then

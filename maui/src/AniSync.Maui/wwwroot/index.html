@@ -12,12 +12,15 @@
     <link rel="icon" href="data:,">
 
     <!-- Stamp the saved theme on <html> before first paint so the boot screen (and the app) match the
-         user's light/dark choice instead of flashing dark. Same localStorage key chrome.js uses; chrome.js
-         re-applies later (idempotent). Falls back to prefers-color-scheme when nothing is saved. -->
+         user's light/dark choice instead of flashing dark. The theme preference lives in the settings
+         store (ISecureStore) under "pref:theme"; on the web head that store IS localStorage, so this
+         pre-paint read keeps web flash-free. MainLayout re-applies from the store once interactive
+         (the authoritative path on native, where the store is SecureStorage). "system"/absent → leave
+         it to prefers-color-scheme. -->
     <script>
         (function () {
             try {
-                var t = localStorage.getItem('anisync-theme');
+                var t = localStorage.getItem('pref:theme');
                 if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
             } catch (e) { /* storage blocked — CSS prefers-color-scheme decides */ }
         })();
@@ -47,7 +50,7 @@
     </div>
 
     <script src="_framework/blazor.webview.js" autostart="false"></script>
-    <!-- Shared shell behaviour (theme toggle, back button, mobile "More" sheet). -->
+    <!-- Shared shell behaviour (theme apply hook, back button, mobile "More" sheet). -->
     <script src="_content/AniSync.Client/js/chrome.js"></script>
     <!-- Native head only: open external (target=_blank) links in the system browser. Android's WebView
          drops _blank, so without this the Sign-up / API-key / manifest links do nothing. -->
