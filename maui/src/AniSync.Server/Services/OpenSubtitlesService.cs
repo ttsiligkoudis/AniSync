@@ -1,5 +1,6 @@
 using AnimeList.Services.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -204,6 +205,14 @@ namespace AnimeList.Services
                 // on screen. Strip the opening + closing tags (preserve
                 // the inner text) before returning.
                 vtt = StripFontTags(vtt);
+                // Lift positioning out of the ASS override blocks BEFORE we strip
+                // them: an \an8 / \pos(x,y) on a cue means it's a positioned sign
+                // translation or song overlay, not bottom dialogue. Convert those to
+                // WebVTT cue settings (line/position/align) on the cue header so the
+                // renderer puts them where the author intended, instead of collapsing
+                // every cue to the bottom where they overlap the dialogue. Mirrors the
+                // embedded-MKV converter's buildVttCueSettings (Watch.cshtml).
+                vtt = ApplyAssPositioning(vtt);
                 // ASS / SSA override blocks ({\an8}, {\fad(200,200)},
                 // {\pos(x,y)}, {\c&Hxxxxxx&}, …) leak through when an
                 // OpenSubtitles release re-packages an .ass track as
@@ -211,9 +220,8 @@ namespace AnimeList.Services
                 // for anime where the original sub author authored in
                 // ASS for typesetting / karaoke. Native VTT renderers
                 // have no concept of these tags, so they paint them as
-                // literal text on the cue. Same shape as the embedded-
-                // MKV converter's ASS_OVERRIDE_RE (Watch.cshtml) so a
-                // file routed through either path renders the same.
+                // literal text on the cue. Positioning was already lifted to the
+                // header above; now drop the (consumed) blocks from the cue text.
                 vtt = StripAssOverrides(vtt);
                 // Lift cues off the bottom edge so they don't collide
                 // with ArtPlayer's controls bar / sit flush against
@@ -462,6 +470,125 @@ namespace AnimeList.Services
 
         private static string StripAssOverrides(string vtt) =>
             string.IsNullOrEmpty(vtt) ? vtt : AssOverride.Replace(vtt, string.Empty);
+
+        // ASS positioning tags inside an override block. \an1..9 = numpad anchor;
+        // legacy \a (bitmap alignment); \pos(x,y) = absolute coords; \move(x1,y1,…)
+        // animates — VTT can't animate, so we snap to the start coords. Same set the
+        // web converter's buildVttCueSettings reads.
+        private static readonly Regex AssAn = new(@"\\an([1-9])", RegexOptions.Compiled);
+        private static readonly Regex AssLegacyA = new(@"\\a(\d+)", RegexOptions.Compiled);
+        private static readonly Regex AssPos = new(@"\\pos\(\s*([\d.\-]+)\s*,\s*([\d.\-]+)\s*\)", RegexOptions.Compiled);
+        private static readonly Regex AssMove = new(@"\\move\(\s*([\d.\-]+)\s*,\s*([\d.\-]+)", RegexOptions.Compiled);
+
+        // Re-packaged ASS rarely keeps a [Script Info] PlayResX/Y, so \pos coords have
+        // no declared canvas to scale against. Assume 1920×1080 — the same default the
+        // web converter (parseAssPlayRes) falls back to, so both heads agree.
+        private const double AssPlayResX = 1920;
+        private const double AssPlayResY = 1080;
+
+        /// <summary>
+        /// Walks each VTT cue and, when its text carries ASS positioning overrides
+        /// (\an / \pos / \move), appends the equivalent WebVTT cue settings
+        /// (line / position / align) to that cue's timing header. Cues the source
+        /// already positioned (a <c>line:</c> in the header) are left untouched, as
+        /// are plain bottom-dialogue cues (picked up later by ApplyDefaultLineMargin).
+        /// The override blocks themselves are stripped from the text afterwards by
+        /// StripAssOverrides.
+        /// </summary>
+        private static string ApplyAssPositioning(string vtt)
+        {
+            if (string.IsNullOrEmpty(vtt) || vtt.IndexOf('{') < 0) return vtt; // no overrides at all
+            var lines = vtt.Replace("\r\n", "\n").Split('\n');
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var header = CueHeader.Match(lines[i]);
+                if (!header.Success) continue;
+                // Source already set an explicit line position — respect it.
+                if (header.Groups[2].Value.IndexOf("line:", StringComparison.Ordinal) >= 0) continue;
+
+                // Concatenate the override blocks across the cue's text lines (an ASS
+                // author may split them, e.g. "{\an8}{\fad(200,200)}Lyrics…").
+                var overrides = new StringBuilder();
+                for (var j = i + 1; j < lines.Length; j++)
+                {
+                    if (string.IsNullOrWhiteSpace(lines[j]) || CueHeader.IsMatch(lines[j])) break;
+                    foreach (Match ov in AssOverride.Matches(lines[j]))
+                        overrides.Append(ov.Value);
+                }
+                if (overrides.Length == 0) continue;
+
+                var settings = BuildVttCueSettings(overrides.ToString());
+                if (settings.Length == 0) continue;
+                lines[i] = header.Groups[1].Value + header.Groups[2].Value + settings;
+            }
+            return string.Join("\n", lines);
+        }
+
+        // ASS override text → " line:.. position:.. align:..". Ported verbatim from the
+        // web converter's buildVttCueSettings + vttSettingsForAlign so a sub routed
+        // through either path lands in the same on-screen spot. Empty when there's no
+        // positioning to translate.
+        private static string BuildVttCueSettings(string overrideText)
+        {
+            if (string.IsNullOrEmpty(overrideText)) return string.Empty;
+            string? line = null, position = null, align = null;
+
+            var anM = AssAn.Match(overrideText);
+            var posM = AssPos.Match(overrideText);
+            var moveM = AssMove.Match(overrideText);
+            var posSource = posM.Success ? posM : (moveM.Success ? moveM : null);
+
+            if (posSource != null
+                && double.TryParse(posSource.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var rawX)
+                && double.TryParse(posSource.Groups[2].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var rawY))
+            {
+                var px = Math.Clamp(rawX / AssPlayResX * 100, 0, 100);
+                var py = Math.Clamp(rawY / AssPlayResY * 100, 0, 100);
+                position = px.ToString("0.0", CultureInfo.InvariantCulture) + "%";
+                line = py.ToString("0.0", CultureInfo.InvariantCulture) + "%";
+                if (anM.Success)
+                {
+                    var anA = int.Parse(anM.Groups[1].Value);
+                    align = anA is 1 or 4 or 7 ? "start" : anA is 3 or 6 or 9 ? "end" : "center";
+                }
+            }
+            else if (anM.Success)
+            {
+                (line, position, align) = VttSettingsForAlign(int.Parse(anM.Groups[1].Value));
+            }
+            else
+            {
+                var aM = AssLegacyA.Match(overrideText);
+                // SSA legacy \a: 1=left,2=centre,3=right (+4 top, +8 middle). Map to the
+                // \an numpad so the same alignment helper applies.
+                if (aM.Success && int.TryParse(aM.Groups[1].Value, out var legacy)
+                    && LegacyAToAn.TryGetValue(legacy, out var mapped))
+                    (line, position, align) = VttSettingsForAlign(mapped);
+            }
+
+            var parts = new List<string>();
+            if (line != null) parts.Add("line:" + line);
+            if (position != null) parts.Add("position:" + position);
+            if (align != null) parts.Add("align:" + align);
+            return parts.Count > 0 ? " " + string.Join(" ", parts) : string.Empty;
+        }
+
+        private static readonly Dictionary<int, int> LegacyAToAn = new()
+        {
+            { 1, 1 }, { 2, 2 }, { 3, 3 }, { 5, 7 }, { 6, 8 }, { 7, 9 }, { 9, 4 }, { 10, 5 }, { 11, 6 },
+        };
+
+        // ASS numpad anchor (1=bottom-left … 9=top-right) → WebVTT (line, position,
+        // align). null = the VTT default for that axis (bottom / centre).
+        private static (string? Line, string? Position, string? Align) VttSettingsForAlign(int an)
+        {
+            string? line = an is 7 or 8 or 9 ? "5%" : an is 4 or 5 or 6 ? "50%" : null;
+            string? position, align;
+            if (an is 1 or 4 or 7) { position = "5%"; align = "start"; }
+            else if (an is 3 or 6 or 9) { position = "95%"; align = "end"; }
+            else { position = null; align = null; }
+            return (line, position, align);
+        }
 
         // Cue-header lines look like "00:00:01.500 --> 00:00:04.000"
         // optionally followed by space-separated cue settings. WebVTT
