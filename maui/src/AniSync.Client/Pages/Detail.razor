@@ -331,7 +331,9 @@ else
                     @foreach (var ep in _filteredEpisodes)
                     {
                         var future = IsFuture(ep);
-                        var watched = (_state?.Progress ?? 0) > 0 && ep.Episode <= (_state!.Progress);
+                        var watched = _perSeasonMarkers
+                            ? _watchedKeys.Contains((ep.Season > 0 ? ep.Season : 1, ep.Episode))
+                            : (_state?.Progress ?? 0) > 0 && ep.Episode <= (_state!.Progress);
                         var displayDate = DisplayDate(ep);
                         var description = ep.Overview;
                         var classes = new List<string> { "anime-detail-episode" };
@@ -1016,6 +1018,13 @@ else
     private bool _showWatchCta;
     private string _watchCtaHref = "";
     private string _watchCtaLabel = "";
+    // Real (season, episode) keys of the watched prefix for a multi-season series —
+    // drives the episode list's watched eye icons (see ComputeWatchCta). _perSeasonMarkers
+    // says whether to use them: true only for a linear-progress multi-season series (video),
+    // false for single-season AND grouped anime franchise umbrellas (whose cours are
+    // separate entries — no single cumulative prefix), which keep ep.Episode <= progress.
+    private readonly HashSet<(int Season, int Episode)> _watchedKeys = new();
+    private bool _perSeasonMarkers;
 
     // Movie CTA target — anime movies: /meta/{id}/watch/1 (episode 1 = the movie
     // body); video movies: /meta/{id}/watch?type=movie (no episode segment). Mirrors
@@ -1031,6 +1040,8 @@ else
     private void ComputeWatchCta()
     {
         _showWatchCta = false;
+        _watchedKeys.Clear();
+        _perSeasonMarkers = false;
         if (_meta is null || IsMovie || _episodes.Count == 0) return;
 
         var progress = _state?.Progress ?? 0;
@@ -1046,6 +1057,7 @@ else
 
         if (_multiSeason)
         {
+            _perSeasonMarkers = true;
             // Progress is a single linear count across the season-ordered episode list
             // (the same prefix model the manage-entry season picker uses), so the next
             // episode to watch is the one at index `progress`. Show its real season +
@@ -1057,6 +1069,12 @@ else
                 .OrderBy(v => v.Season)
                 .ThenBy(v => v.Episode)
                 .ToList();
+            // The watched prefix drives the episode list's eye icons too — record the
+            // first `progress` episodes by real (season, episode). "ep.Episode <= progress"
+            // can't work multi-season: progress is a global count, ep.Episode resets per
+            // season, so it marked every episode (incl. future ones) watched.
+            foreach (var v in ordered.Take(progress))
+                _watchedKeys.Add((v.Season, v.Episode));
             if (norm == "completed" || progress >= ordered.Count) return;
             var next = ordered[progress];
             if (IsFuture(next)) return; // can't promise a future-aired episode
