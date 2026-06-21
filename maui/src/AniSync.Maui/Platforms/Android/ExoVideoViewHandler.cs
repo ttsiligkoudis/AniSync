@@ -363,11 +363,18 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         if (_wasPlayingBeforeBackground && _player is { } p) p.PlayWhenReady = true;
     }
 
-    // Media3 needs an explicit MIME type for sideloaded subtitle tracks. Guess from the URL; default to SubRip
-    // (most OpenSubtitles downloads are .srt, and the proxied URLs often carry no extension).
+    // Media3 needs an explicit MIME type for sideloaded subtitle tracks and picks the parser from it — so it
+    // must match what the URL actually serves. Default to SubRip (most OpenSubtitles downloads are .srt, and
+    // the proxied URLs often carry no extension).
     private static string GuessSubtitleMime(string url)
     {
         var u = url.ToLowerInvariant();
+        // Our subtitle proxy (/api/v1/subtitle?url=…) always converts upstream SRT/ASS to WebVTT, and the
+        // positioning pass on that path emits VTT cue settings (line/position/align). Force text/vtt so
+        // ExoPlayer uses the VTT parser — the SubRip parser would choke on the WEBVTT header and, even if it
+        // didn't, drop the positioning, collapsing sign translations onto the dialogue. The encoded upstream
+        // url= can still say ".srt", so this check must come before the extension sniffing below.
+        if (u.Contains("/api/v1/subtitle")) return "text/vtt";
         if (u.Contains(".vtt")) return "text/vtt";
         if (u.Contains(".ass") || u.Contains(".ssa")) return "text/x-ssa";
         if (u.Contains(".ttml") || u.Contains(".dfxp")) return "application/ttml+xml";
