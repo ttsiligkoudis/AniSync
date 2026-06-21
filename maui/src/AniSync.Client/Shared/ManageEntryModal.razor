@@ -42,11 +42,13 @@
                     {
                         <div class="entry-modal-field">
                             <label class="entry-modal-label" for="entry-modal-season">Season</label>
-                            <select id="entry-modal-season" class="entry-modal-select"
-                                    value="@(IsVideo ? _selectedSeason.ToString() : _selectedEntryId)" @onchange="OnSeasonChanged">
+                            @* selected= on the option (not value= on the select) so the initial
+                               render reliably lands on the picked season/cour — a one-way value
+                               on a <select> doesn't always reflect before the user interacts. *@
+                            <select id="entry-modal-season" class="entry-modal-select" @onchange="OnSeasonChanged">
                                 @foreach (var s in _seasons)
                                 {
-                                    <option value="@s.Id">@s.Label</option>
+                                    <option value="@s.Id" selected="@(s.Id == CurrentSeasonValue)">@s.Label</option>
                                 }
                             </select>
                         </div>
@@ -188,6 +190,10 @@
     // count the server reads. _selectedSeason is the picked season number.
     private bool VideoSeasonPicker => IsVideo && _seasons.Count > 1;
     private int _selectedSeason = 1;
+
+    // The dropdown option that should render as selected: the picked season number
+    // for video, the picked cour id for anime.
+    private string? CurrentSeasonValue => IsVideo ? _selectedSeason.ToString() : _selectedEntryId;
 
     private static int SeasonNum(string? id) => int.TryParse(id, out var n) ? n : 0;
 

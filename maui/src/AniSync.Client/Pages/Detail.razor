@@ -917,8 +917,8 @@ else
     private string EntryPillLabel()
     {
         if (!HasEntry) return "Add to List";
-        // Video pill mirrors Detail.cshtml's vLabel: the Trakt status vocabulary, with
-        // "Watching · Ep N/T" for a series only (a movie is a single unit).
+        // Video pill is just the Trakt status word (no episode count — a series'
+        // linear all-seasons progress is meaningless on the pill; see VideoPillLabel).
         if (IsVideo) return VideoPillLabel(_state!.Status!);
         // Mirror Detail.cshtml's userBits: [PrettyStatus, "Ep N / T"] joined by " · ".
         var bits = new List<string>();
@@ -931,8 +931,10 @@ else
     }
 
     // Trakt video status → pill label. Mirrors Detail.cshtml's vLabel switch
-    // (planning / completed / onhold / dropped / rewatching, else "watching" →
-    // "Watching · Ep N/T" for a series with a known total, else "Watching").
+    // (planning / completed / onhold / dropped / rewatching, else "Watching").
+    // A series' progress is a single linear count across all seasons, which reads
+    // as meaningless on the pill (e.g. "Ep 2/204"), so just show the status — the
+    // per-season detail lives in the Manage Entry modal's season picker.
     private string VideoPillLabel(string status) => status.ToLowerInvariant() switch
     {
         "planning" => "Planning",
@@ -940,9 +942,7 @@ else
         "onhold" => "On Hold",
         "dropped" => "Dropped",
         "rewatching" => "Rewatching",
-        _ => VideoMediaType == "series" && _state?.TotalEpisodes is int vt && vt > 0
-            ? $"Watching · Ep {_state.Progress}/{vt}"
-            : "Watching",
+        _ => "Watching",
     };
 
     private async Task OpenModal()
