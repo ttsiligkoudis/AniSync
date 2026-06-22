@@ -1,4 +1,5 @@
 @page "/meta/{Id}"
+@using System.Globalization
 @inject IAniSyncApi Api
 @inject NavigationManager Nav
 @inject AppState State
@@ -1106,9 +1107,14 @@ else
     {
         if (ep.AiringAt is long at && at > 0)
             return at > DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        // Parse with InvariantCulture, NOT the device locale: the source date is
+        // MM/dd/yyyy (or ISO), so a dd/MM device (e.g. Greek) otherwise read "06/08"
+        // as 6 August (flipping a past episode to "future") and "06/29" as an invalid
+        // month (parse fails → treated as aired) — exactly backwards.
         return !string.IsNullOrEmpty(ep.Released)
-            && DateTime.TryParse(ep.Released, out var d)
-            && d.ToUniversalTime().Date > DateTime.UtcNow.Date;
+            && DateTime.TryParse(ep.Released, CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var d)
+            && d.Date > DateTime.UtcNow.Date;
     }
 
     private static string? DisplayDate(EpisodeInfoDto ep)
