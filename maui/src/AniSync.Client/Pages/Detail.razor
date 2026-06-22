@@ -1119,10 +1119,20 @@ else
 
     private static string? DisplayDate(EpisodeInfoDto ep)
     {
-        if (ep.AiringAt is long at && at > 0)
-            return DateTimeOffset.FromUnixTimeSeconds(at).UtcDateTime.ToString("yyyy-MM-dd");
-        if (!string.IsNullOrEmpty(ep.Released) && ep.Released!.Length >= 10) return ep.Released![..10];
-        return ep.Released;
+        // Resolve the air date (AniList unix wins; else the MM/dd/yyyy-or-ISO Released
+        // string, parsed invariantly like IsFuture so the day/month never flip).
+        DateTime? d =
+            ep.AiringAt is long at && at > 0
+                ? DateTimeOffset.FromUnixTimeSeconds(at).UtcDateTime
+            : DateTime.TryParse(ep.Released, CultureInfo.InvariantCulture,
+                  DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed)
+                ? parsed
+                : null;
+        // Render in the device's locale so a dd/MM user sees 25/05/2026 and a MM/dd user
+        // 05/25/2026 (CurrentCulture follows the device on native). Fall back to the raw
+        // string when it isn't a date we can parse.
+        return d?.ToString("d", CultureInfo.CurrentCulture)
+            ?? (!string.IsNullOrEmpty(ep.Released) && ep.Released!.Length >= 10 ? ep.Released![..10] : ep.Released);
     }
 
     // Default visible season: the one containing current progress when known,
