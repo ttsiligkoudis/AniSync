@@ -1,4 +1,5 @@
 @page "/calendar"
+@implements IDisposable
 @inject IAniSyncApi Api
 @inject AppState State
 @inject ISecureStore Store
@@ -26,9 +27,10 @@
         </div>
     </header>
 
-    @* Only show "Sign in" once we've actually finished resolving the credential — otherwise a
-       logged-in cold load flashes it while the store read is in flight (the skeleton shows instead). *@
-    @if (string.IsNullOrEmpty(State.StreamConfig) && !_loading)
+    @* Only show "Sign in" once we've finished resolving AND have nothing to show — otherwise a
+       logged-in load flashes it while the store read is in flight, and (after a prerender replay)
+       the loaded calendar would be hidden because StreamConfig isn't repopulated on the circuit. *@
+    @if (string.IsNullOrEmpty(State.StreamConfig) && !_loading && _model is null)
     {
         <p class="hint-text"><a href="/settings">Sign in</a> to see your week of episodes.</p>
     }
@@ -156,6 +158,12 @@
 
     private bool _loading = true;
     private CalendarResponse? _model;
+
+    // Re-render when the UI culture resolves (MainLayout reads navigator.language after first
+    // render) so the day / month labels flip to the visitor's locale without a navigation.
+    protected override void OnInitialized() => State.Changed += OnStateChanged;
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+    void IDisposable.Dispose() => State.Changed -= OnStateChanged;
 
     protected override async Task OnParametersSetAsync()
     {
