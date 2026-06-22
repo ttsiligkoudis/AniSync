@@ -1117,7 +1117,7 @@ else
             && d.Date > DateTime.UtcNow.Date;
     }
 
-    private static string? DisplayDate(EpisodeInfoDto ep)
+    private string? DisplayDate(EpisodeInfoDto ep)
     {
         // Resolve the air date (AniList unix wins; else the MM/dd/yyyy-or-ISO Released
         // string, parsed invariantly like IsFuture so the day/month never flip).
@@ -1128,10 +1128,10 @@ else
                   DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed)
                 ? parsed
                 : null;
-        // Render in the device's locale so a dd/MM user sees 25/05/2026 and a MM/dd user
-        // 05/25/2026 (CurrentCulture follows the device on native). Fall back to the raw
-        // string when it isn't a date we can parse.
-        return d?.ToString("d", CultureInfo.CurrentCulture)
+        // Render in the VISITOR's locale (State.UiCulture, from navigator.language) so a dd/MM
+        // user sees 25/05/2026 and a MM/dd user 05/25/2026 — on both heads, since the web
+        // server's culture isn't the visitor's. Fall back to the raw string when unparseable.
+        return d?.ToString("d", State.UiCulture)
             ?? (!string.IsNullOrEmpty(ep.Released) && ep.Released!.Length >= 10 ? ep.Released![..10] : ep.Released);
     }
 

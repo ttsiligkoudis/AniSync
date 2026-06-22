@@ -103,6 +103,21 @@ public sealed class AppState
     }
 
     /// <summary>
+    /// The locale used to FORMAT dates/times for the user (day/month order, month names).
+    /// Resolved from the browser/WebView's navigator.language (per circuit on the web head —
+    /// CurrentCulture there is the shared server's, not the visitor's). Defaults to the
+    /// process culture, which is correct on native (device locale) until the JS read lands.
+    /// </summary>
+    public System.Globalization.CultureInfo UiCulture { get; private set; } = System.Globalization.CultureInfo.CurrentCulture;
+
+    public void SetUiCulture(System.Globalization.CultureInfo culture)
+    {
+        if (Equals(UiCulture, culture)) return;
+        UiCulture = culture;
+        Changed?.Invoke();
+    }
+
+    /// <summary>
     /// Web-only TV-preview override. The native head decides TV via DeviceIdiom; on the web
     /// <see cref="IAppEnvironment.IsTv"/> reads this so a browser can preview the full 10-foot
     /// shell with <c>?tv=1</c> (and <c>?tv=0</c> to exit). Never set by default — strictly opt-in.
