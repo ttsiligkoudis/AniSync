@@ -1,6 +1,7 @@
 @page "/calendar"
 @inject IAniSyncApi Api
 @inject AppState State
+@inject ISecureStore Store
 @inject IPrerenderSession Prerender
 
 @* Calendar — port of Views/Calendar/Index.cshtml. A Sunday-first week strip
@@ -25,7 +26,9 @@
         </div>
     </header>
 
-    @if (string.IsNullOrEmpty(State.StreamConfig))
+    @* Only show "Sign in" once we've actually finished resolving the credential — otherwise a
+       logged-in cold load flashes it while the store read is in flight (the skeleton shows instead). *@
+    @if (string.IsNullOrEmpty(State.StreamConfig) && !_loading)
     {
         <p class="hint-text"><a href="/settings">Sign in</a> to see your week of episodes.</p>
     }
@@ -174,6 +177,16 @@
         // hydrates) re-invoke OnParametersSet and refetch over the replayed model.
         if (_appliedKey == key) return;
 
+        // Resolve the credential ourselves on the interactive pass before deciding logged-out: on a
+        // cold web refresh MainLayout hasn't populated StreamConfig yet when we first run, which left
+        // the page stuck on "Sign in" even when authenticated. The store derives it from the
+        // anisync_uid cookie on web (secure store on native) — same self-resolve Account does.
+        if (string.IsNullOrEmpty(State.StreamConfig) && RendererInfo.IsInteractive)
+        {
+            var saved = await Store.GetAsync(ISecureStore.ConfigKey);
+            if (!string.IsNullOrEmpty(saved)) State.SetStreamConfig(saved);
+        }
+
         if (string.IsNullOrEmpty(State.StreamConfig)) { _loading = false; return; }
         _loading = true;
         _model = await Api.CalendarAsync(D);
@@ -203,9 +216,11 @@
         _loading = false;
     }
 
-    private static string MonthLabel(string? iso) => DateOnly.TryParse(iso, out var d) ? d.ToString("MMM") : "";
-    private static string DayNumber(string? iso) => DateOnly.TryParse(iso, out var d) ? d.Day.ToString() : "";
-    private static string DowLabel(string? iso) => DateOnly.TryParse(iso, out var d) ? d.ToString("ddd") : "";
+    // Month / weekday names in the visitor's locale (State.UiCulture, from navigator.language) —
+    // the web server's culture isn't theirs. Parse the ISO key invariantly (it's yyyy-MM-dd).
+    private string MonthLabel(string? iso) => DateOnly.TryParse(iso, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d.ToString("MMM", State.UiCulture) : "";
+    private static string DayNumber(string? iso) => DateOnly.TryParse(iso, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d.Day.ToString() : "";
+    private string DowLabel(string? iso) => DateOnly.TryParse(iso, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d.ToString("ddd", State.UiCulture) : "";
     private static string AirTime(long unix) => DateTimeOffset.FromUnixTimeSeconds(unix).UtcDateTime
         .ToString("h:mm tt", System.Globalization.CultureInfo.InvariantCulture);
 

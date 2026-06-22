@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Linq;
 using AniSync.Client.Services;
 using AniSync.Client.Models;
@@ -104,6 +105,14 @@ public sealed class WebPrerenderSession : IPrerenderSession
             // instead of defaulting to anime and flashing once localStorage hydrates on the interactive
             // pass. Applies to anonymous visitors too (no credential needed).
             if (ctx is not null) SeedMediaTypes(state, ctx);
+
+            // Date/time formatting locale from the request's Accept-Language — the web server's
+            // CurrentCulture is the host's, not the visitor's, so dates would otherwise render in
+            // the server locale (e.g. MM/dd) instead of theirs (dd/MM for el-GR). Seed it for the
+            // prerendered HTML and bridge it to the interactive circuit so the first interactive
+            // render matches (no MM/dd → dd/MM flip). Native has no prerender and keeps its default
+            // CurrentCulture (= device locale).
+            if (ctx is not null) SeedCulture(state, ctx);
         }
         else
         {
@@ -118,7 +127,47 @@ public sealed class WebPrerenderSession : IPrerenderSession
             // default (anime / no toggle) until MainLayout's async localStorage read lands.
             if (_persist.TryTakeFromJson<MediaSeed>(MediaPersistKey, out var ms) && ms is not null)
                 ApplyMediaSeed(state, ms.Enabled, ms.Active, ms.Dash);
+
+            // Restore the date-formatting culture the prerender resolved from Accept-Language, so the
+            // first interactive render formats dates in the visitor's locale (not the server's).
+            if (_persist.TryTakeFromJson<string>(CulturePersistKey, out var cultureName) && !string.IsNullOrEmpty(cultureName))
+                TrySetCulture(state, cultureName);
         }
+    }
+
+    private const string CulturePersistKey = "anisync.uiCulture";
+
+    // Prerender: resolve the visitor's date/time formatting culture from the request's Accept-Language
+    // (highest-quality language that maps to a real culture), apply it, and bridge the name to the
+    // interactive circuit. Left un-set (process default) when nothing usable is sent.
+    private void SeedCulture(AppState state, Microsoft.AspNetCore.Http.HttpContext ctx)
+    {
+        string? resolved = null;
+        // "el-GR,el;q=0.9,en;q=0.8" → try each tag in listed order (browsers list the preferred
+        // one first), stripping the ";q=…" weight, until one maps to a real culture.
+        var header = ctx.Request.Headers["Accept-Language"].ToString();
+        if (!string.IsNullOrEmpty(header))
+        {
+            foreach (var part in header.Split(',', System.StringSplitOptions.RemoveEmptyEntries))
+            {
+                var tag = part.Split(';')[0].Trim();
+                if (string.IsNullOrEmpty(tag) || tag == "*") continue;
+                if (TrySetCulture(state, tag)) { resolved = state.UiCulture.Name; break; }
+            }
+        }
+
+        if (resolved is null) return;
+        _persist.RegisterOnPersisting(() =>
+        {
+            _persist.PersistAsJson(CulturePersistKey, resolved);
+            return Task.CompletedTask;
+        });
+    }
+
+    private static bool TrySetCulture(AppState state, string name)
+    {
+        try { state.SetUiCulture(CultureInfo.GetCultureInfo(name)); return true; }
+        catch (CultureNotFoundException) { return false; }
     }
 
     // Persisted across prerender→interactive (non-sensitive, unlike the credential) so the media-type
