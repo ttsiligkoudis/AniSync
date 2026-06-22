@@ -1,5 +1,6 @@
 @page "/meta/{Id}"
 @using System.Globalization
+@implements IDisposable
 @inject IAniSyncApi Api
 @inject NavigationManager Nav
 @inject AppState State
@@ -580,6 +581,12 @@ else
     // video movie — the query is authoritative for the video path).
     private bool IsMovie => _typeQuery == "movie"
         || string.Equals(_meta?.Type, "movie", StringComparison.OrdinalIgnoreCase);
+
+    // Re-render when the UI culture resolves (MainLayout reads navigator.language after first
+    // render) so the episode air dates flip to the visitor's locale without a navigation.
+    protected override void OnInitialized() => State.Changed += OnStateChanged;
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+    void IDisposable.Dispose() => State.Changed -= OnStateChanged;
 
     protected override async Task OnParametersSetAsync()
     {

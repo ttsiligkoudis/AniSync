@@ -12,6 +12,13 @@
     // 'light'/'dark' pin data-theme; anything else ('system') clears it so the CSS
     // follows the OS via prefers-color-scheme. theme-bridge.js observes data-theme
     // and re-tints the native status bars.
+    // The browser / WebView locale (e.g. "el-GR"), so .NET can format dates in the
+    // visitor's locale even on the web head, whose server CurrentCulture isn't theirs.
+    window.anisyncBrowserLocale = function () {
+        try { return navigator.language || (navigator.languages && navigator.languages[0]) || ''; }
+        catch (e) { return ''; }
+    };
+
     window.anisyncApplyTheme = function (theme) {
         var meta = document.querySelector('meta[name="theme-color"]');
         if (theme === 'light' || theme === 'dark') {

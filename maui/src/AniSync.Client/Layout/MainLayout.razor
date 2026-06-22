@@ -186,6 +186,21 @@ else
         if (!firstRender || !RendererInfo.IsInteractive) return;
         try
         {
+            // Resolve the date-formatting locale straight from the browser/WebView (navigator.language).
+            // The web server's CurrentCulture isn't the visitor's, and the Accept-Language prerender seed
+            // can disagree with what the browser actually uses — this is the authoritative client read.
+            // Pages subscribed to State.Changed re-render with the new culture. Native gets the device
+            // locale here too (matches its default CurrentCulture).
+            var locale = await JS.InvokeAsync<string>("anisyncBrowserLocale");
+            if (!string.IsNullOrWhiteSpace(locale))
+            {
+                try { State.SetUiCulture(System.Globalization.CultureInfo.GetCultureInfo(locale)); }
+                catch (System.Globalization.CultureNotFoundException) { /* unknown tag — keep default */ }
+            }
+        }
+        catch { /* no JS — keep the default / Accept-Language culture */ }
+        try
+        {
             // Apply the saved theme (System / Light / Dark) from the settings store — the
             // preference lives here now, not a header toggle / localStorage key. On web the
             // pre-paint stamp already applied it (this is an idempotent re-apply); on native
