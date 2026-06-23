@@ -114,7 +114,9 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         // Skip on TV: those panels are HDR-capable and pass HDR through, and the GL path can choke on
         // 4K there. Best-effort: if a device can't set up the effects pipeline, fall back to direct
         // rendering rather than failing playback.
-        if (DeviceInfo.Current.Idiom != DeviceIdiom.TV)
+        // Microsoft.Maui.Devices.DeviceInfo, fully qualified — AndroidX.Media3.Common (used in this
+        // file) also defines a DeviceInfo, so the bare name is ambiguous (CS0104).
+        if (Microsoft.Maui.Devices.DeviceInfo.Current.Idiom != Microsoft.Maui.Devices.DeviceIdiom.TV)
         {
             try { player.SetVideoEffects(new List<AndroidX.Media3.Common.IEffect>()); }
             catch (System.Exception ex) { System.Diagnostics.Debug.WriteLine($"HDR tone-map (video effects) unavailable: {ex.Message}"); }
