@@ -104,6 +104,14 @@
          MediaElement can't sideload subtitles or switch audio tracks); this package is referenced for those
          Media3 bindings, which it pulls in transitively. -->
     <PackageReference Include="CommunityToolkit.Maui.MediaElement" Version="10.0.0" />
+
+    <!-- media3-effect: the GL video-effects pipeline (DefaultVideoFrameProcessor). The toolkit pulls in the
+         core Media3 bindings (ExoPlayer/UI/Common/…) but NOT this one, so ExoPlayer.SetVideoEffects(...) threw
+         "Could not find required lib-effect dependencies." at runtime. We use that pipeline to tone-map HDR
+         (PQ/HLG) down to SDR on phones — without this package the empty-effects tone-map never engaged and HDR
+         streams rendered dark. Android-only binding; pin to the same 1.8.0 the toolkit resolves for Media3. -->
+    <PackageReference Include="Xamarin.AndroidX.Media3.Effect" Version="1.8.0"
+                      Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'" />
   </ItemGroup>
 
   <ItemGroup>
