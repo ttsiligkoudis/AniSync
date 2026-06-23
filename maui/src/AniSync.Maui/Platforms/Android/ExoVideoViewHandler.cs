@@ -107,6 +107,19 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         _player = player;
         platformView.Player = player;
 
+        // HDR → SDR tone-mapping (phones only). HDR streams render dark/washed on a phone because
+        // ExoPlayer hardware-decodes without tone-mapping, whereas libVLC software-tonemaps (so it
+        // looks brighter/correct). Routing playback through the effects (GL) pipeline makes Media3
+        // tone-map HDR down to SDR by default — an empty effects list just enables that pipeline.
+        // Skip on TV: those panels are HDR-capable and pass HDR through, and the GL path can choke on
+        // 4K there. Best-effort: if a device can't set up the effects pipeline, fall back to direct
+        // rendering rather than failing playback.
+        if (DeviceInfo.Current.Idiom != DeviceIdiom.TV)
+        {
+            try { player.SetVideoEffects(new List<AndroidX.Media3.Common.IEffect>()); }
+            catch (System.Exception ex) { System.Diagnostics.Debug.WriteLine($"HDR tone-map (video effects) unavailable: {ex.Message}"); }
+        }
+
         // Build the MediaItem, sideloading any external subtitle tracks (the proxied OpenSubtitles URLs from
         // the API) so they appear in the CC button / settings menu alongside the file's embedded tracks.
         var builder = new MediaItem.Builder().SetUri(request.Url);
