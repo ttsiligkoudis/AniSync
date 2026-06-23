@@ -33,4 +33,6 @@ public sealed class WebAppEnvironment : IAppEnvironment
     // Browser-on-TV can't be auto-detected server-side, but `?tv=1` opts into a full TV-shell
     // preview: MainLayout sets AppState.ForceTv from the query / persisted flag. Off by default.
     public bool IsTv => _state.ForceTv;
+    // The web head plays in an HTML5 <video> — no libVLC / ExoPlayer to choose between.
+    public bool SupportsPlayerChoice => false;
 }

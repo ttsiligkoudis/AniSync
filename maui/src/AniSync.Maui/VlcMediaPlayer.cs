@@ -26,22 +26,33 @@ namespace AniSync.Maui;
 public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
 {
     private readonly LibVLC _libVlc;
+    private readonly ISecureStore _store;
     private MediaPlayer? _player;
 
-    public VlcMediaPlayer(LibVLC libVlc) => _libVlc = libVlc;
+    // Settings-store key for the chosen native engine (Account → Appearance → Video player).
+    // "exo" → ExoPlayer; anything else (incl. unset) → the default libVLC. Android phones only;
+    // TV ignores it (always ExoPlayer) and non-Android has no ExoPlayer to switch to.
+    private const string PlayerPrefKey = "pref:player";
+
+    public VlcMediaPlayer(LibVLC libVlc, ISecureStore store) => (_libVlc, _store) = (libVlc, store);
 
     public async Task PlayAsync(PlaybackRequest request, CancellationToken ct = default)
     {
         // Tear down any prior session before starting a new one.
         await StopAsync();
 
+        // Read unconditionally (not inside #if ANDROID) so _store is used on every target —
+        // avoids an "assigned but never used" warning on the Windows build, where the branch
+        // below is compiled out.
+        var prefersExo = string.Equals(await _store.GetAsync(PlayerPrefKey), "exo", StringComparison.OrdinalIgnoreCase);
+
 #if ANDROID
         // Android TV: play with ExoPlayer (Google Media3, via our ExoVideoView handler), the engine
         // Stremio uses. The embedded libVLCSharp SurfaceView could never present a 4K frame on these TVs
         // (the MAUI wrapper's surface integration, not libVLC itself); ExoPlayer plays 4K cleanly. Phones
-        // keep the in-app libVLC MAUI player below (it works there, with the full chrome / exotic audio
-        // codecs).
-        if (DeviceInfo.Current.Idiom == DeviceIdiom.TV)
+        // default to the in-app libVLC MAUI player below (full chrome / exotic audio codecs) but can opt
+        // into ExoPlayer via the setting — so this branch also runs when the user picked it.
+        if (DeviceInfo.Current.Idiom == DeviceIdiom.TV || prefersExo)
         {
             await MainThread.InvokeOnMainThreadAsync(async () =>
             {
