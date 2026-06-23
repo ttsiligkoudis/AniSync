@@ -29,7 +29,7 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
     private bool _ended;
     private bool _wasPlayingBeforeBackground;
     private int _scaleIndex;
-    private TextView? _aspectButton;
+    private ImageButton? _aspectButton;
 
     // AniSkip OP/ED bands (absolute seconds) + the "Skip Intro/Outro" overlay button. Shown by the
     // position ticker while inside a band; tapping (or D-pad OK) seeks just past it.
@@ -280,14 +280,14 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         if (PlatformView is null) return;
         _scaleIndex = (_scaleIndex + 1) % ResizeModes.Length;
         PlatformView.ResizeMode = ResizeModes[_scaleIndex];
-        if (_aspectButton is not null) _aspectButton.Text = ScaleLabels[_scaleIndex];
+        // The button is a single aspect-ratio icon (no text) — surface the new mode as a toast.
         Toast.MakeText(Context, ScaleLabels[_scaleIndex], ToastLength.Short)?.Show();
     }
 
     // Inject the on-screen aspect-ratio control into ExoPlayer's bottom control bar, next to the settings/CC
-    // buttons. ExoPlayer's bar isn't publicly extensible, so we find the settings button's container and add a
-    // small text button that shows the current mode ("Fit"/"Zoom"/"Fill") and cycles it on click — clicking it
-    // routes through the same CycleScale used by the MENU key, so the label always reflects the live mode.
+    // buttons. ExoPlayer's bar isn't publicly extensible, so we find the settings button's container and add an
+    // aspect-ratio icon button that cycles Fit → Zoom → Fill on click (the same CycleScale the MENU key uses,
+    // which toasts the new mode).
     private void EnsureAspectButton()
     {
         if (_aspectButton is not null || PlatformView is null) return;
@@ -295,27 +295,25 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
 
         var ctx = PlatformView.Context!;
         var density = ctx.Resources?.DisplayMetrics?.Density ?? 1f;
-        var button = new TextView(ctx)
+        // An icon button (aspect-ratio glyph) rather than a "Fit/Zoom/Fill" text label, to match the
+        // other bottom-bar controls. The active mode is announced via a toast on each tap (CycleScale).
+        var button = new ImageButton(ctx)
         {
-            Text = ScaleLabels[_scaleIndex],
             Focusable = true,
             Clickable = true,
-            Gravity = GravityFlags.Center,
         };
-        button.SetTextColor(Android.Graphics.Color.White);
-        button.SetTextSize(Android.Util.ComplexUnitType.Sp, 14);
-        var padH = (int)(10 * density);
-        var padV = (int)(4 * density);
-        button.SetPadding(padH, padV, padH, padV);
+        button.SetImageResource(Resource.Drawable.aspect_ratio);
+        button.SetScaleType(ImageView.ScaleType.FitCenter!);
+        var pad = (int)(8 * density);
+        button.SetPadding(pad, pad, pad, pad);
         button.Background = BuildFocusSelector(ctx);
         button.Click += (_, _) => CycleScale();
 
         // Place it just before the settings (gear) button so it reads with the other bottom-bar controls.
         var index = bar.IndexOfChild(FindExoView("exo_settings"));
         bar.AddView(button, index < 0 ? bar.ChildCount : index);
-        // The bottom control bar is a horizontal LinearLayout; a WRAP_CONTENT TextView defaults to
-        // top-aligned, so "Fit/Zoom/Fill" sat above the (taller) icon buttons. Centre it vertically to
-        // line up with the CC / gear icons.
+        // The bottom control bar is a horizontal LinearLayout; centre the button vertically so it lines
+        // up with the CC / gear icons rather than floating to the top.
         if (button.LayoutParameters is LinearLayout.LayoutParams llp)
         {
             llp.Gravity = GravityFlags.CenterVertical;
