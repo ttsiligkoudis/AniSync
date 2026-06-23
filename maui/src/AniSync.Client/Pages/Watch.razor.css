@@ -1,12 +1,17 @@
-/* Cap the inline player (and the header / nav that frame it) on wide screens. Real
-   watching is done fullscreen, so a full-width 16:9 surface is needlessly large on
-   desktop — constrain the watch column to a comfortable size and centre it. Narrow
-   screens are unaffected: max-width only shrinks, so the player stays full width
-   below the cap. The scoped selector outranks site.css's plain .watch-player(-wrap). */
-.watch-header,
-.watch-player-wrap,
-.watch-nav {
-    max-width: 56rem;
-    margin-left: auto;
-    margin-right: auto;
+/* Desktop only: cap the inline player to a comfortable size and centre it. Real
+   watching is done fullscreen, so a full-width 16:9 surface is needlessly large.
+
+   Important: this caps .watch-player — a normal BLOCK child of the block
+   .watch-player-wrap — so margin-auto centres it via ordinary block flow. Do NOT
+   put max-width + auto margins on .watch-player-wrap: it's a flex item of <main>
+   (a flex column), where auto cross-axis margins cancel align-items:stretch and
+   collapse the box to its content width (≈0 before a stream is picked, tiny while
+   playing). Mobile (<768px) keeps its existing edge-to-edge player — this rule
+   simply doesn't apply there. */
+@media (min-width: 768px) {
+    .watch-player {
+        max-width: 56rem;
+        margin-left: auto;
+        margin-right: auto;
+    }
 }
