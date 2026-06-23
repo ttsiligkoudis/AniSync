@@ -177,16 +177,16 @@
     private bool _infoOpen;
     private bool _refreshing;
 
-    // While loading we don't yet know which trackers returned data, so predict the groups
-    // from the enabled media types (anime → AniList row, movies/series → Trakt row). Stats are
-    // login-gated (they come from linked accounts), so an anonymous visitor shows no skeleton.
-    // Once the fetch lands, fall back to "show the row only if it actually has data".
-    private bool ShowAnimeGroup => _loading
-        ? State.LoggedIn && State.EnabledMediaTypes.Contains(MetaType.anime)
-        : _anime is not null;
-    private bool ShowTraktGroup => _loading
-        ? State.LoggedIn && State.EnabledMediaTypes.Any(t => t != MetaType.anime)
-        : _trakt is not null;
+    // A group shows only when its media type is ENABLED (the "What do you want to watch?" modal —
+    // not just the All/single view toggle), AND there's something to show: while loading we predict
+    // from the enabled types (login-gated, so anonymous shows no skeleton); once loaded, only when the
+    // tracker actually returned data. Gating on the enabled set in BOTH states is what hides the Anime
+    // row when only Movies/Series are enabled (and vice-versa), even though the linked account still
+    // has data behind it.
+    private bool ShowAnimeGroup => State.EnabledMediaTypes.Contains(MetaType.anime)
+        && (_loading ? State.LoggedIn : _anime is not null);
+    private bool ShowTraktGroup => State.EnabledMediaTypes.Any(t => t != MetaType.anime)
+        && (_loading ? State.LoggedIn : _trakt is not null);
     private bool _combined => ShowAnimeGroup && ShowTraktGroup;
 
     // null omits the attribute; "" renders data-stats-loading="" which the skeleton CSS matches.
