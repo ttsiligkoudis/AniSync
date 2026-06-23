@@ -31,13 +31,6 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
     private int _scaleIndex;
     private Android.Widget.ImageButton? _aspectButton;
 
-    // TEMP HDR diagnostics: records the result of the SetVideoEffects (tone-map) attempt and surfaces the
-    // playback color state on-screen so we can see — on a real device — why HDR still renders dark. Remove
-    // once the tone-mapping path is confirmed working.
-    private string _effectsDiag = "not attempted";
-    private Android.Widget.TextView? _diagView;
-    private bool _diagDone;
-
     // AniSkip OP/ED bands (absolute seconds) + the "Skip Intro/Outro" overlay button. Shown by the
     // position ticker while inside a band; tapping (or D-pad OK) seeks just past it.
     private SkipMark? _skipIntro;
@@ -117,30 +110,20 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         // HDR → SDR tone-mapping (phones only). HDR streams render dark/washed on a phone because
         // ExoPlayer hardware-decodes without tone-mapping, whereas libVLC software-tonemaps (so it
         // looks brighter/correct). Routing playback through the effects (GL) pipeline makes Media3
-        // tone-map HDR down to SDR by default — an empty effects list just enables that pipeline.
-        // Skip on TV: those panels are HDR-capable and pass HDR through, and the GL path can choke on
-        // 4K there. Best-effort: if a device can't set up the effects pipeline, fall back to direct
+        // tone-map HDR down to SDR by default — an empty effects list just enables that pipeline (this
+        // needs the Xamarin.AndroidX.Media3.Effect package, which carries the GL DefaultVideoFrameProcessor;
+        // without it SetVideoEffects throws "Could not find required lib-effect dependencies").
+        // We tone-map even on HDR-capable phone panels: true HDR passthrough (window COLOR_MODE_HDR) was
+        // tried and, on the panels tested, still looked dimmer than libVLC, so the tone-mapped SDR path is
+        // the reliable match. Skip on TV: those panels pass HDR through natively and the GL path can choke
+        // on 4K there. Best-effort: if a device can't set up the effects pipeline, fall back to direct
         // rendering rather than failing playback.
         // Microsoft.Maui.Devices.DeviceInfo, fully qualified — AndroidX.Media3.Common (used in this
         // file) also defines a DeviceInfo, so the bare name is ambiguous (CS0104).
-        if (Microsoft.Maui.Devices.DeviceInfo.Current.Idiom == Microsoft.Maui.Devices.DeviceIdiom.TV)
+        if (Microsoft.Maui.Devices.DeviceInfo.Current.Idiom != Microsoft.Maui.Devices.DeviceIdiom.TV)
         {
-            _effectsDiag = "skipped (TV idiom)";
-        }
-        else if (PanelIsHdrCapable())
-        {
-            // True HDR passthrough: an HDR-capable panel can present PQ/HLG natively. Don't route through the
-            // SDR effects pipeline (it dims mid-tones); instead put the player's window into HDR colour mode so
-            // the system switches the panel to HDR. Without this, direct-rendered HDR shows dark. The video
-            // surface lives in the modal DialogFragment's own window, so the mode is set there too.
-            _effectsDiag = "passthrough (HDR panel)";
-            AndroidImmersive.RequestHdrColorMode(platformView);
-        }
-        else
-        {
-            // SDR panel: tone-map HDR down to SDR via the (empty) GL effects pipeline.
-            try { player.SetVideoEffects(new List<AndroidX.Media3.Common.IEffect>()); _effectsDiag = "applied (empty list, SDR panel)"; }
-            catch (System.Exception ex) { _effectsDiag = $"ERR {ex.GetType().Name}: {ex.Message}"; System.Diagnostics.Debug.WriteLine($"HDR tone-map (video effects) unavailable: {ex.Message}"); }
+            try { player.SetVideoEffects(new List<AndroidX.Media3.Common.IEffect>()); }
+            catch (System.Exception ex) { System.Diagnostics.Debug.WriteLine($"HDR tone-map (video effects) unavailable: {ex.Message}"); }
         }
 
         // Build the MediaItem, sideloading any external subtitle tracks (the proxied OpenSubtitles URLs from
@@ -193,12 +176,10 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
             VirtualView.PauseForBackgroundRequested -= OnPauseForBackground;
             VirtualView.ResumeFromBackgroundRequested -= OnResumeFromBackground;
         }
-        AndroidImmersive.ClearHdrColorMode(platformView);   // don't leave the app UI in HDR colour mode
         platformView.Player = null;
         try { _player?.Release(); } catch { /* already released */ }
         _player = null;
         _skipButton = null;   // child of platformView, torn down with it
-        _diagView = null;     // ditto (TEMP HDR diagnostics)
         base.DisconnectHandler(platformView);
     }
 
@@ -220,7 +201,6 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
                     long pos = p.CurrentPosition, dur = p.Duration;
                     if (dur > 0) VirtualView?.Request.OnProgress?.Invoke(pos / 1000.0, dur / 1000.0);
                     UpdateSkipButton(pos / 1000.0);
-                    MaybeShowDiag(p);
                     if (!_ended && p.PlaybackState == StateEnded)
                     {
                         _ended = true;
@@ -304,86 +284,6 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
             _skipButton.Visibility = ViewStates.Visible;
             _skipButton.RequestFocus();    // TV: put the D-pad on it so OK skips immediately
         }
-    }
-
-    // Is the panel HDR-capable? Decides HDR passthrough (let the panel present PQ/HLG) vs SDR tone-mapping.
-    // The view usually isn't attached yet in ConnectHandler, so its Display is null — fall back to the
-    // hosting activity's display. Defaults to false (→ safe SDR tone-map path) if the capability is unknown.
-    private bool PanelIsHdrCapable()
-    {
-        if (Android.OS.Build.VERSION.SdkInt < Android.OS.BuildVersionCodes.O) return false;
-        try
-        {
-            var d = PlatformView?.Display;
-            if (d is null)
-            {
-                var ctx = (global::Android.Content.Context?)Context;
-                while (ctx is global::Android.Content.ContextWrapper w)
-                {
-                    if (ctx is Android.App.Activity act)
-                    {
-#pragma warning disable CA1422 // DefaultDisplay deprecated, but the per-view Display (non-deprecated) isn't ready yet
-                        d = act.WindowManager?.DefaultDisplay;
-#pragma warning restore CA1422
-                        break;
-                    }
-                    ctx = w.BaseContext;
-                }
-            }
-            return d?.IsHdr ?? false;
-        }
-        catch { return false; }
-    }
-
-    // TEMP HDR diagnostics. Once the decoder reports a video format, overlay the facts that decide whether
-    // tone-mapping happens: Android API level, the SetVideoEffects result, the stream's color transfer
-    // (6 = PQ/ST2084, 7 = HLG → HDR; 3 = SDR), and whether the panel itself is HDR-capable. Screenshot this
-    // and report back; it pinpoints which piece is failing without another blind build. Remove afterwards.
-    private void MaybeShowDiag(IExoPlayer p)
-    {
-        if (_diagDone || PlatformView is null) return;
-
-        int api = (int)Android.OS.Build.VERSION.SdkInt;
-
-        string transfer = "no video format yet";
-        var fmt = p.VideoFormat;
-        if (fmt is not null)
-        {
-            var ci = fmt.ColorInfo;
-            int t = ci?.ColorTransfer ?? -1;
-            string name = t switch { 3 => "SDR", 6 => "PQ/ST2084 (HDR)", 7 => "HLG (HDR)", 1 => "BT709", -1 => "none", _ => $"#{t}" };
-            transfer = $"{fmt.Width}x{fmt.Height} transfer={name} codec={fmt.SampleMimeType}";
-        }
-        else
-        {
-            return; // wait until the decoder reports the format before pinning the overlay
-        }
-
-        string panel = "?";
-        try { panel = (PlatformView.Display?.IsHdr ?? false) ? "HDR-capable" : "SDR"; }
-        catch { /* Display HDR query unavailable on this API */ }
-
-        var text = $"HDR DIAG\nAPI {api}  panel={panel}\neffects: {_effectsDiag}\nvideo: {transfer}";
-
-        var tv = new Android.Widget.TextView(Context!)
-        {
-            Text = text,
-            Visibility = ViewStates.Visible,
-        };
-        tv.SetTextColor(Android.Graphics.Color.White);
-        tv.SetBackgroundColor(Android.Graphics.Color.Argb(200, 0, 0, 0));
-        tv.SetPadding(24, 24, 24, 24);
-        tv.SetTextSize(Android.Util.ComplexUnitType.Sp, 12);
-        var lp = new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent)
-        {
-            Gravity = GravityFlags.Top | GravityFlags.Start,
-        };
-        lp.SetMargins(40, 120, 0, 0);   // clear of the top control bar / status area
-        tv.LayoutParameters = lp;
-        PlatformView.AddView(tv);
-        _diagView = tv;
-        _diagDone = true;
     }
 
     private (string Label, double End)? ActiveSkipBand(double t)
