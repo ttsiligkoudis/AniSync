@@ -20,10 +20,9 @@
         <item name="selectableItemBackgroundBorderless">@drawable/tv_focus_selectable</item>
         <!-- Opaque dark surface for the gear / CC settings pop-up. With parent="" the popup
              otherwise inherits no solid background and renders semi-transparent, so the bottom-bar
-             buttons show through it. Set the platform + Material surface/background attrs the popup
-             may resolve against so it's solid regardless of Media3 version. -->
+             buttons show through it. Only the PLATFORM attr is valid here — the library attrs
+             (colorBackground / colorSurface, no android: prefix) need a Material parent theme this
+             overlay doesn't have, and AAPT2 fails to link them. -->
         <item name="android:colorBackground">#FF14171C</item>
-        <item name="colorBackground">#FF14171C</item>
-        <item name="colorSurface">#FF14171C</item>
     </style>
 </resources>
