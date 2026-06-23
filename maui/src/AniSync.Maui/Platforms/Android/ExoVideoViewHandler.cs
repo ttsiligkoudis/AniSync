@@ -29,7 +29,7 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
     private bool _ended;
     private bool _wasPlayingBeforeBackground;
     private int _scaleIndex;
-    private ImageButton? _aspectButton;
+    private Android.Widget.ImageButton? _aspectButton;
 
     // AniSkip OP/ED bands (absolute seconds) + the "Skip Intro/Outro" overlay button. Shown by the
     // position ticker while inside a band; tapping (or D-pad OK) seeks just past it.
@@ -297,13 +297,15 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         var density = ctx.Resources?.DisplayMetrics?.Density ?? 1f;
         // An icon button (aspect-ratio glyph) rather than a "Fit/Zoom/Fill" text label, to match the
         // other bottom-bar controls. The active mode is announced via a toast on each tap (CycleScale).
-        var button = new ImageButton(ctx)
+        // Fully qualified: ImageButton/ImageView are ambiguous with the Microsoft.Maui.Controls types
+        // pulled in by the project's implicit usings.
+        var button = new Android.Widget.ImageButton(ctx)
         {
             Focusable = true,
             Clickable = true,
         };
         button.SetImageResource(Resource.Drawable.aspect_ratio);
-        button.SetScaleType(ImageView.ScaleType.FitCenter!);
+        button.SetScaleType(Android.Widget.ImageView.ScaleType.FitCenter!);
         var pad = (int)(8 * density);
         button.SetPadding(pad, pad, pad, pad);
         button.Background = BuildFocusSelector(ctx);
