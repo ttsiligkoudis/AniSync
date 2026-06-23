@@ -544,9 +544,11 @@ window.anisyncWatch = (function () {
             .catch(function () { return originalUrl; });
     }
 
-    // ── matroska-subtitles + jassub ESM bootstrap (CDN, parallel, timed-out) ──
-    // Both ship ESM/Node-only on npm; esm.sh auto-bundles for the browser. Each
-    // import has a fallback CDN chain with a 6s timeout so a hung CDN falls through.
+    // ── matroska-subtitles + jassub ESM bootstrap (local + CDN, parallel, timed-out) ──
+    // Both ship ESM/Node-only on npm. matroska-subtitles loads from a vendored local
+    // bundle first (the CDN builds all broke — see the specifier list); jassub stays on
+    // CDN (its WebAssembly worker makes vendoring a larger, separate effort). Each import
+    // has a fallback chain with a 6s timeout so a hung/broken source falls through.
     var _libsReady = null;
     function loadSubtitleLibs() {
         if (_libsReady) return _libsReady;
@@ -572,6 +574,13 @@ window.anisyncWatch = (function () {
             var status = { matroska: false, jassub: false };
             var pair = await Promise.all([
                 tryImport([
+                    // Local esbuild bundle of matroska-subtitles@3.3.2 FIRST — the CDN builds all
+                    // broke: esm.sh mistranspiles the Writable base so `new SubtitleParser()` throws
+                    // "Class constructor cannot be invoked without 'new'", esm.run ships a broken
+                    // chunk, and skypack 404s. Served from the web head's wwwroot (absolute path —
+                    // watch-player.js loads as a classic script, so import() resolves against the
+                    // page URL, not this file). CDNs stay as a fallback if the vendored copy is missing.
+                    '/js/matroska-subtitles.bundle.js',
                     'https://esm.sh/matroska-subtitles?bundle&target=esnext',
                     'https://esm.sh/matroska-subtitles?target=esnext',
                     'https://esm.run/matroska-subtitles',
