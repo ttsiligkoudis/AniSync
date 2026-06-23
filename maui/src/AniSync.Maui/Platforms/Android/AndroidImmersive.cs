@@ -209,4 +209,39 @@ internal static class AndroidImmersive
             : LayoutInDisplayCutoutMode.Default;
         window!.Attributes = attrs;
     }
+
+    // HDR passthrough: put the player's window(s) into HDR colour mode so an HDR-capable panel actually
+    // presents PQ/HLG content (bright/vivid) instead of rendering it dark. The video surface lives in the
+    // modal DialogFragment's OWN window (see the cutout note above), so the mode must be set there; we set it
+    // on the activity window too and clear that again on teardown so the rest of the app UI isn't left in HDR.
+    public static void RequestHdrColorMode(global::Android.Views.View? view)
+    {
+        if (view is null || Build.VERSION.SdkInt < BuildVersionCodes.O) return;
+        view.Post(() =>
+        {
+            var activity = FindActivity(view.Context);
+            if (activity is null) return;
+            ApplyColorMode(activity.Window, hdr: true);
+            if (TopModalWindow(activity) is { } modal) ApplyColorMode(modal, hdr: true);
+        });
+    }
+
+    public static void ClearHdrColorMode(global::Android.Views.View? view)
+    {
+        if (view is null || Build.VERSION.SdkInt < BuildVersionCodes.O) return;
+        var activity = FindActivity(view.Context);
+        if (activity is not null) ApplyColorMode(activity.Window, hdr: false);
+    }
+
+    private static void ApplyColorMode(global::Android.Views.Window? window, bool hdr)
+    {
+        if (window is null || Build.VERSION.SdkInt < BuildVersionCodes.O) return;
+        try
+        {
+            window.SetColorMode((int)(hdr
+                ? global::Android.Content.PM.ColorMode.Hdr
+                : global::Android.Content.PM.ColorMode.Default));
+        }
+        catch { /* OEM window without HDR colour-mode support */ }
+    }
 }
