@@ -17,5 +17,14 @@ public sealed class MauiAppEnvironment : IAppEnvironment
     // Blazor UI's TV shell. Phones/tablets report a non-TV idiom, so they keep the normal chrome.
     public bool IsTv { get; } = DeviceInfo.Current.Idiom == DeviceIdiom.TV;
 
+    // Only Android phones/tablets can pick the engine: ExoPlayer (Media3) is Android-only, Android
+    // TV is forced to ExoPlayer (see VlcMediaPlayer.PlayAsync), and Windows/iOS native are libVLC-only.
+    public bool SupportsPlayerChoice =>
+#if ANDROID
+        !IsTv;
+#else
+        false;
+#endif
+
     public MauiAppEnvironment(string apiBaseUrl) => ApiBaseUrl = apiBaseUrl;
 }

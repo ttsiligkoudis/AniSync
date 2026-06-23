@@ -87,6 +87,17 @@ else
                 <button type="button" class="theme-pill @(_theme == "light" ? "is-active" : "")" @onclick='() => SetThemeAsync("light")'>Light</button>
                 <button type="button" class="theme-pill @(_theme == "dark" ? "is-active" : "")" @onclick='() => SetThemeAsync("dark")'>Dark</button>
             </div>
+
+            @* Native engine picker — only where both exist (Android phones/tablets). libVLC handles
+               exotic codecs (HEVC/AC3/EAC3/DTS) with full chrome; ExoPlayer handles 4K cleanly. *@
+            @if (Env.SupportsPlayerChoice)
+            {
+                <p class="section-description">Video player — applies to the next thing you play. TV always uses ExoPlayer.</p>
+                <div class="theme-pills" role="group" aria-label="Video player">
+                    <button type="button" class="theme-pill @(_player == "libvlc" ? "is-active" : "")" @onclick='() => SetPlayerAsync("libvlc")'>libVLC</button>
+                    <button type="button" class="theme-pill @(_player == "exo" ? "is-active" : "")" @onclick='() => SetPlayerAsync("exo")'>ExoPlayer</button>
+                </div>
+            }
             <div class="btn-action-row">
                 <button type="button" class="btn-ghost" @onclick="() => _dashCustomize?.Open()">Customize dashboard</button>
             </div>
@@ -177,6 +188,17 @@ else
         try { await JS.InvokeVoidAsync("anisyncApplyTheme", theme); } catch { /* no JS */ }
     }
 
+    // Native video player engine: "libvlc" (default) / "exo". Read by VlcMediaPlayer at the next
+    // PlayAsync — no live effect, so we just persist + repaint the pill highlight.
+    private string _player = "libvlc";
+
+    private async Task SetPlayerAsync(string player)
+    {
+        if (_player == player) return;
+        _player = player;
+        await Store.SetAsync("pref:player", player);
+    }
+
     // Anime-only cards (Preferences toggles) gate on the user's real media-type pick.
     // That choice lives client-side (AppState, hydrated from localStorage by MainLayout) —
     // NOT in the server config: the Blazor-Server self-call to /api/v1/me/config can't see
@@ -194,8 +216,10 @@ else
             // gates on State.EnabledMediaTypes), e.g. the header chooser flips anime off.
             State.Changed += OnStateChanged;
 
-            // Current theme for the Appearance switch's highlight (default System = follow OS).
+            // Current theme + native player engine for the Appearance switches' highlight
+            // (theme default System = follow OS; player default libVLC).
             _theme = await Store.GetAsync("pref:theme") ?? "system";
+            _player = await Store.GetAsync("pref:player") ?? "libvlc";
 
             // Replay the config the prerender stashed (cookie-seeded credential → real cards) instead
             // of re-reading localStorage + refetching, so a logged-in refresh doesn't flash the

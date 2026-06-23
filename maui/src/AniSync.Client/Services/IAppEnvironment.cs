@@ -33,4 +33,13 @@ public interface IAppEnvironment
     /// D-pad focus styling and spatial navigation.
     /// </summary>
     bool IsTv { get; }
+
+    /// <summary>
+    /// True when the user can choose the native video player engine (libVLC vs
+    /// ExoPlayer). Only Android phones/tablets qualify: ExoPlayer (Media3) is
+    /// Android-only, Android TV is locked to ExoPlayer regardless, and the Web
+    /// head has neither (it plays in an HTML5 &lt;video&gt;). Gates the "Video player"
+    /// setting so it only appears where it actually does something.
+    /// </summary>
+    bool SupportsPlayerChoice { get; }
 }
