@@ -18,5 +18,12 @@
         <item name="android:selectableItemBackgroundBorderless">@drawable/tv_focus_selectable</item>
         <item name="selectableItemBackground">@drawable/tv_focus_selectable</item>
         <item name="selectableItemBackgroundBorderless">@drawable/tv_focus_selectable</item>
+        <!-- Opaque dark surface for the gear / CC settings pop-up. With parent="" the popup
+             otherwise inherits no solid background and renders semi-transparent, so the bottom-bar
+             buttons show through it. Set the platform + Material surface/background attrs the popup
+             may resolve against so it's solid regardless of Media3 version. -->
+        <item name="android:colorBackground">#FF14171C</item>
+        <item name="colorBackground">#FF14171C</item>
+        <item name="colorSurface">#FF14171C</item>
     </style>
 </resources>
