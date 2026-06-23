@@ -1,0 +1,12 @@
+/* Cap the inline player (and the header / nav that frame it) on wide screens. Real
+   watching is done fullscreen, so a full-width 16:9 surface is needlessly large on
+   desktop — constrain the watch column to a comfortable size and centre it. Narrow
+   screens are unaffected: max-width only shrinks, so the player stays full width
+   below the cap. The scoped selector outranks site.css's plain .watch-player(-wrap). */
+.watch-header,
+.watch-player-wrap,
+.watch-nav {
+    max-width: 56rem;
+    margin-left: auto;
+    margin-right: auto;
+}
