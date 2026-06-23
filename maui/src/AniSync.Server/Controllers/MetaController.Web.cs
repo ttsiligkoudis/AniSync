@@ -161,7 +161,7 @@ namespace AnimeList.Controllers
                         {
                             var v = await _traktService.GetVideoEntryAsync(uid, traktAnimeType, imdbId);
                             int? total = traktAnimeType == "series" ? anime.videos?.Count : 1;
-                            var (tStatus, tProgress) = DeriveTraktVideoStatus(traktAnimeType, v, total);
+                            var (tStatus, tProgress) = DeriveTraktVideoStatus(traktAnimeType, v, total, Utils.IsSeriesStillAiring(anime));
                             if (!string.IsNullOrEmpty(tStatus))
                             {
                                 entry = new EntryViewState
@@ -355,7 +355,7 @@ namespace AnimeList.Controllers
             {
                 var v = await _traktService.GetVideoEntryAsync(uid, cinemetaType, imdbId);
                 int? total = cinemetaType == "series" ? meta.videos?.Count : 1;
-                var (status, progress) = DeriveTraktVideoStatus(cinemetaType, v, total);
+                var (status, progress) = DeriveTraktVideoStatus(cinemetaType, v, total, Utils.IsSeriesStillAiring(meta));
                 if (!string.IsNullOrEmpty(status))
                 {
                     entry = new EntryViewState
@@ -472,7 +472,7 @@ namespace AnimeList.Controllers
         // shape. Shared by VideoDetail (hero pill) and GetTraktVideoEntryAsync
         // (modal GET) so both agree. Status vocabulary matches the modal's Trakt
         // option set: planning / watching / completed (or "" = not tracked).
-        private static (string Status, int Progress) DeriveTraktVideoStatus(string type, TraktVideoEntry e, int? total)
+        private static (string Status, int Progress) DeriveTraktVideoStatus(string type, TraktVideoEntry e, int? total, bool stillAiring = false)
         {
             // Custom-status personal lists (On Hold / Dropped / Rewatching) win
             // over the native surfaces — that's the explicit status the user set.
@@ -489,10 +489,12 @@ namespace AnimeList.Controllers
             // watched history without one means "completed". This mirrors movies
             // and avoids comparing Trakt's watched count to Cinemeta's episode
             // total (different sources that rarely match, which made finished
-            // shows read as "watching" forever).
+            // shows read as "watching" forever). The one exception: a show that's
+            // STILL AIRING isn't done just because every released episode is
+            // watched — the rest are merely unreleased — so it stays "watching".
             var progress = e.WatchedEpisodes;
             var status = e.InPlayback ? "watching"
-                : progress > 0 ? "completed"
+                : progress > 0 ? (stillAiring ? "watching" : "completed")
                 : e.InWatchlist ? "planning"
                 : "";
             return (status, progress);

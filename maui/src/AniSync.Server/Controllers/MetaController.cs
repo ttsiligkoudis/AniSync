@@ -996,14 +996,15 @@ namespace AnimeList.Controllers
 
             // Series total comes from Cinemeta's episode list; a movie is one unit.
             int? totalEpisodes = 1;
+            Meta meta = null;
             if (type == "series")
             {
-                var meta = await _cinemeta.GetVideoMetaAsync(type, id);
+                meta = await _cinemeta.GetVideoMetaAsync(type, id);
                 totalEpisodes = meta?.videos?.Count;
             }
 
             var entry = await _traktService.GetVideoEntryAsync(uid, type, id);
-            var (status, progress) = DeriveTraktVideoStatus(type, entry, totalEpisodes);
+            var (status, progress) = DeriveTraktVideoStatus(type, entry, totalEpisodes, Utils.IsSeriesStillAiring(meta));
 
             return new JsonResult(new
             {
@@ -1289,7 +1290,11 @@ namespace AnimeList.Controllers
                 return new JsonResult(new { success = false, error = "no-uid" });
 
             var entry = await _traktService.GetVideoEntryAsync(uid, request.Type, request.Id);
-            var (status, _) = DeriveTraktVideoStatus(request.Type, entry, null);
+            // Match the detail page: a still-airing watched series is "watching", not "completed",
+            // so the heart stays the control for it (rather than reading as "in another list").
+            var stillAiring = request.Type == "series"
+                && Utils.IsSeriesStillAiring(await _cinemeta.GetVideoMetaAsync(request.Type, request.Id));
+            var (status, _) = DeriveTraktVideoStatus(request.Type, entry, null, stillAiring);
             var norm = NormalizeListStatus(status);
 
             // In some other list — the heart isn't the control for that.

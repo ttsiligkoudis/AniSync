@@ -137,6 +137,33 @@ namespace AnimeList
         };
 
         /// <summary>
+        /// True when a series is still airing — its <see cref="Meta.airStatus"/> says so, or it lists at
+        /// least one episode dated in the future. Used so that finishing the last *released* episode of an
+        /// ongoing show isn't mistaken for completion (the remaining episodes are simply unreleased). Works
+        /// across sources: the anime path carries airStatus, while Cinemeta carries no status but does list
+        /// upcoming episodes with future `released` dates.
+        /// </summary>
+        public static bool IsSeriesStillAiring(Meta meta)
+        {
+            if (meta is null) return false;
+            if (meta.airStatus is "Airing" or "Not yet aired" or "On hiatus") return true;
+            if (meta.videos is { Count: > 0 } videos)
+            {
+                var now = DateTimeOffset.UtcNow;
+                foreach (var v in videos)
+                    if (HasFutureDate(v?.released, now) || HasFutureDate(v?.firstAired, now)) return true;
+            }
+            return false;
+        }
+
+        private static bool HasFutureDate(string iso, DateTimeOffset now)
+            => !string.IsNullOrEmpty(iso)
+               && DateTimeOffset.TryParse(iso, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                    out var d)
+               && d > now;
+
+        /// <summary>
         /// AniList's MediaSource enum → user-facing label, framed as
         /// "Manga adaptation" / "Original" / "Light novel adaptation" /
         /// etc. so the detail-page info row reads naturally.

@@ -1631,9 +1631,10 @@ namespace AnimeList.Controllers
 
             int? totalEpisodes = 1;
             var seasons = new List<EntrySeason>();
+            Meta meta = null;
             if (type == "series")
             {
-                var meta = await _cinemeta.GetVideoMetaAsync(type, id);
+                meta = await _cinemeta.GetVideoMetaAsync(type, id);
                 // Count only real episodes (season > 0). Cinemeta lists a show's
                 // specials / extras under season 0 — the detail page's episode list
                 // hides them, so the progress total and the season picker must too,
@@ -1643,7 +1644,7 @@ namespace AnimeList.Controllers
             }
 
             var entry = await _traktService.GetVideoEntryAsync(uid, type, id);
-            var (status, progress) = DeriveTraktVideoStatus(type, entry, totalEpisodes);
+            var (status, progress) = DeriveTraktVideoStatus(type, entry, totalEpisodes, Utils.IsSeriesStillAiring(meta));
             return (status, progress, totalEpisodes, entry.Rating, seasons);
         }
 
@@ -1678,7 +1679,7 @@ namespace AnimeList.Controllers
         // completed (or "" = not tracked), with the custom-status personal lists
         // (onhold / dropped / rewatching) taking precedence. Ported verbatim from
         // MetaController.Web.cs DeriveTraktVideoStatus.
-        private static (string Status, int Progress) DeriveTraktVideoStatus(string type, TraktVideoEntry e, int? total)
+        private static (string Status, int Progress) DeriveTraktVideoStatus(string type, TraktVideoEntry e, int? total, bool stillAiring = false)
         {
             // Custom-status personal lists (On Hold / Dropped / Rewatching) win
             // over the native surfaces — that's the explicit status the user set.
@@ -1694,9 +1695,11 @@ namespace AnimeList.Controllers
             // An active episode playback means "watching" (continue-watching);
             // watched history without one means "completed". Mirrors movies and
             // avoids comparing Trakt's watched count to Cinemeta's episode total.
+            // Exception: a still-airing show isn't done just because every released
+            // episode is watched (the rest are unreleased) — it stays "watching".
             var progress = e.WatchedEpisodes;
             var status = e.InPlayback ? "watching"
-                : progress > 0 ? "completed"
+                : progress > 0 ? (stillAiring ? "watching" : "completed")
                 : e.InWatchlist ? "planning"
                 : "";
             return (status, progress);
@@ -1716,7 +1719,11 @@ namespace AnimeList.Controllers
                 return new JsonResult(new ToggleWatchingResponse(Ok: false, Watching: false, Hidden: false));
 
             var entry = await _traktService.GetVideoEntryAsync(uid, request.Type, request.Id);
-            var (status, _) = DeriveTraktVideoStatus(request.Type, entry, null);
+            // Match the detail page: a still-airing watched series is "watching", not "completed",
+            // so the heart stays the control for it (rather than reading as "in another list").
+            var stillAiring = request.Type == "series"
+                && Utils.IsSeriesStillAiring(await _cinemeta.GetVideoMetaAsync(request.Type, request.Id));
+            var (status, _) = DeriveTraktVideoStatus(request.Type, entry, null, stillAiring);
             var norm = NormalizeListStatus(status);
 
             // In some other list — the heart isn't the control for that.
