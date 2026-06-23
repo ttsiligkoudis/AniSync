@@ -1,0 +1,39 @@
+/* "Video player" engine switch — a compact centred segmented pill bar (mirrors the
+   Appearance theme switch). Inactive pills are quiet; the active one fills with the
+   accent. Theme-aware via the shared CSS variables. */
+.player-pick {
+    margin-top: 16px;
+}
+
+.pill-switch {
+    display: flex;
+    width: fit-content;
+    gap: 4px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px;
+    margin: 10px auto 0;
+}
+
+.pill-switch-opt {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    padding: 7px 18px;
+    border-radius: 999px;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pill-switch-opt:hover {
+    color: var(--text-strong);
+}
+
+.pill-switch-opt.is-active {
+    background: var(--accent-fill);
+    color: #fff;
+}
