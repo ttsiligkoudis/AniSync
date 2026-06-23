@@ -238,11 +238,11 @@ internal static class AndroidImmersive
         if (window is null || Build.VERSION.SdkInt < BuildVersionCodes.O) return;
         try
         {
-            // net-android binds the Java setColorMode(int) as the Window.ColorMode property; the values are
-            // the int COLOR_MODE_* constants on ActivityInfo.
+            // net-android binds Java setColorMode(int) as the Window.ColorMode property, typed as the
+            // ActivityColorMode enum (COLOR_MODE_HDR → Hdr, COLOR_MODE_DEFAULT → Default).
             window.ColorMode = hdr
-                ? global::Android.Content.PM.ActivityInfo.ColorModeHdr
-                : global::Android.Content.PM.ActivityInfo.ColorModeDefault;
+                ? global::Android.Content.PM.ActivityColorMode.Hdr
+                : global::Android.Content.PM.ActivityColorMode.Default;
         }
         catch { /* OEM window without HDR colour-mode support */ }
     }
