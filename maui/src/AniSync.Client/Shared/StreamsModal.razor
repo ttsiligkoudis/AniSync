@@ -1,4 +1,6 @@
 @inject IJSRuntime JS
+@inject IAppEnvironment Env
+@inject ISecureStore Store
 @implements IAsyncDisposable
 
 @* Streams entry point — Blazor port of _StreamsModal.cshtml. A compact card whose
@@ -36,6 +38,23 @@
                 <StreamsSection IsStremio="false" Flags="Flags" Config="Config" OnDirty="OnDirty" OnReload="OnReload" OnReorder="OnReorder" />
                 <PlaybackLanguageSection Audio="AudioLang" Subtitle="SubLang"
                                          AudioChanged="OnAudioLangChanged" SubtitleChanged="OnSubLangChanged" />
+
+                @* Native engine picker — only where both exist (Android phones/tablets). libVLC handles
+                   more codecs (and tone-maps HDR brighter); ExoPlayer is lighter and plays 4K cleanly.
+                   Persists instantly to the settings store; applies to the next thing you play. *@
+                @if (Env.SupportsPlayerChoice)
+                {
+                    <div class="player-pick">
+                        <span class="section-title">Video player</span>
+                        <p class="section-description">
+                            Which engine plays episodes — applies to the next one you start. TV always uses ExoPlayer.
+                        </p>
+                        <div class="pill-switch" role="group" aria-label="Video player">
+                            <button type="button" class="pill-switch-opt @(_player == "libvlc" ? "is-active" : "")" @onclick='() => SetPlayerAsync("libvlc")'>libVLC</button>
+                            <button type="button" class="pill-switch-opt @(_player == "exo" ? "is-active" : "")" @onclick='() => SetPlayerAsync("exo")'>ExoPlayer</button>
+                        </div>
+                    </div>
+                }
             </div>
         </div>
     </div>
@@ -59,6 +78,23 @@
     private IJSObjectReference? _js;
     private DotNetObjectReference<StreamsModal>? _selfRef;
     private bool _hashChecked;
+
+    // Native video player engine: "libvlc" (default) / "exo". Read by VlcMediaPlayer at the next
+    // PlayAsync. Only loaded/shown where both engines exist (Env.SupportsPlayerChoice → Android phones).
+    private string _player = "libvlc";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Env.SupportsPlayerChoice)
+            _player = await Store.GetAsync("pref:player") ?? "libvlc";
+    }
+
+    private async Task SetPlayerAsync(string player)
+    {
+        if (_player == player) return;
+        _player = player;
+        await Store.SetAsync("pref:player", player);
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
