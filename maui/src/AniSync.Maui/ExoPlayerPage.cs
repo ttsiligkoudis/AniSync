@@ -20,13 +20,18 @@ public sealed class ExoPlayerPage : ContentPage
         Title = request.Title;
         BackgroundColor = Colors.Black;
         NavigationPage.SetHasNavigationBar(this, false);
+        // Draw edge-to-edge under a landscape display cutout (notch) instead of letting MAUI inset
+        // the player off the notch side — the modal window is opted into the cutout by AndroidImmersive,
+        // but MAUI 10 still applies safe-area insets per page AND per layout, so both must opt out (same
+        // fix as VlcPlayerPage). Without this the video shows a black gap on the notch edge.
+        SafeAreaEdges = SafeAreaEdges.None;
 
         _video = new ExoVideoView(request)
         {
             VerticalOptions = LayoutOptions.Fill,
             HorizontalOptions = LayoutOptions.Fill,
         };
-        Content = new Grid { BackgroundColor = Colors.Black, Children = { _video } };
+        Content = new Grid { BackgroundColor = Colors.Black, SafeAreaEdges = SafeAreaEdges.None, Children = { _video } };
 
         // Re-assert immersive once the page's native view is attached to its (modal) window.
         Loaded += (_, _) => ApplyImmersiveToView();

@@ -69,6 +69,15 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         view.SetShowRewindButton(true);         // VLC-style −30s / +30s seek buttons (increment set on the player)
         view.SetShowFastForwardButton(true);
         view.SetBackgroundColor(Android.Graphics.Color.Black);
+        // Subtitles: match the libVLC look — white text with a dark outline and NO background box.
+        // ExoPlayer's SubtitleView otherwise paints a translucent black box behind every cue.
+        view.SubtitleView?.SetStyle(new AndroidX.Media3.UI.CaptionStyleCompat(
+            Android.Graphics.Color.White.ToArgb(),
+            Android.Graphics.Color.Transparent.ToArgb(),   // per-cue background box — removed
+            Android.Graphics.Color.Transparent.ToArgb(),   // window background — removed
+            AndroidX.Media3.UI.CaptionStyleCompat.EdgeTypeOutline,
+            Android.Graphics.Color.Black.ToArgb(),
+            null));
         view.OnCycleScale = CycleScale;
         // ExoPlayer's default control buttons use a borderless ripple background, which shows on touch but
         // gives NO visible focus highlight under D-pad navigation — on a TV you can click buttons but can't
@@ -304,6 +313,14 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         // Place it just before the settings (gear) button so it reads with the other bottom-bar controls.
         var index = bar.IndexOfChild(FindExoView("exo_settings"));
         bar.AddView(button, index < 0 ? bar.ChildCount : index);
+        // The bottom control bar is a horizontal LinearLayout; a WRAP_CONTENT TextView defaults to
+        // top-aligned, so "Fit/Zoom/Fill" sat above the (taller) icon buttons. Centre it vertically to
+        // line up with the CC / gear icons.
+        if (button.LayoutParameters is LinearLayout.LayoutParams llp)
+        {
+            llp.Gravity = GravityFlags.CenterVertical;
+            button.LayoutParameters = llp;
+        }
         _aspectButton = button;
         _highlighted.Add(button); // already has the focus selector; keep the tree walk from re-applying it
     }
