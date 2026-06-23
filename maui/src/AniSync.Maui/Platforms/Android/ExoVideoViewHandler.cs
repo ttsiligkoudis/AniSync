@@ -31,6 +31,21 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
     private int _scaleIndex;
     private Android.Widget.ImageButton? _aspectButton;
 
+    // Whether we engaged the tone-map (GL effects) pipeline for this playback (phones, not TV), and whether
+    // the one-time HDR "look" boost has been applied yet. Media3's default HDR→SDR tone-map renders dimmer
+    // and less saturated than libVLC, so once we confirm the stream is actually HDR we push the tone-mapped
+    // result brighter/punchier/more vivid to match. Gated to HDR only — boosting already-graded SDR would
+    // over-brighten/over-saturate it.
+    private bool _toneMapEnabled;
+    private bool _lookApplied;
+
+    // HDR "look" knobs, applied (in order) on top of the SDR tone-map for HDR streams. Tunable: raise/lower
+    // to taste vs libVLC. Brightness is additive [-1,1]; Contrast is [-1,1] (>0 = more punch); Saturation is
+    // the HSL adjustment [-100,100] (>0 = more vivid).
+    private const float ToneMapBrightness = 0.08f;
+    private const float ToneMapContrast = 0.12f;
+    private const float ToneMapSaturation = 28f;
+
     // AniSkip OP/ED bands (absolute seconds) + the "Skip Intro/Outro" overlay button. Shown by the
     // position ticker while inside a band; tapping (or D-pad OK) seeks just past it.
     private SkipMark? _skipIntro;
@@ -115,15 +130,19 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         // without it SetVideoEffects throws "Could not find required lib-effect dependencies").
         // We tone-map even on HDR-capable phone panels: true HDR passthrough (window COLOR_MODE_HDR) was
         // tried and, on the panels tested, still looked dimmer than libVLC, so the tone-mapped SDR path is
-        // the reliable match. Skip on TV: those panels pass HDR through natively and the GL path can choke
-        // on 4K there. Best-effort: if a device can't set up the effects pipeline, fall back to direct
-        // rendering rather than failing playback.
+        // the reliable match. The empty list tone-maps from the first frame (no dark flash) and is a no-op
+        // for SDR; once the decoder confirms the stream is HDR, the ticker swaps in the brightness/saturation
+        // boost (MaybeApplyHdrLook) so HDR matches libVLC's punchier look while SDR stays untouched.
+        // Skip on TV: those panels pass HDR through natively and the GL path can choke on 4K there.
+        // Best-effort: if a device can't set up the effects pipeline, fall back to direct rendering rather
+        // than failing playback.
         // Microsoft.Maui.Devices.DeviceInfo, fully qualified — AndroidX.Media3.Common (used in this
         // file) also defines a DeviceInfo, so the bare name is ambiguous (CS0104).
-        if (Microsoft.Maui.Devices.DeviceInfo.Current.Idiom != Microsoft.Maui.Devices.DeviceIdiom.TV)
+        _toneMapEnabled = Microsoft.Maui.Devices.DeviceInfo.Current.Idiom != Microsoft.Maui.Devices.DeviceIdiom.TV;
+        if (_toneMapEnabled)
         {
             try { player.SetVideoEffects(new List<AndroidX.Media3.Common.IEffect>()); }
-            catch (System.Exception ex) { System.Diagnostics.Debug.WriteLine($"HDR tone-map (video effects) unavailable: {ex.Message}"); }
+            catch (System.Exception ex) { _toneMapEnabled = false; System.Diagnostics.Debug.WriteLine($"HDR tone-map (video effects) unavailable: {ex.Message}"); }
         }
 
         // Build the MediaItem, sideloading any external subtitle tracks (the proxied OpenSubtitles URLs from
@@ -201,6 +220,7 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
                     long pos = p.CurrentPosition, dur = p.Duration;
                     if (dur > 0) VirtualView?.Request.OnProgress?.Invoke(pos / 1000.0, dur / 1000.0);
                     UpdateSkipButton(pos / 1000.0);
+                    if (_toneMapEnabled && !_lookApplied) MaybeApplyHdrLook(p);
                     if (!_ended && p.PlaybackState == StateEnded)
                     {
                         _ended = true;
@@ -219,6 +239,33 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         _ticking = false;
         _ticker = null;
         _tick = null;
+    }
+
+    // Once the decoder reports the video format, decide whether to push the HDR "look". For HDR streams
+    // (PQ/ST2084 or HLG transfer) swap the empty tone-map pipeline for one that brightens/adds punch/boosts
+    // saturation, so the tone-mapped SDR result matches libVLC's vivid output. SDR streams are left on the
+    // (no-op) empty pipeline — they're already correctly graded. Runs once per playback either way.
+    private void MaybeApplyHdrLook(IExoPlayer p)
+    {
+        var fmt = p.VideoFormat;
+        if (fmt is null) return;          // wait until the decoder reports a format
+        _lookApplied = true;              // only evaluate once, HDR or not
+
+        // ColorInfo.ColorTransfer: 6 = ST2084/PQ, 7 = HLG (both HDR). Anything else (SDR/BT709/unknown) is
+        // left untouched.
+        int transfer = fmt.ColorInfo?.ColorTransfer ?? -1;
+        if (transfer != 6 && transfer != 7) return;
+
+        try
+        {
+            p.SetVideoEffects(new List<AndroidX.Media3.Common.IEffect>
+            {
+                new AndroidX.Media3.Effect.Brightness(ToneMapBrightness),
+                new AndroidX.Media3.Effect.Contrast(ToneMapContrast),
+                new AndroidX.Media3.Effect.HslAdjustment.Builder().AdjustSaturation(ToneMapSaturation).Build()!,
+            });
+        }
+        catch (System.Exception ex) { System.Diagnostics.Debug.WriteLine($"HDR look effects unavailable: {ex.Message}"); }
     }
 
     // Build the "Skip Intro/Outro" overlay button once, anchored bottom-right over the PlayerView
