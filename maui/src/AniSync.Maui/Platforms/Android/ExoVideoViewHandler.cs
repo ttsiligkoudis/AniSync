@@ -123,14 +123,24 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         // rendering rather than failing playback.
         // Microsoft.Maui.Devices.DeviceInfo, fully qualified — AndroidX.Media3.Common (used in this
         // file) also defines a DeviceInfo, so the bare name is ambiguous (CS0104).
-        if (Microsoft.Maui.Devices.DeviceInfo.Current.Idiom != Microsoft.Maui.Devices.DeviceIdiom.TV)
+        if (Microsoft.Maui.Devices.DeviceInfo.Current.Idiom == Microsoft.Maui.Devices.DeviceIdiom.TV)
         {
-            try { player.SetVideoEffects(new List<AndroidX.Media3.Common.IEffect>()); _effectsDiag = "applied (empty list)"; }
-            catch (System.Exception ex) { _effectsDiag = $"ERR {ex.GetType().Name}: {ex.Message}"; System.Diagnostics.Debug.WriteLine($"HDR tone-map (video effects) unavailable: {ex.Message}"); }
+            _effectsDiag = "skipped (TV idiom)";
+        }
+        else if (PanelIsHdrCapable())
+        {
+            // True HDR passthrough: an HDR-capable panel can present PQ/HLG natively. Don't route through the
+            // SDR effects pipeline (it dims mid-tones); instead put the player's window into HDR colour mode so
+            // the system switches the panel to HDR. Without this, direct-rendered HDR shows dark. The video
+            // surface lives in the modal DialogFragment's own window, so the mode is set there too.
+            _effectsDiag = "passthrough (HDR panel)";
+            AndroidImmersive.RequestHdrColorMode(platformView);
         }
         else
         {
-            _effectsDiag = "skipped (TV idiom)";
+            // SDR panel: tone-map HDR down to SDR via the (empty) GL effects pipeline.
+            try { player.SetVideoEffects(new List<AndroidX.Media3.Common.IEffect>()); _effectsDiag = "applied (empty list, SDR panel)"; }
+            catch (System.Exception ex) { _effectsDiag = $"ERR {ex.GetType().Name}: {ex.Message}"; System.Diagnostics.Debug.WriteLine($"HDR tone-map (video effects) unavailable: {ex.Message}"); }
         }
 
         // Build the MediaItem, sideloading any external subtitle tracks (the proxied OpenSubtitles URLs from
@@ -183,6 +193,7 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
             VirtualView.PauseForBackgroundRequested -= OnPauseForBackground;
             VirtualView.ResumeFromBackgroundRequested -= OnResumeFromBackground;
         }
+        AndroidImmersive.ClearHdrColorMode(platformView);   // don't leave the app UI in HDR colour mode
         platformView.Player = null;
         try { _player?.Release(); } catch { /* already released */ }
         _player = null;
@@ -293,6 +304,35 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
             _skipButton.Visibility = ViewStates.Visible;
             _skipButton.RequestFocus();    // TV: put the D-pad on it so OK skips immediately
         }
+    }
+
+    // Is the panel HDR-capable? Decides HDR passthrough (let the panel present PQ/HLG) vs SDR tone-mapping.
+    // The view usually isn't attached yet in ConnectHandler, so its Display is null — fall back to the
+    // hosting activity's display. Defaults to false (→ safe SDR tone-map path) if the capability is unknown.
+    private bool PanelIsHdrCapable()
+    {
+        if (Android.OS.Build.VERSION.SdkInt < Android.OS.BuildVersionCodes.O) return false;
+        try
+        {
+            var d = PlatformView?.Display;
+            if (d is null)
+            {
+                var ctx = (global::Android.Content.Context?)Context;
+                while (ctx is global::Android.Content.ContextWrapper w)
+                {
+                    if (ctx is Android.App.Activity act)
+                    {
+#pragma warning disable CA1422 // DefaultDisplay deprecated, but the per-view Display (non-deprecated) isn't ready yet
+                        d = act.WindowManager?.DefaultDisplay;
+#pragma warning restore CA1422
+                        break;
+                    }
+                    ctx = w.BaseContext;
+                }
+            }
+            return d?.IsHdr ?? false;
+        }
+        catch { return false; }
     }
 
     // TEMP HDR diagnostics. Once the decoder reports a video format, overlay the facts that decide whether
