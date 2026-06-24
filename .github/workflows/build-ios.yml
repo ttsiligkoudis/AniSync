@@ -23,33 +23,36 @@ concurrency:
 
 jobs:
   build-ios:
-    # .NET 10's iOS workload targets the current-generation Apple SDKs (Xcode 26.x). The default
-    # macos-latest image lagged on Xcode 16.4, which the workload rejects ("requires Xcode 26.5,
-    # current is 16.4"), so pin to the macos-26 image, which ships Xcode 26.x.
+    # .NET 10's iOS workload targets the current-generation Apple SDKs (Xcode 26.x), so this needs the
+    # macos-26 image. Its DEFAULT Xcode (26.5) ships an incomplete SDK on the current image — actool /
+    # platform SDKs are missing (actions/runner-images #14000, #14172) — so builds that use 26.5 die with
+    # "MacOSX.sdk cannot be located" / "unable to find utility actool". We instead use the complete,
+    # prior-default Xcode 26.4.1 and pin the .NET iOS workload to the matching band (below).
     runs-on: macos-26
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
-      # `dotnet workload restore` installs the NEWEST iOS workload from NuGet, which is aligned to the
-      # latest Xcode. Select the newest Xcode present on the image so the toolchain matches the workload
-      # (and print versions, so a future mismatch is diagnosable straight from the log).
-      - name: Select latest Xcode
+      # Use the complete Xcode 26.4.1 (not the broken default 26.5). Print versions for diagnosability.
+      - name: Select Xcode 26.4.1
         run: |
-          latest=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -n1)
           echo "Available Xcodes:"; ls -d /Applications/Xcode_*.app 2>/dev/null || true
-          echo "Selecting $latest"
-          sudo xcode-select -s "$latest/Contents/Developer"
+          sudo xcode-select -s /Applications/Xcode_26.4.1.app/Contents/Developer
           xcodebuild -version
 
+      # Pin to the 10.0.2xx SDK band so the Xcode-26.4 workload set (10.0.203.1) below is valid for it.
+      # 10.0.203 is preinstalled on the macos-26 image.
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '10.0.203'
 
-      # Installs exactly the workloads the MAUI project needs (maui-ios) by reading the csproj.
-      - name: Restore MAUI workloads
-        run: dotnet workload restore maui/src/AniSync.Maui/AniSync.Maui.csproj
+      # The latest iOS workload (26.5.10284) demands the broken Xcode 26.5. Pin to workload set 10.0.203.1,
+      # whose iOS SDK (26.4.10259) targets Xcode 26.4 — matching the 26.4.1 selected above. (Published in the
+      # dotnet/macios ".NET 10 - Xcode 26.4 support" release notes.) maui-ios pulls the MAUI + iOS bits the
+      # net10.0-ios build needs; we don't restore android/maccatalyst since CI only builds the iOS TFM.
+      - name: Install iOS workload (Xcode 26.4 band)
+        run: dotnet workload install maui-ios --version 10.0.203.1
 
       # Build for the iOS simulator (arm64 — macOS runners are Apple silicon). Targeting the simulator
       # runtime skips provisioning/signing, so this runs unsigned. If the build can't find a simulator
