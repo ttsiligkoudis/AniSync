@@ -50,6 +50,8 @@ export function setConfigPage(on) {
 // driven by Blazor state (the `hidden` attribute), so this only owns the body-class
 // side effect + the Esc key, which calls back into .NET to flip the state closed.
 let _streamsEscHandler = null;
+let _streamsPopHandler = null;
+let _streamsHistoryPushed = false;
 
 export function streamsModalOpen(dotnet) {
     document.body.classList.add('streams-modal-open');
@@ -58,6 +60,18 @@ export function streamsModalOpen(dotnet) {
         if (e.key === 'Escape' && dotnet) dotnet.invokeMethodAsync('CloseFromJs');
     };
     document.addEventListener('keydown', _streamsEscHandler);
+
+    // Hardware / browser Back should close the modal — not navigate off the settings page, which on the
+    // native head also left the scroll-lock body class stranded (the page underneath stayed unscrollable).
+    // Push a history entry and close the modal when Back pops it. pushState keeps the same URL, so
+    // Blazor's own popstate router sees no location change and treats it as a no-op.
+    if (_streamsPopHandler) window.removeEventListener('popstate', _streamsPopHandler);
+    _streamsPopHandler = function () {
+        _streamsHistoryPushed = false;   // our entry was just popped by Back
+        if (dotnet) dotnet.invokeMethodAsync('CloseFromJs');
+    };
+    window.addEventListener('popstate', _streamsPopHandler);
+    try { history.pushState({ streamsModal: true }, ''); _streamsHistoryPushed = true; } catch { }
 }
 
 export function streamsModalClose() {
@@ -65,6 +79,16 @@ export function streamsModalClose() {
     if (_streamsEscHandler) {
         document.removeEventListener('keydown', _streamsEscHandler);
         _streamsEscHandler = null;
+    }
+    if (_streamsPopHandler) {
+        window.removeEventListener('popstate', _streamsPopHandler);
+        _streamsPopHandler = null;
+    }
+    // Closed via the X / Escape (not Back): pop the synthetic entry we pushed so Back doesn't need an
+    // extra press to leave the page. If Back closed us, the entry is already gone (flag cleared above).
+    if (_streamsHistoryPushed) {
+        _streamsHistoryPushed = false;
+        try { history.back(); } catch { }
     }
 }
 
