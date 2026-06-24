@@ -89,14 +89,19 @@
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
 
     <!-- LibVLCSharp: software-decodes HEVC / AC3 / EAC3 / DTS / TrueHD (the native
-         playback path the Web head can't match). Native libVLC binaries are pulled
-         in per-platform; iOS/macOS ship libVLC via the LibVLCSharp build. -->
+         playback path the Web head can't match). LibVLCSharp is only the .NET binding —
+         it does NOT bundle the native libVLC runtime, so each platform pulls its own
+         VideoLAN.LibVLC.<platform> binary below. Without the matching one, Core.Initialize()
+         throws on that platform and playback is disabled (browsing still works). -->
     <PackageReference Include="LibVLCSharp" Version="3.9.7.1" />
     <PackageReference Include="LibVLCSharp.MAUI" Version="3.9.7.1" />
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1"
                       Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'" />
     <PackageReference Include="VideoLAN.LibVLC.Android" Version="3.6.5"
                       Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'" />
+    <!-- Native libVLC for iOS (device + simulator xcframework). Same 3.6.x family as Android. -->
+    <PackageReference Include="VideoLAN.LibVLC.iOS" Version="3.6.1"
+                      Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'" />
 
     <!-- Brings in Xamarin.AndroidX.Media3 (Google's ExoPlayer) — the engine Stremio uses, and the TV player
          for AniSync (it plays 4K cleanly where the embedded libVLC SurfaceView never presented a frame). We
