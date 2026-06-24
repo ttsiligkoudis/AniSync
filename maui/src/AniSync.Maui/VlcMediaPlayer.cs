@@ -2,6 +2,9 @@ using AniSync.Client.Services;
 using LibVLCSharp.Shared;
 // LibVLCSharp.Shared also defines a SubtitleTrack; alias the bare name to ours to avoid CS0104.
 using SubtitleTrack = AniSync.Client.Services.SubtitleTrack;
+// On iOS the SDK exposes a `MediaPlayer` NAMESPACE (Apple's MediaPlayer.framework binding) that
+// collides with LibVLCSharp.Shared.MediaPlayer (the type we use) — CS0118. Alias to the libVLC type.
+using MediaPlayer = LibVLCSharp.Shared.MediaPlayer;
 
 namespace AniSync.Maui;
 
