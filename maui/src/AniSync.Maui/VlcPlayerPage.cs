@@ -106,6 +106,15 @@ public sealed class VlcPlayerPage : ContentPage
     private double _skipTarget;
 
     private bool _seeking;
+    // Rewind/forward (±30s) accumulation: rapid taps fold into one seek instead of firing a seek (and its
+    // re-buffer) per tap. Each tap moves a pending target and the slider/clock immediately; the actual
+    // _player.Time is committed once the taps stop (debounced). _suppressSpinnerUntil keeps the buffering
+    // overlay from popping for a seek's own re-buffer so the transport stays visible — i.e. you can keep
+    // tapping to skip a 90s intro without waiting on the loader between taps.
+    private bool _seekPending;
+    private long _pendingSeekTarget;
+    private int _seekGen;
+    private DateTime _suppressSpinnerUntil;
     private bool _started;   // one-shot guard: playback is started once, when the video surface is ready
     private ScaleMode _scaleMode = ScaleMode.Fit;
     private string? _subLang;                        // selected language column in the subtitle sheet
@@ -411,7 +420,15 @@ public sealed class VlcPlayerPage : ContentPage
         _player.Paused += (_, _) => Dispatcher.Dispatch(() => { _playPause.Text = IcPlay; StopHideTimer(); KeepAwake(false); });
         // Buffering climbs 0→100 on connect and re-fires on a re-buffer; show the spinner until it's full.
         // Buffering means we're loading toward playback, so keep the screen awake through it too.
-        _player.Buffering += (_, e) => Dispatcher.Dispatch(() => { var loading = e.Cache < 100f; SetLoading(loading); if (loading) KeepAwake(true); });
+        _player.Buffering += (_, e) => Dispatcher.Dispatch(() =>
+        {
+            var loading = e.Cache < 100f;
+            if (loading) KeepAwake(true);
+            // A seek's own re-buffer must not pop the overlay (it hides the transport, blocking further
+            // ±30s taps). Skip showing the spinner inside the post-seek window; still clear it when full.
+            if (loading && DateTime.UtcNow < _suppressSpinnerUntil) return;
+            SetLoading(loading);
+        });
         _player.EndReached += (_, _) => Dispatcher.Dispatch(() => KeepAwake(false));
         _player.EncounteredError += (_, _) => Dispatcher.Dispatch(() => KeepAwake(false));
 
@@ -767,13 +784,36 @@ public sealed class VlcPlayerPage : ContentPage
         try
         {
             var len = _player.Length;
-            var target = _player.Time + deltaMs;
+            // Accumulate from the pending target (if a seek is still queued) so repeated taps add up
+            // instead of each measuring from the same live position.
+            var target = (_seekPending ? _pendingSeekTarget : _player.Time) + deltaMs;
             if (target < 0) target = 0;
             if (len > 0 && target > len) target = len;
-            _player.Time = target;
+            _pendingSeekTarget = target;
+            _seekPending = true;
+            _seeking = true;   // freeze position-driven slider updates while taps accumulate
+            // Immediate feedback: jump the slider + clock to the pending target even though the decoder
+            // hasn't moved yet, so a burst of taps reads as one smooth scrub.
+            if (len > 0) _seek.Value = Math.Clamp((double)target / len, 0, 1);
+            UpdateTimes();
+            // Debounce the real seek: commit only once taps stop, collapsing a burst into a single seek.
+            var gen = ++_seekGen;
+            Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(400), () => CommitSeek(gen));
         }
         catch { /* not seekable yet */ }
         RestartHideTimer();
+    }
+
+    // Apply the accumulated ±30s target, unless a newer tap has arrived (gen bumped) and is still
+    // accumulating. Suppress the buffering overlay for the seek's re-buffer so the transport stays
+    // visible and tappable — the whole point is to let the user keep skipping without the loader.
+    private void CommitSeek(int gen)
+    {
+        if (gen != _seekGen || !_seekPending) return;
+        try { _player.Time = _pendingSeekTarget; } catch { /* not seekable yet */ }
+        _seekPending = false;
+        _seeking = false;
+        _suppressSpinnerUntil = DateTime.UtcNow.AddSeconds(4);
     }
 
     private async Task CloseAsync()
@@ -1330,7 +1370,8 @@ public sealed class VlcPlayerPage : ContentPage
 
     private void UpdateTimes()
     {
-        _position.Text = Format(_player.Time);
+        // While taps accumulate, show the pending target so the clock tracks the scrub, not the decoder.
+        _position.Text = Format(_seekPending ? _pendingSeekTarget : _player.Time);
         _duration.Text = Format(_player.Length);
         UpdateSkipButton();
     }
