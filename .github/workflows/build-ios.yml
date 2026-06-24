@@ -1,0 +1,55 @@
+name: Build iOS
+
+
+# Compile-checks the MAUI app for iOS on a macOS runner (iOS builds need the Apple toolchain, which
+# only exists on macOS). This builds the net10.0-ios target for the iOS SIMULATOR, which skips code
+# signing — so it needs no Apple Developer account, certificates, or provisioning profiles. It proves
+# the project compiles for iOS and that the native libVLC binary (VideoLAN.LibVLC.iOS) links.
+#
+# This does NOT produce an installable build for real iPhones. A device IPA (TestFlight / App Store /
+# ad-hoc) requires an Apple Developer Program membership, a signing certificate, and a provisioning
+# profile supplied as secrets — a separate, future task. (It would also warrant replacing the
+# placeholder bundle id com.companyname.anisync with a real one.)
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'maui/**'
+      - '.github/workflows/build-ios.yml'
+
+concurrency:
+  group: build-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Installs exactly the workloads the MAUI project needs (maui-ios) by reading the csproj.
+      - name: Restore MAUI workloads
+        run: dotnet workload restore maui/src/AniSync.Maui/AniSync.Maui.csproj
+
+      # Build for the iOS simulator (arm64 — macOS runners are Apple silicon). Targeting the simulator
+      # runtime skips provisioning/signing, so this runs unsigned. If the build can't find a simulator
+      # slice in VideoLAN.LibVLC.iOS, the alternative is a device build (-p:RuntimeIdentifier=ios-arm64),
+      # which then requires signing and so can't run unsigned here.
+      - name: Build iOS (simulator, unsigned)
+        run: |
+          dotnet build maui/src/AniSync.Maui/AniSync.Maui.csproj \
+            -c Release -f net10.0-ios -p:RuntimeIdentifier=iossimulator-arm64
+
+      # Keep the built .app for record / inspection. Not installable on a real device (unsigned simulator build).
+      - name: Upload iOS simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: anisync-ios-simulator-app
+          path: maui/src/AniSync.Maui/bin/Release/net10.0-ios/iossimulator-arm64/**/*.app
+          if-no-files-found: error
