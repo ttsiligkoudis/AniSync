@@ -83,6 +83,10 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         view.SetShowSubtitleButton(true);       // CC button → toggle/select text tracks (incl. sideloaded subs)
         view.SetShowRewindButton(true);         // VLC-style −30s / +30s seek buttons (increment set on the player)
         view.SetShowFastForwardButton(true);
+        // Media3's PlayerView defaults to show_buffering=never, so it never shows a spinner. Surface the
+        // built-in buffering indicator while playing (initial load + mid-stream re-buffer), matching the
+        // VLC head's connecting/buffering overlay.
+        view.SetShowBuffering(PlayerView.ShowBufferingWhenPlaying);
         view.SetBackgroundColor(Android.Graphics.Color.Black);
         // Subtitles: match the libVLC look — white text with a dark outline and NO background box.
         // ExoPlayer's SubtitleView otherwise paints a translucent black box behind every cue.
