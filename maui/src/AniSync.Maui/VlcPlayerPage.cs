@@ -9,10 +9,11 @@ using SubtitleTrack = AniSync.Client.Services.SubtitleTrack;
 // Alias (not a full namespace import) for the same reason as SubtitleTrack above.
 using PlaybackLanguages = AniSync.Client.Services.PlaybackLanguages;
 using SkipMark = AniSync.Client.Services.SkipMark;
-// On iOS the SDK exposes a `MediaPlayer` NAMESPACE (Apple's MediaPlayer.framework binding), which
-// collides with LibVLCSharp.Shared.MediaPlayer (the type we use) — CS0118. Alias the bare name to
-// the libVLC type so it resolves the same on every platform.
-using MediaPlayer = LibVLCSharp.Shared.MediaPlayer;
+// NOTE: the libVLC player type is referenced as the fully-qualified LibVLCSharp.Shared.MediaPlayer
+// below. On iOS the SDK exposes a top-level `MediaPlayer` namespace (Apple's MediaPlayer.framework
+// binding), so the bare name resolves to that namespace (CS0118) and a `using MediaPlayer = …` alias
+// collides with it (CS0576) — qualifying is the only clean option. (view.MediaPlayer member access
+// and MediaPlayer*EventArgs are unaffected.)
 
 namespace AniSync.Maui;
 
@@ -54,7 +55,7 @@ public sealed class VlcPlayerPage : ContentPage
     private const string IcAdd = "";       // add
     private const string IcCheck = "";     // check
 
-    private readonly MediaPlayer _player;
+    private readonly LibVLCSharp.Shared.MediaPlayer _player;
     private VideoView _videoView;
     private readonly Grid _root;
     private readonly Slider _seek;
@@ -126,7 +127,7 @@ public sealed class VlcPlayerPage : ContentPage
 
     private enum ScaleMode { Fit, Crop, Fill, SixteenNine, FourThree }
 
-    public VlcPlayerPage(MediaPlayer player, string title, IReadOnlyList<SubtitleTrack>? externalSubs = null,
+    public VlcPlayerPage(LibVLCSharp.Shared.MediaPlayer player, string title, IReadOnlyList<SubtitleTrack>? externalSubs = null,
         string? preferredAudioLang = null, string? preferredSubLang = null, string? fetchDiag = null,
         SkipMark? skipIntro = null, SkipMark? skipOutro = null, SkipMark? skipRecap = null)
     {

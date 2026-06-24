@@ -2,9 +2,10 @@ using AniSync.Client.Services;
 using LibVLCSharp.Shared;
 // LibVLCSharp.Shared also defines a SubtitleTrack; alias the bare name to ours to avoid CS0104.
 using SubtitleTrack = AniSync.Client.Services.SubtitleTrack;
-// On iOS the SDK exposes a `MediaPlayer` NAMESPACE (Apple's MediaPlayer.framework binding) that
-// collides with LibVLCSharp.Shared.MediaPlayer (the type we use) — CS0118. Alias to the libVLC type.
-using MediaPlayer = LibVLCSharp.Shared.MediaPlayer;
+// NOTE: the libVLC player type is referenced as the fully-qualified LibVLCSharp.Shared.MediaPlayer
+// throughout this file. On iOS the SDK exposes a top-level `MediaPlayer` namespace (Apple's
+// MediaPlayer.framework binding), so the bare name resolves to that namespace (CS0118) and a
+// `using MediaPlayer = …` alias collides with it (CS0576) — qualifying is the only clean option.
 
 namespace AniSync.Maui;
 
@@ -30,7 +31,7 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
 {
     private readonly LibVLC _libVlc;
     private readonly ISecureStore _store;
-    private MediaPlayer? _player;
+    private LibVLCSharp.Shared.MediaPlayer? _player;
 
     // Settings-store key for the chosen native engine (Account → Appearance → Video player).
     // "exo" → ExoPlayer; anything else (incl. unset) → the default libVLC. Android phones only;
@@ -79,7 +80,7 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
             // decode is right for phones: some mobile chipsets' HEVC/10-bit hardware decoders corrupt the
             // picture into green/blocky artifacts, and a phone CPU keeps up fine (verified on-screen — a
             // 3840x2160 stream displays ~24fps steadily with no dropped frames).
-            var player = new MediaPlayer(media) { EnableHardwareDecoding = false };
+            var player = new LibVLCSharp.Shared.MediaPlayer(media) { EnableHardwareDecoding = false };
             _player = player;
 
             // External subtitle tracks (proxied OpenSubtitles URLs) are NOT pre-attached here: libVLC loads
