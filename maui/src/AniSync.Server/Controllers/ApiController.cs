@@ -1077,6 +1077,26 @@ namespace AnimeList.Controllers
                 else if (id.StartsWith(tmdbPrefix))     meta = await _tmdbService.GetAnimeByIdAsync(id, null);
 
                 if (meta?.videos == null) return NotFound(new ApiError("not found"));
+
+                // Overlay AniList's per-episode airing schedule so the displayed air dates match the
+                // notifier's source of truth. Cinemeta's `released` lags real-world airings by 1–2 days
+                // for some shows (and is what the client falls back to), so a just-aired episode reads as
+                // still upcoming. The detail-page meta loader already overlays this; the episodes-list
+                // endpoint must too. Best-effort: any failure leaves the Cinemeta dates in place.
+                try
+                {
+                    var anilistRaw = await _mappingService.GetIdByService(id, AnimeService.Anilist);
+                    if (int.TryParse(anilistRaw, out var anilistId) && anilistId > 0)
+                    {
+                        var schedule = await _anilistFallback.GetAiringScheduleByAnilistIdAsync(anilistId);
+                        if (schedule is { Count: > 0 })
+                            foreach (var v in meta.videos)
+                                if (v.episode > 0 && schedule.TryGetValue(v.episode, out var airingAt))
+                                    v.airingAt = airingAt;
+                    }
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "Episodes: AniList airing overlay failed (id={Id}).", id); }
+
                 var rows = meta.videos.Select(v => new EpisodeInfo(
                     Season: v.season,
                     Episode: v.episode,
