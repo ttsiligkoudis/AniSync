@@ -87,3 +87,34 @@ jobs:
           name: anisync-ios-sim-appetize
           path: anisync-ios-sim.zip
           if-no-files-found: error
+
+      # ---- Unsigned DEVICE .ipa for sideloading (Sideloadly / AltStore on Windows) ----
+      # Sideloadly re-signs the app with the user's FREE Apple ID on the PC, so it accepts an UNSIGNED
+      # .ipa — no Apple Developer account, no Mac. We build the device (ios-arm64) slice with code signing
+      # skipped, then hand-package the .app into the standard Payload/ zip and rename it .ipa.
+      # NOTE: free-Apple-ID sideloads last 7 days (Sideloadly's auto-refresh re-signs over USB/Wi-Fi) and
+      # are capped at 3 apps per device; Windows needs the DESKTOP iTunes + iCloud (not the Store versions).
+      - name: Build iOS device app (unsigned)
+        run: |
+          dotnet build maui/src/AniSync.Maui/AniSync.Maui.csproj \
+            -c Release -f net10.0-ios \
+            -p:RuntimeIdentifier=ios-arm64 \
+            -p:CodesignKey= \
+            -p:_RequireCodeSigning=false
+
+      - name: Package unsigned .ipa (Payload/)
+        run: |
+          APP=$(find maui/src/AniSync.Maui/bin/Release/net10.0-ios/ios-arm64 -maxdepth 2 -name '*.app' -type d | head -n1)
+          echo "Device app: $APP"
+          rm -rf Payload && mkdir Payload
+          cp -R "$APP" Payload/          # cp -R keeps symlinks (framework bundles) as-is
+          zip -r -y anisync-unsigned-ios.ipa Payload
+          ls -lh anisync-unsigned-ios.ipa
+
+      # Download this, then in Sideloadly drag in anisync-unsigned-ios.ipa, enter your free Apple ID, Start.
+      - name: Upload unsigned .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: anisync-ios-ipa-unsigned
+          path: anisync-unsigned-ios.ipa
+          if-no-files-found: error
