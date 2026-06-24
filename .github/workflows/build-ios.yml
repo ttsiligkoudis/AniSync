@@ -69,10 +69,21 @@ jobs:
             -c Release -f net10.0-ios \
             -p:RuntimeIdentifier=iossimulator-arm64
 
-      # Keep the built .app for record / inspection. Not installable on a real device (unsigned simulator build).
-      - name: Upload iOS simulator app
+      # Zip the simulator .app the way Appetize.io wants it: a single .zip of the .app bundle, symlinks
+      # preserved (-y) so the embedded frameworks (incl. native libVLC) survive. Appetize's free tier runs
+      # this arm64 simulator build in-browser on iPhone/iPad skins — no Mac, no Apple account, no signing.
+      # (It's a hosted SIMULATOR, not a real device; for the physical iPhone/iPad you need signing.)
+      - name: Package simulator .app for Appetize (zip)
+        run: |
+          APP=$(find maui/src/AniSync.Maui/bin/Release/net10.0-ios/iossimulator-arm64 -maxdepth 2 -name '*.app' -type d | head -n1)
+          echo "Zipping $APP"
+          ( cd "$(dirname "$APP")" && zip -r -y "$GITHUB_WORKSPACE/anisync-ios-sim.zip" "$(basename "$APP")" )
+          ls -lh "$GITHUB_WORKSPACE/anisync-ios-sim.zip"
+
+      # Download this artifact, then upload anisync-ios-sim.zip at https://appetize.io/upload to run it.
+      - name: Upload Appetize-ready simulator build
         uses: actions/upload-artifact@v4
         with:
-          name: anisync-ios-simulator-app
-          path: maui/src/AniSync.Maui/bin/Release/net10.0-ios/iossimulator-arm64/**/*.app
+          name: anisync-ios-sim-appetize
+          path: anisync-ios-sim.zip
           if-no-files-found: error
