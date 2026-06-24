@@ -49,25 +49,24 @@ jobs:
 
       # The latest iOS workload (26.5.10284) demands the broken Xcode 26.5. Pin to workload set 10.0.203.1,
       # whose iOS SDK (26.4.10259) targets Xcode 26.4 — matching the 26.4.1 selected above. (Published in the
-      # dotnet/macios ".NET 10 - Xcode 26.4 support" release notes.) maui-ios pulls the MAUI + iOS bits the
-      # net10.0-ios build needs; we don't restore android/maccatalyst since CI only builds the iOS TFM.
-      - name: Install iOS workload (Xcode 26.4 band)
-        run: dotnet workload install maui-ios --version 10.0.203.1
+      # dotnet/macios ".NET 10 - Xcode 26.4 support" release notes.) Install the full `maui` workload, not just
+      # maui-ios: the csproj multi-targets (android;ios;maccatalyst on macOS), and `dotnet build -f net10.0-ios`
+      # still RESTORES every TFM, so all three workloads must be present or restore fails NETSDK1147. Only the
+      # iOS TFM is compiled, so the Xcode-26.5 breakage never touches the android/maccatalyst packs.
+      - name: Install MAUI workload (Xcode 26.4 band)
+        run: dotnet workload install maui --version 10.0.203.1
 
       # Build for the iOS simulator (arm64 — macOS runners are Apple silicon). Targeting the simulator
       # runtime skips provisioning/signing, so this runs unsigned. If the build can't find a simulator
       # slice in VideoLAN.LibVLC.iOS, the alternative is a device build (-p:RuntimeIdentifier=ios-arm64),
       # which then requires signing and so can't run unsigned here.
       #
-      # Override TargetFrameworks to iOS-only. The csproj always includes net10.0-android, and even with
-      # `-f net10.0-ios` the restore pass still evaluates the android TFM and fails with NETSDK1147 ("the
-      # android workload must be installed") — which we deliberately don't install here. Forcing a single
-      # TFM keeps the restore/build to iOS, matching the maui-ios workload above.
+      # `-f net10.0-ios` compiles only the iOS TFM. (We don't override TargetFrameworks — that's a GLOBAL
+      # property that also leaks into the referenced net9.0 AniSync.Client RCL and breaks its restore.)
       - name: Build iOS (simulator, unsigned)
         run: |
           dotnet build maui/src/AniSync.Maui/AniSync.Maui.csproj \
             -c Release -f net10.0-ios \
-            -p:TargetFrameworks=net10.0-ios \
             -p:RuntimeIdentifier=iossimulator-arm64
 
       # Keep the built .app for record / inspection. Not installable on a real device (unsigned simulator build).
