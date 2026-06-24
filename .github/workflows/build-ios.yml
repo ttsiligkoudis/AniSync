@@ -23,10 +23,24 @@ concurrency:
 
 jobs:
   build-ios:
-    runs-on: macos-latest
+    # .NET 10's iOS workload targets the current-generation Apple SDKs (Xcode 26.x). The default
+    # macos-latest image lagged on Xcode 16.4, which the workload rejects ("requires Xcode 26.5,
+    # current is 16.4"), so pin to the macos-26 image, which ships Xcode 26.x.
+    runs-on: macos-26
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+
+      # `dotnet workload restore` installs the NEWEST iOS workload from NuGet, which is aligned to the
+      # latest Xcode. Select the newest Xcode present on the image so the toolchain matches the workload
+      # (and print versions, so a future mismatch is diagnosable straight from the log).
+      - name: Select latest Xcode
+        run: |
+          latest=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -n1)
+          echo "Available Xcodes:"; ls -d /Applications/Xcode_*.app 2>/dev/null || true
+          echo "Selecting $latest"
+          sudo xcode-select -s "$latest/Contents/Developer"
+          xcodebuild -version
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
