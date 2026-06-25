@@ -3784,6 +3784,24 @@ body.modal-open {
     border-radius: 0.75rem;
 }
 
+/* Proactive iOS-only heads-up under the player (web head) — sets the codec-limit expectation before
+   a source is picked. Subtler than the post-failure fallback box: a thin accent rule, no buttons. */
+.watch-ios-notice {
+    margin: 0.75rem 0 0;
+    padding: 0.6rem 0.8rem;
+    background: var(--overlay-04);
+    border-left: 3px solid var(--accent, #7c3aed);
+    border-radius: 0.4rem;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    line-height: 1.4;
+}
+
+.watch-ios-notice strong {
+    color: var(--text);
+    font-weight: 600;
+}
+
 .watch-fallback-actions {
     display: flex;
     gap: var(--space-2);
