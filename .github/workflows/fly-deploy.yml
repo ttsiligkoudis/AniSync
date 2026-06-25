@@ -74,7 +74,30 @@ jobs:
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
+      # Retry the deploy on failure before giving up — Fly deploys fail transiently often enough
+      # (remote builder hiccups, registry/network blips, brief machine-placement errors) that a
+      # clean re-run usually succeeds. Up to 3 attempts with a short escalating backoff; the job
+      # only fails if every attempt fails. flyctl deploy is safe to re-run — it just builds and
+      # releases a fresh version.
       - name: Deploy to Fly.io
-        run: flyctl deploy --remote-only
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -uo pipefail
+          attempts=3
+          for i in $(seq 1 "$attempts"); do
+            echo "::group::flyctl deploy (attempt $i/$attempts)"
+            if flyctl deploy --remote-only; then
+              echo "::endgroup::"
+              echo "Deploy succeeded on attempt $i."
+              exit 0
+            fi
+            echo "::endgroup::"
+            if [ "$i" -lt "$attempts" ]; then
+              backoff=$((i * 15))
+              echo "::warning::Deploy attempt $i failed; retrying in ${backoff}s..."
+              sleep "$backoff"
+            fi
+          done
+          echo "::error::Deploy failed after $attempts attempts."
+          exit 1
