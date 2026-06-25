@@ -42,9 +42,14 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
     // HDR "look" knobs, applied (in order) on top of the SDR tone-map for HDR streams. Tunable: raise/lower
     // to taste vs libVLC. Brightness is additive [-1,1]; Contrast is [-1,1] (>0 = more punch); Saturation is
     // the HSL adjustment [-100,100] (>0 = more vivid).
-    private const float ToneMapBrightness = 0.08f;
-    private const float ToneMapContrast = 0.12f;
-    private const float ToneMapSaturation = 28f;
+    //
+    // Dialled DOWN from 28/0.12/0.08: the strong HSL saturation + contrast amplified the SDR tone-map's
+    // faint banding in low-chroma regions (dark-blue backgrounds) into rainbow speckles. A gentler lift
+    // keeps the vibrancy closer to libVLC without scattering hues. (The artifact is inherent to HSL
+    // saturation; a luma-preserving RGB-matrix saturation would remove it outright — see notes.)
+    private const float ToneMapBrightness = 0.05f;
+    private const float ToneMapContrast = 0.06f;
+    private const float ToneMapSaturation = 12f;
 
     // AniSkip OP/ED bands (absolute seconds) + the "Skip Intro/Outro" overlay button. Shown by the
     // position ticker while inside a band; tapping (or D-pad OK) seeks just past it.
