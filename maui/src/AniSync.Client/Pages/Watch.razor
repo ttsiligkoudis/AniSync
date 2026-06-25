@@ -1129,19 +1129,20 @@
     // a diagnosis, not a generic wall.
     private string FallbackMessage(string reason) => reason switch
     {
-        // On iOS the decode failure is almost always the container/audio Safari can't handle (anime
-        // releases are mostly MKV + Dolby/DTS), so give the Safari-specific guidance and point at the
-        // paths that actually decode it rather than the generic "try another source".
+        // On iOS the decode failure is almost always the container/audio the OS can't handle (anime
+        // releases are mostly MKV + Dolby/DTS). Every iOS browser — Safari, Chrome, Firefox — uses the
+        // same WebKit decoder (Apple mandates it), so "try another browser" is wasted effort; point at
+        // the paths that actually decode it instead.
         "decode" => _isIosSafari
-            ? "Safari on iPhone / iPad can't play this stream's format — most anime releases are MKV with Dolby/DTS audio, which Safari doesn't support. Tap Open externally to watch in VLC or Infuse, or use the AniSync app (both decode it). An MP4 source below, if one's listed, will also play."
+            ? "No iPhone / iPad browser can play this stream's format — Safari, Chrome and the rest all use Safari's engine. Most anime releases are MKV with Dolby/DTS audio, which iOS can't decode. Tap Open externally to watch in VLC or Infuse, or use the AniSync app (both decode it). An MP4 source below, if one's listed, will also play."
             : "Your browser can't decode this stream — the codec isn't supported. Open it in an external player, or try a different source below.",
         "network" => "The stream couldn't be reached. The debrid link may have expired — pick the source again, or try a different one.",
-        "ios-container" => "Safari on iPhone / iPad can't play this file's container (MKV / AVI). Pick an MP4 source below if one's listed, or tap Open externally to watch in VLC, Infuse, or another video app.",
+        "ios-container" => "No iPhone / iPad browser can play this file's container (MKV / AVI) — Safari, Chrome and the rest share Safari's engine. Pick an MP4 source below if one's listed, or tap Open externally to watch in VLC, Infuse, or another video app.",
         "timeout" => _isIosSafari
-            ? "Safari on iPad / iPhone can't play most MKV streams. Tap Open externally to launch it in VLC, Infuse, or another video app."
+            ? "No iPhone / iPad browser can play most MKV streams — Safari, Chrome and the rest all use Safari's engine. Tap Open externally to launch it in VLC, Infuse, or another video app, or use the AniSync app."
             : "This source hasn't started playing yet. It might just be slow — wait a bit, retry, or try another source below.",
         _ => _isIosSafari
-            ? "Safari on iPhone / iPad couldn't play this stream — most anime releases use formats Safari can't decode. Tap Open externally (VLC / Infuse) or use the AniSync app, or try an MP4 source below."
+            ? "No iPhone / iPad browser could play this stream — they all use Safari's engine, which can't decode most anime formats. Tap Open externally (VLC / Infuse) or use the AniSync app, or try an MP4 source below."
             : "Couldn't play this stream. Try another source below, or open it externally.",
     };
 
