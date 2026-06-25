@@ -99,8 +99,7 @@ jobs:
           dotnet build maui/src/AniSync.Maui/AniSync.Maui.csproj \
             -c Release -f net10.0-ios \
             -p:RuntimeIdentifier=ios-arm64 \
-            -p:CodesignKey= \
-            -p:_RequireCodeSigning=false
+            -p:EnableCodeSigning=false
 
       - name: Package unsigned .ipa (Payload/)
         run: |
