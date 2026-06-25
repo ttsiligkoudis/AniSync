@@ -3802,6 +3802,57 @@ body.modal-open {
     font-weight: 600;
 }
 
+/* iOS one-tap VLC launch bar — appears under the player once a source is resolved for external
+   playback. Accent "Open in VLC" anchor + ghost Copy/Dismiss. */
+.watch-vlc-launch {
+    margin-top: 0.75rem;
+    padding: 0.7rem 0.9rem;
+    background: var(--overlay-04);
+    border: 1px solid var(--overlay-08);
+    border-radius: 0.75rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+}
+
+.watch-vlc-launch-label {
+    flex: 1 1 12rem;
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.watch-vlc-launch-actions {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.watch-vlc-open,
+.watch-vlc-open:link,
+.watch-vlc-open:visited {
+    background: var(--accent, #7c3aed);
+    color: #fff;
+    border: none;
+    padding: 0.4rem 0.85rem;
+    border-radius: 0.4rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+}
+
+.watch-vlc-open:hover,
+.watch-vlc-open:focus {
+    filter: brightness(1.08);
+    text-decoration: none;
+}
+
 .watch-fallback-actions {
     display: flex;
     gap: var(--space-2);
