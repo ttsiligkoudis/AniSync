@@ -170,11 +170,17 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
 
         // Preselect audio + subtitle language: anime dual-audio releases often default to Japanese, so honour
         // the preferred audio language; subtitles default to English like the web head.
+        //
+        // Use the PLURAL setPreferredAudioLanguages/Text with an explicit English fallback. The singular
+        // setPreferredAudioLanguage falls back to ExoPlayer's DEFAULT track when the preferred language is
+        // absent — which is whatever the container flags/orders first (a Greek-preferring user with no Greek
+        // track was landing on Spanish). An ordered list [preferred, en] makes English the fallback before
+        // ExoPlayer's default kicks in. Codes are normalised by ExoPlayer, so "en" matches eng/english.
         var audioLang = string.IsNullOrWhiteSpace(request.PreferredAudioLanguage) ? null : request.PreferredAudioLanguage;
         var textLang = string.IsNullOrWhiteSpace(request.PreferredSubtitleLanguage) ? "en" : request.PreferredSubtitleLanguage;
         var tsp = player.TrackSelectionParameters!.BuildUpon();
-        if (audioLang is not null) tsp.SetPreferredAudioLanguage(audioLang);
-        tsp.SetPreferredTextLanguage(textLang);
+        if (audioLang is not null) tsp.SetPreferredAudioLanguages(WithEnglishFallback(audioLang));
+        tsp.SetPreferredTextLanguages(WithEnglishFallback(textLang));
         player.TrackSelectionParameters = tsp.Build();
 
         // Resume via the start-position overload (no need to wait for a "ready" callback to seek).
@@ -244,6 +250,14 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         _ticker = null;
         _tick = null;
     }
+
+    // Preferred-language list with English as an explicit fallback: [lang] when it's already English,
+    // else [lang, "en"]. ExoPlayer tries them in order before its own default, so a missing preferred
+    // language lands on English rather than an arbitrary container-default track.
+    private static string[] WithEnglishFallback(string lang)
+        => string.Equals(lang, "en", System.StringComparison.OrdinalIgnoreCase)
+            ? new[] { "en" }
+            : new[] { lang, "en" };
 
     // Once the decoder reports the video format, decide whether to push the HDR "look". For HDR streams
     // (PQ/ST2084 or HLG transfer) swap the empty tone-map pipeline for one that brightens/adds punch/boosts
