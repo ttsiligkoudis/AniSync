@@ -269,10 +269,13 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         if (fmt is null) return;          // wait until the decoder reports a format
         _lookApplied = true;              // only evaluate once, HDR or not
 
-        // ColorInfo.ColorTransfer: 6 = ST2084/PQ, 7 = HLG (both HDR). Anything else (SDR/BT709/unknown) is
-        // left untouched.
+        // ColorInfo.ColorTransfer: 6 = ST2084/PQ, 7 = HLG (both HDR). Many containers/decoders don't surface
+        // ColorInfo at all (transfer comes back unset), so an HDR stream would otherwise be left washed-out —
+        // fall back to the release-metadata HDR flag (request.IsHdr) when the decoder doesn't report it.
         int transfer = fmt.ColorInfo?.ColorTransfer ?? -1;
-        if (transfer != 6 && transfer != 7) return;
+        bool decoderHdr = transfer == 6 || transfer == 7;
+        bool metadataHdr = VirtualView?.Request?.IsHdr ?? false;
+        if (!decoderHdr && !metadataHdr) return;
 
         try
         {

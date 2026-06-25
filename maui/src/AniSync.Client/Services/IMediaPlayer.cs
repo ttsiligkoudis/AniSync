@@ -57,7 +57,12 @@ public record PlaybackRequest(
     // drives its own skip overlay from JS, so these are only consumed by the native player pages.
     SkipMark? SkipIntro = null,
     SkipMark? SkipOutro = null,
-    SkipMark? SkipRecap = null);
+    SkipMark? SkipRecap = null,
+    // True when the release metadata flags the stream as HDR (HDR10 / HLG / Dolby Vision). The Android
+    // ExoPlayer head uses this as a fallback HDR signal: it normally detects HDR from the decoder's
+    // colour-transfer to apply its tone-map saturation boost, but many containers don't expose colour
+    // info, so without this flag HDR streams render washed-out vs libVLC. Native head only.
+    bool IsHdr = false);
 
 /// <summary>An AniSkip band: skip from <paramref name="Start"/> to <paramref name="End"/> (absolute seconds).</summary>
 public record SkipMark(double Start, double End);
