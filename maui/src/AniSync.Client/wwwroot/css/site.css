@@ -8395,6 +8395,27 @@ ol.anime-detail-episodes-busy {
     text-align: center;
 }
 
+/* Bell-dropdown loading skeleton — rows shaped like .notif-item (thumb + two text lines) so the
+   panel holds its height while the first fetch lands, instead of a centred "Loading…" that jumps
+   the layout. The thumb reuses .notif-thumb sizing; .skeleton-shimmer paints the shimmer. */
+.notif-item-skeleton {
+    pointer-events: none;
+}
+
+.notif-skeleton-line {
+    height: 0.62rem;
+    width: 85%;
+    border-radius: 0.3rem;
+}
+
+.notif-skeleton-line + .notif-skeleton-line {
+    margin-top: 0.45rem;
+}
+
+.notif-skeleton-line-short {
+    width: 45%;
+}
+
 .notif-item,
 .notif-item:link,
 .notif-item:visited {

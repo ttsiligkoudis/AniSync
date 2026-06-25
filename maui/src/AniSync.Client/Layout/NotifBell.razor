@@ -32,7 +32,18 @@
             <div class="notif-panel-body">
                 @if (_loading)
                 {
-                    <div class="notif-empty">Loading…</div>
+                    @* Skeleton rows shaped like .notif-item so the panel keeps its height while the
+                       first fetch is in flight (instead of a centred "Loading…" that jumps the layout). *@
+                    @for (var i = 0; i < 4; i++)
+                    {
+                        <div class="notif-item notif-item-skeleton" aria-hidden="true">
+                            <span class="notif-thumb skeleton-shimmer"></span>
+                            <div class="notif-body">
+                                <div class="notif-skeleton-line skeleton-shimmer"></div>
+                                <div class="notif-skeleton-line notif-skeleton-line-short skeleton-shimmer"></div>
+                            </div>
+                        </div>
+                    }
                 }
                 else if (_items.Count == 0)
                 {
@@ -72,6 +83,12 @@
     private bool _loading;
     private int _count;
     private IReadOnlyList<NotificationDto> _items = Array.Empty<NotificationDto>();
+    // Cache the fetched rows across opens so re-opening the panel renders instantly instead of
+    // showing the loading state and refetching every time. _loaded flips true after the first fetch;
+    // _itemsCountAtFetch snapshots the unread count those cached rows correspond to, so a later open
+    // can tell whether the cache is still current (count unchanged) or needs a silent background refresh.
+    private bool _loaded;
+    private int _itemsCountAtFetch;
     private System.Threading.Timer? _poll;
     private bool _liveStarted;
     private ElementReference _root;
@@ -154,13 +171,39 @@
         if (_open) { await CloseAsync(); return; }
 
         _open = true;
-        _loading = true;
-        _items = await Api.NotificationsAsync(limit: 20);
-        _loading = false;
-        // Opening the panel is a good moment to re-sync the badge too.
-        await RefreshCountAsync();
         // Arm outside-press dismissal only while the panel is open.
         await RegisterDismissAsync();
+
+        if (!_loaded)
+        {
+            // First open: nothing cached — show the skeleton rows while the initial fetch runs.
+            _loading = true;
+            StateHasChanged();
+            await LoadItemsAsync();
+            _loading = false;
+            StateHasChanged();
+        }
+        else
+        {
+            // Re-open: render the cached rows immediately (no loading flash, no refetch). Re-sync the
+            // badge, and only refresh the rows — silently, no skeleton — if the unread count has moved
+            // since we cached (a new episode aired, or something was read elsewhere).
+            StateHasChanged();
+            await RefreshCountAsync();
+            if (_count != _itemsCountAtFetch)
+                await LoadItemsAsync();
+        }
+    }
+
+    // Fetch the recent rows and snapshot the unread count they correspond to, so a later open can
+    // tell whether the cache is still current. Refreshes the count first so the snapshot is accurate.
+    private async Task LoadItemsAsync()
+    {
+        _items = await Api.NotificationsAsync(limit: 20);
+        await RefreshCountAsync();
+        _itemsCountAtFetch = _count;
+        _loaded = true;
+        StateHasChanged();
     }
 
     // Single close path — clears the open flag and tears down the outside-press listener.
@@ -212,6 +255,9 @@
             // re-syncs from the server regardless, so a failed POST self-heals.
             n.ReadAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             if (_count > 0) _count--;
+            // Keep the cache baseline in step with the optimistic count drop — the cached row's read
+            // state was just updated too, so the cache is still current and shouldn't refetch on reopen.
+            if (_itemsCountAtFetch > 0) _itemsCountAtFetch--;
             try { await Api.MarkNotificationReadAsync(n.Id); }
             catch { /* best-effort — badge re-syncs on the next poll / navigation */ }
         }
@@ -224,7 +270,9 @@
     {
         await Api.MarkAllNotificationsReadAsync();
         _count = 0;
-        _items = await Api.NotificationsAsync(limit: 20);
+        // Refetch the rows (now all read) and re-snapshot the baseline so the refreshed cache is reused
+        // on the next open rather than refetched.
+        await LoadItemsAsync();
     }
 
     // Series notifications carry a season (S1E5); single-cour anime don't (Episode 5).
