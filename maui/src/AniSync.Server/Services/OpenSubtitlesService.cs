@@ -606,15 +606,26 @@ namespace AnimeList.Services
 
         private static string DecodeText(byte[] bytes)
         {
+            string text;
             try
             {
-                return Encoding.GetEncoding("utf-8", new EncoderExceptionFallback(), new DecoderExceptionFallback())
+                text = Encoding.GetEncoding("utf-8", new EncoderExceptionFallback(), new DecoderExceptionFallback())
                     .GetString(bytes);
             }
             catch
             {
-                return Encoding.GetEncoding("ISO-8859-1").GetString(bytes);
+                text = Encoding.GetEncoding("ISO-8859-1").GetString(bytes);
             }
+
+            // Normalise to NFC (precomposed). Some OpenSubtitles tracks — Greek ones especially — ship in
+            // decomposed (NFD) form, where an accented vowel is a base letter + a separate combining mark
+            // (e.g. "ι" + U+0301 instead of "ί"). libVLC/libass don't attach the combining mark, so the
+            // accent renders detached and drifting while the letter shows bare (seen on Greek subs). NFC
+            // recomposes them into single glyphs; it's a no-op for already-precomposed text and leaves
+            // ASCII (timestamps, ASS override tags) untouched.
+            try { text = text.Normalize(NormalizationForm.FormC); }
+            catch (ArgumentException) { /* invalid code units — keep the as-decoded text */ }
+            return text;
         }
 
         // SRT → VTT differs mainly in a "WEBVTT" header line and
