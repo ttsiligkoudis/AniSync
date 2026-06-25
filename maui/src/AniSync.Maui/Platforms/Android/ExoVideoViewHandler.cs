@@ -40,16 +40,12 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
     private bool _lookApplied;
 
     // HDR "look" knobs, applied (in order) on top of the SDR tone-map for HDR streams. Tunable: raise/lower
-    // to taste vs libVLC. Brightness is additive [-1,1]; Contrast is [-1,1] (>0 = more punch); Saturation is
-    // the HSL adjustment [-100,100] (>0 = more vivid).
-    //
-    // Dialled DOWN from 28/0.12/0.08: the strong HSL saturation + contrast amplified the SDR tone-map's
-    // faint banding in low-chroma regions (dark-blue backgrounds) into rainbow speckles. A gentler lift
-    // keeps the vibrancy closer to libVLC without scattering hues. (The artifact is inherent to HSL
-    // saturation; a luma-preserving RGB-matrix saturation would remove it outright — see notes.)
+    // to taste vs libVLC. Brightness is additive [-1,1]; Contrast is [-1,1] (>0 = more punch). Saturation is
+    // an RGB-matrix MULTIPLIER (1.0 = unchanged, >1 = more vivid) — see SaturationRgbMatrix below for why we
+    // moved off HslAdjustment (HSL scattered hues into rainbow speckles on flat low-chroma walls).
     private const float ToneMapBrightness = 0.05f;
     private const float ToneMapContrast = 0.06f;
-    private const float ToneMapSaturation = 12f;
+    private const float ToneMapSaturationMul = 1.45f;
 
     // AniSkip OP/ED bands (absolute seconds) + the "Skip Intro/Outro" overlay button. Shown by the
     // position ticker while inside a band; tapping (or D-pad OK) seeks just past it.
@@ -288,7 +284,7 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
             {
                 new AndroidX.Media3.Effect.Brightness(ToneMapBrightness),
                 new AndroidX.Media3.Effect.Contrast(ToneMapContrast),
-                new AndroidX.Media3.Effect.HslAdjustment.Builder().AdjustSaturation(ToneMapSaturation).Build()!,
+                new SaturationRgbMatrix(ToneMapSaturationMul),
             });
         }
         catch (System.Exception ex) { System.Diagnostics.Debug.WriteLine($"HDR look effects unavailable: {ex.Message}"); }
@@ -508,4 +504,32 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
             return base.DispatchKeyEvent(e);
         }
     }
+}
+
+// Luma-preserving RGB saturation, as a Media3 RgbMatrix effect. HslAdjustment converts each pixel to HSL
+// and rescales S, which is unstable in near-neutral regions — the SDR tone-map's faint banding on flat,
+// low-chroma walls scattered into rainbow speckles. This instead scales the colour toward/away from its
+// BT.709 luma in RGB: hue is preserved and only chroma magnitude changes, so flat areas stay clean while
+// colours still gain punch. `s` is a multiplier (1.0 = unchanged, >1 = more vivid).
+//
+// Matrix is column-major 4x4 over RGBA (Media3 / GL convention: out = M * colour). Per channel the result
+// is (1-s)·luma + s·channel, i.e. interpolate between the grey (luma) point and the original colour.
+internal sealed class SaturationRgbMatrix : Java.Lang.Object, AndroidX.Media3.Effect.IRgbMatrix
+{
+    private readonly float[] _m;
+
+    public SaturationRgbMatrix(float s)
+    {
+        const float lr = 0.2126f, lg = 0.7152f, lb = 0.0722f; // BT.709 luma weights
+        float ir = (1f - s) * lr, ig = (1f - s) * lg, ib = (1f - s) * lb;
+        _m = new[]
+        {
+            ir + s, ir,     ir,     0f,   // column 0 — input R's contribution to R,G,B
+            ig,     ig + s, ig,     0f,   // column 1 — input G
+            ib,     ib,     ib + s, 0f,   // column 2 — input B
+            0f,     0f,     0f,     1f,   // column 3 — alpha (passthrough)
+        };
+    }
+
+    public float[] GetMatrix(long presentationTimeUs, bool useHdr) => _m;
 }
