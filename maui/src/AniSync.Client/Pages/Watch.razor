@@ -141,6 +141,18 @@
             </div>
         </div>
     }
+    @* iOS web: every iPhone / iPad browser shares Safari's WebKit decoder, which can't play most anime
+       formats (MKV / Dolby audio). Surface that up front — before a source is picked and the player spins
+       then times out — so the user goes straight to Open externally / the app. Hidden while the fallback
+       panel is up (that already carries the same guidance for the source that just failed). *@
+    @if (!Env.SupportsNativePlayback && _isIosSafari && _fallbackReason is null)
+    {
+        <p class="watch-ios-notice">
+            On iPhone / iPad the browser can't play most of these formats (MKV / Dolby audio) — every iOS
+            browser uses Safari's engine. Pick a source, then tap <strong>Open externally</strong> (VLC / Infuse),
+            or install the AniSync app.
+        </p>
+    }
 </section>
 }
 
