@@ -147,6 +147,32 @@ function isIosSafari() {
     return false;
 }
 
+// iOS one-tap VLC launch. The reliable trigger is a real anchor tap (rendered by .NET), but we also
+// fire this best-effort top-level navigation right after the stream resolves — if the originating tap's
+// user-gesture is still live, VLC opens in one tap; if iOS has expired it, the visible "Open in VLC"
+// button is the fallback. Top-level (not the old hidden-iframe vlc:// probe, which iOS silently drops).
+export function openVlc(vlcUrl) {
+    if (!vlcUrl) return;
+    try { window.location.href = vlcUrl; } catch (_) { }
+}
+
+// Copy the resolved direct URL to the clipboard so it can be pasted into any player (VLC, Infuse, …).
+// Async Clipboard API first; falls back to a hidden-textarea execCommand for older WebKit.
+export async function copyText(text) {
+    if (!text) return false;
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch (_) {
+        try {
+            var ta = document.createElement('textarea');
+            ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.focus(); ta.select();
+            var ok = document.execCommand('copy');
+            document.body.removeChild(ta);
+            return ok;
+        } catch (e) { return false; }
+    }
+}
+
 // ── AniSkip progress-bar paint ───────────────────────────────────────────────
 
 // Paint translucent OP / ED bands over the player's progress strip. `intro` /

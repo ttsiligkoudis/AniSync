@@ -153,6 +153,21 @@
             or install the AniSync app.
         </p>
     }
+    @* One-tap VLC launch (iOS web). Populated when the user taps Open externally / a row's external
+       button: a real tap on this anchor reliably opens VLC with the resolved stream (the auto-open
+       fired at resolve time may be dropped by iOS if the gesture went stale). Copy link covers the
+       VLC-not-installed / other-player case. *@
+    @if (!Env.SupportsNativePlayback && _isIosSafari && _iosVlcLink is not null)
+    {
+        <div class="watch-vlc-launch" role="dialog" aria-label="Open in external player">
+            <span class="watch-vlc-launch-label">@(string.IsNullOrEmpty(_iosLaunchName) ? "Ready to play" : _iosLaunchName)</span>
+            <div class="watch-vlc-launch-actions">
+                <a class="watch-vlc-open" href="@_iosVlcLink">▶ Open in VLC</a>
+                <button type="button" class="btn-ghost btn-ghost-sm" @onclick="CopyIosLinkAsync">Copy link</button>
+                <button type="button" class="btn-ghost btn-ghost-sm" @onclick="DismissIosLaunch">Dismiss</button>
+            </div>
+        </div>
+    }
 </section>
 }
 
@@ -530,6 +545,13 @@
     // disabled), mirroring setExternalActionLoading. Null when none in flight.
     private string? _externalLoadingUrl;
 
+    // iOS one-tap launch (web head, iOS only): the resolved direct URL + its VLC x-callback deep
+    // link, surfaced as an "Open in VLC" bar after the user taps Open externally / a row's external
+    // button. Null when no launch is pending.
+    private string? _iosVlcLink;
+    private string? _iosDirectUrl;
+    private string? _iosLaunchName;
+
     // True once the skip-range bands have been painted for the current source so
     // the OnProgress tick doesn't repaint every frame (only retries until painted).
     private bool _skipRangesPainted;
@@ -565,6 +587,9 @@
         _fallbackReason = null;
         _fallbackStream = null;
         _fallbackOpening = false;
+        _iosVlcLink = null;
+        _iosDirectUrl = null;
+        _iosLaunchName = null;
         _skipRangesPainted = false;
         _subtitleIndex = -1;
         _rawDebrid = new();
@@ -1221,10 +1246,27 @@
             var resolved = await Api.ResolveStreamAsync(s.Url!) ?? s.Url!;
             var displayName = (FirstReleaseLine(s.Description)
                 ?? (s.Title ?? s.Name ?? "").Split('\n').FirstOrDefault() ?? "").Trim();
-            var sidecar = ExternalSidecarUrl();
-            var toast = await (await LaunchModuleAsync())
-                .InvokeAsync<string?>("openExternally", resolved, displayName, sidecar);
-            if (!string.IsNullOrEmpty(toast)) await ShowToastAsync(toast!, 9000);
+
+            if (_isIosSafari)
+            {
+                // iOS: every browser shares Safari's engine, so inline play is hopeless for most
+                // releases. Hand the resolved URL straight to VLC via its x-callback scheme — surface a
+                // one-tap "Open in VLC" button (a real anchor tap reliably opens the app) AND fire a
+                // best-effort auto-open now, so a fresh, fast resolve often launches in a single tap.
+                _iosLaunchName = displayName;
+                _iosDirectUrl = resolved;
+                _iosVlcLink = BuildVlcLink(resolved);
+                await InvokeAsync(StateHasChanged);
+                try { await (await LaunchModuleAsync()).InvokeVoidAsync("openVlc", _iosVlcLink); }
+                catch { /* gesture stale / scheme unhandled — the visible button is the fallback */ }
+            }
+            else
+            {
+                var sidecar = ExternalSidecarUrl();
+                var toast = await (await LaunchModuleAsync())
+                    .InvokeAsync<string?>("openExternally", resolved, displayName, sidecar);
+                if (!string.IsNullOrEmpty(toast)) await ShowToastAsync(toast!, 9000);
+            }
         }
         catch { /* best-effort — a failed dispatch leaves the row usable */ }
         finally
@@ -1232,6 +1274,35 @@
             _externalLoadingUrl = null;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    // VLC for iOS deep link. The streaming form is vlc-x-callback://x-callback-url/stream?url=…
+    // (a plain vlc://<url> just rewrites the "vlc" scheme to "http" and breaks); url + x-success must
+    // be percent-encoded. x-success points back at this page so VLC's "Done" returns to AniSync.
+    private string BuildVlcLink(string url)
+        => "vlc-x-callback://x-callback-url/stream?url=" + Uri.EscapeDataString(url)
+           + "&x-success=" + Uri.EscapeDataString(Nav.Uri);
+
+    // Copy the resolved direct URL so it can be pasted into VLC / Infuse / any player — the escape
+    // hatch when VLC isn't installed (the deep link would no-op) or the user prefers another app.
+    private async Task CopyIosLinkAsync()
+    {
+        if (string.IsNullOrEmpty(_iosDirectUrl)) return;
+        try
+        {
+            var ok = await (await LaunchModuleAsync()).InvokeAsync<bool>("copyText", _iosDirectUrl);
+            await ShowToastAsync(
+                ok ? "Direct link copied — paste it into VLC, Infuse, or any player."
+                   : "Couldn't copy automatically — long-press the link to copy it.", 6000);
+        }
+        catch { /* clipboard unavailable — non-fatal */ }
+    }
+
+    private void DismissIosLaunch()
+    {
+        _iosVlcLink = null;
+        _iosDirectUrl = null;
+        _iosLaunchName = null;
     }
 
     // Picks the sidecar VTT to hand the external player, mirroring
