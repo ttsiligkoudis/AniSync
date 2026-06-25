@@ -6307,10 +6307,11 @@ a.stats-cell-link:hover {
     width: 100%;
     overflow-x: auto;
     overflow-y: hidden;
-    /* `proximity`, not `mandatory`: mandatory snap forces every gesture to land on a snap point, so a
-       small thumb slide gets yanked several tiles ahead (momentum overshoots, then snaps far). Proximity
-       only snaps when you release near a boundary, so a short drag settles roughly where you let go. */
-    scroll-snap-type: x proximity;
+    /* No scroll-snap: it was the source of the "slide a bit → jumps several tiles" feel — snap forces
+       each gesture to END on a tile boundary, so momentum overshoots and then snaps to a far tile.
+       Plain native momentum scrolling is linear and proportional to the gesture (1:1 while dragging, a
+       velocity-based glide on release), which is what we want here. */
+    scroll-snap-type: none;
     /* Top breathing room so a tile's hover/touch lift (translateY) rises into
        this padding instead of being clipped by the scroller's overflow box
        (overflow-x:auto forces overflow-y to clip). Covers every dashboard
