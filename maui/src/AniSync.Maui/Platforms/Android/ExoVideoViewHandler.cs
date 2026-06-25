@@ -170,11 +170,17 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
 
         // Preselect audio + subtitle language: anime dual-audio releases often default to Japanese, so honour
         // the preferred audio language; subtitles default to English like the web head.
+        //
+        // Use the PLURAL setPreferredAudioLanguages/Text with an explicit English fallback. The singular
+        // setPreferredAudioLanguage falls back to ExoPlayer's DEFAULT track when the preferred language is
+        // absent — which is whatever the container flags/orders first (a Greek-preferring user with no Greek
+        // track was landing on Spanish). An ordered list [preferred, en] makes English the fallback before
+        // ExoPlayer's default kicks in. Codes are normalised by ExoPlayer, so "en" matches eng/english.
         var audioLang = string.IsNullOrWhiteSpace(request.PreferredAudioLanguage) ? null : request.PreferredAudioLanguage;
         var textLang = string.IsNullOrWhiteSpace(request.PreferredSubtitleLanguage) ? "en" : request.PreferredSubtitleLanguage;
         var tsp = player.TrackSelectionParameters!.BuildUpon();
-        if (audioLang is not null) tsp.SetPreferredAudioLanguage(audioLang);
-        tsp.SetPreferredTextLanguage(textLang);
+        if (audioLang is not null) tsp.SetPreferredAudioLanguages(WithEnglishFallback(audioLang));
+        tsp.SetPreferredTextLanguages(WithEnglishFallback(textLang));
         player.TrackSelectionParameters = tsp.Build();
 
         // Resume via the start-position overload (no need to wait for a "ready" callback to seek).
@@ -245,6 +251,14 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         _tick = null;
     }
 
+    // Preferred-language list with English as an explicit fallback: [lang] when it's already English,
+    // else [lang, "en"]. ExoPlayer tries them in order before its own default, so a missing preferred
+    // language lands on English rather than an arbitrary container-default track.
+    private static string[] WithEnglishFallback(string lang)
+        => string.Equals(lang, "en", System.StringComparison.OrdinalIgnoreCase)
+            ? new[] { "en" }
+            : new[] { lang, "en" };
+
     // Once the decoder reports the video format, decide whether to push the HDR "look". For HDR streams
     // (PQ/ST2084 or HLG transfer) swap the empty tone-map pipeline for one that brightens/adds punch/boosts
     // saturation, so the tone-mapped SDR result matches libVLC's vivid output. SDR streams are left on the
@@ -255,10 +269,13 @@ public sealed class ExoVideoViewHandler : ViewHandler<ExoVideoView, PlayerView>
         if (fmt is null) return;          // wait until the decoder reports a format
         _lookApplied = true;              // only evaluate once, HDR or not
 
-        // ColorInfo.ColorTransfer: 6 = ST2084/PQ, 7 = HLG (both HDR). Anything else (SDR/BT709/unknown) is
-        // left untouched.
+        // ColorInfo.ColorTransfer: 6 = ST2084/PQ, 7 = HLG (both HDR). Many containers/decoders don't surface
+        // ColorInfo at all (transfer comes back unset), so an HDR stream would otherwise be left washed-out —
+        // fall back to the release-metadata HDR flag (request.IsHdr) when the decoder doesn't report it.
         int transfer = fmt.ColorInfo?.ColorTransfer ?? -1;
-        if (transfer != 6 && transfer != 7) return;
+        bool decoderHdr = transfer == 6 || transfer == 7;
+        bool metadataHdr = VirtualView?.Request?.IsHdr ?? false;
+        if (!decoderHdr && !metadataHdr) return;
 
         try
         {

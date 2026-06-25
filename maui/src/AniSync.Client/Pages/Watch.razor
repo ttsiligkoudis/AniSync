@@ -1100,7 +1100,8 @@
             // AniSkip bands for the native players' Skip button (web drives its own JS overlay).
             SkipIntro: Env.SupportsNativePlayback && _skipTimes?.Intro is { } si ? new SkipMark(si.Start, si.End) : null,
             SkipOutro: Env.SupportsNativePlayback && _skipTimes?.Outro is { } so ? new SkipMark(so.Start, so.End) : null,
-            SkipRecap: Env.SupportsNativePlayback && _skipTimes?.Recap is { } sr ? new SkipMark(sr.Start, sr.End) : null);
+            SkipRecap: Env.SupportsNativePlayback && _skipTimes?.Recap is { } sr ? new SkipMark(sr.Start, sr.End) : null,
+            IsHdr: !string.IsNullOrEmpty(s.Hdr));
 
         if (Env.SupportsNativePlayback)
         {
@@ -1231,7 +1232,8 @@
                 PreferredAudioLanguage: _prefAudioLang, PreferredSubtitleLanguage: _prefSubLang, Diagnostics: SubtitleDiag(),
                 SkipIntro: _skipTimes?.Intro is { } si2 ? new SkipMark(si2.Start, si2.End) : null,
                 SkipOutro: _skipTimes?.Outro is { } so2 ? new SkipMark(so2.Start, so2.End) : null,
-                SkipRecap: _skipTimes?.Recap is { } sr2 ? new SkipMark(sr2.Start, sr2.End) : null));
+                SkipRecap: _skipTimes?.Recap is { } sr2 ? new SkipMark(sr2.Start, sr2.End) : null,
+                IsHdr: !string.IsNullOrEmpty(s.Hdr)));
             _playingUrl = s.Url;
             StateHasChanged();
             return;
