@@ -6307,7 +6307,10 @@ a.stats-cell-link:hover {
     width: 100%;
     overflow-x: auto;
     overflow-y: hidden;
-    scroll-snap-type: x mandatory;
+    /* `proximity`, not `mandatory`: mandatory snap forces every gesture to land on a snap point, so a
+       small thumb slide gets yanked several tiles ahead (momentum overshoots, then snaps far). Proximity
+       only snaps when you release near a boundary, so a short drag settles roughly where you let go. */
+    scroll-snap-type: x proximity;
     /* Top breathing room so a tile's hover/touch lift (translateY) rises into
        this padding instead of being clipped by the scroller's overflow box
        (overflow-x:auto forces overflow-y to clip). Covers every dashboard
