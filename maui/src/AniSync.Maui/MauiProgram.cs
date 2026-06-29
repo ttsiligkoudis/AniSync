@@ -145,8 +145,14 @@ public static class MauiProgram
         // "--ipv4": force libVLC to fetch the stream over IPv4, matching the IPv4 the API HttpClient
         // above signs IP-locked debrid links to — so the signed IP and the playback IP are the same
         // family (avoids the debrid "Wrong IP" error on dual-stack devices).
+        // "--ipv4": force IPv4 (matches the IP the API signs debrid links to — see ConnectIpv4FirstAsync).
+        // "--http-reconnect" + "--network-caching=5000": streaming resilience for the remote debrid source.
+        // The default ~1s cache with no reconnect starves the decoder near a file's tail (last minutes
+        // macroblock, clock stalls); a 5s read-ahead rides out throughput dips and reconnect re-opens a
+        // dropped connection instead of looping on a stalled read. Set at the core level too since some
+        // access modules read these here; VlcMediaPlayer also sets them per-media.
         builder.Services.AddSingleton(_ => vlcReady
-            ? new LibVLC("--ipv4")
+            ? new LibVLC("--ipv4", "--http-reconnect", "--network-caching=5000")
             : throw new InvalidOperationException("LibVLC native libraries failed to load on this device/build."));
         builder.Services.AddSingleton<IMediaPlayer, VlcMediaPlayer>();
 

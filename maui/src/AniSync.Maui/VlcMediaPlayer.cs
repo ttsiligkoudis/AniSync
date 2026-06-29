@@ -72,6 +72,15 @@ public sealed class VlcMediaPlayer : IMediaPlayer, IDisposable
         {
             using var media = new Media(_libVlc, new Uri(request.Url));
 
+            // Streaming resilience for the remote debrid HTTP source. The default network cache (~1s) and
+            // no-reconnect behaviour starve the decoder near the file's tail — a single long sequential read
+            // dips below bitrate and there's no recovery, so the last minutes macroblock and the clock stalls
+            // (the image is fine: seeking back issues a fresh range request that plays clean). A 5s read-ahead
+            // rides out the dip, and :http-reconnect re-establishes the connection if it drops near EOF
+            // instead of looping on a stalled read.
+            media.AddOption(":network-caching=5000");
+            media.AddOption(":http-reconnect");
+
             // Resume position: libVLC takes a start time in seconds via :start-time.
             if (request.ResumeSeconds is > 0)
                 media.AddOption($":start-time={(int)request.ResumeSeconds.Value}");
